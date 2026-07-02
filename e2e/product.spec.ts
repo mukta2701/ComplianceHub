@@ -5,7 +5,7 @@ test("landing page explains the product and opens the demo", async ({ page }) =>
   await page.goto("/");
   await expect(page.getByRole("heading", { name: /security readiness/i })).toBeVisible();
   await expect(page.getByText(/does not provide certification/i)).toBeVisible();
-  await expect(page.getByRole("link", { name: /try the demo/i })).toHaveAttribute("href", /demo/);
+  await expect(page.getByRole("banner").getByRole("link", { name: /try the demo/i })).toHaveAttribute("href", /demo/);
 });
 
 test("demo exposes the complete compliance workflow", async ({ page }) => {
