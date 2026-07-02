@@ -1,36 +1,38 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ComplianceHub
 
-## Getting Started
+ComplianceHub is an open-source, UK-first information security readiness tool. It turns a plain-English ISO/IEC 27001:2022 readiness assessment into a dashboard, a reviewable Statement of Applicability, and an auditable risk register.
 
-First, run the development server:
+ComplianceHub supports readiness work. It does **not** provide certification, legal advice, or a substitute for an accredited auditor. The included questions are independently written and do not reproduce ISO standards text.
+
+## Local development
+
+Requirements: Node.js 22+, pnpm 11+, Docker Desktop, and the Supabase CLI.
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+cp .env.example .env.local
+pnpm install
+pnpm exec supabase start
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Use the local Supabase values printed by `supabase start` in `.env.local`. Never expose `SUPABASE_SERVICE_ROLE_KEY` to browser code.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Verification
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+pnpm verify
+pnpm test:db
+pnpm test:e2e
+```
 
-## Learn More
+## Deployment
 
-To learn more about Next.js, take a look at the following resources:
+The reference beta deployment uses Vercel and managed Supabase. See `docs/deployment.md`. The application remains portable because schema changes are SQL migrations and core domain logic is framework-independent TypeScript.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Security and privacy
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Do not report vulnerabilities through public issues. Use the repository security-advisory channel or contact the project owner privately. See `SECURITY.md` and `docs/privacy.md`.
 
-## Deploy on Vercel
+## Licence
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+MIT. See `LICENSE`.

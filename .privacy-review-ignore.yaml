@@ -1,0 +1,8 @@
+# Narrow false-positive suppressions for static, independently authored
+# assessment copy. These strings are product content and are never sent to an
+# LLM or populated with user data.
+ignore:
+  - fingerprint: "e29890cc4c9d9f21"
+    reason: "Static assessment catalogue copy; no user or personal data and no LLM call"
+  - fingerprint: "ff2de33c3042690b"
+    reason: "Static assessment catalogue copy; no user or personal data and no LLM call"
