@@ -18,7 +18,7 @@ automation flags drift → tasks regenerate → dashboard reflects live posture
 Direction decisions already made:
 
 - **Workflow automation first.** Recurring tasks, review reminders, evidence expiry, and control-drift flags — buildable now with Supabase + cron. Third-party integrations (GitHub, Google Workspace) are a later horizon, not this plan.
-- **ISO 27001:2022 only, deeper.** No second framework yet. Cyber Essentials is recorded as a future option.
+- **UK-first, multi-framework roadmap.** ISO 27001:2022 stays the backbone; UK GDPR (as amended by the Data (Use and Access) Act 2025) and AI governance (ISO/IEC 42001 with an EU AI Act overlay) follow as framework modules on a shared control library (§3a). Cyber Essentials remains a future option on the same model.
 - **Top three modules:** evidence vault, policy management, asset + vendor registers. People & training deferred.
 - **AI assistance as a later phase**, behind a feature flag, never auto-publishing.
 
@@ -35,6 +35,17 @@ Direction decisions already made:
 - Domain logic lives in framework-independent TypeScript under `src/features/<module>/domain|application`, test-first.
 - Immutable things stay immutable: catalogue versions, final SoA snapshots, audit events — and now evidence records and policy versions.
 - Never expose the service-role key to browser code. Assessment content and policy templates are original, independently written.
+
+## 3a. Framework-agnostic control library (decided in Phase 1, load-bearing for everything after)
+
+v1 hardcodes ISO Annex A references (`control_ref`) throughout. Multi-framework support requires the "common controls" model used by Vanta/Drata:
+
+- `frameworks` (versioned, immutable catalogues): ISO 27001:2022 now; UK GDPR and ISO 42001 later.
+- `requirements`: the clauses/articles of a framework (e.g. an Annex A control, a UK GDPR article obligation, a 42001 clause).
+- `controls`: the shared, framework-neutral library of things an organisation actually does ("MFA enforced", "access reviewed quarterly", "processing records maintained").
+- `requirement_control_mappings`: many-to-many. One control satisfies requirements across several frameworks; evidence, tasks, and policies attach to **controls**, so satisfying work is done once and counted everywhere.
+
+Phase 1 ships this schema with ISO 27001 as the only framework populated (existing `control_ref` usage migrates onto it). The cost now is one layer of indirection; the payoff is that adding UK GDPR or ISO 42001 becomes a content exercise (author the catalogue + mappings) instead of a schema rewrite.
 
 ## 4. Phase 1 — Workflow automation core
 
@@ -95,7 +106,24 @@ The backbone. Three units that together make posture *live*.
 - **Live readiness model** (`src/features/readiness`, pure domain logic): control status becomes a function of (latest assessment answer, evidence freshness, open remediation tasks, mapped policy state). Deterministic, unit-tested, explainable — each control shows *why* it has its status. Dashboard headline becomes "readiness now" with a trend sparkline (daily snapshot row written by the cron sweep).
 - **Management review pack**: one-click PDF/DOCX export assembling posture summary, top risks, overdue tasks, evidence gaps, policy acceptance — the toolkit's "Management Review Meeting" artifact, generated instead of hand-written. Reuses the finalised-snapshot export pattern.
 
-## 8. Phase 5 — AI assistance (feature-flagged)
+## 7a. Phase 5 — UK GDPR framework module
+
+Every UK business is subject to UK GDPR already, so this is the widest-audience framework after ISO. Built on the §3a model: a UK GDPR requirements catalogue (original plain-English summaries of obligations, ICO-aligned, DUAA 2025-aware — never reproducing legal text) mapped onto the shared control library, plus the privacy-specific registers the ICO expects:
+
+- **Records of processing (RoPA)**: processing activities register (purpose, lawful basis, data categories, recipients, retention) — reuses the register UI patterns from assets/vendors.
+- **DPIA workflow**: screening questions → full assessment → sign-off, stored as immutable versions like policies.
+- **Data-subject request tracker**: request log with statutory clocks (task engine drives the deadlines).
+- **Breach log**: incident record with the 72-hour assessment trail.
+
+Existing machinery reused: evidence attaches to privacy controls, policies cover privacy notices, vendors register doubles as the processors list.
+
+## 7b. Phase 6 — AI governance module (ISO/IEC 42001 + EU AI Act overlay)
+
+The UK has no AI statute (regulator-led approach; an AI Bill remains pending as of mid-2026), so the certifiable, procurement-driven framework is ISO/IEC 42001. Shipped as: a 42001 requirements catalogue on the shared control library, an AI system inventory (extends the asset register with model/provider/purpose/risk fields), and an **EU AI Act overlay** — a mapping layer that classifies inventoried AI systems (prohibited/high-risk/limited/minimal) and shows which 42001-mapped controls also serve AI Act obligations, relevant to tenants selling into the EU (high-risk deadline deferred to December 2027 by the Digital Omnibus). The overlay is mappings and content, not a separate module.
+
+Sequencing note: Phases 5 and 6 are deliberately swappable — both are catalogue + registers on the §3a model. GDPR is first because its audience is universal in the UK; flip them if AI-governance demand arrives sooner.
+
+## 8. Phase 7 — AI assistance (feature-flagged)
 
 - Capabilities: draft a policy from a plain-English description; suggest risk treatments for a gap; explain a control in context. Uses the Claude API server-side.
 - Guardrails: flag-off by default per organisation; AI output always lands as a *draft* requiring human approval; prompts send the minimum context (control text, user's description — never member PII or evidence file contents); every AI generation writes an audit event. These constraints align with the repo's privacy-review tooling.
@@ -104,7 +132,7 @@ The backbone. Three units that together make posture *live*.
 ## 9. Explicitly deferred (future horizon, not in this plan)
 
 - Third-party integrations for automated evidence (GitHub first: MFA, branch protection — highest value/effort ratio when the time comes).
-- Trust center (public posture page), people & training module, internal audit module, BC/DR planning, scope/context builder, Cyber Essentials framework, email digests/SMTP, billing/SaaS.
+- Trust center (public posture page), people & training module, internal audit module, BC/DR planning, scope/context builder, Cyber Essentials framework (fits the §3a model when wanted), email digests/SMTP, billing/SaaS.
 
 ## 10. Cross-cutting requirements
 
@@ -116,7 +144,7 @@ The backbone. Three units that together make posture *live*.
 
 ## 11. Sequencing rationale and risks
 
-Phase 1 before 2: policies-as-evidence needs the evidence vault; tasks are the substrate for every later "automation" behaviour. Phase 3 is independent of 2 and could swap earlier if register demand is higher. Phase 4 needs 1–3's signals to be meaningful. Phase 5 last by explicit decision.
+Phase 1 before 2: policies-as-evidence needs the evidence vault; tasks are the substrate for every later "automation" behaviour, and the §3a control library must land here because every later phase builds on it. Phase 3 is independent of 2 and could swap earlier if register demand is higher. Phase 4 needs 1–3's signals to be meaningful. Phases 5 and 6 (UK GDPR, AI governance) are content-plus-registers on the shared model and mutually swappable. AI assistance (Phase 7) last by explicit decision.
 
 Main risks: (a) scope creep — each phase is shippable alone; stop-points are real; (b) storage security — evidence bucket must get the same RLS attack-test rigour as tables; (c) content workload — policy templates are writing-heavy, not code-heavy; schedule them as content tasks; (d) readiness-model credibility — keep the scoring explainable, never a black box.
 
