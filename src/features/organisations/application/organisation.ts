@@ -37,5 +37,6 @@ export async function inviteMember(
   const token = randomBytes(32).toString("base64url");
   const tokenHash = createHash("sha256").update(token).digest("hex");
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-  return context.insertInvitation({ ...parsed, invitedBy: context.actorId, tokenHash, expiresAt });
+  const invitation = await context.insertInvitation({ ...parsed, invitedBy: context.actorId, tokenHash, expiresAt });
+  return { ...invitation, token };
 }

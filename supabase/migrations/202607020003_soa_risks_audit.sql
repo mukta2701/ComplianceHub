@@ -145,7 +145,18 @@ returns trigger language plpgsql security definer set search_path = '' as $$
 declare row_data jsonb; org_id uuid; record_id text;
 begin
   row_data := case when tg_op = 'DELETE' then to_jsonb(old) else to_jsonb(new) end;
-  org_id := (row_data ->> 'organisation_id')::uuid;
+  org_id := case tg_table_name
+    when 'organisations' then (row_data ->> 'id')::uuid
+    when 'assessment_responses' then (
+      select organisation_id from public.assessment_sessions
+      where id = (row_data ->> 'session_id')::uuid
+    )
+    when 'soa_items' then (
+      select organisation_id from public.soa_registers
+      where id = (row_data ->> 'soa_register_id')::uuid
+    )
+    else (row_data ->> 'organisation_id')::uuid
+  end;
   record_id := coalesce(row_data ->> 'id', row_data ->> 'user_id');
   insert into public.audit_events (organisation_id, actor_id, action, entity_type, entity_id, metadata)
   values (org_id, (select auth.uid()), lower(tg_op), tg_table_name, record_id, '{}'::jsonb);
@@ -196,3 +207,17 @@ create policy risks_members_update on public.risks for update to authenticated
 using (public.is_organisation_member(organisation_id)) with check (public.is_organisation_member(organisation_id));
 create policy risks_members_delete on public.risks for delete to authenticated
 using (public.is_organisation_member(organisation_id));
+
+-- PostgreSQL privileges are the outer gate; RLS policies above remain the
+-- row-level gate. Grant only the operations each browser-facing workflow uses.
+grant usage on schema public to authenticated;
+grant select, update on public.profiles to authenticated;
+grant select, insert, update, delete on public.organisations to authenticated;
+grant select, insert, update, delete on public.memberships to authenticated;
+grant select, insert, update, delete on public.invitations to authenticated;
+grant select on public.audit_events to authenticated;
+grant select on public.catalogue_versions, public.catalogue_categories, public.catalogue_questions to authenticated;
+grant select, insert, delete on public.assessment_sessions to authenticated;
+grant select on public.assessment_responses to authenticated;
+grant select, insert, update, delete on public.soa_registers, public.soa_items, public.risks to authenticated;
+grant select on public.soa_snapshots to authenticated;

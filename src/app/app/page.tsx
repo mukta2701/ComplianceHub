@@ -1,17 +1,17 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { requireAppContext } from "@/lib/app-context";
 
 export default async function AppHome() {
-  const supabase = await createSupabaseServerClient();
-  const { data: memberships } = await supabase.from("memberships").select("organisation_id,role,organisations(name)").limit(1);
-  if (!memberships?.length) redirect("/app/onboarding");
-  const membership = memberships[0];
-  const organisation = Array.isArray(membership.organisations) ? membership.organisations[0] : membership.organisations;
+  const { supabase, organisation } = await requireAppContext();
+  const [{ count: assessments }, { count: risks }, { count: snapshots }, { data: activity }] = await Promise.all([
+    supabase.from("assessment_sessions").select("id", { count: "exact", head: true }),
+    supabase.from("risks").select("id", { count: "exact", head: true }).neq("status", "closed"),
+    supabase.from("soa_snapshots").select("id", { count: "exact", head: true }),
+    supabase.from("audit_events").select("id,action,entity_type,occurred_at").order("occurred_at", { ascending: false }).limit(5),
+  ]);
   return <main className="mx-auto max-w-6xl px-6 py-12">
-    <p className="text-sm font-medium text-blue-700">{organisation?.name ?? "Your organisation"}</p>
-    <h1 className="mt-2 text-3xl font-bold">Your compliance workspace</h1>
-    <p className="mt-3 max-w-2xl text-slate-600">The authenticated workspace is ready. Continue to the working beta while production data views are connected.</p>
-    <Link href="/demo/dashboard" className="mt-8 inline-block rounded-lg bg-blue-600 px-5 py-3 font-semibold text-white">Open dashboard</Link>
+    <p className="text-sm font-medium text-blue-700">{organisation.name}</p><h1 className="mt-2 text-3xl font-bold">Readiness dashboard</h1>
+    <div className="mt-8 grid gap-4 sm:grid-cols-3">{[["Assessments",assessments,"/app/assessment"],["Open risks",risks,"/app/risks"],["Finalised SoAs",snapshots,"/app/soa"]].map(([label,value,href]) => <Link key={label} href={String(href)} className="rounded-xl border bg-white p-5 shadow-sm"><p className="text-sm text-slate-500">{label}</p><p className="mt-2 text-3xl font-bold">{value ?? 0}</p></Link>)}</div>
+    <h2 className="mt-10 text-xl font-semibold">Recent activity</h2><div className="mt-3 divide-y rounded-xl border bg-white">{activity?.length ? activity.map((event) => <p className="p-4 text-sm" key={event.id}><b className="capitalize">{event.action}</b> {event.entity_type.replaceAll("_"," ")} <span className="float-right text-slate-500">{new Date(event.occurred_at).toLocaleString("en-GB")}</span></p>) : <p className="p-4 text-slate-500">No recorded activity yet.</p>}</div>
   </main>;
 }

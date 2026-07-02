@@ -18,7 +18,7 @@ describe("organisation application service", () => {
     await expect(inviteMember(
       { organisationId: "00000000-0000-4000-8000-000000000001", email: " PERSON@Example.COM ", role: "member" },
       { actorId: "user-1", actorRole: "owner", insertInvitation },
-    )).resolves.toEqual({ id: "invite-1" });
+    )).resolves.toEqual({ id: "invite-1", token: expect.any(String) });
     expect(insertInvitation).toHaveBeenCalledWith(expect.objectContaining({ email: "person@example.com", invitedBy: "user-1" }));
   });
 

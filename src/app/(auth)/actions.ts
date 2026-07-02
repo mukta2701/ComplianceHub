@@ -3,10 +3,12 @@
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { signInSchema, signUpSchema } from "@/features/auth/application/auth";
+import { enforceRateLimit } from "@/lib/security/rate-limit";
 
 function message(path: string, value: string) { return `${path}?message=${encodeURIComponent(value)}`; }
 
 export async function signInAction(formData: FormData) {
+  await enforceRateLimit(`sign-in:${String(formData.get("email")).trim().toLowerCase()}`, { limit: 8, windowMs: 15 * 60_000 });
   const result = signInSchema.safeParse(Object.fromEntries(formData));
   if (!result.success) redirect(message("/sign-in", "Enter a valid email and password."));
   const supabase = await createSupabaseServerClient();
@@ -16,6 +18,7 @@ export async function signInAction(formData: FormData) {
 }
 
 export async function signUpAction(formData: FormData) {
+  await enforceRateLimit(`sign-up:${String(formData.get("email")).trim().toLowerCase()}`, { limit: 4, windowMs: 60 * 60_000 });
   const result = signUpSchema.safeParse(Object.fromEntries(formData));
   if (!result.success) redirect(message("/sign-up", result.error.issues[0]?.message ?? "Check your details."));
   const supabase = await createSupabaseServerClient();
