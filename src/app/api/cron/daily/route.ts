@@ -1,0 +1,88 @@
+import { timingSafeEqual } from "node:crypto";
+import { NextResponse } from "next/server";
+import { createSupabaseServiceClient } from "@/lib/supabase/service";
+import { runDailySweep, type SweepDependencies } from "@/features/automation/application/daily-sweep";
+import type { SweepEvidence, SweepTask } from "@/features/automation/domain/sweep";
+
+export const dynamic = "force-dynamic";
+
+function authorised(request: Request): boolean {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return false;
+  const provided = request.headers.get("authorization") ?? "";
+  const expected = `Bearer ${secret}`;
+  const a = Buffer.from(provided); const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+async function sweep(request: Request) {
+  if (!authorised(request)) return NextResponse.json({ error: "unauthorised" }, { status: 401 });
+  const supabase = createSupabaseServiceClient();
+  const today = new Date().toISOString().slice(0, 10);
+  const deps: SweepDependencies = {
+    today,
+    listActiveEvidence: async () => {
+      const { data, error } = await supabase.from("evidence")
+        .select("id,organisation_id,title,owner_id,status,valid_until")
+        .in("status", ["current", "expiring"]).not("valid_until", "is", null);
+      if (error) throw error;
+      return (data ?? []).map((row): SweepEvidence => ({
+        id: row.id, organisationId: row.organisation_id, title: row.title, ownerId: row.owner_id,
+        status: row.status as "current" | "expiring", validUntil: row.valid_until,
+      }));
+    },
+    updateEvidenceStatus: async (id, status) => {
+      const { error } = await supabase.from("evidence").update({ status }).eq("id", id);
+      if (error) throw error;
+    },
+    listOpenExpiryTaskEvidenceIds: async () => {
+      const { data, error } = await supabase.from("tasks").select("evidence_id")
+        .eq("source", "evidence_expiry").in("status", ["open", "in_progress"]).not("evidence_id", "is", null);
+      if (error) throw error;
+      return (data ?? []).map((row) => row.evidence_id as string);
+    },
+    createTask: async (task) => {
+      const { data: owner, error: ownerError } = await supabase.from("memberships")
+        .select("user_id").eq("organisation_id", task.organisationId).eq("role", "owner").limit(1).single();
+      if (ownerError) throw ownerError;
+      const { data, error } = await supabase.from("tasks").upsert({
+        organisation_id: task.organisationId, title: task.title,
+        detail: "Raised automatically because linked evidence is expiring or expired.",
+        source: "evidence_expiry", owner_id: task.ownerId, due_on: task.dueOn,
+        evidence_id: task.evidenceId, created_by: owner.user_id,
+      }, { onConflict: "organisation_id,evidence_id,source", ignoreDuplicates: true }).select("id");
+      if (error) throw error;
+      return Boolean(data?.length);
+    },
+    listOverdueTasks: async () => {
+      const { data, error } = await supabase.from("tasks")
+        .select("id,organisation_id,title,owner_id,status,due_on")
+        .in("status", ["open", "in_progress"]).lt("due_on", today);
+      if (error) throw error;
+      return (data ?? []).map((row): SweepTask => ({
+        id: row.id, organisationId: row.organisation_id, title: row.title, ownerId: row.owner_id,
+        status: row.status, dueOn: row.due_on,
+      }));
+    },
+    listOrganisationOwners: async (organisationId) => {
+      const { data, error } = await supabase.from("memberships")
+        .select("user_id").eq("organisation_id", organisationId).eq("role", "owner");
+      if (error) throw error;
+      return (data ?? []).map((row) => row.user_id);
+    },
+    createNotification: async (notification) => {
+      // The full day-scoped constraint makes retries and concurrent runs idempotent.
+      const { data, error } = await supabase.from("notifications").upsert({
+        organisation_id: notification.organisationId, user_id: notification.userId, kind: notification.kind,
+        subject_type: notification.subjectType, subject_id: notification.subjectId, message: notification.message, sweep_on: notification.sweepOn,
+      }, { onConflict: "user_id,kind,subject_type,subject_id,sweep_on", ignoreDuplicates: true }).select("id");
+      if (error) throw error;
+      return Boolean(data?.length);
+    },
+  };
+  const summary = await runDailySweep(deps);
+  return NextResponse.json(summary);
+}
+
+export async function GET(request: Request) { return sweep(request); } // Vercel Cron sends GET
+export async function POST(request: Request) { return sweep(request); }

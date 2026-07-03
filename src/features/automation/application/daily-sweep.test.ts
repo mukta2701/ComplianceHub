@@ -1,0 +1,44 @@
+import { describe, expect, it } from "vitest";
+import { runDailySweep, type SweepDependencies } from "./daily-sweep";
+
+function makeDeps(overrides: Partial<SweepDependencies> = {}): SweepDependencies & {
+  statusUpdates: [string, string][]; createdTasks: unknown[]; createdNotifications: { userId: string; kind: string }[];
+} {
+  const statusUpdates: [string, string][] = [];
+  const createdTasks: unknown[] = [];
+  const createdNotifications: { userId: string; kind: string }[] = [];
+  return {
+    statusUpdates, createdTasks, createdNotifications,
+    today: "2026-07-02",
+    listActiveEvidence: async () => [
+      { id: "e1", organisationId: "org1", title: "Backup report", ownerId: "u1", status: "current", validUntil: "2026-07-20" },
+      { id: "e2", organisationId: "org1", title: "Old cert", ownerId: null, status: "expiring", validUntil: "2026-06-01" },
+    ],
+    updateEvidenceStatus: async (id, status) => { statusUpdates.push([id, status]); },
+    listOpenExpiryTaskEvidenceIds: async () => ["e1"],
+    createTask: async (task) => { createdTasks.push(task); return true; },
+    listOverdueTasks: async () => [
+      { id: "t1", organisationId: "org1", title: "Fix firewall", ownerId: "u1", status: "open", dueOn: "2026-07-01" },
+      { id: "t2", organisationId: "org1", title: "Unowned", ownerId: null, status: "open", dueOn: "2026-07-01" },
+    ],
+    listOrganisationOwners: async () => ["owner1"],
+    createNotification: async (notification) => { createdNotifications.push({ userId: notification.userId, kind: notification.kind }); return true; },
+    ...overrides,
+  };
+}
+
+describe("runDailySweep", () => {
+  it("applies transitions, raises expiry tasks, and notifies owners (falling back to org owners)", async () => {
+    const deps = makeDeps();
+    const summary = await runDailySweep(deps);
+    expect(deps.statusUpdates).toEqual([["e1", "expiring"], ["e2", "expired"]]);
+    expect(deps.createdTasks).toHaveLength(1);
+    expect(deps.createdNotifications).toEqual([
+      { userId: "u1", kind: "evidence_expiring" },   // e1 transition -> owner
+      { userId: "owner1", kind: "evidence_expired" }, // e2 has no owner -> org owners
+      { userId: "u1", kind: "task_overdue" },
+      { userId: "owner1", kind: "task_overdue" },     // unowned task -> org owners
+    ]);
+    expect(summary).toEqual({ evidenceExpiring: 1, evidenceExpired: 1, tasksCreated: 1, notificationsCreated: 4 });
+  });
+});
