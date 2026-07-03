@@ -10,6 +10,8 @@ const nav = [
   ["/demo/assessment", "clipboard", "Gap assessment"],
   ["/demo/soa", "file", "Statement of Applicability"],
   ["/demo/risks", "alert", "Risk register"],
+  ["/demo/tasks", "check", "Tasks"],
+  ["/demo/evidence", "file", "Evidence vault"],
   ["/demo/settings", "settings", "Settings"],
 ] as const;
 
