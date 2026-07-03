@@ -4,7 +4,13 @@ import path from "node:path";
 
 export default defineConfig({
   plugins: [react()],
-  resolve: { alias: { "@": path.resolve(__dirname, "src") } },
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "src"),
+      // Next-only marker module; not installed as a package, so stub it.
+      "server-only": path.resolve(__dirname, "src/test/server-only-stub.ts"),
+    },
+  },
   test: {
     environment: "jsdom",
     globals: true,
