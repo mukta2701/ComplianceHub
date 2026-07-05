@@ -18,12 +18,20 @@ export function calculateRiskScore(likelihood: number, impact: number): number {
   return likelihood * impact;
 }
 
-export function riskBand(score: number): RiskBand {
+export type RiskMatrixConfig = { lowMax: number; moderateMax: number; highMax: number; appetite: number | null };
+export const DEFAULT_RISK_MATRIX_CONFIG: RiskMatrixConfig = { lowMax: 4, moderateMax: 9, highMax: 14, appetite: null };
+export const RISK_BAND_LABEL: Record<RiskBand, string> = { low: "Low", moderate: "Medium", high: "High", very_high: "Critical" };
+
+export function riskBand(score: number, config: RiskMatrixConfig = DEFAULT_RISK_MATRIX_CONFIG): RiskBand {
   if (!Number.isInteger(score) || score < 1 || score > 25) throw new RangeError("Risk score must be between 1 and 25");
-  if (score <= 4) return "low";
-  if (score <= 9) return "moderate";
-  if (score <= 14) return "high";
+  if (score <= config.lowMax) return "low";
+  if (score <= config.moderateMax) return "moderate";
+  if (score <= config.highMax) return "high";
   return "very_high";
+}
+
+export function exceedsAppetite(score: number, config: RiskMatrixConfig): boolean {
+  return config.appetite !== null && score > config.appetite;
 }
 
 export function suggestRisksFromGaps(gaps: readonly GapForRisk[]) {
