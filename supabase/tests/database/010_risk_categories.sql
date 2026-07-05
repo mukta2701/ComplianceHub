@@ -1,5 +1,5 @@
 begin;
-select plan(7);
+select plan(8);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data)
 values
@@ -28,6 +28,9 @@ select is((select count(*) from public.risk_categories where organisation_id = '
 select results_eq(
   $$ delete from public.risk_categories where organisation_id = '20000000-0000-4000-8000-000000000001' returning id $$,
   $$ select null::uuid where false $$, 'cross-tenant delete affects no rows');
+select results_eq(
+  $$ update public.risk_categories set name = 'forged update' where organisation_id = '20000000-0000-4000-8000-000000000001' returning id $$,
+  $$ select null::uuid where false $$, 'cross-tenant update affects no rows');
 select is(
   (select count(*) from public.audit_events where entity_type = 'risk_categories' and organisation_id = '20000000-0000-4000-8000-000000000002'),
   7::bigint, 'category seeding is audited per tenant');
