@@ -75,6 +75,47 @@ test("a new user creates an isolated workspace and starts an assessment", async 
   await expect(page.getByText("error", { exact: true })).toHaveCount(0);
 });
 
+test("an asset is added to the inventory and the list is accessible", async ({ page }, testInfo) => {
+  const suffix = `${Date.now()}-${testInfo.project.name}`;
+  const email = `ast-${suffix}@example.test`;
+  const password = "Test-only-passphrase-2026";
+
+  await page.goto("/sign-up");
+  await page.getByLabel("Name").fill("Beta Owner");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page.getByLabel("Confirm password").fill(password);
+  await page.getByRole("button", { name: "Create account" }).click();
+
+  await page.waitForURL(/\/sign-in/);
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
+  await page.getByLabel("Organisation name").fill(`AST Workspace ${suffix}`);
+  await page.getByRole("button", { name: "Create workspace" }).click();
+  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
+
+  // Reach the asset inventory through the workspace nav.
+  const navToggle = page.getByRole("button", { name: "Open navigation" });
+  if (await navToggle.isVisible()) await navToggle.click();
+  await page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: "Assets", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Asset inventory", level: 1 })).toBeVisible();
+
+  await page.getByRole("link", { name: "Add asset" }).click();
+  await expect(page.getByRole("heading", { name: "Add asset" })).toBeVisible();
+  await page.getByLabel("Reference", { exact: true }).fill("AST-001");
+  await page.getByLabel("Description").fill("Customer database");
+  await page.locator("select[name=classification]").selectOption("highly_confidential");
+  await page.locator("select[name=valueCriticality]").selectOption("high");
+  await page.getByRole("button", { name: "Save asset" }).click();
+
+  await expect(page.getByRole("heading", { name: "Asset inventory", level: 1 })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Customer database" })).toBeVisible();
+  const axe = await new AxeBuilder({ page }).analyze();
+  expect(axe.violations).toEqual([]);
+});
+
 test("a treatment plan spawns an owned, dated task", async ({ page }, testInfo) => {
   const suffix = `${Date.now()}-${testInfo.project.name}`;
   const email = `rtp-${suffix}@example.test`;

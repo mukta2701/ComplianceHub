@@ -10,6 +10,7 @@ const nav = [
   ["/app", "home", "Dashboard"],
   ["/app/assessment", "clipboard", "Assessment"],
   ["/app/risks", "alert", "Risks"],
+  ["/app/assets", "lock", "Assets"],
   ["/app/soa", "file", "SoA"],
   ["/app/tasks", "check", "Tasks"],
   ["/app/evidence", "file", "Evidence"],
@@ -22,7 +23,7 @@ const TITLES: Array<[string, string]> = [
   ["/app/assessment", "Assessment"], ["/app/risks", "Risk register"], ["/app/soa", "Statement of Applicability"],
   ["/app/tasks", "Tasks"], ["/app/evidence", "Evidence vault"], ["/app/notifications", "Notifications"],
   ["/app/activity", "Activity"], ["/app/settings", "Settings"], ["/app/onboarding", "Workspace setup"],
-  ["/app/invitations", "Invitation"], ["/app", "Dashboard"],
+  ["/app/invitations", "Invitation"], ["/app/assets", "Asset inventory"], ["/app", "Dashboard"],
 ];
 
 function isActive(path: string, href: string) { return href === "/app" ? path === "/app" : path === href || path.startsWith(`${href}/`); }
