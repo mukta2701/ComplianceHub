@@ -2,14 +2,15 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireAppContext } from "@/lib/app-context";
 import { isOverdue, type TaskStatus } from "@/features/tasks/domain/tasks";
+import { Card, PageIntro, Pill } from "@/components/ui";
 import { updateTaskStatusAction } from "../actions";
+
+const EVIDENCE_TONE: Record<string, string> = { current: "green", expiring: "amber", expired: "red", superseded: "neutral", withdrawn: "neutral" };
 
 export default async function TaskDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { supabase } = await requireAppContext();
-  const { data: task } = await supabase.from("tasks")
-    .select("id,title,detail,status,due_on,recurrence,source,owner_id,control_id,risk_id,created_at,updated_at")
-    .eq("id", id).maybeSingle();
+  const { data: task } = await supabase.from("tasks").select("id,title,detail,status,due_on,recurrence,source,owner_id,control_id,risk_id,created_at,updated_at").eq("id", id).maybeSingle();
   if (!task) notFound();
   const [{ data: owner }, { data: control }, { data: risk }, { data: evidenceLinks }] = await Promise.all([
     task.owner_id ? supabase.from("profiles").select("display_name").eq("id", task.owner_id).maybeSingle() : Promise.resolve({ data: null }),
@@ -18,30 +19,23 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
     supabase.from("evidence_links").select("id,evidence(id,title,status,kind)").eq("task_id", id),
   ]);
   const evidence = (evidenceLinks ?? []).map((l) => (Array.isArray(l.evidence) ? l.evidence[0] : l.evidence)).filter((e): e is { id: string; title: string; status: string; kind: string } => Boolean(e));
-  const EVIDENCE_TONE: Record<string, string> = { current: "bg-emerald-100 text-emerald-800", expiring: "bg-amber-100 text-amber-800", expired: "bg-red-100 text-red-700", superseded: "bg-slate-200 text-slate-600", withdrawn: "bg-slate-200 text-slate-600" };
   const today = new Date().toISOString().slice(0, 10);
   const overdue = isOverdue({ status: task.status as TaskStatus, dueOn: task.due_on }, today);
   const facts: Array<[string, React.ReactNode]> = [
-    ["Status", <span className="capitalize" key="s">{task.status.replaceAll("_", " ")}</span>],
+    ["Status", <span key="s" style={{ textTransform: "capitalize" }}>{task.status.replaceAll("_", " ")}</span>],
     ["Owner", owner?.display_name ?? "Unassigned"],
-    ["Due date", <>{task.due_on ?? "—"}{overdue && <span className="ml-2 rounded bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">Overdue</span>}</>],
-    ["Recurrence", <span className="capitalize" key="r">{task.recurrence ?? "One-off"}</span>],
-    ["Source", <span className="capitalize" key="src">{task.source.replaceAll("_", " ")}</span>],
-    ["Linked control", control ? <Link href="/app/soa" className="text-blue-700 hover:underline">{control.code}: {control.title}</Link> : "—"],
-    ["Linked risk", risk ? <Link href="/app/risks" className="text-blue-700 hover:underline">{risk.reference}: {risk.title}</Link> : "—"],
+    ["Due date", <>{task.due_on ?? "—"}{overdue && <> <Pill tone="red">Overdue</Pill></>}</>],
+    ["Recurrence", <span key="r" style={{ textTransform: "capitalize" }}>{task.recurrence ?? "One-off"}</span>],
+    ["Source", <span key="src" style={{ textTransform: "capitalize" }}>{task.source.replaceAll("_", " ")}</span>],
+    ["Linked control", control ? <Link href="/app/soa">{control.code}: {control.title}</Link> : "—"],
+    ["Linked risk", risk ? <Link href="/app/risks">{risk.reference}: {risk.title}</Link> : "—"],
   ];
   return <>
-    <Link href="/app/tasks" className="text-sm text-blue-700 hover:underline">← Back to tasks</Link>
-    <h1 className="mt-3 text-3xl font-bold">{task.title}</h1>
-    <dl className="mt-8 grid gap-4 rounded-xl border bg-white p-6 sm:grid-cols-2">
-      {facts.map(([label, value]) => <div key={label}><dt className="text-sm text-slate-500">{label}</dt><dd className="mt-1 font-medium">{value}</dd></div>)}
-    </dl>
-    {task.detail && <section className="mt-6 rounded-xl border bg-white p-6"><h2 className="text-sm text-slate-500">Detail</h2><p className="mt-1 whitespace-pre-wrap">{task.detail}</p></section>}
-    {evidence.length > 0 && <section className="mt-6 rounded-xl border bg-white p-6"><h2 className="text-sm text-slate-500">Linked evidence</h2><ul className="mt-2 space-y-2">{evidence.map((e) => <li key={e.id} className="flex items-center justify-between gap-3"><Link href="/app/evidence" className="text-blue-700 hover:underline">{e.title}</Link><span className={`rounded px-2 py-0.5 text-xs font-medium capitalize ${EVIDENCE_TONE[e.status] ?? "bg-slate-200 text-slate-600"}`}>{e.status}</span></li>)}</ul></section>}
-    <form action={updateTaskStatusAction} className="mt-6 flex items-center gap-3">
-      <input type="hidden" name="id" value={task.id} />
-      <label className="text-sm font-medium">Update status<select name="status" defaultValue={task.status} className="ml-2 rounded border px-2 py-1"><option value="open">Open</option><option value="in_progress">In progress</option><option value="done">Done</option><option value="cancelled">Cancelled</option></select></label>
-      <button className="rounded bg-blue-600 px-4 py-2 text-sm text-white">Save</button>
-    </form>
+    <Link href="/app/tasks" style={{ color: "var(--blue)", fontSize: "13px", fontWeight: 700 }}>← Back to tasks</Link>
+    <PageIntro eyebrow="TASK" title={task.title} body="Owned, dated remediation work." />
+    <Card style={{ padding: "22px" }}><dl className="fact-grid">{facts.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl></Card>
+    {task.detail && <Card style={{ padding: "22px", marginTop: "16px" }}><h2 style={{ fontSize: "12px", color: "#596273", margin: 0 }}>Detail</h2><p style={{ whiteSpace: "pre-wrap", marginTop: "6px" }}>{task.detail}</p></Card>}
+    {evidence.length > 0 && <Card style={{ padding: "22px", marginTop: "16px" }}><h2 style={{ fontSize: "12px", color: "#596273", margin: "0 0 10px" }}>Linked evidence</h2><ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "8px" }}>{evidence.map((e) => <li key={e.id} style={{ display: "flex", justifyContent: "space-between", gap: "12px" }}><Link href="/app/evidence">{e.title}</Link><Pill tone={EVIDENCE_TONE[e.status] ?? "neutral"}>{e.status}</Pill></li>)}</ul></Card>}
+    <form action={updateTaskStatusAction} className="card" style={{ padding: "18px", marginTop: "16px", display: "flex", gap: "10px", alignItems: "center" }}><input type="hidden" name="id" value={task.id} /><label style={{ fontWeight: 700, fontSize: "12px" }}>Update status <select name="status" defaultValue={task.status} style={{ marginLeft: "6px" }}><option value="open">Open</option><option value="in_progress">In progress</option><option value="done">Done</option><option value="cancelled">Cancelled</option></select></label><button className="button primary">Save</button></form>
   </>;
 }

@@ -17,8 +17,12 @@
 .sidebar-foot .demo-pill{color:#704d00}
 .sidebar-foot p,.header-actions,.legal,.page-intro p,.eyebrow,.stat small,.stat p{color:#596273}
 .data-table-wrap th{color:#596273}
+.data-table-wrap td small{color:#596273}
+.data-table-wrap td:last-child .button{color:#30394a}
 .pill.amber,.pill.medium{color:#715500}
 .pill.red,.pill.high{color:#963f00}
 .notif-bell{position:relative;display:grid;place-items:center;width:36px;height:36px;border-radius:9px;color:#4a556a}.notif-bell:hover{background:#f2f4f8}.notif-count{position:absolute;top:-3px;right:-3px;min-width:16px;height:16px;padding:0 4px;border-radius:99px;background:var(--blue);color:#fff;font-size:9px;font-weight:800;display:grid;place-items:center}
 
 .quick-actions{display:flex;gap:14px;align-items:center}.quick-actions a{color:var(--blue);font-weight:700}
+
+.app-form{padding:24px;display:flex;flex-direction:column;gap:16px;max-width:760px}.app-form>label,.app-form .form-grid label{display:block;font-size:12px;font-weight:700;color:#3e4758}.app-form input,.app-form select,.app-form textarea{display:block;width:100%;margin-top:6px;border:1px solid #dbe0e8;border-radius:8px;padding:9px 11px;font-size:13px;background:#fff}.app-form textarea{min-height:84px;resize:vertical}.app-form input:focus,.app-form select:focus,.app-form textarea:focus{outline:none;border-color:#7d9fea;box-shadow:0 0 0 3px #2f6bed16}.fact-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:0}.fact-grid dt{font-size:11px;color:#596273;font-weight:700}.fact-grid dd{margin:4px 0 0;font-weight:600;font-size:13px}@media(max-width:640px){.form-grid,.fact-grid{grid-template-columns:1fr}}
