@@ -114,6 +114,26 @@ test("an asset is added to the inventory and the list is accessible", async ({ p
   await expect(page.getByRole("link", { name: "Customer database" })).toBeVisible();
   const axe = await new AxeBuilder({ page }).analyze();
   expect(axe.violations).toEqual([]);
+
+  // Create a risk to link to the asset.
+  await page.goto("/app/risks/new");
+  await page.getByLabel("Reference", { exact: true }).fill("R-001");
+  await page.getByLabel("Title").fill("Unencrypted laptops");
+  await page.getByLabel("Description").fill("Endpoints hold data at rest without disk encryption.");
+  await page.locator("select[name=categoryId]").selectOption({ index: 1 });
+  await page.getByRole("button", { name: "Save risk" }).click();
+  await expect(page.getByRole("heading", { name: "Risk register" })).toBeVisible();
+
+  // Open the asset detail page and link the risk.
+  await page.goto("/app/assets");
+  await page.getByRole("link", { name: "Customer database" }).click();
+  await expect(page.getByRole("heading", { name: "Customer database" })).toBeVisible();
+  await page.getByLabel(/Link a risk to/).selectOption({ label: "R-001: Unencrypted laptops" });
+  await page.getByRole("button", { name: "Link risk" }).click();
+  await expect(page.getByRole("link", { name: "R-001: Unencrypted laptops" })).toBeVisible();
+
+  const detailAxe = await new AxeBuilder({ page }).analyze();
+  expect(detailAxe.violations).toEqual([]);
 });
 
 test("a treatment plan spawns an owned, dated task", async ({ page }, testInfo) => {
