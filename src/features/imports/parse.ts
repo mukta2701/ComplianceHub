@@ -37,6 +37,10 @@ async function parseXlsx(buf: ArrayBuffer): Promise<string[][]> {
     for (let c = 1; c < values.length; c++) {
       const v = values[c];
       if (v === null || v === undefined) cells.push("");
+      else if (typeof v === "object" && "richText" in (v as Record<string, unknown>)) {
+        const runs = (v as { richText: unknown }).richText;
+        cells.push(Array.isArray(runs) ? runs.map((run) => String((run as { text?: unknown })?.text ?? "")).join("") : "");
+      }
       else if (typeof v === "object" && "text" in (v as Record<string, unknown>)) cells.push(String((v as { text: unknown }).text));
       else if (typeof v === "object" && "result" in (v as Record<string, unknown>)) cells.push(String((v as { result: unknown }).result));
       else cells.push(String(v));

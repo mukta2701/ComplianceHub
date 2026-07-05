@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import ExcelJS from "exceljs";
 import { parseCsv, findHeaderRow, parseWorkbook } from "./parse";
 import { toXlsx, type ExportColumn } from "@/features/exports/exports";
 
@@ -42,5 +43,15 @@ describe("parseWorkbook", () => {
     const { headers, rows } = await parseWorkbook(buffer, "xlsx", ["Risk ID", "Likelihood"]);
     expect(headers).toEqual(["Risk ID", "Likelihood"]);
     expect(rows).toEqual([["R-001", "3"]]);
+  });
+  it("concatenates a rich-text cell's runs instead of stringifying the object", async () => {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("Risk register");
+    sheet.addRow(["Risk ID", "Risk Description"]);
+    sheet.addRow(["R-001", { richText: [{ text: "Data " }, { text: "loss", font: { bold: true } }] }]);
+    const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+    const { headers, rows } = await parseWorkbook(buffer, "xlsx", ["Risk ID", "Risk Description"]);
+    expect(headers).toEqual(["Risk ID", "Risk Description"]);
+    expect(rows).toEqual([["R-001", "Data loss"]]);
   });
 });
