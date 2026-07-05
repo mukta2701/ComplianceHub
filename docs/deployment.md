@@ -13,7 +13,7 @@ The Supabase free tier is suitable for development, not dependable production: p
 
 ## Daily automation cron
 
-`vercel.json` declares a cron entry (`0 6 * * *`) that calls `GET /api/cron/daily` once a day. Vercel Cron sends the request with an `Authorization: Bearer <CRON_SECRET>` header, so `CRON_SECRET` must be set to a high-entropy value in the Vercel project's environment variables — the route rejects any request whose bearer token does not match. The sweep is idempotent: re-running it for the same day, whether via Vercel's own retry or a manual call, does not duplicate the tasks or notifications it creates.
+`vercel.json` declares a cron entry (`0 6 * * *`) that calls `GET /api/cron/daily` once a day. Vercel Cron sends the request with an `Authorization: Bearer <CRON_SECRET>` header, so `CRON_SECRET` must be set to a high-entropy value in the Vercel project's environment variables — the route rejects any request whose bearer token does not match. The sweep is idempotent: notifications are deduplicated per day, and it only opens a new evidence-expiry task while none is already open for that evidence item, so re-running it — via Vercel's own retry or a manual call — is safe.
 
 To invoke it manually in development:
 
