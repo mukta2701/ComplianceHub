@@ -1,0 +1,49 @@
+Title,Description,Status,Priority,Labels
+Asset inventory,"Tenant-isolated asset register with classification, value, category, owner and lifecycle fields plus a stat-row list and full CRUD pages.",Done,High,phase-b;assets
+Asset-to-risk linking,"Many-to-many links between assets and the risks they are exposed to, managed on the asset detail page.",Done,Medium,phase-b;assets;risks
+Risk treatment plans (RTPs),"First-class treatment plans with status, lead and target/actual dates that can spawn an owned, dated task.",Done,High,phase-b;risks
+Risk category taxonomy,Per-workspace controlled category list replacing free-text risk categories via a backfilled FK.,Done,Medium,phase-b;risks
+Configurable RAG bands and risk appetite,Per-org RAG thresholds and an optional appetite threshold driving risk banding and pills.,Done,High,phase-b;risks
+7-value SoA implementation status,SoA status widened from 4 to the 7 toolkit values with existing rows migrated by a documented mapping.,Done,High,phase-b;soa
+Per-control SoA owner,"Each SoA control gains an owner, editable on review and carried into the SoA export.",Done,Medium,phase-b;soa
+SoA readiness weighting,"Maturity-weighted readiness score that excludes not-applicable controls, in the SoA domain.",Done,Medium,phase-b;soa
+XLSX/CSV export for all modules,Shared export helper and RLS-scoped route handlers emitting toolkit-mirrored XLSX/CSV for every register.,Done,High,phase-b;export
+Add saved views and filters to the asset inventory list,"Add saved views plus classification, value and category filters so large asset inventories stay navigable.",Backlog,Medium,phase-b;assets;enhancement
+Add bulk actions to the asset inventory,"Add bulk re-classify, re-assign owner and delete actions so assets are not edited one at a time.",Backlog,Medium,phase-b;assets;enhancement
+Surface asset review staleness in the needs-attention queue,Flag assets whose lifespan or last-updated date is stale into the dashboard needs-attention queue.,Backlog,Medium,phase-b;assets;enhancement
+Show aggregate risk exposure on assets and asset counts on risks,Display the highest linked residual RAG band on each asset and a linked-asset count on each risk.,Backlog,Medium,phase-b;assets;risks;enhancement
+Add bulk asset-to-risk linking,Allow several assets to be linked to a risk (and vice versa) in a single action.,Backlog,Low,phase-b;assets;risks;enhancement
+Add an asset coverage-gap view,Flag high-value or highly-confidential assets that have no linked risks.,Backlog,Medium,phase-b;assets;risks;enhancement
+Surface overdue RTPs on the risk and dashboard,Flag RTPs past their target completion with no actual completion on the risk detail and needs-attention queue.,Backlog,High,phase-b;risks;enhancement
+Notify the RTP lead as the target date approaches,Send the assigned lead a reminder via the existing notifications channel as an RTP target date nears.,Backlog,Medium,phase-b;risks;enhancement;notifications
+Roll up RTP progress onto the risk register list,"Show a plans-complete pill per risk on the register, not only on the detail page.",Backlog,Low,phase-b;risks;enhancement
+Add a risk category management screen,"Let members rename, reorder, merge and archive risk categories.",Backlog,Medium,phase-b;risks;enhancement
+Add a reassign flow before deleting an in-use category,Guide the user to reassign affected risks before an in-use category can be deleted.,Backlog,Low,phase-b;risks;enhancement
+Add category-level risk roll-ups and heatmap,Add per-category risk counts and a heatmap to the risk register.,Backlog,Low,phase-b;risks;enhancement
+Add a RAG-banded 5x5 risk heatmap,Render a Likelihood x Impact heatmap coloured by the configured RAG bands with per-cell risk counts.,Backlog,High,phase-b;risks;enhancement
+Add an appetite-breach queue,List every risk whose residual score exceeds the configured appetite threshold.,Backlog,High,phase-b;risks;enhancement
+Validate and audit RAG threshold changes,Validate thresholds inline as strictly increasing and record who changed the RAG configuration and when.,Backlog,Medium,phase-b;risks;enhancement
+Add bulk SoA status transitions and inline editing,Allow multiple controls' implementation status to be set in one action with inline editing.,Backlog,Medium,phase-b;soa;enhancement
+Add per-control SoA status history,Record a status-change timeline per control beyond the immutable finalised snapshot.,Backlog,Low,phase-b;soa;enhancement
+Add SoA status filters to surface the backlog,Add status filters and segments to surface the Pending and Absent control backlog.,Backlog,Medium,phase-b;soa;enhancement
+Add an SoA owner-workload view,Group SoA controls by owner with counts by status to show who owns what.,Backlog,Medium,phase-b;soa;enhancement
+Add bulk SoA owner assignment,Assign an owner across a selected group of SoA controls in one action.,Backlog,Low,phase-b;soa;enhancement
+Notify SoA owners of pending controls before an audit,Alert owners of controls still Pending or Absent ahead of an audit deadline.,Backlog,Medium,phase-b;soa;enhancement;notifications
+Surface SoA readiness percent and trend on the dashboard,Show the weighted readiness percent and its trend on the dashboard and in the audit pack.,Backlog,High,phase-b;soa;enhancement
+Make SoA readiness weights configurable,Allow the per-status maturity weights to be configured per workspace.,Backlog,Low,phase-b;soa;enhancement
+Add SoA readiness breakdown by category and owner,Break the readiness score down by category and by owner to locate gaps.,Backlog,Low,phase-b;soa;enhancement
+Add an auditor audit-pack export bundle,"Bundle all registers, the finalised SoA snapshot and the evidence index into a single export for auditors.",Backlog,High,phase-b;export;enhancement
+Add XLSX import round-trip (Phase B.5),Deliver the planned import and column-mapping wizard so exported workbooks re-import cleanly.,Backlog,High,phase-b;export;enhancement;phase-b.5
+Produce styled branded XLSX exports,"Add formatted header rows, sensible column widths and auto-filters so exports can replace the workbooks.",Backlog,Low,phase-b;export;enhancement
+Rate-limit and audit the export endpoints,Apply rate limiting and audit logging to the export route handlers as the create actions already have.,Backlog,Medium,phase-b;export;hardening;security
+Harden CSV export against formula injection,"Neutralise leading =, +, - and @ in CSV cells so exported free text cannot execute as a spreadsheet formula.",Backlog,High,phase-b;hardening;security;export
+Add an XLSX export content assertion,Add a round-trip read-back assertion instead of only checking the workbook container exists.,Backlog,Medium,phase-b;hardening;test-coverage;export
+Resolve dual lockfiles and pick one package manager,Choose a single package manager and verify a frozen-lockfile install passes before deploy.,Backlog,High,phase-b;hardening;go-live;build
+Pin updated_by in the risk_matrix_config update policy,Re-assert updated_by equals auth.uid() in the RLS with-check for the risk matrix config update policy.,Backlog,Medium,phase-b;hardening;security;risks
+Stop swallowing the DB error in the RTP delete action,Surface delete failures in deleteRtpAction instead of discarding the error.,Backlog,Low,phase-b;hardening;risks
+Add server-side owner-membership check in reviewSoaItemAction,Re-validate the chosen SoA owner is an org member server-side rather than relying on the FK alone.,Backlog,Medium,phase-b;hardening;security;soa
+Add an empty-id guard to asset link and unlink actions,Defensively guard against a blank asset or risk id in the link and unlink actions.,Backlog,Low,phase-b;hardening;assets
+Fix dense_rank position collision in category backfill,Make the 202607020011 category backfill collision-proof for values differing only by case.,Backlog,Low,phase-b;hardening;risks
+Assert filenames and use buttons in the export e2e,Drive downloads via the buttons and assert the content-disposition filename in the export e2e.,Backlog,Low,phase-b;hardening;test-coverage;export
+Normalise the evidence export owner fallback,Change the evidence export owner fallback from an empty string to Unassigned for consistency.,Backlog,Low,phase-b;hardening;export
+Revisit single-org assumption in risk-matrix-config read,Replace the maybeSingle risk_matrix_config read that assumes a single active org.,Backlog,Low,phase-b;hardening;risks
