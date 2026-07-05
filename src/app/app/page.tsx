@@ -6,7 +6,7 @@ import { Icon } from "@/components/icons";
 import { acceptCalendarSeedAction } from "./tasks/actions";
 
 const STALE_EVIDENCE = new Set(["expired", "withdrawn", "superseded"]);
-const SOURCE_LABEL: Record<string, string> = { gap: "From assessment gap", evidence_expiry: "Raised by daily sweep", system: "From compliance calendar", policy_review: "From policy review", manual: "Added manually" };
+const SOURCE_LABEL: Record<string, string> = { gap: "From assessment gap", evidence_expiry: "Raised by daily sweep", system: "From compliance calendar", policy_review: "From policy review", risk_treatment: "From a treatment plan", manual: "Added manually" };
 
 export default async function AppHome() {
   const { supabase, organisation } = await requireAppContext();

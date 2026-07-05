@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireAppContext } from "@/lib/app-context";
-import { acceptRiskSuggestionAction, deleteRiskAction, updateRiskStatusAction } from "../actions";
+import { acceptRiskSuggestionAction, deleteRiskAction } from "../actions";
+import { RiskStatusSelect } from "./risk-status-select";
 import { calculateRiskScore, riskBand, exceedsAppetite, RISK_BAND_LABEL, DEFAULT_RISK_MATRIX_CONFIG, type RiskMatrixConfig } from "@/features/risks/domain/risks";
 import { updateRiskMatrixConfigAction } from "./config-actions";
 import { summariseEvidenceFreshness, type EvidenceStatus } from "@/features/evidence/domain/evidence";
@@ -40,10 +41,10 @@ export default async function RisksPage() {
     <Card><div className="data-table-wrap" role="region" aria-label="Risk register table" tabIndex={0}><table><thead><tr><th>Ref</th><th>Risk</th><th>Inherent</th><th>Residual</th><th>Status</th><th>Review</th><th></th></tr></thead><tbody>
       {data?.map((r) => { const inherent = calculateRiskScore(r.likelihood, r.impact); const residual = calculateRiskScore(r.residual_likelihood, r.residual_impact); const linked = tasksByRisk.get(r.id) ?? []; const freshness = summariseEvidenceFreshness(evidenceByRisk.get(r.id) ?? []); return <tr key={r.id}>
         <td>{r.reference}</td>
-        <td><b>{r.title}</b><small>{(Array.isArray(r.risk_categories) ? r.risk_categories[0] : r.risk_categories)?.name ?? "—"}</small>{linked.length > 0 && <small>Linked tasks: {linked.map((t, i) => <span key={t.id}>{i > 0 && ", "}<Link href={`/app/tasks/${t.id}`}>{t.title}</Link></span>)}</small>}{freshness.total > 0 && <small>Evidence: {freshness.total}{freshness.expiring > 0 ? ` · ${freshness.expiring} expiring` : ""}{freshness.expired > 0 ? ` · ${freshness.expired} expired` : ""}</small>}</td>
+        <td><b><Link href={`/app/risks/${r.id}`}>{r.title}</Link></b><small>{(Array.isArray(r.risk_categories) ? r.risk_categories[0] : r.risk_categories)?.name ?? "—"}</small>{linked.length > 0 && <small>Linked tasks: {linked.map((t, i) => <span key={t.id}>{i > 0 && ", "}<Link href={`/app/tasks/${t.id}`}>{t.title}</Link></span>)}</small>}{freshness.total > 0 && <small>Evidence: {freshness.total}{freshness.expiring > 0 ? ` · ${freshness.expiring} expiring` : ""}{freshness.expired > 0 ? ` · ${freshness.expired} expired` : ""}</small>}</td>
         <td>{(() => { const band = riskBand(inherent, config); return <Pill tone={exceedsAppetite(inherent, config) ? "critical" : (BAND_TONE[band] ?? "neutral")}>{inherent} · {RISK_BAND_LABEL[band]}</Pill>; })()}</td>
         <td>{(() => { const band = riskBand(residual, config); return <Pill tone={exceedsAppetite(residual, config) ? "critical" : (BAND_TONE[band] ?? "neutral")}>{residual} · {RISK_BAND_LABEL[band]}</Pill>; })()}</td>
-        <td><form action={updateRiskStatusAction}><input type="hidden" name="id" value={r.id} /><select name="status" defaultValue={r.status} onChange={(e) => e.currentTarget.form?.requestSubmit()}><option value="open">Open</option><option value="treating">Treating</option><option value="accepted">Accepted</option><option value="closed">Closed</option></select></form></td>
+        <td><RiskStatusSelect id={r.id} status={r.status} /></td>
         <td>{r.review_date ?? "—"}</td>
         <td><form action={deleteRiskAction}><input type="hidden" name="id" value={r.id} /><button style={{ color: "var(--red)", border: 0, background: "none" }}>Delete</button></form></td>
       </tr>; })}
