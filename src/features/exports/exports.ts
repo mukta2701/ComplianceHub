@@ -2,8 +2,18 @@ import ExcelJS from "exceljs";
 
 export type ExportColumn<T> = { header: string; value: (row: T) => string | number | null };
 
+// OWASP CSV-injection mitigation: a leading =, +, -, @, tab or CR is how
+// Excel/Sheets recognise a formula, so any such field is prefixed with a
+// leading apostrophe to force it to be read as literal text. This guard is
+// CSV-only (the XLSX path below writes inline strings via exceljs, which are
+// never evaluated as formulas). NOTE for Phase B.5 XLSX/CSV import: strip a
+// single leading apostrophe when re-reading a value that starts with one, so
+// this mitigation round-trips instead of leaking into the re-imported data.
+const CSV_FORMULA_INJECTION_PREFIX = /^[=+\-@\t\r]/;
+
 function cell(value: string | number | null): string {
-  const s = value === null || value === undefined ? "" : String(value);
+  const raw = value === null || value === undefined ? "" : String(value);
+  const s = CSV_FORMULA_INJECTION_PREFIX.test(raw) ? `'${raw}` : raw;
   return /[",\n\r]/.test(s) ? `"${s.replaceAll('"', '""')}"` : s;
 }
 
