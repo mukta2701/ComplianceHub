@@ -3,7 +3,7 @@ import { isOverdue, type TaskStatus } from "../../tasks/domain/tasks";
 
 export type SweepEvidence = Readonly<{
   id: string; organisationId: string; title: string; ownerId: string | null;
-  status: "current" | "expiring"; validUntil: string | null;
+  status: "current" | "expiring" | "expired"; validUntil: string | null;
 }>;
 export type SweepTask = Readonly<{
   id: string; organisationId: string; title: string; ownerId: string | null;

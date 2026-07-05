@@ -24,11 +24,11 @@ async function sweep(request: Request) {
     listActiveEvidence: async () => {
       const { data, error } = await supabase.from("evidence")
         .select("id,organisation_id,title,owner_id,status,valid_until")
-        .in("status", ["current", "expiring"]).not("valid_until", "is", null);
+        .in("status", ["current", "expiring", "expired"]).not("valid_until", "is", null);
       if (error) throw error;
       return (data ?? []).map((row): SweepEvidence => ({
         id: row.id, organisationId: row.organisation_id, title: row.title, ownerId: row.owner_id,
-        status: row.status as "current" | "expiring", validUntil: row.valid_until,
+        status: row.status as "current" | "expiring" | "expired", validUntil: row.valid_until,
       }));
     },
     updateEvidenceStatus: async (id, status) => {

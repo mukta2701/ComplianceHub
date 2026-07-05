@@ -41,4 +41,19 @@ describe("runDailySweep", () => {
     ]);
     expect(summary).toEqual({ evidenceExpiring: 1, evidenceExpired: 1, tasksCreated: 1, notificationsCreated: 4 });
   });
+
+  it("raises a task and notification for evidence already marked expired", async () => {
+    const deps = makeDeps({
+      listActiveEvidence: async () => [
+        { id: "e3", organisationId: "org1", title: "Uploaded stale cert", ownerId: "u1", status: "expired", validUntil: "2026-07-01" },
+      ],
+      listOpenExpiryTaskEvidenceIds: async () => [],
+      listOverdueTasks: async () => [],
+    });
+    const summary = await runDailySweep(deps);
+    expect(deps.statusUpdates).toEqual([]);
+    expect(deps.createdTasks).toHaveLength(1);
+    expect(deps.createdNotifications).toEqual([{ userId: "u1", kind: "evidence_expired" }]);
+    expect(summary).toEqual({ evidenceExpiring: 0, evidenceExpired: 0, tasksCreated: 1, notificationsCreated: 1 });
+  });
 });

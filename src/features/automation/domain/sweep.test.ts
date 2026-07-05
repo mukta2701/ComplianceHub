@@ -31,6 +31,11 @@ describe("planExpiryTasks", () => {
     expect(planExpiryTasks([evidence({ validUntil: "2026-12-01" })], [], "2026-07-02")).toEqual([]);
     expect(planExpiryTasks([evidence({})], ["e1"], "2026-07-02")).toEqual([]);
   });
+  it("creates a task for evidence that was already expired when recorded", () => {
+    expect(planExpiryTasks([evidence({ status: "expired", validUntil: "2026-07-01" })], [], "2026-07-02")).toEqual([
+      { organisationId: "org1", evidenceId: "e1", title: "Replace stale evidence: Backup report", ownerId: "u1", dueOn: "2026-07-01" },
+    ]);
+  });
 });
 
 describe("planOverdueTaskAlerts", () => {

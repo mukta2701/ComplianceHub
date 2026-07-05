@@ -41,7 +41,22 @@ export async function runDailySweep(deps: SweepDependencies): Promise<SweepSumma
 
   const openExpiryIds = await deps.listOpenExpiryTaskEvidenceIds();
   for (const task of planExpiryTasks(evidence, openExpiryIds, deps.today)) {
-    if (await deps.createTask(task)) summary.tasksCreated += 1;
+    if (await deps.createTask(task)) {
+      summary.tasksCreated += 1;
+      const item = evidence.find((candidate) => candidate.id === task.evidenceId);
+      // Evidence created after its validity date is already `expired`, so it
+      // has no status transition to generate the normal expiry notification.
+      if (item?.status === "expired") {
+        for (const userId of await recipients(item.ownerId, item.organisationId, deps)) {
+          const inserted = await deps.createNotification({
+            organisationId: item.organisationId, userId, kind: "evidence_expired",
+            subjectType: "evidence", subjectId: item.id,
+            message: `Evidence "${item.title}" is expired.`.slice(0, 500), sweepOn: deps.today,
+          });
+          if (inserted) summary.notificationsCreated += 1;
+        }
+      }
+    }
   }
 
   for (const alert of planOverdueTaskAlerts(await deps.listOverdueTasks(), deps.today)) {
