@@ -62,9 +62,9 @@ export function ImportWizard({ module, fields, recordsHref, recordsLabel, regist
 
     {preview && <Card style={{ padding: "22px", marginBottom: "16px" }}>
       <h2 style={{ fontSize: "15px", margin: "0 0 4px" }}>3. Preview &amp; validation</h2>
-      <p style={{ fontSize: "13px", margin: "0 0 10px" }}>{preview.valid} valid, {preview.invalid} with errors. {module === "soa" ? `${preview.valid} matched controls will be updated.` : `${preview.valid} rows will be added.`}</p>
+      <p style={{ fontSize: "13px", margin: "0 0 10px" }}>{preview.valid} valid, {preview.invalid} with errors. {module === "soa" ? `${preview.updated} matched controls will be updated.` : `${preview.valid} rows will be added.`}</p>
       {preview.rowErrors.length > 0 && <ul style={{ fontSize: "12px", color: "var(--red)", margin: "0 0 10px", paddingLeft: "18px" }}>{preview.rowErrors.slice(0, 50).map((e) => <li key={e.row}>Row {e.row}: {e.errors.join("; ")}</li>)}</ul>}
-      {preview.valid > 0 && <form action={() => run(true)}><button className="button primary" disabled={pending}>4. Confirm import ({preview.valid})</button></form>}
+      {preview.valid > 0 && <form action={() => run(true)}><button className="button primary" disabled={pending}>4. Confirm import ({module === "soa" ? preview.updated : preview.valid})</button></form>}
     </Card>}
 
     {result && <Card style={{ padding: "22px" }}>
