@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { expect, test } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
@@ -181,6 +182,44 @@ test("a treatment plan spawns an owned, dated task", async ({ page }, testInfo) 
 
   await page.goto("/app/tasks");
   await expect(page.getByText("Treatment plan RTP-001")).toBeVisible();
+});
+
+test("a risk register workbook can be imported through the wizard", async ({ page }, testInfo) => {
+  const suffix = `${Date.now()}-${testInfo.project.name}`;
+  const email = `imp-${suffix}@example.test`;
+  const password = "Test-only-passphrase-2026";
+
+  await page.goto("/sign-up");
+  await page.getByLabel("Name").fill("Beta Owner");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page.getByLabel("Confirm password").fill(password);
+  await page.getByRole("button", { name: "Create account" }).click();
+
+  await page.waitForURL(/\/sign-in/);
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
+  await page.getByLabel("Organisation name").fill(`Import Workspace ${suffix}`);
+  await page.getByRole("button", { name: "Create workspace" }).click();
+  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
+
+  await page.goto("/app/risks/import");
+  await expect(page.getByRole("heading", { name: "Import risk register", level: 1 })).toBeVisible();
+  const csv = ["Risk ID,Risk Description,Risk Category,Likelihood,Impact,Mitigation Measures,Risk Owner,Status,Review Date",
+    "R-501,Imported laptop theft,Operational,3,4,Encrypt disks,,Treating,31/12/2026"].join("\n");
+  await page.locator('input[name="file"]').setInputFiles({ name: "risks.csv", mimeType: "text/csv", buffer: Buffer.from(csv) });
+  await page.getByRole("button", { name: "Analyse file" }).click();
+  await expect(page.getByLabel("Map column Risk Category")).toHaveValue("categoryName");
+  await page.getByRole("button", { name: /Preview 1 row/ }).click();
+  await expect(page.getByText("1 rows will be added")).toBeVisible();
+  const axe = await new AxeBuilder({ page }).analyze();
+  expect(axe.violations).toEqual([]);
+  await page.getByRole("button", { name: /Confirm import/ }).click();
+  await expect(page.getByText(/1 rows added/)).toBeVisible();
+  await page.goto("/app/risks");
+  await expect(page.getByRole("link", { name: "Imported laptop theft" })).toBeVisible();
 });
 
 test("every register can be downloaded as an XLSX export", async ({ page }, testInfo) => {

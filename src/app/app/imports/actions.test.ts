@@ -81,7 +81,8 @@ const validRow = (n: number) => [`Row ${n} description`, "Operational", "3", "2"
 describe("runImportAction — row cap (Fix 1)", () => {
   it("caps input.rows at MAX_IMPORT_ROWS regardless of how many the caller posts", async () => {
     hoisted.ctx = { supabase: fakeSupabase({ risk_categories: [], memberships: [], risks: [] }), user: { id: USER_ID }, organisation: { id: ORG_ID, name: "Org" } };
-    const { runImportAction, MAX_IMPORT_ROWS } = await import("./actions");
+    const { runImportAction } = await import("./actions");
+    const { MAX_IMPORT_ROWS } = await import("@/features/imports/limits");
 
     const oversized = Array.from({ length: MAX_IMPORT_ROWS + 137 }, (_, i) => validRow(i));
     const result = await runImportAction({ module: "risk", headers: HEADERS, rows: oversized, mapping: MAPPING, commit: false });

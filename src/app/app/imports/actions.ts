@@ -7,6 +7,7 @@ import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { parseWorkbook } from "@/features/imports/parse";
 import { coerceAndValidate, suggestMapping, type ColumnMapping } from "@/features/imports/mapping";
 import { ADAPTERS, type ImportModule } from "@/features/imports/adapters";
+import { MAX_IMPORT_ROWS } from "@/features/imports/limits";
 import { riskInputSchema } from "@/features/risks/application/risk";
 import { assetInputSchema } from "@/features/assets/application/asset";
 import { soaItemReviewSchema } from "@/features/soa/application/review";
@@ -15,8 +16,6 @@ export type AnalyseResult = { headers: string[]; rows: string[][]; suggestion: R
 export type ImportRunResult = { committed: boolean; total: number; valid: number; invalid: number; imported: number; updated: number; skipped: number; rowErrors: { row: number; errors: string[] }[]; notes: string[] };
 
 const MODULES = new Set<ImportModule>(["risk", "soa", "asset"]);
-// Shared ceiling between the analyse preview and the write path — keeps dry-run/commit CPU and insert-loop cost bounded.
-export const MAX_IMPORT_ROWS = 500;
 
 export async function analyseImportAction(formData: FormData): Promise<AnalyseResult> {
   await requireAppContext(); // auth gate; parsing needs no org data
