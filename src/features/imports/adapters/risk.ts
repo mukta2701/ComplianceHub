@@ -1,9 +1,6 @@
 import { z } from "zod";
 import { RISK_STATUS_LABEL } from "@/features/risks/domain/risks";
-import { textField, enumField, intField, dateField, type TargetField } from "../mapping";
-
-export type ImportModule = "risk" | "soa" | "asset";
-export type ImportAdapter = { module: ImportModule; label: string; fields: TargetField[]; rowSchema: z.ZodType };
+import { textField, enumField, intField, dateField, type TargetField, type ImportAdapter } from "../mapping";
 
 export const RISK_IMPORT_FIELDS: TargetField[] = [
   textField("reference", "Risk ID", false, ["Reference", "Risk No."], 40),

@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { SOA_STATUS_LABEL } from "@/features/soa/domain/soa";
-import { textField, enumField, boolField, type TargetField } from "../mapping";
-import type { ImportAdapter } from "./risk";
+import { textField, enumField, boolField, type TargetField, type ImportAdapter } from "../mapping";
 
 // SoA items are generated from controls, never inserted — import UPDATES matched
 // rows by controlCode within a selected register (applicability, status,

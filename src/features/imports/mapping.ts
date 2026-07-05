@@ -5,6 +5,10 @@ export type TargetField = { key: string; label: string; required: boolean; alias
 export type ColumnMapping = Record<string, string | null>;
 export type RowResult = { ok: true; values: Record<string, string | number | boolean | null> } | { ok: false; errors: string[] };
 
+// Shared across the module adapters (risk/soa/asset) and their registry.
+export type ImportModule = "risk" | "soa" | "asset";
+export type ImportAdapter = { module: ImportModule; label: string; fields: TargetField[]; rowSchema: z.ZodType };
+
 const norm = (s: string) => s.trim().toLowerCase().replace(/[\s_/()?:.\-]+/g, " ").trim();
 
 export function reverseLabels<T extends string>(labels: Record<T, string>): (raw: string) => T | null {
