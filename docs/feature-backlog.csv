@@ -47,3 +47,11 @@ Fix dense_rank position collision in category backfill,Make the 202607020011 cat
 Assert filenames and use buttons in the export e2e,Drive downloads via the buttons and assert the content-disposition filename in the export e2e.,Backlog,Low,phase-b;hardening;test-coverage;export
 Normalise the evidence export owner fallback,Change the evidence export owner fallback from an empty string to Unassigned for consistency.,Backlog,Low,phase-b;hardening;export
 Revisit single-org assumption in risk-matrix-config read,Replace the maybeSingle risk_matrix_config read that assumes a single active org.,Backlog,Low,phase-b;hardening;risks
+"Spreadsheet import wizard (risk/SoA/asset)","Upload XLSX/CSV, map columns, preview validation, confirm; RLS-scoped, server re-validated, round-trips with export","Done","High","phase-b5;import"
+"Save & reuse column mappings","Persist named mappings per workbook template to skip re-mapping","Backlog","Medium","enhancement;import"
+"Drag-drop upload + multi-sheet selection","Nicer upload UX and per-sheet picking for multi-sheet workbooks","Backlog","Low","enhancement;import"
+"Import history + undo-last-import","Audit trail of imports with a one-click undo","Backlog","Medium","enhancement;import;audit"
+"Dedup-on-re-import for risk/asset","Match on a natural key instead of always inserting","Backlog","Medium","enhancement;import"
+"Real asset owner-name resolution","Split/parse Owner & Location to resolve owner_id (currently a no-op)","Backlog","Low","hardening;import"
+"Async import for large workbooks","Background job for >500-row files","Backlog","Low","enhancement;import"
+"Downloadable blank import templates","Provide header-matching template files for each module","Backlog","Medium","enhancement;import"

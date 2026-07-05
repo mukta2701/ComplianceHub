@@ -117,3 +117,20 @@ Small backlog items carried forward in the SDD ledger (`.superpowers/sdd/progres
 - **Export e2e hits endpoints, not buttons, and asserts no filenames** — the download tests call the routes directly and do not assert the `content-disposition` filename (Tasks 13/14 minor).
 - **Evidence export owner fallback is `""` rather than "Unassigned"** — inconsistent with the other export owner columns (Task 14 minor).
 - **`maybeSingle` risk-matrix-config read assumes a single active org** — a pre-existing pattern that will need revisiting for multi-org membership (Task 3 minor).
+
+---
+
+## Phase B.5 — Spreadsheet import + column-mapping wizard (Done)
+
+**What shipped:** Upload XLSX/CSV → auto-suggested column mapping → validation preview (valid/invalid + per-row errors) → confirm, for risk register, SoA, and asset inventory. Server-side re-validation, RLS-scoped writes, org-scoped name→id resolution. SoA import *updates* matched controls (never inserts). Lossless export→import round-trip (reverses Phase B's label maps + CSV formula guard). Robustness: calendar-date validation, XLSX rich-text cells, 500-row cap + rate limit.
+
+**Suggested improvements (backlog):**
+- Save & reuse named column mappings per workbook template (skip re-mapping each time).
+- Drag-and-drop upload + per-sheet selection for multi-sheet workbooks.
+- Import history / audit trail with undo-last-import.
+- Dedup-on-re-import for risk/asset (currently additive with a warning) — match on a natural key.
+- Real asset owner-name resolution (currently the combined "Owner & Location" column never matches a display name — effectively a no-op).
+- Async/background import for large workbooks (currently synchronous, capped at 500 rows).
+- Downloadable blank import templates matching the expected headers.
+
+**Deferred hardening (from reviews):** apostrophe-strip caveat for hand-authored leading-`'` data; `intField` accepts hex-ish input; SoA confirm shows "(0)" when no controls match; pre-existing Phase-A sidebar footer/avatar overlap (shell polish).
