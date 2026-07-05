@@ -45,3 +45,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .superpowers/
+
+# Local scratch: subagent UX-audit screenshots and export smoke-test downloads
+artifacts/
