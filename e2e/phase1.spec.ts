@@ -46,6 +46,9 @@ async function activate(button: Locator) {
 // The workspace nav is a horizontally scrollable strip on narrow viewports, so a
 // link can be clipped out of the clickable area — scroll it in before clicking.
 async function openSection(page: Page, name: string) {
+  // On mobile the sidebar nav is off-canvas until the drawer is opened.
+  const toggle = page.getByRole("button", { name: "Open navigation" });
+  if (await toggle.isVisible()) await toggle.click();
   const link = page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name, exact: true });
   await link.scrollIntoViewIfNeeded();
   await link.click({ force: true });

@@ -59,6 +59,9 @@ test("a new user creates an isolated workspace and starts an assessment", async 
   await page.getByRole("button", { name: "Create workspace" }).click();
   await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
 
+  // On mobile the sidebar nav is off-canvas until the drawer is opened.
+  const navToggle = page.getByRole("button", { name: "Open navigation" });
+  if (await navToggle.isVisible()) await navToggle.click();
   await page.getByRole("link", { name: "Assessment", exact: true }).click();
   await page.getByRole("button", { name: "New assessment" }).click();
   await expect(page.getByRole("heading", { name: /readiness assessment/i })).toBeVisible();
