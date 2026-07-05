@@ -39,13 +39,30 @@ export function boolField(key: string, label: string, required: boolean, aliases
   } };
 }
 
+// Regex only checks the DD/MM/YYYY *shape* — "31/02/2026" and "2026-13-40" match the
+// pattern but aren't real dates. Confirm the components round-trip through Date.UTC
+// (which normalises out-of-range values, e.g. Feb 31 -> Mar 3) to reject impossible dates.
+function isValidCalendarDate(year: number, month: number, day: number): boolean {
+  if (!Number.isInteger(year) || month < 1 || month > 12 || day < 1 || day > 31) return false;
+  const d = new Date(Date.UTC(year, month - 1, day));
+  return d.getUTCFullYear() === year && d.getUTCMonth() === month - 1 && d.getUTCDate() === day;
+}
+
 export function dateField(key: string, label: string, required: boolean, aliases: string[]): TargetField {
+  const invalid = { ok: false as const, error: "must be a date (DD/MM/YYYY or YYYY-MM-DD)" };
   return { key, label, required, aliases, coerce: (raw) => {
     const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw.trim());
-    if (iso) return { ok: true, value: `${iso[1]}-${iso[2]}-${iso[3]}` };
+    if (iso) {
+      const [, y, m, d] = iso;
+      return isValidCalendarDate(Number(y), Number(m), Number(d)) ? { ok: true, value: `${y}-${m}-${d}` } : invalid;
+    }
     const uk = /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/.exec(raw.trim());
-    if (uk) { const y = uk[3].length === 2 ? `20${uk[3]}` : uk[3]; return { ok: true, value: `${y}-${uk[2].padStart(2, "0")}-${uk[1].padStart(2, "0")}` }; }
-    return { ok: false, error: "must be a date (DD/MM/YYYY or YYYY-MM-DD)" };
+    if (uk) {
+      const y = uk[3].length === 2 ? 2000 + Number(uk[3]) : Number(uk[3]);
+      const d = Number(uk[1]), m = Number(uk[2]);
+      return isValidCalendarDate(y, m, d) ? { ok: true, value: `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}` } : invalid;
+    }
+    return invalid;
   } };
 }
 

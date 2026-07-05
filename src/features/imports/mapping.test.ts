@@ -26,6 +26,14 @@ describe("field builders", () => {
     expect(dateField("d", "Review Date", false, []).coerce("2026-12-31")).toEqual({ ok: true, value: "2026-12-31" });
     expect(dateField("d", "Review Date", false, []).coerce("nope")).toEqual({ ok: false, error: "must be a date (DD/MM/YYYY or YYYY-MM-DD)" });
   });
+
+  it("rejects calendar-invalid dates that merely match the shape (e.g. 31 Feb, month 13)", () => {
+    expect(dateField("d", "Review Date", false, []).coerce("31/02/2026")).toEqual({ ok: false, error: "must be a date (DD/MM/YYYY or YYYY-MM-DD)" });
+    expect(dateField("d", "Review Date", false, []).coerce("2026-13-40")).toEqual({ ok: false, error: "must be a date (DD/MM/YYYY or YYYY-MM-DD)" });
+    // still accepts real dates, including the Feb 29 on a leap year
+    expect(dateField("d", "Review Date", false, []).coerce("29/02/2028")).toEqual({ ok: true, value: "2028-02-29" });
+    expect(dateField("d", "Review Date", false, []).coerce("28/02/2026")).toEqual({ ok: true, value: "2026-02-28" });
+  });
 });
 
 describe("suggestMapping", () => {
