@@ -18,7 +18,11 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
   const overdueCount = all.filter((t) => isOverdue({ status: t.status as TaskStatus, dueOn: t.due_on }, today)).length;
   const recurringCount = all.filter((t) => t.recurrence).length;
   return <>
-    <PageIntro eyebrow="REMEDIATION" title="Tasks" body="Owned, dated work generated from gaps, evidence expiry and your compliance calendar." action={<Link className="button primary" href="/app/tasks/new"><Icon name="plus" />New task</Link>} />
+    <PageIntro eyebrow="REMEDIATION" title="Tasks" body="Owned, dated work generated from gaps, evidence expiry and your compliance calendar." action={<span style={{ display: "flex", gap: "8px" }}>
+      <a className="button secondary" href="/api/app/tasks/export?format=xlsx">Export XLSX</a>
+      <a className="button secondary" href="/api/app/tasks/export?format=csv">CSV</a>
+      <Link className="button primary" href="/app/tasks/new"><Icon name="plus" />New task</Link>
+    </span>} />
     <div className="stats-grid"><Stat label="OPEN TASKS" value={openCount} detail="across all sources" /><Stat label="OVERDUE" value={overdueCount} detail="flagged by the daily sweep" tone="red" /><Stat label="RECURRING" value={recurringCount} detail="regenerate on completion" tone="green" /></div>
     <nav aria-label="Task filters" className="segmented" style={{ marginBottom: "16px" }}>{FILTERS.map((f) => <Link key={f} href={`/app/tasks?filter=${f}`} aria-current={filter === f ? "page" : undefined} className={filter === f ? "active" : ""} style={{ textTransform: "capitalize" }}>{f.replace("_", " ")}</Link>)}</nav>
     {!all.length && <Card style={{ padding: "20px", marginBottom: "16px" }}><h2 style={{ fontSize: "15px", margin: "0 0 4px" }}>Start with the compliance calendar</h2><p style={{ fontSize: "12px", color: "#596273", margin: "0 0 12px" }}>Add recurring access reviews, policy reviews, and backup restore tests in one click.</p><form action={acceptCalendarSeedAction}><button className="button primary">Add starter calendar</button></form></Card>}

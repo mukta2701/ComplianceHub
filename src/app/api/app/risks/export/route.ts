@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { calculateRiskScore } from "@/features/risks/domain/risks";
+import { calculateRiskScore, RISK_STATUS_LABEL, type RiskStatus } from "@/features/risks/domain/risks";
 import { toCsv, toXlsx, type ExportColumn } from "@/features/exports/exports";
 
 type Row = { reference: string; title: string; description: string; likelihood: number; impact: number; treatment_plan: string; status: string; review_date: string | null; risk_categories: { name: string } | { name: string }[] | null; profiles: { display_name: string } | { display_name: string }[] | null };
@@ -22,7 +22,7 @@ export async function GET(request: Request) {
     { header: "Risk Rating", value: (r) => calculateRiskScore(r.likelihood, r.impact) },
     { header: "Mitigation Measures", value: (r) => r.treatment_plan },
     { header: "Risk Owner", value: (r) => one(r.profiles)?.display_name ?? "" },
-    { header: "Status", value: (r) => r.status },
+    { header: "Status", value: (r) => RISK_STATUS_LABEL[r.status as RiskStatus] },
     { header: "Review Date", value: (r) => r.review_date ?? "" },
   ];
   if (format === "csv") return new NextResponse(toCsv(columns, rows), { headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": 'attachment; filename="risk-register.csv"', "cache-control": "private, no-store" } });

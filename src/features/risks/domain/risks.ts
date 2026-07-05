@@ -22,6 +22,9 @@ export type RiskMatrixConfig = { lowMax: number; moderateMax: number; highMax: n
 export const DEFAULT_RISK_MATRIX_CONFIG: RiskMatrixConfig = { lowMax: 4, moderateMax: 9, highMax: 14, appetite: null };
 export const RISK_BAND_LABEL: Record<RiskBand, string> = { low: "Low", moderate: "Medium", high: "High", very_high: "Critical" };
 
+export type RiskStatus = "open" | "treating" | "accepted" | "closed";
+export const RISK_STATUS_LABEL: Record<RiskStatus, string> = { open: "Open", treating: "Treating", accepted: "Accepted", closed: "Closed" };
+
 export function riskBand(score: number, config: RiskMatrixConfig = DEFAULT_RISK_MATRIX_CONFIG): RiskBand {
   if (!Number.isInteger(score) || score < 1 || score > 25) throw new RangeError("Risk score must be between 1 and 25");
   if (score <= config.lowMax) return "low";

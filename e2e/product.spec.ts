@@ -182,3 +182,47 @@ test("a treatment plan spawns an owned, dated task", async ({ page }, testInfo) 
   await page.goto("/app/tasks");
   await expect(page.getByText("Treatment plan RTP-001")).toBeVisible();
 });
+
+test("every register can be downloaded as an XLSX export", async ({ page }, testInfo) => {
+  const suffix = `${Date.now()}-${testInfo.project.name}`;
+  const email = `exp-${suffix}@example.test`;
+  const password = "Test-only-passphrase-2026";
+
+  await page.goto("/sign-up");
+  await page.getByLabel("Name").fill("Beta Owner");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page.getByLabel("Confirm password").fill(password);
+  await page.getByRole("button", { name: "Create account" }).click();
+
+  await page.waitForURL(/\/sign-in/);
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
+  await page.getByLabel("Organisation name").fill(`Export Workspace ${suffix}`);
+  await page.getByRole("button", { name: "Create workspace" }).click();
+  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
+
+  // Seed an assessment session so the assessment export has a session to default to.
+  await page.goto("/app/assessment");
+  await page.getByRole("button", { name: "New assessment" }).click();
+  await expect(page.getByRole("heading", { name: /readiness assessment/i })).toBeVisible();
+
+  // Generate an SoA draft from that assessment so the SoA export finds a register.
+  await page.goto("/app/soa");
+  const assessmentSelect = page.locator("select[name=assessmentId]");
+  await expect(assessmentSelect.locator("option")).not.toHaveCount(1);
+  await assessmentSelect.selectOption({ index: 1 });
+  await page.getByRole("button", { name: "Generate draft" }).click();
+  await page.waitForURL(/\/app\/soa\/[0-9a-f-]+$/);
+  await expect(page.getByRole("heading", { name: "Statement of Applicability", level: 1 })).toBeVisible();
+
+  for (const path of ["/api/app/risks/export?format=xlsx", "/api/app/soa/export?format=xlsx", "/api/app/assets/export?format=xlsx", "/api/app/tasks/export?format=xlsx", "/api/app/evidence/export?format=xlsx", "/api/app/assessment/export?format=xlsx"]) {
+    const res = await page.request.get(path);
+    expect(res.ok(), `${path} should return 200`).toBeTruthy();
+    const body = await res.body();
+    expect(body.length).toBeGreaterThan(0);
+    expect(body.subarray(0, 2).toString("latin1")).toBe("PK");
+  }
+});

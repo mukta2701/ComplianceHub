@@ -15,7 +15,11 @@ export default async function EvidencePage() {
   ]);
   const freshness = summariseEvidenceFreshness((items ?? []).map((i) => ({ status: i.status as EvidenceStatus })));
   return <>
-    <PageIntro eyebrow="EVIDENCE" title="Evidence vault" body="Immutable proof attached to controls — freshness is re-checked by the daily sweep, and stale items raise tasks automatically." action={<Link className="button primary" href="/app/evidence/new"><Icon name="plus" />Add evidence</Link>} />
+    <PageIntro eyebrow="EVIDENCE" title="Evidence vault" body="Immutable proof attached to controls — freshness is re-checked by the daily sweep, and stale items raise tasks automatically." action={<span style={{ display: "flex", gap: "8px" }}>
+      <a className="button secondary" href="/api/app/evidence/export?format=xlsx">Export XLSX</a>
+      <a className="button secondary" href="/api/app/evidence/export?format=csv">CSV</a>
+      <Link className="button primary" href="/app/evidence/new"><Icon name="plus" />Add evidence</Link>
+    </span>} />
     <div className="stats-grid"><Stat label="EVIDENCE ITEMS" value={freshness.total} detail="files, links and notes" /><Stat label="EXPIRING SOON" value={freshness.expiring} detail="within 30 days" tone="amber" /><Stat label="EXPIRED" value={freshness.expired} detail="replacement task raised" tone="red" /></div>
     <div style={{ display: "grid", gap: "14px" }}>{items?.map((item) => <Card key={item.id} style={{ padding: "20px" }}>
       <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: "12px", alignItems: "center" }}>
