@@ -11,6 +11,17 @@
 
 The Supabase free tier is suitable for development, not dependable production: projects may pause and production backup guarantees are limited. Vercel Hobby is limited to qualifying non-commercial use.
 
+## Daily automation cron
+
+`vercel.json` declares a cron entry (`0 6 * * *`) that calls `GET /api/cron/daily` once a day. Vercel Cron sends the request with an `Authorization: Bearer <CRON_SECRET>` header, so `CRON_SECRET` must be set to a high-entropy value in the Vercel project's environment variables — the route rejects any request whose bearer token does not match. The sweep is idempotent: re-running it for the same day, whether via Vercel's own retry or a manual call, does not duplicate the tasks or notifications it creates.
+
+To invoke it manually in development:
+
+```bash
+curl -i -X GET http://localhost:3000/api/cron/daily \
+  -H "Authorization: Bearer $CRON_SECRET"
+```
+
 ## Self-hosting
 
 Use the official Supabase Docker distribution and deploy the Next.js container behind TLS. The operator owns patching, availability, monitoring, backups, recovery testing, email delivery, and secret rotation.
