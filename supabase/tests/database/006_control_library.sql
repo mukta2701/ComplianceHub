@@ -1,10 +1,11 @@
 begin;
-select plan(8);
+select plan(9);
 
 select is((select count(*) from public.frameworks where slug = 'iso-27001' and version = '2022'), 1::bigint, 'ISO 27001:2022 framework is seeded');
 select is((select count(*) from public.requirements r join public.frameworks f on f.id = r.framework_id where f.slug = 'iso-27001'), 93::bigint, 'all 93 catalogue controls became requirements');
 select is((select count(*) from public.controls), 93::bigint, 'shared control library is seeded 1:1');
 select is((select count(*) from public.requirement_control_mappings), 93::bigint, 'every requirement maps to a control');
+select is((select count(*) from public.assessment_control_mappings), 10::bigint, 'every seeded assessment question maps to a framework requirement');
 select is(
   (select count(*) from public.requirements r where not exists (select 1 from public.control_catalogue_controls c where c.id = r.id)),
   0::bigint, 'requirement ids reuse control catalogue ids'

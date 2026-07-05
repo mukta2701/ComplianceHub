@@ -19,3 +19,17 @@ insert into public.catalogue_questions (catalogue_version_id, category_id, code,
   ('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000104','ASSURE-01','Do you evaluate whether security controls operate as intended?','Use evidence such as review results, tests and performance measures.','Define a control assurance schedule and retain results.',2,0),
   ('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000104','ASSURE-02','Are internal security audits planned and independently performed?','Independence means auditors do not assess their own work.','Create a risk-based audit programme and assign independent reviewers.',2,1),
   ('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000104','ASSURE-03','Are corrective actions tracked through to verified completion?','Look for root cause, owner, due date and effectiveness checks.','Use a corrective action log and verify effectiveness before closure.',1,2);
+
+-- These mappings depend on both the assessment seed above and the framework
+-- catalogue created by migrations. Keeping the fresh-install backfill here
+-- ensures `supabase db reset` produces the same links as an upgraded database.
+insert into public.assessment_control_mappings (catalogue_question_id, control_id, rationale)
+select q.id, c.id, 'Readiness evidence informs review of this control.'
+from public.catalogue_questions q
+join public.control_catalogue_controls c on c.code = case q.code
+  when 'GOV-01' then '5.1' when 'GOV-02' then '5.2' when 'RISK-01' then '5.7'
+  when 'RISK-02' then '5.8' when 'OPS-01' then '5.18' when 'OPS-02' then '8.13'
+  when 'OPS-03' then '6.8' when 'ASSURE-01' then '5.36' when 'ASSURE-02' then '5.35'
+  when 'ASSURE-03' then '5.27' end
+where q.catalogue_version_id = '00000000-0000-4000-8000-000000000001'
+on conflict (catalogue_question_id, control_id) do nothing;
