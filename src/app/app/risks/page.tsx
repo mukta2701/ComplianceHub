@@ -34,11 +34,11 @@ export default async function RisksPage() {
     <Card style={{ padding: "18px", marginBottom: "16px" }}>
       <h2 style={{ fontSize: "15px", margin: "0 0 4px" }}>RAG band thresholds</h2>
       <p style={{ fontSize: "12px", color: "#596273", margin: "0 0 12px" }}>Set the top of each band on the 1–25 scale. Scores above your appetite are flagged Critical.</p>
-      <form action={updateRiskMatrixConfigAction} style={{ display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "end" }}>
-        <label style={{ fontSize: "12px", fontWeight: 700 }}>Low ≤<input name="lowMax" type="number" min={1} max={23} defaultValue={config.lowMax} style={{ display: "block", width: "72px" }} /></label>
-        <label style={{ fontSize: "12px", fontWeight: 700 }}>Medium ≤<input name="moderateMax" type="number" min={2} max={24} defaultValue={config.moderateMax} style={{ display: "block", width: "72px" }} /></label>
-        <label style={{ fontSize: "12px", fontWeight: 700 }}>High ≤<input name="highMax" type="number" min={3} max={24} defaultValue={config.highMax} style={{ display: "block", width: "72px" }} /></label>
-        <label style={{ fontSize: "12px", fontWeight: 700 }}>Appetite<input name="appetite" type="number" min={1} max={25} defaultValue={config.appetite ?? ""} style={{ display: "block", width: "72px" }} /></label>
+      <form action={updateRiskMatrixConfigAction} className="rag-editor" style={{ display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "end" }}>
+        <label style={{ fontSize: "12px", fontWeight: 700 }}>Low ≤<input name="lowMax" type="number" min={1} max={23} defaultValue={config.lowMax} /></label>
+        <label style={{ fontSize: "12px", fontWeight: 700 }}>Medium ≤<input name="moderateMax" type="number" min={2} max={24} defaultValue={config.moderateMax} /></label>
+        <label style={{ fontSize: "12px", fontWeight: 700 }}>High ≤<input name="highMax" type="number" min={3} max={24} defaultValue={config.highMax} /></label>
+        <label style={{ fontSize: "12px", fontWeight: 700 }}>Appetite<input name="appetite" type="number" min={1} max={25} defaultValue={config.appetite ?? ""} /></label>
         <button className="button secondary">Save thresholds</button>
       </form>
     </Card>
