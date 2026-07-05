@@ -222,6 +222,45 @@ test("a risk register workbook can be imported through the wizard", async ({ pag
   await expect(page.getByRole("link", { name: "Imported laptop theft" })).toBeVisible();
 });
 
+test("an asset workbook can be imported through the wizard", async ({ page }, testInfo) => {
+  const suffix = `${Date.now()}-${testInfo.project.name}`;
+  const email = `assetimp-${suffix}@example.test`;
+  const password = "Test-only-passphrase-2026";
+
+  await page.goto("/sign-up");
+  await page.getByLabel("Name").fill("Beta Owner");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page.getByLabel("Confirm password").fill(password);
+  await page.getByRole("button", { name: "Create account" }).click();
+
+  await page.waitForURL(/\/sign-in/);
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
+  await page.getByLabel("Organisation name").fill(`Import Workspace ${suffix}`);
+  await page.getByRole("button", { name: "Create workspace" }).click();
+  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
+
+  await page.goto("/app/assets/import");
+  await expect(page.getByRole("heading", { name: "Import asset inventory", level: 1 })).toBeVisible();
+  const csv = ["Asset Reference,Asset Description,Category,Owner & Location,Classification,Value (Criticality),Security Controls,Asset Lifespan,Last Updated,Remarks",
+    "AST-900,Imported CRM,Applications,HQ,Confidential,High,SSO,3 years,05/01/2026,",
+    ",Imported backup vault,,Offsite,Highly Confidential,High,,,,"].join("\n");
+  await page.locator('input[name="file"]').setInputFiles({ name: "assets.csv", mimeType: "text/csv", buffer: Buffer.from(csv) });
+  await page.getByRole("button", { name: "Analyse file" }).click();
+  await expect(page.getByLabel("Map column Classification")).toHaveValue("classification");
+  await page.getByRole("button", { name: /Preview 2 rows/ }).click();
+  await expect(page.getByText("2 rows will be added")).toBeVisible();
+  const axe = await new AxeBuilder({ page }).analyze();
+  expect(axe.violations).toEqual([]);
+  await page.getByRole("button", { name: /Confirm import/ }).click();
+  await expect(page.getByText(/2 rows added/)).toBeVisible();
+  await page.goto("/app/assets");
+  await expect(page.getByRole("link", { name: "Imported CRM" })).toBeVisible();
+});
+
 test("a SoA workbook import updates a matched control in the selected register", async ({ page }, testInfo) => {
   const suffix = `${Date.now()}-${testInfo.project.name}`;
   const email = `soaimp-${suffix}@example.test`;

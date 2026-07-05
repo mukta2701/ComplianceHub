@@ -13,6 +13,7 @@ export default async function AssetsPage() {
     <PageIntro eyebrow="ASSETS" title="Asset inventory" body="Track information assets, their classification, and their criticality — and link them to the risks that threaten them." action={<span style={{ display: "flex", gap: "8px" }}>
       <a className="button secondary" href="/api/app/assets/export?format=xlsx">Export XLSX</a>
       <a className="button secondary" href="/api/app/assets/export?format=csv">CSV</a>
+      <Link className="button secondary" href="/app/assets/import">Import</Link>
       <Link className="button primary" href="/app/assets/new"><Icon name="plus" />Add asset</Link>
     </span>} />
     <div className="stats-grid"><Stat label="ASSETS" value={summary.total} detail="in the inventory" /><Stat label="HIGH VALUE" value={summary.highValue} detail="business-critical" tone="red" /><Stat label="HIGHLY CONFIDENTIAL" value={summary.sensitive} detail="strictest handling" tone="amber" /></div>
