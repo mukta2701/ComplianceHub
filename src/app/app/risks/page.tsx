@@ -25,7 +25,11 @@ export default async function RisksPage() {
   const evidenceByRisk = new Map<string, { status: EvidenceStatus }[]>();
   for (const link of evidenceLinks ?? []) { if (!link.risk_id) continue; const ev = Array.isArray(link.evidence) ? link.evidence[0] : link.evidence; if (!ev) continue; const list = evidenceByRisk.get(link.risk_id) ?? []; list.push({ status: ev.status as EvidenceStatus }); evidenceByRisk.set(link.risk_id, list); }
   return <>
-    <PageIntro eyebrow="RISK" title="Risk register" body="Track inherent and residual exposure on a documented 5×5 matrix." action={<Link className="button primary" href="/app/risks/new"><Icon name="plus" />Add risk</Link>} />
+    <PageIntro eyebrow="RISK" title="Risk register" body="Track inherent and residual exposure on a documented 5×5 matrix." action={<span style={{ display: "flex", gap: "8px" }}>
+      <a className="button secondary" href="/api/app/risks/export?format=xlsx">Export XLSX</a>
+      <a className="button secondary" href="/api/app/risks/export?format=csv">CSV</a>
+      <Link className="button primary" href="/app/risks/new"><Icon name="plus" />Add risk</Link>
+    </span>} />
     {Boolean(gaps?.length) && <Card style={{ padding: "20px", marginBottom: "16px", borderColor: "#efe1aa", background: "#fffbef" }}><h2 style={{ fontSize: "15px", margin: "0 0 4px" }}>Assessment gap suggestions</h2><p style={{ fontSize: "12px", color: "#596273", margin: 0 }}>Nothing is created until you accept it.</p>{gaps?.map((g) => { const q = Array.isArray(g.catalogue_questions) ? g.catalogue_questions[0] : g.catalogue_questions; return <div key={`${g.session_id}-${g.question_id}`} style={{ display: "flex", justifyContent: "space-between", gap: "16px", marginTop: "12px" }}><span style={{ fontSize: "13px" }}>{q?.code}: {q?.prompt}</span><span style={{ display: "flex", flexShrink: 0, gap: "16px" }}><form action={acceptRiskSuggestionAction}><input type="hidden" name="questionId" value={g.question_id} /><input type="hidden" name="sessionId" value={g.session_id} /><button style={{ color: "var(--blue)", fontWeight: 700, border: 0, background: "none" }}>Accept as risk</button></form><Link style={{ color: "var(--blue)", fontWeight: 700 }} href={`/app/tasks/from-gap?questionId=${g.question_id}`}>Accept as task</Link></span></div>; })}</Card>}
     <Card style={{ padding: "18px", marginBottom: "16px" }}>
       <h2 style={{ fontSize: "15px", margin: "0 0 4px" }}>RAG band thresholds</h2>
