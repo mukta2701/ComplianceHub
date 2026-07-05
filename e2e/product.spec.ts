@@ -210,9 +210,12 @@ test("every register can be downloaded as an XLSX export", async ({ page }, test
   await expect(page.getByRole("heading", { name: /readiness assessment/i })).toBeVisible();
 
   // Generate an SoA draft from that assessment so the SoA export finds a register.
-  await page.goto("/app/soa");
+  // The dropdown is server-rendered, so re-navigate until the seeded assessment appears.
   const assessmentSelect = page.locator("select[name=assessmentId]");
-  await expect(assessmentSelect.locator("option")).not.toHaveCount(1);
+  await expect(async () => {
+    await page.goto("/app/soa");
+    await expect(assessmentSelect.locator("option")).not.toHaveCount(1);
+  }).toPass({ timeout: 15000 });
   await assessmentSelect.selectOption({ index: 1 });
   await page.getByRole("button", { name: "Generate draft" }).click();
   await page.waitForURL(/\/app\/soa\/[0-9a-f-]+$/);
