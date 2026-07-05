@@ -1,3 +1,25 @@
+import { PageIntro } from "@/components/ui";
 import { createRiskAction } from "../../actions";
 
-export default function NewRiskPage() { const field="rounded border border-slate-300 px-3 py-2"; return <><h1 className="text-3xl font-bold">Add risk</h1><form action={createRiskAction} className="mt-8 grid gap-4 rounded-xl border bg-white p-6 sm:grid-cols-2"><input name="reference" required placeholder="Reference, e.g. R-001" className={field}/><input name="title" required placeholder="Risk title" className={field}/><textarea name="description" required placeholder="Risk description" className={`${field} sm:col-span-2`}/><input name="category" required placeholder="Category" className={field}/><input name="reviewDate" type="date" className={field}/>{[["likelihood","Likelihood"],["impact","Impact"],["residualLikelihood","Residual likelihood"],["residualImpact","Residual impact"]].map(([name,label]) => <label key={name}>{label}<select name={name} defaultValue="3" className={`${field} ml-2`}>{[1,2,3,4,5].map(n=><option key={n}>{n}</option>)}</select></label>)}<select name="treatment" className={field}><option value="mitigate">Mitigate</option><option value="avoid">Avoid</option><option value="transfer">Transfer</option><option value="accept">Accept</option></select><select name="status" className={field}><option value="open">Open</option><option value="treating">Treating</option><option value="accepted">Accepted</option><option value="closed">Closed</option></select><textarea name="treatmentPlan" placeholder="Treatment plan" className={`${field} sm:col-span-2`}/><textarea name="evidence" placeholder="Evidence references" className={`${field} sm:col-span-2`}/><button className="rounded bg-blue-600 px-4 py-2 font-semibold text-white sm:col-span-2">Save risk</button></form></>; }
+export default function NewRiskPage() {
+  return <>
+    <PageIntro eyebrow="RISK" title="Add risk" body="Record inherent and residual exposure on the documented 5×5 matrix." />
+    <form action={createRiskAction} className="card app-form">
+      <div className="form-grid">
+        <label>Reference<input name="reference" required placeholder="e.g. R-001" /></label>
+        <label>Title<input name="title" required placeholder="Risk title" /></label>
+      </div>
+      <label>Description<textarea name="description" required placeholder="Risk description" /></label>
+      <div className="form-grid">
+        <label>Category<input name="category" required placeholder="Category" /></label>
+        <label>Review date<input name="reviewDate" type="date" /></label>
+        {[["likelihood", "Likelihood"], ["impact", "Impact"], ["residualLikelihood", "Residual likelihood"], ["residualImpact", "Residual impact"]].map(([name, label]) => <label key={name}>{label}<select name={name} defaultValue="3">{[1, 2, 3, 4, 5].map((n) => <option key={n}>{n}</option>)}</select></label>)}
+        <label>Treatment<select name="treatment"><option value="mitigate">Mitigate</option><option value="avoid">Avoid</option><option value="transfer">Transfer</option><option value="accept">Accept</option></select></label>
+        <label>Status<select name="status"><option value="open">Open</option><option value="treating">Treating</option><option value="accepted">Accepted</option><option value="closed">Closed</option></select></label>
+      </div>
+      <label>Treatment plan<textarea name="treatmentPlan" placeholder="Treatment plan" /></label>
+      <label>Evidence references<textarea name="evidence" placeholder="Evidence references" /></label>
+      <button className="button primary">Save risk</button>
+    </form>
+  </>;
+}
