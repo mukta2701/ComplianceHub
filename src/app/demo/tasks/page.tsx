@@ -11,7 +11,7 @@ export default function DemoTasksPage() {
   return <>
     <PageIntro eyebrow="REMEDIATION" title="Tasks" body="Owned, dated work generated from gaps, evidence expiry and your compliance calendar." />
     <div className="stats-grid"><Stat label="OPEN TASKS" value={3} detail="across all sources" /><Stat label="OVERDUE" value={2} detail="flagged by the daily sweep" tone="red" /><Stat label="RECURRING" value={2} detail="regenerate on completion" tone="green" /></div>
-    <Card><div className="data-table-wrap"><table><thead><tr><th>Task</th><th>Owner</th><th>Due</th><th>Recurs</th><th>Source</th><th>Status</th></tr></thead><tbody>
+    <Card><div className="data-table-wrap" role="region" aria-label="Tasks table" tabIndex={0}><table><thead><tr><th>Task</th><th>Owner</th><th>Due</th><th>Recurs</th><th>Source</th><th>Status</th></tr></thead><tbody>
       {tasks.map((t) => <tr key={t.title}><td><b>{t.title}</b></td><td>{t.owner}</td><td className={t.overdue ? "overdue" : ""}>{t.due}{t.overdue && <> <Pill tone="red">Overdue</Pill></>}</td><td>{t.recurs}</td><td>{t.source}</td><td><Pill tone={t.status === "Open" ? "blue" : "amber"}>{t.status}</Pill></td></tr>)}
     </tbody></table></div></Card>
   </>;

@@ -11,7 +11,7 @@ export default function DemoEvidencePage() {
   return <>
     <PageIntro eyebrow="EVIDENCE" title="Evidence vault" body="Immutable proof attached to controls — freshness is re-checked by the daily sweep, and stale items raise tasks automatically." />
     <div className="stats-grid"><Stat label="EVIDENCE ITEMS" value={4} detail="files, links and notes" /><Stat label="EXPIRING SOON" value={1} detail="within 30 days" tone="amber" /><Stat label="EXPIRED" value={1} detail="replacement task raised" tone="red" /></div>
-    <Card><div className="data-table-wrap"><table><thead><tr><th>Evidence</th><th>Kind</th><th>Linked control</th><th>Valid until</th><th>Status</th></tr></thead><tbody>
+    <Card><div className="data-table-wrap" role="region" aria-label="Evidence table" tabIndex={0}><table><thead><tr><th>Evidence</th><th>Kind</th><th>Linked control</th><th>Valid until</th><th>Status</th></tr></thead><tbody>
       {evidence.map((e) => <tr key={e.title}><td><b>{e.title}</b></td><td>{e.kind}</td><td>{e.linked}</td><td>{e.until}</td><td><Pill tone={e.tone}>{e.status}</Pill></td></tr>)}
     </tbody></table></div></Card>
   </>;

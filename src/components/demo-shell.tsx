@@ -38,7 +38,7 @@ export function DemoShell({ children }: { children: React.ReactNode }) {
     </aside>
     <div className="app-main">
       <header className="app-header"><button ref={menuButton} className="menu" onClick={() => setOpen(value => !value)} aria-label={open ? "Close navigation" : "Open navigation"} aria-expanded={open} aria-controls="demo-navigation"><Icon name="menu" /></button><h1>{title}</h1><div className="header-actions"><span className="status-dot" />All changes saved<span className="user-avatar">PS</span></div></header>
-      <div className="demo-banner"><Icon name="alert"/><span><b>You&apos;re viewing a demo.</b> Explore freely — this is sample data for Northstar Labs.</span><Link href="/">Create your workspace</Link></div>
+      <section className="demo-banner" aria-label="Demo notice"><Icon name="alert"/><span><b>You&apos;re viewing a demo.</b> Explore freely — this is sample data for Northstar Labs.</span><Link href="/">Create your workspace</Link></section>
       <main className="content">{children}</main>
       <footer className="legal">ComplianceHub supports readiness management. It does not provide ISO certification or legal advice.</footer>
     </div>
