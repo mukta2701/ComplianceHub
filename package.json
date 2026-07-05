@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:db": "supabase test db",
     "test:e2e": "playwright test",
     "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"

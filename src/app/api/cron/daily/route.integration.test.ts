@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
@@ -10,10 +10,15 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 // (`server-only`, imported transitively via the service client, is stubbed by
 // a vitest alias — it is a Next-only marker module, not an installed package.)
 
-// vitest does not load .env.local; hydrate the Supabase env vars from it.
-for (const line of readFileSync(path.join(process.cwd(), ".env.local"), "utf8").split("\n")) {
-  const match = line.match(/^([A-Z0-9_]+)=(.*)$/);
-  if (match && process.env[match[1]] === undefined) process.env[match[1]] = match[2];
+// vitest does not load .env.local; hydrate the Supabase env vars from it when it
+// exists. On a fresh checkout / CI, the file is gitignored and absent — do not
+// throw ENOENT at collection; the suite skips itself below when env is missing.
+const envFile = path.join(process.cwd(), ".env.local");
+if (existsSync(envFile)) {
+  for (const line of readFileSync(envFile, "utf8").split("\n")) {
+    const match = line.match(/^([A-Z0-9_]+)=(.*)$/);
+    if (match && process.env[match[1]] === undefined) process.env[match[1]] = match[2];
+  }
 }
 
 import { GET } from "./route";
@@ -21,9 +26,21 @@ import { GET } from "./route";
 const CRON_SECRET = "integration-test-secret";
 const TIMEOUT = 30_000;
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const admin = createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
+const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const missingEnv = !url || !serviceKey;
+if (missingEnv) {
+  console.warn(
+    "[route.integration] Skipping live-DB integration tests: NEXT_PUBLIC_SUPABASE_URL and " +
+      "SUPABASE_SERVICE_ROLE_KEY are not set. Provide them via .env.local or `supabase status` " +
+      "and run against a live stack with `pnpm test:integration`.",
+  );
+}
+// Dummy fallbacks keep createClient from throwing at import when env is absent;
+// the describe below is skipped in that case, so these are never used.
+const admin = createClient(url ?? "http://127.0.0.1:54321", serviceKey ?? "missing", {
+  auth: { persistSession: false, autoRefreshToken: false },
+});
 
 const runId = randomUUID().slice(0, 8);
 const todayIso = new Date().toISOString().slice(0, 10);
@@ -94,7 +111,7 @@ afterAll(async () => {
   vi.unstubAllEnvs();
 }, TIMEOUT);
 
-describe("GET /api/cron/daily against the live database", () => {
+describe.skipIf(missingEnv)("GET /api/cron/daily against the live database", () => {
   it("rejects a wrong bearer token with 401 and does not sweep", { timeout: TIMEOUT }, async () => {
     const response = await GET(request("wrong-secret"));
     expect(response.status).toBe(401);

@@ -35,7 +35,12 @@ jobs:
           eval "$(supabase status -o env)"
           echo "NEXT_PUBLIC_SUPABASE_URL=$API_URL" >> "$GITHUB_ENV"
           echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$ANON_KEY" >> "$GITHUB_ENV"
+          echo "SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY" >> "$GITHUB_ENV"
           echo "NEXT_PUBLIC_SITE_URL=http://127.0.0.1:3000" >> "$GITHUB_ENV"
+      # Non-hermetic integration tests: run only now that the DB stack is up and
+      # its env (incl. the service-role key) is provisioned. Excluded from the
+      # earlier `pnpm test` on purpose.
+      - run: pnpm test:integration
       - run: pnpm test:e2e --project=chromium
 
   secrets:

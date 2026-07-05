@@ -2,6 +2,11 @@ import react from "@vitejs/plugin-react";
 import { defineConfig, configDefaults } from "vitest/config";
 import path from "node:path";
 
+// Integration tests exercise the real local Supabase stack (see
+// **/*.integration.test.ts). They are excluded from the default `vitest run`
+// (vitest.config.ts) because they are non-hermetic; this config runs ONLY the
+// integration suites and expects a running DB plus its env (SUPABASE_* keys,
+// e.g. from `supabase status` or .env.local). Invoke via `pnpm test:integration`.
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -15,11 +20,7 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
-    include: ["src/**/*.test.{ts,tsx}"],
-    // Integration tests hit the live local Supabase stack and are NOT hermetic;
-    // keep them out of the default `vitest run` so a clean checkout passes
-    // without a running DB. Run them via `pnpm test:integration`.
-    exclude: [...configDefaults.exclude, "**/*.integration.test.{ts,tsx}"],
-    coverage: { reporter: ["text", "json", "html"] },
+    include: ["src/**/*.integration.test.{ts,tsx}"],
+    exclude: [...configDefaults.exclude],
   },
 });
