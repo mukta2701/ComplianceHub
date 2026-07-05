@@ -1,2 +1,11 @@
+import { PageIntro, Card } from "@/components/ui";
 import { acceptInvitationAction } from "../../actions";
-export default async function AcceptInvitationPage({ searchParams }: { searchParams: Promise<{ token?: string; message?: string }> }) { const {token,message}=await searchParams; return <><h1 className="text-3xl font-bold">Accept invitation</h1>{message&&<p role="alert" className="mt-5 rounded bg-red-50 p-3">{message}</p>}<p className="mt-3 text-slate-600">The invitation must match the email address on your signed-in account.</p><form action={acceptInvitationAction} className="mt-6"><input type="hidden" name="token" value={token??""}/><button disabled={!token} className="rounded bg-blue-600 px-5 py-3 text-white disabled:opacity-50">Join organisation</button></form></>; }
+
+export default async function AcceptInvitationPage({ searchParams }: { searchParams: Promise<{ token?: string; message?: string }> }) {
+  const { token, message } = await searchParams;
+  return <>
+    <PageIntro eyebrow="INVITATION" title="Accept invitation" body="The invitation must match the email address on your signed-in account." />
+    {message && <Card role="alert" style={{ padding: "12px", background: "#fdf2f2", borderColor: "#f0c9c9", marginBottom: "12px" }}>{message}</Card>}
+    <form action={acceptInvitationAction}><input type="hidden" name="token" value={token ?? ""} /><button disabled={!token} className="button primary">Join organisation</button></form>
+  </>;
+}

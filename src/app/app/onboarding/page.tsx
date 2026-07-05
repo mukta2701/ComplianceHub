@@ -1,15 +1,14 @@
 import { createOrganisationAction } from "../actions";
+import { PageIntro, Card } from "@/components/ui";
 
 export default async function OnboardingPage({ searchParams }: { searchParams: Promise<{ message?: string }> }) {
   const { message } = await searchParams;
   return <>
-    <p className="text-sm font-semibold uppercase tracking-wide text-blue-700">Workspace setup</p>
-    <h1 className="mt-2 text-3xl font-bold">Create your organisation</h1>
-    <p className="mt-3 text-slate-600">Assessment answers, risks and exports are isolated to this organisation.</p>
-    {message && <p role="alert" className="mt-6 rounded-lg bg-red-50 p-3 text-sm text-red-800">{message}</p>}
-    <form action={createOrganisationAction} className="mt-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-      <label className="block font-medium">Organisation name<input name="name" required maxLength={160} autoFocus className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2.5" placeholder="Example Ltd" /></label>
-      <button className="mt-6 rounded-lg bg-blue-600 px-5 py-2.5 font-semibold text-white hover:bg-blue-700">Create workspace</button>
+    <PageIntro eyebrow="WORKSPACE SETUP" title="Create your organisation" body="Assessment answers, risks, evidence and exports are isolated to this organisation." />
+    {message && <Card role="alert" style={{ padding: "12px", background: "#fdf2f2", borderColor: "#f0c9c9", marginBottom: "12px" }}>{message}</Card>}
+    <form action={createOrganisationAction} className="card app-form">
+      <label>Organisation name<input name="name" required maxLength={160} autoFocus placeholder="Example Ltd" /></label>
+      <button className="button primary">Create workspace</button>
     </form>
   </>;
 }
