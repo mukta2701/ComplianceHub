@@ -56,4 +56,26 @@ describe("runDailySweep", () => {
     expect(deps.createdNotifications).toEqual([{ userId: "u1", kind: "evidence_expired" }]);
     expect(summary).toEqual({ evidenceExpiring: 0, evidenceExpired: 0, tasksCreated: 1, notificationsCreated: 1 });
   });
+
+  it("does not re-raise work for expired evidence whose task already exists", async () => {
+    // Regression lock for the no-daily-re-raise contract: evidence that is
+    // already `expired` and whose expiry task was completed-without-replacement.
+    // The task's `done` state means it is absent from the open-expiry set, so a
+    // task is planned again — but createTask hits the
+    // (organisation_id, evidence_id, source) unique constraint and returns false
+    // (upsert ignoreDuplicates), and the expired-evidence notification is gated
+    // on that. Result: zero new tasks and zero notifications, day after day.
+    const deps = makeDeps({
+      listActiveEvidence: async () => [
+        { id: "e3", organisationId: "org1", title: "Uploaded stale cert", ownerId: "u1", status: "expired", validUntil: "2026-07-01" },
+      ],
+      listOpenExpiryTaskEvidenceIds: async () => [], // prior expiry task is `done`, not open
+      createTask: async () => false, // upsert conflicts with the existing done task
+      listOverdueTasks: async () => [],
+    });
+    const summary = await runDailySweep(deps);
+    expect(deps.statusUpdates).toEqual([]);
+    expect(deps.createdNotifications).toEqual([]);
+    expect(summary).toEqual({ evidenceExpiring: 0, evidenceExpired: 0, tasksCreated: 0, notificationsCreated: 0 });
+  });
 });
