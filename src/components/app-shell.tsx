@@ -20,7 +20,8 @@ const nav = [
 ] as const;
 
 const TITLES: Array<[string, string]> = [
-  ["/app/assessment", "Assessment"], ["/app/risks/import", "Import risk register"], ["/app/risks", "Risk register"], ["/app/soa", "Statement of Applicability"],
+  ["/app/assessment", "Assessment"], ["/app/risks/import", "Import risk register"], ["/app/risks", "Risk register"],
+  ["/app/soa/import", "Import Statement of Applicability"], ["/app/soa", "Statement of Applicability"],
   ["/app/tasks", "Tasks"], ["/app/evidence", "Evidence vault"], ["/app/notifications", "Notifications"],
   ["/app/activity", "Activity"], ["/app/settings", "Settings"], ["/app/onboarding", "Workspace setup"],
   ["/app/invitations", "Invitation"], ["/app/assets", "Asset inventory"], ["/app", "Dashboard"],

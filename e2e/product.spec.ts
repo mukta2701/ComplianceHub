@@ -222,6 +222,71 @@ test("a risk register workbook can be imported through the wizard", async ({ pag
   await expect(page.getByRole("link", { name: "Imported laptop theft" })).toBeVisible();
 });
 
+test("a SoA workbook import updates a matched control in the selected register", async ({ page }, testInfo) => {
+  const suffix = `${Date.now()}-${testInfo.project.name}`;
+  const email = `soaimp-${suffix}@example.test`;
+  const password = "Test-only-passphrase-2026";
+
+  await page.goto("/sign-up");
+  await page.getByLabel("Name").fill("Beta Owner");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page.getByLabel("Confirm password").fill(password);
+  await page.getByRole("button", { name: "Create account" }).click();
+
+  await page.waitForURL(/\/sign-in/);
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
+  await page.getByLabel("Organisation name").fill(`SoA Import Workspace ${suffix}`);
+  await page.getByRole("button", { name: "Create workspace" }).click();
+  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
+
+  // Seed an assessment session and generate a SoA draft so there is a real register + control to update.
+  await page.goto("/app/assessment");
+  await page.getByRole("button", { name: "New assessment" }).click();
+  await expect(page.getByRole("heading", { name: /readiness assessment/i })).toBeVisible();
+
+  const assessmentSelect = page.locator("select[name=assessmentId]");
+  await expect(async () => {
+    await page.goto("/app/soa");
+    await expect(assessmentSelect.locator("option")).not.toHaveCount(1);
+  }).toPass({ timeout: 15000 });
+  await assessmentSelect.selectOption({ index: 1 });
+  await page.getByRole("button", { name: "Generate draft" }).click();
+  await page.waitForURL(/\/app\/soa\/[0-9a-f-]+$/);
+  await expect(page.getByRole("heading", { name: "Statement of Applicability", level: 1 })).toBeVisible();
+  const registerUrl = page.url();
+
+  // PageIntro itself renders an <h2> for the page title, so scope to the control forms'
+  // headings (each control is `<h2>{code}: {title}</h2>` inside its review `<form>`).
+  const firstHeading = await page.locator("form h2").first().textContent();
+  const code = (firstHeading ?? "").split(":")[0].trim();
+
+  await page.goto("/app/soa/import");
+  await expect(page.getByRole("heading", { name: "Import Statement of Applicability", level: 1 })).toBeVisible();
+  const csv = ["Control Number,Is Control Applicable?,Justification for the Inclusion/Exclusion,Implementation Status,Owner,Comments",
+    `${code},Yes,Imported justification,Operational,,Imported note`].join("\n");
+  await page.locator('input[name="file"]').setInputFiles({ name: "soa.csv", mimeType: "text/csv", buffer: Buffer.from(csv) });
+  await page.getByRole("button", { name: "Analyse file" }).click();
+  await page.getByRole("button", { name: /Preview 1 control update/ }).click();
+  await expect(page.getByText("1 matched controls will be updated")).toBeVisible();
+  const soaAxe = await new AxeBuilder({ page }).analyze();
+  expect(soaAxe.violations).toEqual([]);
+  await page.getByRole("button", { name: /Confirm import/ }).click();
+  await expect(page.getByText(/1 controls updated/)).toBeVisible();
+
+  // Confirm the matched control's status and justification were actually updated on the register.
+  await page.goto(registerUrl);
+  // hasText does substring matching, so anchor to the "{code}: " prefix — otherwise "5.1" would
+  // also match sibling controls like "5.1.1".
+  const codePattern = new RegExp(`^${code.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:`);
+  const updatedForm = page.locator("form", { has: page.locator("h2", { hasText: codePattern }) });
+  await expect(updatedForm.locator('select[name="status"]')).toHaveValue("operational");
+  await expect(updatedForm.locator('textarea[name="justification"]')).toHaveValue("Imported justification");
+});
+
 test("every register can be downloaded as an XLSX export", async ({ page }, testInfo) => {
   const suffix = `${Date.now()}-${testInfo.project.name}`;
   const email = `exp-${suffix}@example.test`;
