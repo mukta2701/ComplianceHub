@@ -5,7 +5,7 @@ export default async function NewEvidencePage({ searchParams }: { searchParams: 
   const { replaces, message } = await searchParams;
   const { supabase } = await requireAppContext();
   const { data: members } = await supabase.from("memberships").select("user_id,profiles(display_name)");
-  return <main className="mx-auto max-w-3xl px-6 py-10"><h1 className="text-3xl font-bold">Add evidence</h1>
+  return <><h1 className="text-3xl font-bold">Add evidence</h1>
     {message && <p role="alert" className="mt-4 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">{message}</p>}
     <form action={createEvidenceAction} className="mt-8 space-y-4 rounded-xl border bg-white p-6">
       {replaces && <input type="hidden" name="replacesEvidenceId" value={replaces} />}
@@ -22,5 +22,5 @@ export default async function NewEvidencePage({ searchParams }: { searchParams: 
       </div>
       <button className="rounded bg-blue-600 px-4 py-2 text-white">Save evidence</button>
     </form>
-  </main>;
+  </>;
 }

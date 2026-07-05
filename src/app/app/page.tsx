@@ -29,7 +29,7 @@ export default async function AppHome() {
     if (overdueTask) reasons.push("a remediation task is overdue");
     return [{ id: control.id, code: control.code, title: control.title, reason: `— ${reasons.join(" and ")}` }];
   });
-  return <main className="mx-auto max-w-6xl px-6 py-12">
+  return <>
     <p className="text-sm font-medium text-blue-700">{organisation.name}</p><h1 className="mt-2 text-3xl font-bold">Readiness dashboard</h1>
     <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">{[["Assessments",assessments,"/app/assessment"],["Open risks",risks,"/app/risks"],["Finalised SoAs",snapshots,"/app/soa"],["Open tasks",openTasks,"/app/tasks"],["Evidence items",liveEvidence,"/app/evidence"]].map(([label,value,href]) => <Link key={label} href={String(href)} className="rounded-xl border bg-white p-5 shadow-sm"><p className="text-sm text-slate-500">{label}</p><p className="mt-2 text-3xl font-bold">{value ?? 0}</p></Link>)}</div>
     {attentionControls.length > 0 && <section className="mt-10 rounded-xl border border-amber-200 bg-amber-50 p-5">
@@ -39,5 +39,5 @@ export default async function AppHome() {
       </ul>
     </section>}
     <h2 className="mt-10 text-xl font-semibold">Recent activity</h2><div className="mt-3 divide-y rounded-xl border bg-white">{activity?.length ? activity.map((event) => <p className="p-4 text-sm" key={event.id}><b className="capitalize">{event.action}</b> {event.entity_type.replaceAll("_"," ")} <span className="float-right text-slate-500">{new Date(event.occurred_at).toLocaleString("en-GB")}</span></p>) : <p className="p-4 text-slate-500">No recorded activity yet.</p>}</div>
-  </main>;
+  </>;
 }

@@ -30,7 +30,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
     ["Linked control", control ? <Link href="/app/soa" className="text-blue-700 hover:underline">{control.code}: {control.title}</Link> : "—"],
     ["Linked risk", risk ? <Link href="/app/risks" className="text-blue-700 hover:underline">{risk.reference}: {risk.title}</Link> : "—"],
   ];
-  return <main className="mx-auto max-w-3xl px-6 py-10">
+  return <>
     <Link href="/app/tasks" className="text-sm text-blue-700 hover:underline">← Back to tasks</Link>
     <h1 className="mt-3 text-3xl font-bold">{task.title}</h1>
     <dl className="mt-8 grid gap-4 rounded-xl border bg-white p-6 sm:grid-cols-2">
@@ -43,5 +43,5 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
       <label className="text-sm font-medium">Update status<select name="status" defaultValue={task.status} className="ml-2 rounded border px-2 py-1"><option value="open">Open</option><option value="in_progress">In progress</option><option value="done">Done</option><option value="cancelled">Cancelled</option></select></label>
       <button className="rounded bg-blue-600 px-4 py-2 text-sm text-white">Save</button>
     </form>
-  </main>;
+  </>;
 }

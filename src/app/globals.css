@@ -11,3 +11,12 @@
 
 /* WCAG AA contrast overrides for compact preview metadata. */
 .ring small,.preview-stats span{color:#5d6675}
+
+/* Shared AA-contrast overrides (used by both AppShell and DemoShell). */
+.app-shell{--blue:#2456c4;--muted:#5f6878}
+.sidebar-foot .demo-pill{color:#704d00}
+.sidebar-foot p,.header-actions,.legal,.page-intro p,.eyebrow,.stat small,.stat p{color:#596273}
+.data-table-wrap th{color:#596273}
+.pill.amber,.pill.medium{color:#715500}
+.pill.red,.pill.high{color:#963f00}
+.notif-bell{position:relative;display:grid;place-items:center;width:36px;height:36px;border-radius:9px;color:#4a556a}.notif-bell:hover{background:#f2f4f8}.notif-count{position:absolute;top:-3px;right:-3px;min-width:16px;height:16px;padding:0 4px;border-radius:99px;background:var(--blue);color:#fff;font-size:9px;font-weight:800;display:grid;place-items:center}

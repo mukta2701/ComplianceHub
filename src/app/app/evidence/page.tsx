@@ -10,7 +10,7 @@ export default async function EvidencePage() {
     supabase.from("evidence").select("id,title,kind,url,storage_path,status,collected_on,valid_until,evidence_links(id,control_id,risk_id,task_id,controls(code,title),risks(reference),tasks(title))").order("created_at", { ascending: false }),
     supabase.from("controls").select("id,code,title").order("position"),
   ]);
-  return <main className="mx-auto max-w-6xl px-6 py-10">
+  return <>
     <div className="flex justify-between"><div><h1 className="text-3xl font-bold">Evidence vault</h1><p className="mt-2 text-slate-600">Attach proof to controls, risks, and tasks — freshness is tracked daily.</p></div><Link href="/app/evidence/new" className="rounded bg-blue-600 px-4 py-2 text-white">Add evidence</Link></div>
     <div className="mt-8 space-y-4">{items?.map((item) => <section key={item.id} className="rounded-xl border bg-white p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -28,5 +28,5 @@ export default async function EvidencePage() {
     </section>)}
     {!items?.length && <p className="mt-8 rounded-xl border bg-white p-6 text-slate-500">No evidence yet. Add your first item to start tracking freshness.</p>}
     </div>
-  </main>;
+  </>;
 }

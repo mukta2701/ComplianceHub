@@ -19,7 +19,7 @@ export default async function FromGapPage({ searchParams }: { searchParams: Prom
   }
   const { data: members } = await supabase.from("memberships").select("user_id,profiles(display_name)");
   const title = `Close gap: ${question.prompt}`;
-  return <main className="mx-auto max-w-3xl px-6 py-10"><h1 className="text-3xl font-bold">Accept gap as task</h1>
+  return <><h1 className="text-3xl font-bold">Accept gap as task</h1>
     <p className="mt-2 text-slate-600">Assign an owner and a due date. A dated, owned task is created and the gap stays visible until it is done.</p>
     {control && <p className="mt-3 text-sm text-slate-500">Linked control: <b>{control.code}: {control.title}</b></p>}
     <form action={createGapTaskAction} className="mt-8 space-y-4 rounded-xl border bg-white p-6">
@@ -32,5 +32,5 @@ export default async function FromGapPage({ searchParams }: { searchParams: Prom
       </div>
       <button className="rounded bg-blue-600 px-4 py-2 text-white">Create task</button>
     </form>
-  </main>;
+  </>;
 }

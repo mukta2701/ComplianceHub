@@ -8,7 +8,7 @@ export default async function NewTaskPage() {
     supabase.from("controls").select("id,code,title").order("position"),
     supabase.from("risks").select("id,reference,title").neq("status", "closed").order("reference"),
   ]);
-  return <main className="mx-auto max-w-3xl px-6 py-10"><h1 className="text-3xl font-bold">New task</h1>
+  return <><h1 className="text-3xl font-bold">New task</h1>
     <form action={createTaskAction} className="mt-8 space-y-4 rounded-xl border bg-white p-6">
       <label className="block text-sm font-medium">Title<input name="title" required maxLength={200} className="mt-1 w-full rounded border p-2" /></label>
       <label className="block text-sm font-medium">Detail<textarea name="detail" maxLength={10000} className="mt-1 w-full rounded border p-2" /></label>
@@ -21,5 +21,5 @@ export default async function NewTaskPage() {
       </div>
       <button className="rounded bg-blue-600 px-4 py-2 text-white">Create task</button>
     </form>
-  </main>;
+  </>;
 }
