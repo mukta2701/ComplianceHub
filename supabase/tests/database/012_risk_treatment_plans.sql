@@ -1,5 +1,5 @@
 begin;
-select plan(6);
+select plan(8);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data)
 values
@@ -42,6 +42,18 @@ select throws_ok(
 select is((select count(*) from public.audit_events where entity_type = 'risk_treatment_plans' and organisation_id = '20000000-0000-4000-8000-000000000001'), 1::bigint, 'RTP writes are audited');
 select set_config('request.jwt.claims', '{"sub":"10000000-0000-4000-8000-000000000002","role":"authenticated"}', true);
 select is((select count(*) from public.risk_treatment_plans where organisation_id = '20000000-0000-4000-8000-000000000001'), 0::bigint, 'RTPs are read-isolated per tenant');
+with u as (
+  update public.risk_treatment_plans set summary = 'forged update'
+  where organisation_id = '20000000-0000-4000-8000-000000000001' and reference = 'RTP-001'
+  returning 1
+)
+select is((select count(*) from u), 0::bigint, 'RTPs cannot be updated cross-tenant');
+with d as (
+  delete from public.risk_treatment_plans
+  where organisation_id = '20000000-0000-4000-8000-000000000001' and reference = 'RTP-001'
+  returning 1
+)
+select is((select count(*) from d), 0::bigint, 'RTPs cannot be deleted cross-tenant');
 
 select * from finish();
 rollback;
