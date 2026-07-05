@@ -213,11 +213,11 @@ test("a risk register workbook can be imported through the wizard", async ({ pag
   await page.getByRole("button", { name: "Analyse file" }).click();
   await expect(page.getByLabel("Map column Risk Category")).toHaveValue("categoryName");
   await page.getByRole("button", { name: /Preview 1 row/ }).click();
-  await expect(page.getByText("1 rows will be added")).toBeVisible();
+  await expect(page.getByText("1 row will be added")).toBeVisible();
   const axe = await new AxeBuilder({ page }).analyze();
   expect(axe.violations).toEqual([]);
   await page.getByRole("button", { name: /Confirm import/ }).click();
-  await expect(page.getByText(/1 rows added/)).toBeVisible();
+  await expect(page.getByText(/1 row added/)).toBeVisible();
   await page.goto("/app/risks");
   await expect(page.getByRole("link", { name: "Imported laptop theft" })).toBeVisible();
 });
@@ -310,11 +310,11 @@ test("a SoA workbook import updates a matched control in the selected register",
   await page.locator('input[name="file"]').setInputFiles({ name: "soa.csv", mimeType: "text/csv", buffer: Buffer.from(csv) });
   await page.getByRole("button", { name: "Analyse file" }).click();
   await page.getByRole("button", { name: /Preview 1 control update/ }).click();
-  await expect(page.getByText("1 matched controls will be updated")).toBeVisible();
+  await expect(page.getByText("1 matched control will be updated")).toBeVisible();
   const soaAxe = await new AxeBuilder({ page }).analyze();
   expect(soaAxe.violations).toEqual([]);
   await page.getByRole("button", { name: /Confirm import/ }).click();
-  await expect(page.getByText(/1 controls updated/)).toBeVisible();
+  await expect(page.getByText(/1 control updated/)).toBeVisible();
 
   // Confirm the matched control's status and justification were actually updated on the register.
   await page.goto(registerUrl);

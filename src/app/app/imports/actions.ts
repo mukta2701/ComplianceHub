@@ -69,10 +69,10 @@ async function memberResolver(supabase: SupabaseClient, organisationId: string) 
 
 // Resolves the SoA register + its control_code -> item id map. Read-only, so it's safe to call from
 // both the dry-run preview and the real commit (Fix 4: keeps the preview's updated/skipped counts honest).
-async function loadSoaRegister(supabase: SupabaseClient, registerId: string | undefined): Promise<{ registerId: string | null; byCode: Map<string, string> }> {
+async function loadSoaRegister(supabase: SupabaseClient, registerId: string | undefined, organisationId: string): Promise<{ registerId: string | null; byCode: Map<string, string> }> {
   let id = registerId;
   if (!id) {
-    const { data: latest } = await supabase.from("soa_registers").select("id").order("updated_at", { ascending: false }).limit(1).maybeSingle();
+    const { data: latest } = await supabase.from("soa_registers").select("id").eq("organisation_id", organisationId).order("updated_at", { ascending: false }).limit(1).maybeSingle();
     id = latest?.id;
   }
   if (!id) return { registerId: null, byCode: new Map() };
@@ -109,7 +109,7 @@ export async function runImportAction(input: { module: ImportModule; headers: st
   if (!input.commit) {
     if (input.module === "soa") {
       // Fix 4: preview the real control_code match against the selected register instead of assuming every valid row updates.
-      const { registerId, byCode } = await loadSoaRegister(supabase, input.registerId);
+      const { registerId, byCode } = await loadSoaRegister(supabase, input.registerId, organisation.id);
       if (!registerId) { notes.push("No SoA register found to update."); return result; }
       let previewUpdated = 0, previewSkipped = 0;
       for (const r of results) {
@@ -172,7 +172,7 @@ export async function runImportAction(input: { module: ImportModule; headers: st
     }
     revalidatePath("/app/assets");
   } else { // soa — UPDATE matched control_code rows in the selected register
-    const { registerId, byCode } = await loadSoaRegister(supabase, input.registerId);
+    const { registerId, byCode } = await loadSoaRegister(supabase, input.registerId, organisation.id);
     if (!registerId) { notes.push("No SoA register found to update."); return result; }
     const resolveMember = await memberResolver(supabase, organisation.id);
     for (const r of results) {

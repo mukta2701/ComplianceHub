@@ -42,6 +42,7 @@ export function ImportWizard({ module, fields, recordsHref, recordsLabel, regist
         <input name="file" type="file" accept=".xlsx,.csv" required aria-label="Workbook file (XLSX or CSV)" />
         <button className="button primary" disabled={pending}>Analyse file</button>
       </form>
+      <p style={{ fontSize: "13px", color: "#596273", margin: "8px 0 0" }}>Accepted formats: XLSX or CSV.</p>
       {error && <p role="alert" style={{ color: "var(--red)", fontSize: "13px", marginTop: "10px" }}>{error}</p>}
     </Card>
 
@@ -62,14 +63,14 @@ export function ImportWizard({ module, fields, recordsHref, recordsLabel, regist
 
     {preview && <Card style={{ padding: "22px", marginBottom: "16px" }}>
       <h2 style={{ fontSize: "15px", margin: "0 0 4px" }}>3. Preview &amp; validation</h2>
-      <p style={{ fontSize: "13px", margin: "0 0 10px" }}>{preview.valid} valid, {preview.invalid} with errors. {module === "soa" ? `${preview.updated} matched controls will be updated.` : `${preview.valid} rows will be added.`}</p>
+      <p style={{ fontSize: "13px", margin: "0 0 10px" }}>{preview.valid} valid, {preview.invalid} with errors. {module === "soa" ? `${preview.updated} matched control${preview.updated === 1 ? "" : "s"} will be updated.` : `${preview.valid} row${preview.valid === 1 ? "" : "s"} will be added.`}</p>
       {preview.rowErrors.length > 0 && <ul style={{ fontSize: "12px", color: "var(--red)", margin: "0 0 10px", paddingLeft: "18px" }}>{preview.rowErrors.slice(0, 50).map((e) => <li key={e.row}>Row {e.row}: {e.errors.join("; ")}</li>)}</ul>}
       {preview.valid > 0 && <form action={() => run(true)}><button className="button primary" disabled={pending}>4. Confirm import ({module === "soa" ? preview.updated : preview.valid})</button></form>}
     </Card>}
 
     {result && <Card style={{ padding: "22px" }}>
       <h2 style={{ fontSize: "15px", margin: "0 0 6px" }}>Import complete</h2>
-      <p style={{ fontSize: "13px", margin: "0 0 6px" }}>{module === "soa" ? `${result.updated} controls updated` : `${result.imported} rows added`}{result.skipped ? `, ${result.skipped} skipped` : ""}.</p>
+      <p style={{ fontSize: "13px", margin: "0 0 6px" }}>{module === "soa" ? `${result.updated} control${result.updated === 1 ? "" : "s"} updated` : `${result.imported} row${result.imported === 1 ? "" : "s"} added`}{result.skipped ? `, ${result.skipped} skipped` : ""}.</p>
       {result.notes.length > 0 && <ul style={{ fontSize: "12px", color: "#596273", margin: "0 0 10px", paddingLeft: "18px" }}>{result.notes.slice(0, 50).map((note, i) => <li key={i}>{note}</li>)}</ul>}
       <Link className="button secondary" href={recordsHref}>View {recordsLabel}</Link>
     </Card>}

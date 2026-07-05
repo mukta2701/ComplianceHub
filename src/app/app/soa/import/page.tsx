@@ -4,8 +4,8 @@ import { ImportWizard } from "@/app/app/imports/import-wizard";
 import { SOA_IMPORT_FIELDS } from "@/features/imports/adapters/soa";
 
 export default async function SoaImportPage() {
-  const { supabase } = await requireAppContext();
-  const { data: registers } = await supabase.from("soa_registers").select("id,title").order("updated_at", { ascending: false });
+  const { supabase, organisation } = await requireAppContext();
+  const { data: registers } = await supabase.from("soa_registers").select("id,title").eq("organisation_id", organisation.id).order("updated_at", { ascending: false });
   const fields = SOA_IMPORT_FIELDS.map((f) => ({ key: f.key, label: f.label, required: f.required }));
   return <>
     <PageIntro eyebrow="SOA" title="Import Statement of Applicability" body="Upload your SoA workbook to update applicability, status, justification and owner on controls that already exist in the selected register. Rows for unknown controls are reported, not added." />
