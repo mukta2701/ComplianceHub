@@ -10,7 +10,7 @@ describe("createSoaDraft", () => {
       { questionId: "q4", answer: "not_applicable" as const },
     ]);
     expect(draft.items.map((item) => item.suggestedStatus)).toEqual([
-      "implemented", "partial", "planned", "not_applicable",
+      "operational", "in_progress", "pending", "not_applicable",
     ]);
     expect(draft.items.every((item) => item.reviewed === false)).toBe(true);
   });

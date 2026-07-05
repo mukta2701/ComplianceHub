@@ -1,6 +1,16 @@
 import type { AssessmentResponse } from "../../assessment/domain/types";
 
-export type SoaStatus = "implemented" | "partial" | "planned" | "not_applicable";
+export type SoaStatus = "pending" | "absent" | "in_progress" | "established" | "operational" | "advanced" | "not_applicable";
+
+export const SOA_STATUS_LABEL: Record<SoaStatus, string> = {
+  pending: "Pending",
+  absent: "Absent",
+  in_progress: "In Progress",
+  established: "Established",
+  operational: "Operational",
+  advanced: "Advanced",
+  not_applicable: "Not Applicable",
+};
 export type SoaItem = {
   questionId: string;
   suggestedStatus: SoaStatus;
@@ -17,9 +27,9 @@ export type SoaSnapshot = Readonly<SoaDraft & {
 }>;
 
 const suggestions: Record<AssessmentResponse["answer"], SoaStatus> = {
-  yes: "implemented",
-  partially: "partial",
-  no: "planned",
+  yes: "operational",
+  partially: "in_progress",
+  no: "pending",
   not_applicable: "not_applicable",
 };
 

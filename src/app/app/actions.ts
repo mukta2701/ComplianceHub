@@ -103,7 +103,8 @@ export async function createSoaAction(formData: FormData) {
 export async function reviewSoaItemAction(formData: FormData) {
   const { supabase } = await requireAppContext();
   const parsed = soaItemReviewSchema.parse({ itemId: formData.get("itemId"), status: formData.get("status"), applicable: formData.get("applicable") === "true", justification: formData.get("justification"), evidence: formData.get("evidence") });
-  const { error } = await supabase.from("soa_items").update({ status: parsed.status, applicable: parsed.applicable, justification: parsed.justification, evidence: parsed.evidence }).eq("id", parsed.itemId);
+  const ownerId = String(formData.get("ownerId")) || null;
+  const { error } = await supabase.from("soa_items").update({ status: parsed.status, applicable: parsed.applicable, justification: parsed.justification, evidence: parsed.evidence, owner_id: ownerId }).eq("id", parsed.itemId);
   if (error) throw new Error("Could not update SoA item");
   revalidatePath("/app/soa");
 }

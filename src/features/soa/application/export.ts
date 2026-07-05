@@ -1,8 +1,8 @@
 import PDFDocument from "pdfkit";
 import { Document, HeadingLevel, Packer, Paragraph, Table, TableCell, TableRow, TextRun } from "docx";
-import type { SoaSnapshot, SoaStatus } from "../domain/soa";
+import { SOA_STATUS_LABEL, type SoaSnapshot, type SoaStatus } from "../domain/soa";
 
-const labels: Record<SoaStatus, string> = { implemented: "Implemented", partial: "Partially implemented", planned: "Planned", not_applicable: "Not applicable" };
+const labels: Record<SoaStatus, string> = SOA_STATUS_LABEL;
 
 export type SoaExportView = Readonly<{
   title: "Statement of Applicability"; organisationName: string; catalogueVersion: string; version: number;
