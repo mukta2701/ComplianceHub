@@ -11,7 +11,7 @@ const BAND_TONE: Record<string, string> = { low: "green", medium: "amber", high:
 export default async function RisksPage() {
   const { supabase } = await requireAppContext();
   const [{ data }, { data: gaps }, { data: linkedTasks }, { data: evidenceLinks }] = await Promise.all([
-    supabase.from("risks").select("id,reference,title,category,likelihood,impact,residual_likelihood,residual_impact,status,review_date").order("updated_at", { ascending: false }),
+    supabase.from("risks").select("id,reference,title,category_id,risk_categories(name),likelihood,impact,residual_likelihood,residual_impact,status,review_date").order("updated_at", { ascending: false }),
     supabase.from("assessment_responses").select("session_id,question_id,answer,catalogue_questions!assessment_responses_question_id_fkey(code,prompt)").in("answer", ["no", "partially"]).limit(10),
     supabase.from("tasks").select("id,title,risk_id,status").in("status", ["open", "in_progress"]).not("risk_id", "is", null),
     supabase.from("evidence_links").select("risk_id,evidence(status)").not("risk_id", "is", null),
@@ -26,7 +26,7 @@ export default async function RisksPage() {
     <Card><div className="data-table-wrap" role="region" aria-label="Risk register table" tabIndex={0}><table><thead><tr><th>Ref</th><th>Risk</th><th>Inherent</th><th>Residual</th><th>Status</th><th>Review</th><th></th></tr></thead><tbody>
       {data?.map((r) => { const inherent = calculateRiskScore(r.likelihood, r.impact); const residual = calculateRiskScore(r.residual_likelihood, r.residual_impact); const linked = tasksByRisk.get(r.id) ?? []; const freshness = summariseEvidenceFreshness(evidenceByRisk.get(r.id) ?? []); return <tr key={r.id}>
         <td>{r.reference}</td>
-        <td><b>{r.title}</b><small>{r.category}</small>{linked.length > 0 && <small>Linked tasks: {linked.map((t, i) => <span key={t.id}>{i > 0 && ", "}<Link href={`/app/tasks/${t.id}`}>{t.title}</Link></span>)}</small>}{freshness.total > 0 && <small>Evidence: {freshness.total}{freshness.expiring > 0 ? ` · ${freshness.expiring} expiring` : ""}{freshness.expired > 0 ? ` · ${freshness.expired} expired` : ""}</small>}</td>
+        <td><b>{r.title}</b><small>{(Array.isArray(r.risk_categories) ? r.risk_categories[0] : r.risk_categories)?.name ?? "—"}</small>{linked.length > 0 && <small>Linked tasks: {linked.map((t, i) => <span key={t.id}>{i > 0 && ", "}<Link href={`/app/tasks/${t.id}`}>{t.title}</Link></span>)}</small>}{freshness.total > 0 && <small>Evidence: {freshness.total}{freshness.expiring > 0 ? ` · ${freshness.expiring} expiring` : ""}{freshness.expired > 0 ? ` · ${freshness.expired} expired` : ""}</small>}</td>
         <td><Pill tone={BAND_TONE[riskBand(inherent)] ?? "neutral"}>{inherent} · {riskBand(inherent).replace("_", " ")}</Pill></td>
         <td><Pill tone={BAND_TONE[riskBand(residual)] ?? "neutral"}>{residual} · {riskBand(residual).replace("_", " ")}</Pill></td>
         <td><form action={updateRiskStatusAction}><input type="hidden" name="id" value={r.id} /><select name="status" defaultValue={r.status} onChange={(e) => e.currentTarget.form?.requestSubmit()}><option value="open">Open</option><option value="treating">Treating</option><option value="accepted">Accepted</option><option value="closed">Closed</option></select></form></td>

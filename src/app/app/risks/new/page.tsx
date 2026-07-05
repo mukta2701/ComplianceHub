@@ -1,7 +1,10 @@
+import { requireAppContext } from "@/lib/app-context";
 import { PageIntro } from "@/components/ui";
 import { createRiskAction } from "../../actions";
 
-export default function NewRiskPage() {
+export default async function NewRiskPage() {
+  const { supabase } = await requireAppContext();
+  const { data: categories } = await supabase.from("risk_categories").select("id,name").order("position");
   return <>
     <PageIntro eyebrow="RISK" title="Add risk" body="Record inherent and residual exposure on the documented 5×5 matrix." />
     <form action={createRiskAction} className="card app-form">
@@ -11,7 +14,7 @@ export default function NewRiskPage() {
       </div>
       <label>Description<textarea name="description" required placeholder="Risk description" /></label>
       <div className="form-grid">
-        <label>Category<input name="category" required placeholder="Category" /></label>
+        <label>Category<select name="categoryId" required defaultValue="">{[<option key="" value="" disabled>Select a category</option>, ...(categories ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)]}</select></label>
         <label>Review date<input name="reviewDate" type="date" /></label>
         {[["likelihood", "Likelihood"], ["impact", "Impact"], ["residualLikelihood", "Residual likelihood"], ["residualImpact", "Residual impact"]].map(([name, label]) => <label key={name}>{label}<select name={name} defaultValue="3">{[1, 2, 3, 4, 5].map((n) => <option key={n}>{n}</option>)}</select></label>)}
         <label>Treatment<select name="treatment"><option value="mitigate">Mitigate</option><option value="avoid">Avoid</option><option value="transfer">Transfer</option><option value="accept">Accept</option></select></label>

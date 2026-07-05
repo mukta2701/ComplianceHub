@@ -1,5 +1,5 @@
 begin;
-select plan(8);
+select plan(9);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data)
 values
@@ -34,6 +34,17 @@ select results_eq(
 select is(
   (select count(*) from public.audit_events where entity_type = 'risk_categories' and organisation_id = '20000000-0000-4000-8000-000000000002'),
   7::bigint, 'category seeding is audited per tenant');
+
+-- Run as the table owner so RLS does not hide tenant B's category from the
+-- lookup; this isolates the composite (id, organisation_id) FK, which must
+-- reject a tenant A risk pointing at a tenant B category with 23503.
+reset role;
+select throws_ok(
+  $$ insert into public.risks (organisation_id, reference, title, description, category_id, likelihood, impact, treatment, residual_likelihood, residual_impact, status, created_by)
+     values ('20000000-0000-4000-8000-000000000001', 'R-900', 'x', 'y',
+       (select id from public.risk_categories where organisation_id = '20000000-0000-4000-8000-000000000002' limit 1),
+       3, 3, 'mitigate', 2, 2, 'open', '10000000-0000-4000-8000-000000000001') $$,
+  '23503', null, 'a risk cannot reference another tenant''s category');
 
 select * from finish();
 rollback;

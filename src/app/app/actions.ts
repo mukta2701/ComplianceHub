@@ -54,7 +54,7 @@ export async function createRiskAction(formData: FormData) {
   const { supabase, user, organisation } = await requireAppContext();
   await enforceRateLimit(`risk:${user.id}`, { limit: 30, windowMs: 60_000 });
   const parsed = riskInputSchema.parse({ ...Object.fromEntries(formData), organisationId: organisation.id });
-  const { error } = await supabase.from("risks").insert({ organisation_id: organisation.id, reference: parsed.reference, title: parsed.title, description: parsed.description, category: parsed.category, owner_id: parsed.ownerId || null, likelihood: parsed.likelihood, impact: parsed.impact, treatment: parsed.treatment, treatment_plan: parsed.treatmentPlan, residual_likelihood: parsed.residualLikelihood, residual_impact: parsed.residualImpact, review_date: parsed.reviewDate || null, status: parsed.status, evidence: parsed.evidence, source_assessment_session_id: parsed.sourceAssessmentSessionId || null, source_soa_register_id: parsed.sourceSoaRegisterId || null, created_by: user.id });
+  const { error } = await supabase.from("risks").insert({ organisation_id: organisation.id, reference: parsed.reference, title: parsed.title, description: parsed.description, category_id: parsed.categoryId, owner_id: parsed.ownerId || null, likelihood: parsed.likelihood, impact: parsed.impact, treatment: parsed.treatment, treatment_plan: parsed.treatmentPlan, residual_likelihood: parsed.residualLikelihood, residual_impact: parsed.residualImpact, review_date: parsed.reviewDate || null, status: parsed.status, evidence: parsed.evidence, source_assessment_session_id: parsed.sourceAssessmentSessionId || null, source_soa_register_id: parsed.sourceSoaRegisterId || null, created_by: user.id });
   if (error) throw new Error("Could not save risk");
   revalidatePath("/app/risks"); redirect("/app/risks");
 }
@@ -74,10 +74,19 @@ export async function updateRiskStatusAction(formData: FormData) {
 
 export async function acceptRiskSuggestionAction(formData: FormData) {
   const { supabase, user, organisation } = await requireAppContext(); const questionId=String(formData.get("questionId"));
-  const { data: question } = await supabase.from("catalogue_questions").select("code,prompt,remediation,weight,catalogue_categories(title)").eq("id", questionId).single(); if (!question) throw new Error("Suggestion not found");
-  const category=Array.isArray(question.catalogue_categories)?question.catalogue_categories[0]:question.catalogue_categories;
+  const { data: question } = await supabase.from("catalogue_questions").select("code,prompt,remediation,weight").eq("id", questionId).single(); if (!question) throw new Error("Suggestion not found");
   const { count }=await supabase.from("risks").select("id",{count:"exact",head:true}); const rating=Math.max(1,Math.min(5,Math.round(Number(question.weight))));
-  const { error }=await supabase.from("risks").insert({ organisation_id:organisation.id,reference:`R-${String((count??0)+1).padStart(3,"0")}`,title:`Readiness gap: ${question.prompt}`,description:"This risk was accepted from an assessment gap and requires an owner review.",category:category?.title??"Readiness",likelihood:Math.min(5,rating+1),impact:rating,treatment:"mitigate",treatment_plan:question.remediation,residual_likelihood:rating,residual_impact:rating,status:"open",evidence:"",source_assessment_session_id:String(formData.get("sessionId")),created_by:user.id }); if(error) throw new Error("Could not accept risk suggestion"); revalidatePath("/app/risks");
+  const { data: readinessCat } = await supabase.from("risk_categories")
+    .select("id").eq("name", "Readiness").maybeSingle();
+  let categoryId = readinessCat?.id ?? null;
+  if (!categoryId) {
+    const { data: maxPos } = await supabase.from("risk_categories").select("position").order("position", { ascending: false }).limit(1).maybeSingle();
+    const { data: created } = await supabase.from("risk_categories")
+      .insert({ organisation_id: organisation.id, name: "Readiness", position: (maxPos?.position ?? -1) + 1 })
+      .select("id").single();
+    categoryId = created?.id ?? null;
+  }
+  const { error }=await supabase.from("risks").insert({ organisation_id:organisation.id,reference:`R-${String((count??0)+1).padStart(3,"0")}`,title:`Readiness gap: ${question.prompt}`,description:"This risk was accepted from an assessment gap and requires an owner review.",category_id:categoryId,likelihood:Math.min(5,rating+1),impact:rating,treatment:"mitigate",treatment_plan:question.remediation,residual_likelihood:rating,residual_impact:rating,status:"open",evidence:"",source_assessment_session_id:String(formData.get("sessionId")),created_by:user.id }); if(error) throw new Error("Could not accept risk suggestion"); revalidatePath("/app/risks");
 }
 
 export async function createSoaAction(formData: FormData) {

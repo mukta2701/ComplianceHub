@@ -18,8 +18,8 @@ select public.save_assessment_response(current_setting('app.session_a')::uuid,(s
 select set_config('app.register_a',public.create_soa_draft(current_setting('app.session_a')::uuid,'Tenant A SoA')::text,true);
 update public.soa_items set justification='Reviewed for applicability' where soa_register_id=current_setting('app.register_a')::uuid;
 select set_config('app.snapshot_a',public.finalise_soa(current_setting('app.register_a')::uuid)::text,true);
-insert into public.risks(organisation_id,reference,title,description,category,owner_id,likelihood,impact,treatment,residual_likelihood,residual_impact,created_by)
-values(current_setting('app.org_a')::uuid,'R-A-1','Tenant A risk','A material risk owned by tenant A','Operations','50000000-0000-4000-8000-000000000001',3,4,'mitigate',2,3,'50000000-0000-4000-8000-000000000001');
+insert into public.risks(organisation_id,reference,title,description,category_id,owner_id,likelihood,impact,treatment,residual_likelihood,residual_impact,created_by)
+values(current_setting('app.org_a')::uuid,'R-A-1','Tenant A risk','A material risk owned by tenant A',(select id from public.risk_categories where organisation_id=current_setting('app.org_a')::uuid order by position limit 1),'50000000-0000-4000-8000-000000000001',3,4,'mitigate',2,3,'50000000-0000-4000-8000-000000000001');
 
 select set_config('request.jwt.claims','{"sub":"50000000-0000-4000-8000-000000000003","email":"owner-b@example.test","role":"authenticated"}',true);
 select set_config('app.org_b',public.create_organisation_with_owner('Organisation B','workflow-b')::text,true);
@@ -48,7 +48,7 @@ select throws_ok(format($$ insert into public.memberships(organisation_id,user_i
 select throws_ok(format($$ insert into public.invitations(organisation_id,email,token_hash,invited_by,expires_at) values(%L,'x@example.test','%s','50000000-0000-4000-8000-000000000003',now()+interval '1 day') $$,current_setting('app.org_a'),repeat('a',64)),'42501',null,'cross-tenant invitation insert is denied');
 select throws_ok(format($$ insert into public.assessment_sessions(organisation_id,catalogue_version_id,title,created_by) values(%L,'00000000-0000-4000-8000-000000000001','Attack','50000000-0000-4000-8000-000000000003') $$,current_setting('app.org_a')),'42501',null,'cross-tenant assessment insert is denied');
 select throws_ok(format($$ insert into public.soa_registers(organisation_id,assessment_session_id,control_catalogue_version_id,version,title,created_by) values(%L,%L,'40000000-0000-4000-8000-000000000001',99,'Attack','50000000-0000-4000-8000-000000000003') $$,current_setting('app.org_a'),current_setting('app.session_a')),'42501',null,'cross-tenant SoA insert is denied');
-select throws_ok(format($$ insert into public.risks(organisation_id,reference,title,description,category,likelihood,impact,treatment,residual_likelihood,residual_impact,created_by) values(%L,'ATTACK','Attack','Attack','Test',1,1,'accept',1,1,'50000000-0000-4000-8000-000000000003') $$,current_setting('app.org_a')),'42501',null,'cross-tenant risk insert is denied');
+select throws_ok(format($$ insert into public.risks(organisation_id,reference,title,description,category_id,likelihood,impact,treatment,residual_likelihood,residual_impact,created_by) values(%L,'ATTACK','Attack','Attack','00000000-0000-4000-8000-0000000000c1',1,1,'accept',1,1,'50000000-0000-4000-8000-000000000003') $$,current_setting('app.org_a')),'42501',null,'cross-tenant risk insert is denied');
 
 select results_eq(format($$ update public.organisations set name='Tampered' where id=%L returning id $$,current_setting('app.org_a')),$$ select null::uuid where false $$,'cross-tenant updates affect no rows');
 select results_eq(format($$ delete from public.risks where organisation_id=%L returning id $$,current_setting('app.org_a')),$$ select null::uuid where false $$,'cross-tenant deletes affect no rows');
