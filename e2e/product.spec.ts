@@ -200,7 +200,7 @@ test("a treatment plan spawns an owned, dated task", async ({ page }, testInfo) 
   await expect(page.getByText("Treatment plan RTP-001")).toBeVisible();
 });
 
-test("an audit runs from plan through checklist to a corrective-action task", async ({ page }, testInfo) => {
+test("an audit runs from plan through checklist to a corrective-action task", async ({ page, browser }, testInfo) => {
   const suffix = `${Date.now()}-${testInfo.project.name}`;
   const email = `aud-${suffix}@example.test`;
   const password = "Test-only-passphrase-2026";
@@ -295,6 +295,49 @@ test("an audit runs from plan through checklist to a corrective-action task", as
   const anonRes = await anonContext.get(`${new URL(auditUrl).origin}/api/app/audits/${auditId}/pack?format=csv`);
   expect(anonRes.status()).toBe(401);
   await anonContext.dispose();
+
+  // Share with an auditor: the owner mints an AUDIT-SCOPED, read-only link.
+  await page.goto(auditUrl);
+  await expect(page.getByRole("heading", { name: "Share with an auditor" })).toBeVisible();
+  await page.getByLabel("Label").fill("External ISO auditor");
+  // Scope defaults to "This audit" and expiry to 14 days — leave them. Mint it.
+  await page.getByRole("button", { name: "Create link" }).click();
+
+  // The raw link is surfaced exactly ONCE in the status card; capture it.
+  await expect(page.getByRole("status")).toBeVisible();
+  const shownLink = await page.locator("code").filter({ hasText: "/audit-view/" }).first().textContent();
+  expect(shownLink, "the one-time link should render").toMatch(/^\/audit-view\/.+/);
+  const auditorToken = shownLink!.replace("/audit-view/", "");
+
+  // Axe on the audit detail page WITH the share panel and the one-time link card.
+  const shareAxe = await new AxeBuilder({ page }).analyze();
+  expect(shareAxe.violations).toEqual([]);
+
+  // A FRESH, genuinely logged-out context opens the minted link and sees the
+  // AUDIT-SCOPED read-only report — closing Task 16's untested audit branch.
+  const auditor = await browser.newContext();
+  const auditorPage = await auditor.newPage();
+  await auditorPage.goto(`/audit-view/${auditorToken}`);
+  await expect(auditorPage.getByRole("heading", { level: 1, name: /— readiness$/ })).toBeVisible();
+  await expect(auditorPage.getByText("OPEN NON-CONFORMITIES")).toBeVisible();
+  // The audit section renders: reference/title heading, the checklist item, and the finding.
+  await expect(auditorPage.getByRole("heading", { name: "AUD-001: Access control internal audit", level: 2 })).toBeVisible();
+  await expect(auditorPage.getByText("Are leavers de-provisioned within 24 hours?")).toBeVisible();
+  await expect(auditorPage.getByText("Leavers retained access beyond policy")).toBeVisible();
+  expect((await new AxeBuilder({ page: auditorPage }).analyze()).violations).toEqual([]);
+  await auditor.close();
+
+  // Revoking the link from the owner UI invalidates it immediately.
+  await page.goto(auditUrl);
+  await page.getByRole("button", { name: "Revoke" }).first().click();
+  await expect(page.getByText("Revoked")).toBeVisible();
+
+  const revoked = await browser.newContext();
+  const revokedPage = await revoked.newPage();
+  await revokedPage.goto(`/audit-view/${auditorToken}`);
+  await expect(revokedPage.getByRole("heading", { name: "Link unavailable", level: 1 })).toBeVisible();
+  await expect(revokedPage.getByText(/— readiness$/)).toHaveCount(0);
+  await revoked.close();
 });
 
 test("a KPI is logged and its next steps raise a follow-up task", async ({ page }, testInfo) => {

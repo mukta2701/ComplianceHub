@@ -4,18 +4,21 @@ import { requireAppContext } from "@/lib/app-context";
 import { AUDIT_STATUS_LABEL, CHECKLIST_RESULT_LABEL, CHECKLIST_RESULT_TONE, FINDING_SEVERITY_LABEL, FINDING_SEVERITY_TONE, FINDING_STATUS_LABEL, checklistCompletion, summariseFindings, type AuditStatus, type ChecklistResult, type FindingSeverity, type FindingStatus } from "@/features/audits/domain/audits";
 import { Card, PageIntro, Pill, Progress } from "@/components/ui";
 import { updateAuditStatusAction, addChecklistItemAction, updateChecklistItemAction, raiseFindingAction, updateFindingStatusAction } from "../actions";
+import { mintAuditorTokenAction, revokeAuditorTokenAction } from "./share-actions";
 
 const RESULTS: ChecklistResult[] = ["not_tested", "compliant", "non_compliant", "not_applicable"];
 
-export default async function AuditDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function AuditDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ link?: string }> }) {
   const { id } = await params;
+  const { link } = await searchParams;
   const { supabase } = await requireAppContext();
   const { data: audit } = await supabase.from("audits").select("id,reference,title,scope,status,framework,planned_start,planned_end").eq("id", id).maybeSingle();
   if (!audit) notFound();
-  const [{ data: items }, { data: findings }, { data: members }] = await Promise.all([
+  const [{ data: items }, { data: findings }, { data: members }, { data: tokens }] = await Promise.all([
     supabase.from("audit_checklist_items").select("id,area,clause_reference,checklist_item,compliant,evidence_note,findings").eq("audit_id", id).order("position"),
     supabase.from("audit_findings").select("id,summary,severity,status,corrective_action,task_id").eq("audit_id", id).order("created_at"),
     supabase.from("memberships").select("user_id,profiles(display_name)"),
+    supabase.from("auditor_access_tokens").select("id,label,expires_at,revoked_at,audit_id").order("created_at", { ascending: false }),
   ]);
   const rows = items ?? [];
   const completion = checklistCompletion(rows.map((i) => ({ compliant: i.compliant as ChecklistResult })));
@@ -102,6 +105,23 @@ export default async function AuditDetailPage({ params }: { params: Promise<{ id
         <label style={{ display: "flex", gap: "8px", alignItems: "center", fontWeight: 700 }}><input type="checkbox" name="spawnTask" style={{ width: "auto" }} />Raise a corrective-action task from this finding</label>
         <button className="button primary">Raise finding</button>
       </form>
+    </Card>
+
+    <Card style={{ padding: "18px", marginTop: "16px" }}>
+      <h2 style={{ fontSize: "15px", margin: "0 0 4px" }}>Share with an auditor</h2>
+      <p style={{ fontSize: "12px", color: "#596273", margin: "0 0 12px" }}>Create a time-boxed, read-only link. It needs no login and expires automatically. Copy it now — it is shown only once.</p>
+      {link && <Card role="status" style={{ padding: "12px", background: "#eef7ee", borderColor: "#bfe0bf", marginBottom: "12px" }}><b>New link (copy now):</b> <code style={{ wordBreak: "break-all" }}>{`/audit-view/${link}`}</code></Card>}
+      <form action={mintAuditorTokenAction} style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "end", marginBottom: "14px" }}>
+        <input type="hidden" name="auditId" value={id} />
+        <label style={{ fontSize: "12px", fontWeight: 700 }}>Label<input name="label" defaultValue="External auditor" maxLength={160} style={{ display: "block" }} /></label>
+        <label style={{ fontSize: "12px", fontWeight: 700 }}>Scope<select name="scope" defaultValue="audit" style={{ display: "block" }}><option value="audit">This audit</option><option value="org">Whole readiness view</option></select></label>
+        <label style={{ fontSize: "12px", fontWeight: 700 }}>Expires (days)<input name="expiresInDays" type="number" min={1} max={90} defaultValue={14} style={{ display: "block", width: "88px" }} /></label>
+        <button className="button primary">Create link</button>
+      </form>
+      <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "6px" }}>
+        {(tokens ?? []).map((t) => { const state = t.revoked_at ? "Revoked" : new Date(t.expires_at) < new Date() ? "Expired" : "Active"; return <li key={t.id} style={{ display: "flex", justifyContent: "space-between", gap: "12px", fontSize: "13px" }}><span>{t.label} · <Pill tone={state === "Active" ? "green" : "neutral"}>{state}</Pill> <small style={{ color: "#596273" }}>expires {new Date(t.expires_at).toISOString().slice(0, 10)}</small></span>{!t.revoked_at && <form action={revokeAuditorTokenAction}><input type="hidden" name="id" value={t.id} /><input type="hidden" name="auditId" value={id} /><button style={{ color: "var(--red)", border: 0, background: "none", fontWeight: 700 }}>Revoke</button></form>}</li>; })}
+        {!tokens?.length && <li style={{ color: "#596273", fontSize: "13px" }}>No auditor links yet.</li>}
+      </ul>
     </Card>
   </>;
 }
