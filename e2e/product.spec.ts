@@ -1,7 +1,22 @@
 import { Buffer } from "node:buffer";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { createClient } from "@supabase/supabase-js";
 import { expect, request, test } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
+
+// Reads a value from the process env, falling back to .env.local (Playwright's
+// test process does not load Next's env file). Used only by test infrastructure.
+function localEnvironment(name: string): string {
+  if (process.env[name]) return process.env[name] as string;
+  const line = readFileSync(path.join(process.cwd(), ".env.local"), "utf8")
+    .split("\n")
+    .find((candidate) => candidate.startsWith(`${name}=`));
+  if (!line) throw new Error(`${name} is required for this end-to-end test`);
+  return line.slice(name.length + 1);
+}
 
 test("landing page explains the product and opens the demo", async ({ page }) => {
   await page.goto("/");
@@ -575,4 +590,86 @@ test("every register can be downloaded as an XLSX export", async ({ page }, test
     expect(body.length).toBeGreaterThan(0);
     expect(body.subarray(0, 2).toString("latin1")).toBe("PK");
   }
+});
+
+test("a minted auditor link exposes a read-only view to an unauthenticated visitor", async ({ page, browser }, testInfo) => {
+  const suffix = `${Date.now()}-${testInfo.project.name}`;
+  const email = `avw-${suffix}@example.test`;
+  const password = "Test-only-passphrase-2026";
+  const orgName = `Audit View Workspace ${suffix}`;
+
+  await page.goto("/sign-up");
+  await page.getByLabel("Name").fill("Beta Owner");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page.getByLabel("Confirm password").fill(password);
+  await page.getByRole("button", { name: "Create account" }).click();
+
+  await page.waitForURL(/\/sign-in/);
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
+  await page.getByLabel("Organisation name").fill(orgName);
+  await page.getByRole("button", { name: "Create workspace" }).click();
+  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
+
+  // Task 17 (the owner-only mint UI) is not built yet, so seed an auditor token
+  // through the SAME owner-only, RLS-enforced path it will use: sign in as the
+  // owner with the ANON key and insert their own token (the insert policy
+  // requires is_organisation_owner + created_by = auth.uid()). No service-role
+  // client is used anywhere in this test. The raw token is never stored — only
+  // its sha256 hex hash, mirroring the RPC's lookup.
+  const rawToken = `e2e-token-${suffix}`;
+  const tokenHash = createHash("sha256").update(rawToken, "utf8").digest("hex");
+  const owner = createClient(
+    localEnvironment("NEXT_PUBLIC_SUPABASE_URL"),
+    localEnvironment("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
+    { auth: { persistSession: false, autoRefreshToken: false } },
+  );
+  const { data: session, error: signInError } = await owner.auth.signInWithPassword({ email, password });
+  expect(signInError, "the owner should sign in for token seeding").toBeNull();
+  const { data: org } = await owner.from("organisations").select("id").eq("name", orgName).single();
+  expect(org, "the owner should read their own workspace").not.toBeNull();
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const { error: insertError } = await owner.from("auditor_access_tokens").insert({
+    organisation_id: org!.id,
+    token_hash: tokenHash,
+    label: "e2e auditor",
+    framework: "ISO 27001:2022",
+    expires_at: expiresAt,
+    created_by: session.user!.id,
+  });
+  expect(insertError, "seeding the auditor token should succeed").toBeNull();
+
+  // A FRESH context with no storage state — a genuinely logged-out auditor.
+  const anon = await browser.newContext();
+  const anonPage = await anon.newPage();
+  await anonPage.goto(`/audit-view/${rawToken}`);
+
+  // The org's readiness payload renders (h1 + the SoA readiness ring + the
+  // aggregate stat sections), exercising the full RPC payload end-to-end.
+  await expect(anonPage.getByRole("heading", { name: `${orgName} — readiness`, level: 1 })).toBeVisible();
+  await expect(anonPage.getByText("READY")).toBeVisible();
+  await expect(anonPage.getByText("OPEN TASKS")).toBeVisible();
+  await expect(anonPage.getByText("EVIDENCE HEALTH")).toBeVisible();
+  await expect(anonPage.getByText("OPEN NON-CONFORMITIES")).toBeVisible();
+  await expect(anonPage.getByRole("heading", { name: "Risk posture" })).toBeVisible();
+
+  // No links into the authenticated app and no action controls leak onto the
+  // page. Scope to the page's own <main> so Next.js's dev-only toolbar (injected
+  // at the body level, absent in a production build) does not skew the count.
+  const view = anonPage.locator("main");
+  expect(await view.locator('a[href^="/app"]').count()).toBe(0);
+  expect(await view.getByRole("button").count()).toBe(0);
+
+  // Accessibility: zero automatically detectable violations on the public page.
+  expect((await new AxeBuilder({ page: anonPage }).analyze()).violations).toEqual([]);
+
+  // A bogus / expired / revoked token reveals nothing — just the invalid-link card.
+  await anonPage.goto("/audit-view/expired-or-bogus-token");
+  await expect(anonPage.getByRole("heading", { name: "Link unavailable", level: 1 })).toBeVisible();
+  await expect(anonPage.getByText(`${orgName} — readiness`)).toHaveCount(0);
+
+  await anon.close();
 });
