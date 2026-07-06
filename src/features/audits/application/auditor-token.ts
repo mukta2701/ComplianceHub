@@ -1,5 +1,13 @@
 import { randomBytes, createHash } from "node:crypto";
 
+// Name of the short-lived, httpOnly cookie used to hand the freshly-minted
+// raw auditor token to the very next render of the audit detail page. Never
+// put in the URL (query params land in server access logs, browser history,
+// and Referer headers) — the cookie is httpOnly (no client-JS access) and
+// self-expires after 60s, which is enough time for the post-mint redirect's
+// render to pick it up and show the one-time "copy this link" card.
+export const AUDITOR_LINK_FLASH_COOKIE = "auditor_link_flash";
+
 // Read-only, login-free auditor token. Mirrors inviteMember's hashing/expiry:
 // the raw token is returned to the caller ONCE and never stored; only its
 // sha256 hex hash is persisted. The hash idiom is byte-for-byte identical to

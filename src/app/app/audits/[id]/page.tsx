@@ -1,16 +1,32 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { cookies } from "next/headers";
 import { requireAppContext } from "@/lib/app-context";
 import { AUDIT_STATUS_LABEL, CHECKLIST_RESULT_LABEL, CHECKLIST_RESULT_TONE, FINDING_SEVERITY_LABEL, FINDING_SEVERITY_TONE, FINDING_STATUS_LABEL, checklistCompletion, summariseFindings, type AuditStatus, type ChecklistResult, type FindingSeverity, type FindingStatus } from "@/features/audits/domain/audits";
+import { AUDITOR_LINK_FLASH_COOKIE } from "@/features/audits/application/auditor-token";
 import { Card, PageIntro, Pill, Progress } from "@/components/ui";
 import { updateAuditStatusAction, addChecklistItemAction, updateChecklistItemAction, raiseFindingAction, updateFindingStatusAction } from "../actions";
 import { mintAuditorTokenAction, revokeAuditorTokenAction } from "./share-actions";
 
 const RESULTS: ChecklistResult[] = ["not_tested", "compliant", "non_compliant", "not_applicable"];
 
-export default async function AuditDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ link?: string }> }) {
+export default async function AuditDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { link } = await searchParams;
+  // The freshly-minted raw auditor link arrives via a short-lived, httpOnly
+  // flash cookie (never a ?link= URL param — see share-actions.ts) and is
+  // shown a single time. Server Components cannot mutate cookies during
+  // render, so we best-effort clear it here (works from a Route
+  // Handler/Server Action context); if that throws, the cookie's own 60s
+  // maxAge (set at mint time) is the fallback that keeps it from lingering.
+  const jar = await cookies();
+  const link = jar.get(AUDITOR_LINK_FLASH_COOKIE)?.value;
+  if (link) {
+    try {
+      jar.delete(AUDITOR_LINK_FLASH_COOKIE);
+    } catch {
+      // Expected in a plain Server Component render; the cookie self-expires.
+    }
+  }
   const { supabase } = await requireAppContext();
   const { data: audit } = await supabase.from("audits").select("id,reference,title,scope,status,framework,planned_start,planned_end").eq("id", id).maybeSingle();
   if (!audit) notFound();
