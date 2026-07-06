@@ -114,8 +114,8 @@ New `kpi_measurements` table (migration 0035, pgTAP 031) + a per-KPI trend (late
 **B9. Annex A checklist population. ✅ SHIPPED this session (`19af746`).**
 One-click "Populate from control library" bulk-creates an audit's checklist from all 93 Annex A controls, idempotent. *(Recurring/auto-scheduled audits still open.)*
 
-**B3. Continuous evidence automation — NOT YET BUILT (largest; a Phase-D-sized workstream + external secrets → Fable).**
-The 2026 differentiator: an `EvidenceProvider` abstraction + FAKE-tested collectors + the daily sweep marking auto-evidence fresh/stale, connectors for cloud/identity/HR. Real connectors need user OAuth secrets (same shape as the shipped Jira/GitHub path).
+**B3. Continuous evidence automation. ✅ SHIPPED this session (`28bf008` + `76b8d1a`).**
+`EvidenceProvider` abstraction + deterministic FAKE collector; owner-managed `evidence_sources` (Google Workspace / GitHub / AWS, owner-only RLS, migration 0037, pgTAP 033); a `CRON_SECRET`-gated `/api/cron/evidence-collect` that idempotently fills the vault (dedup on `(source_id, external_ref)`, migration 0038, pgTAP 034); auto-evidence is badged "Auto · <Provider>" and aged by the existing daily sweep (drift alerting for free). Real connectors are gated behind `EVIDENCE_LIVE=1` + user OAuth secrets (documented go-live step). **Only B5 (multi-framework) now remains unbuilt.**
 
 *(Full enhancement list, incl. Phase B/B.5/C/D deferrals, lives in `docs/feature-backlog.md` + `.csv`.)*
 
