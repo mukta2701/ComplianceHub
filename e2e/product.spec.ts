@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer";
 import { readFile } from "node:fs/promises";
-import { expect, test } from "@playwright/test";
+import { expect, request, test } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
 test("landing page explains the product and opens the demo", async ({ page }) => {
@@ -255,6 +255,31 @@ test("an audit runs from plan through checklist to a corrective-action task", as
   // The detail route re-opens cleanly for later work.
   await page.goto(auditUrl);
   await expect(page.getByRole("heading", { name: "Access control internal audit", level: 2 })).toBeVisible();
+
+  // The evidence pack can be downloaded as XLSX or CSV, bundling the checklist and findings.
+  const auditId = new URL(auditUrl).pathname.split("/").pop();
+  const xlsxRes = await page.request.get(`/api/app/audits/${auditId}/pack?format=xlsx`);
+  expect(xlsxRes.ok(), "xlsx pack should return 200").toBeTruthy();
+  expect(xlsxRes.headers()["content-type"]).toContain("spreadsheetml");
+  expect(xlsxRes.headers()["content-disposition"]).toContain("attachment");
+  const xlsxBody = await xlsxRes.body();
+  expect(xlsxBody.length).toBeGreaterThan(0);
+  expect(xlsxBody.subarray(0, 2).toString("latin1")).toBe("PK");
+
+  const csvRes = await page.request.get(`/api/app/audits/${auditId}/pack?format=csv`);
+  expect(csvRes.ok(), "csv pack should return 200").toBeTruthy();
+  expect(csvRes.headers()["content-type"]).toContain("text/csv");
+  expect(csvRes.headers()["content-disposition"]).toContain("attachment");
+  const csvBody = await csvRes.text();
+  expect(csvBody.length).toBeGreaterThan(0);
+  expect(csvBody).toContain("Are leavers de-provisioned within 24 hours?");
+  expect(csvBody).toContain("Leavers retained access beyond policy");
+
+  // Unauthenticated requests to the pack route are rejected (tenant/RLS boundary check).
+  const anonContext = await request.newContext();
+  const anonRes = await anonContext.get(`${new URL(auditUrl).origin}/api/app/audits/${auditId}/pack?format=csv`);
+  expect(anonRes.status()).toBe(401);
+  await anonContext.dispose();
 });
 
 test("a KPI is logged and its next steps raise a follow-up task", async ({ page }, testInfo) => {

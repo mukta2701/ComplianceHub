@@ -37,6 +37,11 @@ export default async function AuditDetailPage({ params }: { params: Promise<{ id
       <p style={{ fontSize: "12px", color: "#596273", margin: "8px 0 0" }}>{completion.tested} of {completion.total} items tested · {f.openNonConformities} open non-conformities</p>
     </Card>
 
+    <div style={{ display: "flex", gap: "8px", margin: "0 0 16px" }}>
+      <Link className="button secondary" href={`/api/app/audits/${id}/pack?format=xlsx`}>Evidence pack (XLSX)</Link>
+      <Link className="button secondary" href={`/api/app/audits/${id}/pack?format=csv`}>Evidence pack (CSV)</Link>
+    </div>
+
     <Card style={{ padding: 0 }}><div className="data-table-wrap" role="region" aria-label="Audit checklist" tabIndex={0}><table>
       <thead><tr><th>Area / clause</th><th>Checklist item</th><th>Result</th><th>Evidence &amp; findings</th></tr></thead>
       <tbody>
