@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { requireAppContext } from "@/lib/app-context";
 import { POLICY_STATUS_LABEL, POLICY_STATUS_TONE, summarisePolicyAcceptances, type PolicyStatus } from "@/features/policies/domain/policies";
 import { Card, PageIntro, Pill, Progress } from "@/components/ui";
+import { Icon } from "@/components/icons";
 import { updatePolicyAction, approvePolicyAction, setPolicyStatusAction, acceptPolicyAction } from "../actions";
 import { linkPolicyEvidenceAction, unlinkPolicyEvidenceAction } from "./evidence-actions";
 
@@ -32,39 +33,51 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
       <h2 style={{ fontSize: "15px", margin: "0 0 8px" }}>Acceptance</h2>
       <Progress value={summary.percent} />
       <p style={{ fontSize: "12px", color: "#596273", margin: "8px 0 0" }}>{summary.acceptedCurrent} of {summary.total} members have accepted version {policy.version} · {summary.outstanding} outstanding</p>
-      <form action={acceptPolicyAction} style={{ marginTop: "12px" }}>
-        <input type="hidden" name="id" value={id} />
-        <button className="button primary" disabled={acceptedCurrent}>{acceptedCurrent ? "You have accepted the current version" : "I accept this policy"}</button>
-      </form>
+      {acceptedCurrent
+        ? <p style={{ display: "flex", alignItems: "center", gap: "8px", margin: "14px 0 0", fontSize: "13px", color: "#596273" }}>
+            <Pill tone="green"><span style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}><Icon name="check" />Accepted version {policy.version}</span></Pill>
+            You have accepted the current version.
+          </p>
+        : <form action={acceptPolicyAction} style={{ marginTop: "14px" }}>
+            <input type="hidden" name="id" value={id} />
+            <button className="button primary">I accept this policy</button>
+          </form>}
     </Card>
 
     <Card style={{ padding: "18px", marginBottom: "16px" }}>
       <h2 style={{ fontSize: "15px", margin: "0 0 10px" }}>Policy content</h2>
-      <p style={{ whiteSpace: "pre-wrap", margin: "0 0 16px" }}>{policy.body || "No content yet."}</p>
-      <h3 style={{ fontSize: "14px", margin: "0 0 8px" }}>Edit policy</h3>
-      <form action={updatePolicyAction} className="app-form">
-        <input type="hidden" name="id" value={id} />
-        <div className="form-grid">
-          <label>Reference<input name="reference" required maxLength={40} defaultValue={policy.reference} /></label>
-          <label>Title<input name="title" required maxLength={200} defaultValue={policy.title} /></label>
-          <label>Review due<input name="reviewDue" type="date" defaultValue={policy.review_due ?? ""} /></label>
-        </div>
-        <label>Policy content<textarea name="body" maxLength={100000} rows={8} defaultValue={policy.body} /></label>
-        <p style={{ fontSize: "12px", color: "#596273", margin: 0 }}>Changing the content bumps the version and asks members to re-accept.</p>
-        <button className="button secondary">Save changes</button>
-      </form>
+      <p style={{ whiteSpace: "pre-wrap", margin: 0 }}>{policy.body || "No content yet."}</p>
+      {isOwner && <details style={{ marginTop: "16px", borderTop: "1px solid #edf0f4", paddingTop: "14px" }}>
+        <summary style={{ cursor: "pointer", fontSize: "13px", fontWeight: 700, color: "var(--blue)", display: "flex", alignItems: "center", gap: "6px", width: "fit-content" }}><Icon name="file" />Edit policy</summary>
+        <form action={updatePolicyAction} className="app-form" style={{ padding: "16px 0 0" }}>
+          <input type="hidden" name="id" value={id} />
+          <div className="form-grid">
+            <label>Reference<input name="reference" required maxLength={40} defaultValue={policy.reference} /></label>
+            <label>Title<input name="title" required maxLength={200} defaultValue={policy.title} /></label>
+            <label>Review due<input name="reviewDue" type="date" defaultValue={policy.review_due ?? ""} /></label>
+          </div>
+          <label>Policy content<textarea name="body" maxLength={100000} rows={8} defaultValue={policy.body} /></label>
+          <p style={{ fontSize: "12px", color: "#596273", margin: 0 }}>Changing the content bumps the version and asks members to re-accept.</p>
+          <button className="button primary">Save changes</button>
+        </form>
+      </details>}
     </Card>
 
     {isOwner && <Card style={{ padding: "18px", marginBottom: "16px" }}>
       <h2 style={{ fontSize: "15px", margin: "0 0 10px" }}>Approval</h2>
-      <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
-        <form action={approvePolicyAction}><input type="hidden" name="id" value={id} /><button className="button primary" disabled={status === "approved"}>Approve policy</button></form>
-        <form action={setPolicyStatusAction} style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-          <input type="hidden" name="id" value={id} />
-          <select name="status" defaultValue={status} aria-label="Policy status">{(["draft", "in_review", "approved", "archived"] as PolicyStatus[]).map((s) => <option key={s} value={s}>{POLICY_STATUS_LABEL[s]}</option>)}</select>
-          <button className="button secondary">Set status</button>
-        </form>
-      </div>
+      {status === "approved"
+        ? <p style={{ display: "flex", alignItems: "center", gap: "8px", margin: 0, fontSize: "13px", color: "#596273" }}>
+            <Pill tone="green"><span style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}><Icon name="check" />Approved</span></Pill>
+            This policy is approved and published to members.
+          </p>
+        : <form action={approvePolicyAction}><input type="hidden" name="id" value={id} /><button className="button primary">Approve policy</button></form>}
+      <form action={setPolicyStatusAction} style={{ display: "flex", gap: "8px", alignItems: "center", marginTop: "14px", borderTop: "1px solid #edf0f4", paddingTop: "14px", flexWrap: "wrap" }}>
+        <input type="hidden" name="id" value={id} />
+        <label style={{ fontSize: "12px", color: "#596273" }}>Move to
+          <select name="status" defaultValue={status === "approved" ? "draft" : status} aria-label="Policy status" style={{ marginLeft: "8px" }}>{(["draft", "in_review", "archived"] as PolicyStatus[]).map((s) => <option key={s} value={s}>{POLICY_STATUS_LABEL[s]}</option>)}</select>
+        </label>
+        <button className="button secondary">Set status</button>
+      </form>
     </Card>}
 
     <Card style={{ padding: "18px" }}>

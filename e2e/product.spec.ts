@@ -762,13 +762,16 @@ test("a policy is authored, approved, accepted, and re-accepted after a material
   await page.getByRole("button", { name: "Approve policy" }).click();
 
   await page.getByRole("button", { name: "I accept this policy" }).click();
-  await expect(page.getByRole("button", { name: "You have accepted the current version" })).toBeVisible();
+  // Accepted state now reads as a clear "done" pill, not a pale disabled button.
+  await expect(page.getByText("Accepted version 1")).toBeVisible();
   await expect(page.getByText("Accepted v1")).toBeVisible();
 
   const detailAxe = await new AxeBuilder({ page }).analyze();
   expect(detailAxe.violations).toEqual([]);
 
   // A material content edit bumps the version and invalidates the prior acceptance.
+  // The edit form lives behind an "Edit policy" disclosure — open it first.
+  await page.getByText("Edit policy", { exact: true }).click();
   await page.getByLabel("Policy content").fill("Access to systems is granted on least privilege and reviewed quarterly.");
   await page.getByRole("button", { name: "Save changes" }).click();
 
