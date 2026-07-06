@@ -784,4 +784,22 @@ test("a policy is authored, approved, accepted, and re-accepted after a material
   // The detail route re-opens cleanly at the new version.
   await page.goto(policyUrl);
   await expect(page.getByText("POLICY POL-001 · v2")).toBeVisible();
+
+  // Author an evidence record so it can be attached to the policy.
+  await page.goto("/app/evidence/new");
+  await expect(page.getByRole("heading", { name: "Add evidence", level: 2 })).toBeVisible();
+  await page.getByLabel("Title").fill("Access review log");
+  await page.getByLabel("Kind").selectOption("note");
+  await page.getByRole("button", { name: "Save evidence" }).click();
+  await page.waitForURL(/\/app\/evidence$/);
+
+  // Link the evidence to the policy from the policy detail Evidence panel.
+  await page.goto(policyUrl);
+  await expect(page.getByText("No evidence linked yet.")).toBeVisible();
+  await page.getByLabel("Link evidence to this policy").selectOption({ label: "Access review log" });
+  await page.getByRole("button", { name: "Link", exact: true }).click();
+  await expect(page.getByRole("listitem").filter({ hasText: "Access review log" })).toBeVisible();
+
+  const evidenceAxe = await new AxeBuilder({ page }).analyze();
+  expect(evidenceAxe.violations).toEqual([]);
 });

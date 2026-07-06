@@ -45,12 +45,13 @@ export async function createEvidenceAction(formData: FormData) {
 export async function linkEvidenceAction(formData: FormData) {
   const { supabase, user, organisation } = await requireAppContext();
   const evidenceId = String(formData.get("evidenceId"));
-  const target = String(formData.get("target")); // "control:<id>" | "risk:<id>" | "task:<id>"
+  const target = String(formData.get("target")); // "control:<id>" | "risk:<id>" | "task:<id>" | "policy:<id>"
   const [kind, id] = target.split(":");
-  if (!id || !["control", "risk", "task"].includes(kind)) throw new Error("Invalid link target");
+  if (!id || !["control", "risk", "task", "policy"].includes(kind)) throw new Error("Invalid link target");
   const { error } = await supabase.from("evidence_links").insert({
     organisation_id: organisation.id, evidence_id: evidenceId,
-    control_id: kind === "control" ? id : null, risk_id: kind === "risk" ? id : null, task_id: kind === "task" ? id : null,
+    control_id: kind === "control" ? id : null, risk_id: kind === "risk" ? id : null,
+    task_id: kind === "task" ? id : null, policy_id: kind === "policy" ? id : null,
     created_by: user.id,
   });
   if (error) throw new Error("Could not link evidence");

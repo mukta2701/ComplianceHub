@@ -9,9 +9,10 @@ const TONE: Record<string, string> = { current: "green", expiring: "amber", expi
 
 export default async function EvidencePage() {
   const { supabase } = await requireAppContext();
-  const [{ data: items }, { data: controls }] = await Promise.all([
+  const [{ data: items }, { data: controls }, { data: policies }] = await Promise.all([
     supabase.from("evidence").select("id,title,kind,url,storage_path,status,collected_on,valid_until,evidence_links(id,control_id,risk_id,task_id,controls(code,title),risks(reference),tasks(title))").order("created_at", { ascending: false }),
     supabase.from("controls").select("id,code,title").order("position"),
+    supabase.from("policies").select("id,reference,title").order("reference"),
   ]);
   const freshness = summariseEvidenceFreshness((items ?? []).map((i) => ({ status: i.status as EvidenceStatus })));
   return <>
@@ -32,7 +33,7 @@ export default async function EvidencePage() {
       </div>
       <div style={{ marginTop: "12px", display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center" }}>
         {item.evidence_links?.map((link) => { const c = Array.isArray(link.controls) ? link.controls[0] : link.controls; const r = Array.isArray(link.risks) ? link.risks[0] : link.risks; const t = Array.isArray(link.tasks) ? link.tasks[0] : link.tasks; return <span key={link.id} className="pill neutral">{c ? `${c.code}: ${c.title}` : r ? `Risk ${r.reference}` : `Task: ${t?.title}`}<form action={unlinkEvidenceAction} style={{ display: "inline" }}><input type="hidden" name="linkId" value={link.id} /><button aria-label="Remove link" style={{ border: 0, background: "none", color: "#8b94a2", marginLeft: "4px" }}>×</button></form></span>; })}
-        <form action={linkEvidenceAction} style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}><input type="hidden" name="evidenceId" value={item.id} /><select name="target" defaultValue="" aria-label={`Link ${item.title} to a control`} className="rounded"><option value="" disabled>Link to control…</option>{controls?.map((c) => <option key={c.id} value={`control:${c.id}`}>{c.code}: {c.title}</option>)}</select><button className="button secondary" style={{ minHeight: "32px", padding: "6px 12px" }}>Link</button></form>
+        <form action={linkEvidenceAction} style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}><input type="hidden" name="evidenceId" value={item.id} /><select name="target" defaultValue="" aria-label={`Link ${item.title} to a control`} className="rounded"><option value="" disabled>Link to control…</option>{controls?.map((c) => <option key={c.id} value={`control:${c.id}`}>{c.code}: {c.title}</option>)}<optgroup label="Policies">{policies?.map((p) => <option key={p.id} value={`policy:${p.id}`}>{p.reference}: {p.title}</option>)}</optgroup></select><button className="button secondary" style={{ minHeight: "32px", padding: "6px 12px" }}>Link</button></form>
       </div>
     </Card>)}
     {!items?.length && <Card style={{ padding: "24px", color: "#596273" }}>No evidence yet. Add your first item to start tracking freshness — files, links, or notes attach to any control, risk, or task.</Card>}
