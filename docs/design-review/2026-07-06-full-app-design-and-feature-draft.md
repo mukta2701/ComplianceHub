@@ -70,6 +70,8 @@ Dashboard (`10`) donut = **100% READY** with "Assessments 0 · Open risks 0 · F
 **A11. SoA empty state is a dead end when no assessment exists.** (`17`) "Generate draft" is the primary path but there's nothing to generate from.
 → Disable "Generate draft" with helper text "Complete an assessment first →" linking to Assessment. `[Sonnet · S · soa, empty-state]`
 
+> **P3 status:** A12 (nav grouped into ASSESS/MANAGE/EVIDENCE & REPORTS/ADMIN), A13 (heatmap sizing), A15 (`.field` helper — date/select inputs now match the system; found `.rounded` was dead CSS), A16 (workspace switcher showed "Your workspace" on the fresh dashboard — root cause was a stale `/app` layout cache after org creation, fixed with `revalidatePath("/app","layout")`), A17 (role pills were full-width because a descendant selector matched `Pill`'s span — fixed) — **all SHIPPED & gate-green this session.** Only **A14** (forgot-password) remains — deferred because it needs a real password-reset flow + SMTP, which is a go-live (email) dependency.
+
 ### P3 — nice-to-have
 
 - **A12.** Group the 15-item left nav into sections ("Assess / Manage / Evidence & Audit / Admin") — the flat list slows scanning. `[Opus · M · navigation]`
