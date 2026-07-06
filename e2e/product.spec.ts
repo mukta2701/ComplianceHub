@@ -388,6 +388,21 @@ test("a KPI is logged and its next steps raise a follow-up task", async ({ page 
   await expect(page.getByRole("heading", { name: "Performance measures", level: 1 })).toBeVisible();
   await expect(page.getByText("Mean time to de-provision leavers")).toBeVisible();
 
+  // Record two readings for the KPI and assert the trend reflects the latest
+  // value and the delta/direction versus the previous reading.
+  const kpiRow = page.getByRole("row", { name: /Mean time to de-provision leavers/ });
+  await kpiRow.getByLabel(/^Measurement value/).fill("12");
+  await kpiRow.getByLabel(/^Measurement date/).fill("2026-07-01");
+  await kpiRow.getByRole("button", { name: "Record" }).click();
+  await expect(page.getByText("12 (1 Jul)")).toBeVisible();
+
+  await kpiRow.getByLabel(/^Measurement value/).fill("20");
+  await kpiRow.getByLabel(/^Measurement date/).fill("2026-07-02");
+  await kpiRow.getByRole("button", { name: "Record" }).click();
+  // Latest reading is 20, up +8 on the previous reading of 12.
+  await expect(kpiRow.getByText("20 (2 Jul)")).toBeVisible();
+  await expect(kpiRow.getByText("+8")).toBeVisible();
+
   const listAxe = await new AxeBuilder({ page }).analyze();
   expect(listAxe.violations).toEqual([]);
 

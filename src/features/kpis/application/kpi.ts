@@ -15,3 +15,11 @@ export const kpiInputSchema = z.object({
   lastReviewed: optionalDate,
 });
 export type KpiInput = z.infer<typeof kpiInputSchema>;
+
+export const kpiMeasurementInputSchema = z.object({
+  kpiId: z.string().uuid(),
+  value: z.coerce.number().finite(),
+  measuredOn: z.union([z.iso.date(), z.literal("")]).optional().transform((v) => v || new Date().toISOString().slice(0, 10)),
+  note: z.string().trim().max(500).optional().transform((v) => (v ? v : null)),
+});
+export type KpiMeasurementInput = z.infer<typeof kpiMeasurementInputSchema>;

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireAppContext } from "@/lib/app-context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
-import { kpiInputSchema } from "@/features/kpis/application/kpi";
+import { kpiInputSchema, kpiMeasurementInputSchema } from "@/features/kpis/application/kpi";
 
 function toRow(parsed: ReturnType<typeof kpiInputSchema.parse>, organisationId: string) {
   return {
@@ -29,6 +29,20 @@ export async function updateKpiAction(formData: FormData) {
   const parsed = kpiInputSchema.parse({ ...Object.fromEntries(formData), organisationId: organisation.id });
   const { error } = await supabase.from("kpis").update({ ...toRow(parsed, organisation.id), updated_at: new Date().toISOString() }).eq("id", id);
   if (error) throw new Error("Could not update the KPI");
+  revalidatePath("/app/kpis");
+}
+
+export async function recordKpiMeasurementAction(formData: FormData) {
+  const { supabase, user, organisation } = await requireAppContext();
+  await enforceRateLimit(`kpi:${user.id}`, { limit: 30, windowMs: 60_000 });
+  const parsed = kpiMeasurementInputSchema.parse(Object.fromEntries(formData));
+  const { error } = await supabase.from("kpi_measurements").insert({
+    organisation_id: organisation.id, kpi_id: parsed.kpiId, value: parsed.value,
+    measured_on: parsed.measuredOn, note: parsed.note, created_by: user.id,
+  });
+  if (error) throw new Error("Could not record the measurement");
+  const { error: reviewError } = await supabase.from("kpis").update({ last_reviewed: parsed.measuredOn, updated_at: new Date().toISOString() }).eq("id", parsed.kpiId);
+  if (reviewError) throw new Error("Could not update the KPI review date");
   revalidatePath("/app/kpis");
 }
 
