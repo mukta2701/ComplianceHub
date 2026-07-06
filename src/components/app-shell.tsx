@@ -29,6 +29,7 @@ const navGroups = [
   { label: "Admin", items: [
     ["/app/settings", "settings", "Settings"],
     ["/app/integrations", "lock", "Integrations"],
+    ["/app/trust", "shield", "Trust Center"],
   ] },
 ] as const;
 
@@ -41,7 +42,7 @@ const TITLES: Array<[string, string]> = [
   ["/app/audits/new", "Plan an audit"], ["/app/audits", "Internal audits"],
   ["/app/kpis", "Performance measures"], ["/app/reports/readiness", "Readiness report"],
   ["/app/policies/new", "Author a policy"], ["/app/policies", "Policy library"],
-  ["/app/integrations", "Ticketing integrations"], ["/app", "Dashboard"],
+  ["/app/integrations", "Ticketing integrations"], ["/app/trust", "Trust Center"], ["/app", "Dashboard"],
 ];
 
 function isActive(path: string, href: string) { return href === "/app" ? path === "/app" : path === href || path.startsWith(`${href}/`); }

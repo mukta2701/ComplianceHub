@@ -964,3 +964,75 @@ test("a task is pushed to a sandbox tracker, polled to In Progress, then the con
   await toRevoke.getByRole("button", { name: "Revoke" }).click();
   await expect(toRevoke.getByText("Revoked")).toBeVisible();
 });
+
+test("an owner enables a public Trust Center that leaks nothing sensitive", async ({ page, browser }, testInfo) => {
+  const suffix = `${Date.now()}-${testInfo.project.name}`;
+  const email = `trust-${suffix}@example.test`;
+  const password = "Test-only-passphrase-2026";
+  const orgName = `Trust Workspace ${suffix}`;
+  const slug = `trust-${suffix}`.toLowerCase().replace(/[^a-z0-9-]/g, "-");
+  const headline = "We protect customer data with an audited ISMS.";
+
+  await page.goto("/sign-up");
+  await page.getByLabel("Name").fill("Beta Owner");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page.getByLabel("Confirm password").fill(password);
+  await page.getByRole("button", { name: "Create account" }).click();
+
+  await page.waitForURL(/\/sign-in/);
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
+  await page.getByLabel("Organisation name").fill(orgName);
+  await page.getByRole("button", { name: "Create workspace" }).click();
+  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
+
+  // The owner enables the Trust Center from the owner-only settings page: pick a
+  // slug + headline, opt into policy titles, and switch it on.
+  await page.goto("/app/trust");
+  await expect(page.getByRole("heading", { name: "Trust Center", level: 1 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Public Trust Center" })).toBeVisible();
+  await page.getByLabel("Make the Trust Center publicly visible").check();
+  await page.getByLabel("Public web address (slug)").fill(slug);
+  await page.getByLabel("Headline (optional)").fill(headline);
+  await page.getByRole("button", { name: "Save Trust Center" }).click();
+
+  // The live public URL is surfaced once the Trust Center is on.
+  await expect(page.getByRole("status")).toContainText(`/trust/${slug}`);
+
+  // A FRESH context with no storage state — a genuinely logged-out prospect.
+  const anon = await browser.newContext();
+  const anonPage = await anon.newPage();
+  await anonPage.goto(`/trust/${slug}`);
+
+  // The safe, positive summary renders: org name h1, the ISMS statement, the
+  // owner's headline, the readiness ring, and the summary stat tiles.
+  await expect(anonPage.getByRole("heading", { name: `${orgName} — Trust Center`, level: 1 })).toBeVisible();
+  await expect(anonPage.getByText(/ISO\/IEC 27001-aligned/)).toBeVisible();
+  await expect(anonPage.getByText(headline)).toBeVisible();
+  await expect(anonPage.getByText("READY")).toBeVisible();
+  await expect(anonPage.getByText("CONTROLS IN SCOPE")).toBeVisible();
+  await expect(anonPage.getByText("APPROVED POLICIES")).toBeVisible();
+
+  // No links into the authenticated app, no action controls, and no sign-in
+  // form leak onto the public page. Scope to the page's own <main> so Next's
+  // dev-only toolbar (body-level, absent in a production build) does not skew it.
+  const view = anonPage.locator("main");
+  expect(await view.locator('a[href^="/app"]').count()).toBe(0);
+  expect(await view.getByRole("button").count()).toBe(0);
+  expect(await view.locator('input[type="password"]').count()).toBe(0);
+  // No member identity (the owner's email) is ever exposed publicly.
+  expect(await anonPage.getByText(email).count()).toBe(0);
+
+  // Accessibility: zero automatically detectable violations on the public page.
+  expect((await new AxeBuilder({ page: anonPage }).analyze()).violations).toEqual([]);
+
+  // A bogus slug reveals nothing — just the neutral unavailable card (no oracle).
+  await anonPage.goto(`/trust/${slug}-does-not-exist`);
+  await expect(anonPage.getByRole("heading", { name: "This trust center is not available", level: 1 })).toBeVisible();
+  await expect(anonPage.getByText(`${orgName} — Trust Center`)).toHaveCount(0);
+
+  await anon.close();
+});
