@@ -134,3 +134,20 @@ Small backlog items carried forward in the SDD ledger (`.superpowers/sdd/progres
 - Downloadable blank import templates matching the expected headers.
 
 **Deferred hardening (from reviews):** apostrophe-strip caveat for hand-authored leading-`'` data; `intField` accepts hex-ish input; SoA confirm shows "(0)" when no controls match; pre-existing Phase-A sidebar footer/avatar overlap (shell polish).
+
+---
+
+## Phase C — Run the audit (Done)
+
+**What shipped:** Internal audit module (schedule audits, work a clause/control checklist, raise findings/non-conformities that spawn owned corrective-action tasks), a KPI/management-review register, a leadership readiness report (framework coverage, risk posture, task/evidence health, audit status) with PDF export + an audit evidence-pack export, and time-boxed **read-only external-auditor access** via hashed tokens + a security-definer org-scoped RPC + a public `/audit-view/<token>` page (no login, no service-role, refuses expired/revoked/unknown).
+
+**Suggested improvements (backlog):**
+- Recurring/scheduled audits (annual/quarterly cycle) auto-created from a calendar.
+- Audit templates: pre-populate the checklist from the full Annex A control set for a framework.
+- Findings dashboard + trend over time; link findings to the SoA control they affect.
+- KPI trend charts + threshold RAG status (currently a flat log); KPI edit UI.
+- Readiness report: scheduled email/PDF to leadership; a 5th risk-band tone so high vs very-high are visually distinct.
+- Auditor access hardening: flash the one-time link via a single-use server-side store instead of a 60s cookie; per-view access log of auditor-token reads; escape `audit.reference` in the evidence-pack filename.
+- Management-review meeting record (agenda + minutes) built on the KPI log.
+
+**Deferred hardening (from reviews):** evidence-pack Content-Disposition filename not escaped; pgTAP 021 per-query cross-org coverage (RPC code-clean, public-view e2e renders full payload); `grant usage public to anon` broader than needed; auditor token `on delete cascade` with its audit.
