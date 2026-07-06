@@ -28,6 +28,14 @@ export async function createOrganisationAction(formData: FormData) {
         return { id: String(data), name, slug: uniqueSlug };
       },
     });
+    // The shared /app layout renders the workspace switcher from a membership
+    // query. Without this, Next.js's router reuses the layout output it already
+    // rendered for /app/onboarding (no membership yet, hence the "Your
+    // workspace" fallback) when it soft-navigates to the dashboard below,
+    // showing the generic label until the next full navigation. Revalidating
+    // the layout segment forces it to refetch with the membership that now
+    // exists.
+    revalidatePath("/app", "layout");
     redirect(`/app?organisation=${organisation.id}`);
   } catch (error) {
     if (error && typeof error === "object" && "digest" in error) throw error;
