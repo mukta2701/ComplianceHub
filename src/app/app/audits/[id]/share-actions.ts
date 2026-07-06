@@ -15,7 +15,8 @@ export async function mintAuditorTokenAction(formData: FormData) {
   await enforceRateLimit(`auditor-token:${user.id}`, { limit: 10, windowMs: 60 * 60_000 });
   const auditId = String(formData.get("auditId"));
   const scope = String(formData.get("scope") || "org"); // 'org' | 'audit'
-  const days = Math.min(90, Math.max(1, Number(formData.get("expiresInDays") || 14)));
+  const rawDays = Number(formData.get("expiresInDays"));
+  const days = Number.isFinite(rawDays) ? Math.min(90, Math.max(1, rawDays)) : 14;
   // CSPRNG raw token; ONLY its sha256 hex hash is stored (matches the RPC lookup).
   const { rawToken, tokenHash, expiresAt } = mintAuditorToken({ expiresInDays: days });
   const { error } = await supabase.from("auditor_access_tokens").insert({

@@ -25,14 +25,16 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     { header: "Section", value: (r) => r.section }, { header: "Reference", value: (r) => r.ref },
     { header: "Item", value: (r) => r.item }, { header: "Result", value: (r) => r.result }, { header: "Detail", value: (r) => r.detail },
   ];
-  const filename = `audit-pack-${audit.reference}`;
+  const safeReference = audit.reference.replace(/["\r\n]/g, "");
+  const filename = `audit-pack-${safeReference}`;
+  const encodedFilename = encodeURIComponent(`audit-pack-${audit.reference}`);
   if (format === "csv") {
     return new NextResponse(toCsv(columns, rows), { headers: {
       "content-type": "text/csv; charset=utf-8",
-      "content-disposition": `attachment; filename="${filename}.csv"`, "cache-control": "private, no-store" } });
+      "content-disposition": `attachment; filename="${filename}.csv"; filename*=UTF-8''${encodedFilename}.csv`, "cache-control": "private, no-store" } });
   }
   const buffer = await toXlsx("Audit pack", columns, rows);
   return new NextResponse(new Uint8Array(buffer), { headers: {
     "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "content-disposition": `attachment; filename="${filename}.xlsx"`, "cache-control": "private, no-store" } });
+    "content-disposition": `attachment; filename="${filename}.xlsx"; filename*=UTF-8''${encodedFilename}.xlsx`, "cache-control": "private, no-store" } });
 }
