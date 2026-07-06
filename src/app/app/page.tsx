@@ -3,7 +3,8 @@ import { requireAppContext } from "@/lib/app-context";
 import { isOverdue, type TaskStatus } from "@/features/tasks/domain/tasks";
 import { summariseSoaReadiness } from "@/features/soa/domain/readiness";
 import type { SoaStatus } from "@/features/soa/domain/soa";
-import { Card, PageIntro, Pill, Ring, Stat } from "@/components/ui";
+import { buildOnboardingChecklist } from "@/features/onboarding/domain/checklist";
+import { Card, PageIntro, Pill, Progress, Ring, Stat } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { acceptCalendarSeedAction } from "./tasks/actions";
 
@@ -13,7 +14,7 @@ const SOURCE_LABEL: Record<string, string> = { gap: "From assessment gap", evide
 export default async function AppHome() {
   const { supabase, organisation } = await requireAppContext();
   const today = new Date().toISOString().slice(0, 10);
-  const [{ count: assessments }, { count: risks }, { count: snapshots }, { count: openTasks }, { count: overdue }, { count: liveEvidence }, { count: expiring }, { data: controls }] = await Promise.all([
+  const [{ count: assessments }, { count: risks }, { count: snapshots }, { count: openTasks }, { count: overdue }, { count: liveEvidence }, { count: expiring }, { data: controls }, { count: allRisks }, { count: policies }, { count: soaRegisters }, { count: members }, { count: invites }, { count: integrations }] = await Promise.all([
     supabase.from("assessment_sessions").select("id", { count: "exact", head: true }),
     supabase.from("risks").select("id", { count: "exact", head: true }).neq("status", "closed"),
     supabase.from("soa_snapshots").select("id", { count: "exact", head: true }),
@@ -22,7 +23,23 @@ export default async function AppHome() {
     supabase.from("evidence").select("id", { count: "exact", head: true }).in("status", ["current", "expiring", "expired"]),
     supabase.from("evidence").select("id", { count: "exact", head: true }).in("status", ["expiring", "expired"]),
     supabase.from("controls").select("id,code,title,evidence_links(evidence_id,evidence(status)),tasks(id,status,due_on,source)"),
+    // Onboarding-checklist signals (all RLS-scoped, head/count-only). allRisks is
+    // unfiltered — a risk that was added then closed still counts as "added".
+    supabase.from("risks").select("id", { count: "exact", head: true }),
+    supabase.from("policies").select("id", { count: "exact", head: true }),
+    supabase.from("soa_registers").select("id", { count: "exact", head: true }),
+    supabase.from("memberships").select("user_id", { count: "exact", head: true }),
+    supabase.from("invitations").select("id", { count: "exact", head: true }),
+    supabase.from("integration_connections").select("id", { count: "exact", head: true }).is("revoked_at", null),
   ]);
+  const checklist = buildOnboardingChecklist({
+    hasAssessment: (assessments ?? 0) > 0,
+    hasPolicy: (policies ?? 0) > 0,
+    hasRisk: (allRisks ?? 0) > 0,
+    hasSoa: (soaRegisters ?? 0) > 0 || (snapshots ?? 0) > 0,
+    hasTeam: (members ?? 0) > 1 || (invites ?? 0) > 0,
+    hasIntegration: (integrations ?? 0) > 0,
+  });
   const attention = (controls ?? []).flatMap((control) => {
     const statuses = (control.evidence_links ?? []).map((link) => { const ev = Array.isArray(link.evidence) ? link.evidence[0] : link.evidence; return ev?.status ?? null; });
     const staleEvidence = statuses.length > 0 && statuses.every((s) => s !== null && STALE_EVIDENCE.has(s));
@@ -46,6 +63,17 @@ export default async function AppHome() {
   const readiness = summariseSoaReadiness((soaItems ?? []).map((s) => ({ status: s.status as SoaStatus }))).percent;
   return <>
     <PageIntro eyebrow={organisation.name.toUpperCase()} title="Readiness dashboard" body="Your live view of open work, evidence freshness, and everything the automation is surfacing on its own." action={<Link className="button primary" href="/app/assessment">{(assessments ?? 0) > 0 ? "Continue assessment" : "Start assessment"} <Icon name="arrow" /></Link>} />
+    {!checklist.complete && <Card className="onboarding-card">
+      <div className="card-head"><div><h2>Get certification-ready</h2><p>A few high-value steps to activate your workspace — this guide hides itself once every step is done.</p></div><Pill tone={checklist.percent === 100 ? "green" : "blue"}>{checklist.doneCount} of {checklist.total} done</Pill></div>
+      <div className="onboarding-progress"><Progress value={checklist.percent} tone="green" /></div>
+      <ol className="onboarding-steps">
+        {checklist.steps.map((step, index) => <li key={step.id} className={step.done ? "done" : ""}>
+          <span className="marker">{step.done ? <Icon name="check" /> : index + 1}</span>
+          <span className="step-body"><strong>{step.label}</strong>{!step.done && <small>{step.description}</small>}</span>
+          {step.done ? <Pill tone="green"><Icon name="check" />Done</Pill> : <Link className="button secondary" href={step.href}>{step.cta} <Icon name="arrow" /></Link>}
+        </li>)}
+      </ol>
+    </Card>}
     <div className="stats-grid"><Stat label="OPEN TASKS" value={openTasks ?? 0} detail="in progress or to do" /><Stat label="OVERDUE" value={overdue ?? 0} detail="flagged by the daily sweep" tone="red" /><Stat label="EVIDENCE ITEMS" value={liveEvidence ?? 0} detail="files, links and notes" tone="green" /><Stat label="EXPIRING / EXPIRED" value={expiring ?? 0} detail="need fresh proof" tone="amber" /></div>
     <div className="dashboard-grid">
       <Card><div className="card-head"><div><h3>Needs attention</h3><p>Work the automation has surfaced — start here.</p></div><Link href="/app/tasks">All tasks</Link></div>

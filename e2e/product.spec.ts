@@ -76,6 +76,19 @@ test("a new user creates an isolated workspace and starts an assessment", async 
   await page.getByRole("button", { name: "Create workspace" }).click();
   await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
 
+  // A brand-new workspace sees the first-run onboarding checklist: "Create your
+  // workspace" is already done, and at least one actionable step is offered.
+  const checklist = page.locator(".onboarding-card");
+  await expect(checklist.getByRole("heading", { name: "Get certification-ready" })).toBeVisible();
+  const workspaceStep = checklist.locator("li", { hasText: "Create your workspace" });
+  await expect(workspaceStep.getByText("Done")).toBeVisible();
+  const assessmentStep = checklist.locator("li", { hasText: "Run your first readiness assessment" });
+  await expect(assessmentStep.getByRole("link", { name: /Start assessment/ })).toBeVisible();
+
+  // Accessibility on the dashboard with the checklist rendered.
+  const dashAxe = await new AxeBuilder({ page }).analyze();
+  expect(dashAxe.violations).toEqual([]);
+
   // On mobile the sidebar nav is off-canvas until the drawer is opened.
   const navToggle = page.getByRole("button", { name: "Open navigation" });
   if (await navToggle.isVisible()) await navToggle.click();
