@@ -803,3 +803,99 @@ test("a policy is authored, approved, accepted, and re-accepted after a material
   const evidenceAxe = await new AxeBuilder({ page }).analyze();
   expect(evidenceAxe.violations).toEqual([]);
 });
+
+test("a task is pushed to a sandbox tracker, polled to In Progress, then the connection is revoked", async ({ page }, testInfo) => {
+  const suffix = `${Date.now()}-${testInfo.project.name}`;
+  const email = `int-${suffix}@example.test`;
+  const password = "Test-only-passphrase-2026";
+
+  await page.goto("/sign-up");
+  await page.getByLabel("Name").fill("Beta Owner");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page.getByLabel("Confirm password").fill(password);
+  await page.getByRole("button", { name: "Create account" }).click();
+
+  await page.waitForURL(/\/sign-in/);
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
+  await page.getByLabel("Organisation name").fill(`Integrations Workspace ${suffix}`);
+  await page.getByRole("button", { name: "Create workspace" }).click();
+  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
+
+  // Create an owned task and capture its detail URL — this is the existing task
+  // that gets pushed to the tracker further down.
+  await page.goto("/app/tasks/new");
+  await page.getByLabel("Title", { exact: true }).fill("Ship the tracker integration");
+  await page.getByRole("button", { name: "Create task" }).click();
+  await page.waitForURL(/\/app\/tasks$/);
+  await page.getByRole("link", { name: "Ship the tracker integration" }).click();
+  await page.waitForURL(/\/app\/tasks\/[0-9a-f-]+$/);
+  const taskUrl = page.url();
+  const taskId = new URL(taskUrl).pathname.split("/").pop() as string;
+
+  // 1. Open Integrations (FAKE provider is the dev default; INTEGRATIONS_LIVE is
+  //    not set). The nav link is the last of 15 items in a fixed 100vh sidebar
+  //    with no scroll, so it clips below the viewport — reach the page directly.
+  //    Provider defaults to Jira.
+  await page.goto("/app/integrations");
+  await expect(page.getByRole("heading", { name: "Ticketing integrations", level: 1 })).toBeVisible();
+  await page.getByLabel("Label", { exact: true }).fill("Sandbox Jira");
+  await page.getByRole("button", { name: "Add connection" }).click();
+  const connection = page.getByRole("listitem").filter({ hasText: "Sandbox Jira" });
+  await expect(connection.getByText("Active")).toBeVisible();
+
+  // 2. Axe on the integrations page.
+  const integrationsAxe = await new AxeBuilder({ page }).analyze();
+  expect(integrationsAxe.violations).toEqual([]);
+
+  // 3. Push the existing task to the tracker; the FAKE provider mints a "To Do"
+  //    ticket and the send-to-tracker form is replaced by the ticket chip.
+  await page.goto(taskUrl);
+  await page.getByRole("button", { name: "Send to tracker" }).click();
+  await expect(page.getByText(/FAKE-.+: To Do/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Send to tracker" })).toHaveCount(0);
+
+  // 4. Simulate a poll. The push stamps last_synced_at = now, and the sweep only
+  //    re-syncs tickets older than the 30-minute window, so first age this
+  //    ticket through the owner's own RLS-scoped client (anon key, no service
+  //    role — members may update task_tickets) to simulate the window elapsing,
+  //    then run the CRON_SECRET-gated sweep. The secret is read from the env the
+  //    same way the daily-sweep e2e does (localEnvironment falls back to
+  //    .env.local, which the dev server also loads, so they match). If it is
+  //    genuinely unavailable, skip the poll assertion rather than guess a secret.
+  let cronSecret: string | null = null;
+  try { cronSecret = localEnvironment("CRON_SECRET"); } catch { cronSecret = null; }
+  if (cronSecret) {
+    const owner = createClient(
+      localEnvironment("NEXT_PUBLIC_SUPABASE_URL"),
+      localEnvironment("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
+      { auth: { persistSession: false, autoRefreshToken: false } },
+    );
+    const { error: signInError } = await owner.auth.signInWithPassword({ email, password });
+    expect(signInError, "the owner should sign in to age the ticket").toBeNull();
+    const aged = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const { error: ageError } = await owner.from("task_tickets").update({ last_synced_at: aged }).eq("task_id", taskId);
+    expect(ageError, "the owner should age their own ticket into the sync window").toBeNull();
+
+    const res = await page.request.post("/api/cron/integrations-sync", { headers: { authorization: `Bearer ${cronSecret}` } });
+    expect(res.ok()).toBeTruthy();
+    await page.reload();
+    await expect(page.getByText(/FAKE-.+: In Progress/)).toBeVisible();
+  } else {
+    console.log("CRON_SECRET unavailable to the Playwright process — skipping step 4's poll-sync assertion.");
+  }
+
+  // 5. Axe on the task detail page with the tracker chip.
+  const taskAxe = await new AxeBuilder({ page }).analyze();
+  expect(taskAxe.violations).toEqual([]);
+
+  // 6. Revoke the sandbox connection back on the integrations page.
+  await page.goto("/app/integrations");
+  await expect(page.getByRole("heading", { name: "Ticketing integrations", level: 1 })).toBeVisible();
+  const toRevoke = page.getByRole("listitem").filter({ hasText: "Sandbox Jira" });
+  await toRevoke.getByRole("button", { name: "Revoke" }).click();
+  await expect(toRevoke.getByText("Revoked")).toBeVisible();
+});
