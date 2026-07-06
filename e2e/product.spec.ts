@@ -184,6 +184,78 @@ test("a treatment plan spawns an owned, dated task", async ({ page }, testInfo) 
   await expect(page.getByText("Treatment plan RTP-001")).toBeVisible();
 });
 
+test("an audit runs from plan through checklist to a corrective-action task", async ({ page }, testInfo) => {
+  const suffix = `${Date.now()}-${testInfo.project.name}`;
+  const email = `aud-${suffix}@example.test`;
+  const password = "Test-only-passphrase-2026";
+
+  await page.goto("/sign-up");
+  await page.getByLabel("Name").fill("Beta Owner");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page.getByLabel("Confirm password").fill(password);
+  await page.getByRole("button", { name: "Create account" }).click();
+
+  await page.waitForURL(/\/sign-in/);
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
+  await page.getByLabel("Organisation name").fill(`Audit Workspace ${suffix}`);
+  await page.getByRole("button", { name: "Create workspace" }).click();
+  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
+
+  // Reach the audits module through the workspace nav.
+  const navToggle = page.getByRole("button", { name: "Open navigation" });
+  if (await navToggle.isVisible()) await navToggle.click();
+  await page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: "Audits", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Internal audits", level: 1 })).toBeVisible();
+
+  const listAxe = await new AxeBuilder({ page }).analyze();
+  expect(listAxe.violations).toEqual([]);
+
+  // Plan an audit.
+  await page.getByRole("link", { name: "Plan an audit" }).click();
+  await expect(page.getByRole("heading", { name: "Plan an audit", level: 1 })).toBeVisible();
+  await page.getByLabel("Reference", { exact: true }).fill("AUD-001");
+  await page.getByLabel("Title").fill("Access control internal audit");
+  await page.getByRole("button", { name: "Plan audit" }).click();
+
+  // On the detail page: add a checklist item.
+  await page.waitForURL(/\/app\/audits\/[0-9a-f-]+$/);
+  const auditUrl = page.url();
+  await expect(page.getByRole("heading", { name: "Access control internal audit", level: 2 })).toBeVisible();
+  await page.getByLabel("Checklist item", { exact: true }).fill("Are leavers de-provisioned within 24 hours?");
+  await page.getByRole("button", { name: "Add item" }).click();
+
+  // Set that row's result to Non-compliant and save.
+  await expect(page.getByText("Are leavers de-provisioned within 24 hours?")).toBeVisible();
+  await page.getByLabel(/^Result for/).selectOption("non_compliant");
+  await page.getByRole("button", { name: "Save", exact: true }).first().click();
+  await expect(page.getByRole("cell", { name: "Non-compliant" })).toBeVisible();
+
+  // Raise a finding with a corrective-action task.
+  await page.getByLabel("Summary").fill("Leavers retained access beyond policy");
+  await page.locator("select[name=severity]").selectOption("minor_nc");
+  await page.getByLabel("Corrective action").fill("Automate de-provisioning on HR termination event.");
+  await page.getByLabel(/Raise a corrective-action task from this finding/).check();
+  await page.getByRole("button", { name: "Raise finding" }).click();
+
+  await expect(page.getByText("Leavers retained access beyond policy")).toBeVisible();
+  await expect(page.getByText("Corrective-action task raised.")).toBeVisible();
+
+  const detailAxe = await new AxeBuilder({ page }).analyze();
+  expect(detailAxe.violations).toEqual([]);
+
+  // The corrective action appears as a task in the tasks module.
+  await page.goto("/app/tasks");
+  await expect(page.getByText("Corrective action: Leavers retained access beyond policy")).toBeVisible();
+
+  // The detail route re-opens cleanly for later work.
+  await page.goto(auditUrl);
+  await expect(page.getByRole("heading", { name: "Access control internal audit", level: 2 })).toBeVisible();
+});
+
 test("a risk register workbook can be imported through the wizard", async ({ page }, testInfo) => {
   const suffix = `${Date.now()}-${testInfo.project.name}`;
   const email = `imp-${suffix}@example.test`;
