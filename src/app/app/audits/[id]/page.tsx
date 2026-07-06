@@ -5,7 +5,8 @@ import { requireAppContext } from "@/lib/app-context";
 import { AUDIT_STATUS_LABEL, CHECKLIST_RESULT_LABEL, CHECKLIST_RESULT_TONE, FINDING_SEVERITY_LABEL, FINDING_SEVERITY_TONE, FINDING_STATUS_LABEL, checklistCompletion, summariseFindings, type AuditStatus, type ChecklistResult, type FindingSeverity, type FindingStatus } from "@/features/audits/domain/audits";
 import { AUDITOR_LINK_FLASH_COOKIE } from "@/features/audits/application/auditor-token";
 import { Card, PageIntro, Pill, Progress } from "@/components/ui";
-import { updateAuditStatusAction, addChecklistItemAction, updateChecklistItemAction, raiseFindingAction, updateFindingStatusAction } from "../actions";
+import { Icon } from "@/components/icons";
+import { updateAuditStatusAction, addChecklistItemAction, populateAuditChecklistAction, updateChecklistItemAction, raiseFindingAction, updateFindingStatusAction } from "../actions";
 import { mintAuditorTokenAction, revokeAuditorTokenAction } from "./share-actions";
 
 const RESULTS: ChecklistResult[] = ["not_tested", "compliant", "non_compliant", "not_applicable"];
@@ -81,6 +82,15 @@ export default async function AuditDetailPage({ params }: { params: Promise<{ id
         {!rows.length && <tr><td colSpan={4} style={{ color: "#596273" }}>No checklist items yet. Add the first one below.</td></tr>}
       </tbody>
     </table></div></Card>
+
+    <Card style={{ padding: "18px", marginTop: "16px" }}>
+      <h2 style={{ fontSize: "15px", margin: "0 0 4px" }}>Populate from control library</h2>
+      <p style={{ fontSize: "12px", color: "#596273", margin: "0 0 12px" }}>Adds a checklist row for every Annex A control not already listed. Safe to run again — it only fills in the controls still missing.</p>
+      <form action={populateAuditChecklistAction}>
+        <input type="hidden" name="auditId" value={id} />
+        <button className="button secondary"><Icon name="clipboard" />Populate from control library</button>
+      </form>
+    </Card>
 
     <Card style={{ padding: "18px", marginTop: "16px" }}>
       <h2 style={{ fontSize: "15px", margin: "0 0 10px" }}>Add checklist item</h2>

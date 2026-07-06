@@ -45,6 +45,39 @@ export async function addChecklistItemAction(formData: FormData) {
   revalidatePath(`/app/audits/${parsed.auditId}`);
 }
 
+export async function populateAuditChecklistAction(formData: FormData) {
+  const { supabase, user, organisation } = await requireAppContext();
+  await enforceRateLimit(`audit:${user.id}`, { limit: 30, windowMs: 60_000 });
+  const auditId = String(formData.get("auditId"));
+  // Confirm the audit exists in the caller's org (read under RLS — never a
+  // service role); a stranger's id simply reads back nothing.
+  const { data: audit } = await supabase.from("audits").select("id").eq("id", auditId).maybeSingle();
+  if (!audit) throw new Error("Could not find that audit");
+  // The Annex A control library is global (RLS: controls_read using(true)); the
+  // audits module already reads it this way elsewhere.
+  const [{ data: controls }, { data: existing }] = await Promise.all([
+    supabase.from("controls").select("id,code,title").order("position"),
+    supabase.from("audit_checklist_items").select("control_id,position").eq("audit_id", auditId),
+  ]);
+  // Idempotency: skip any control that already has a row on this audit, so a
+  // re-run only fills in the controls that are still missing.
+  const seenControls = new Set((existing ?? []).map((r) => r.control_id).filter((c): c is string => !!c));
+  let position = (existing ?? []).reduce((max, r) => Math.max(max, r.position), -1);
+  const rows = (controls ?? [])
+    .filter((c) => !seenControls.has(c.id))
+    .map((c) => ({
+      organisation_id: organisation.id, audit_id: auditId, control_id: c.id,
+      area: "Annex A", clause_reference: c.code,
+      checklist_item: `Is the control '${c.title}' implemented and operating effectively?`,
+      compliant: "not_tested" as const, position: ++position,
+    }));
+  if (rows.length) {
+    const { error } = await supabase.from("audit_checklist_items").insert(rows);
+    if (error) throw new Error("Could not populate the checklist from the control library");
+  }
+  revalidatePath(`/app/audits/${auditId}`);
+}
+
 export async function updateChecklistItemAction(formData: FormData) {
   const { supabase, user } = await requireAppContext();
   await enforceRateLimit(`audit:${user.id}`, { limit: 30, windowMs: 60_000 });

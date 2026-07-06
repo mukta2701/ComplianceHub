@@ -257,10 +257,22 @@ test("an audit runs from plan through checklist to a corrective-action task", as
   await page.getByLabel("Checklist item", { exact: true }).fill("Are leavers de-provisioned within 24 hours?");
   await page.getByRole("button", { name: "Add item" }).click();
 
+  // One-click populate the checklist from the Annex A control library (93
+  // controls). It is idempotent: a second click adds no duplicates.
+  const checklistRows = page.locator("table").first().locator("tbody tr");
+  await page.getByRole("button", { name: "Populate from control library" }).click();
+  await expect(page.getByText("Is the control 'Direction for security policy' implemented and operating effectively?")).toBeVisible();
+  const populatedCount = await checklistRows.count();
+  expect(populatedCount).toBeGreaterThan(90);
+  await page.getByRole("button", { name: "Populate from control library" }).click();
+  await expect(page.getByText("Is the control 'Direction for security policy' implemented and operating effectively?")).toBeVisible();
+  expect(await checklistRows.count(), "re-running must not duplicate rows").toBe(populatedCount);
+
   // Set that row's result to Non-compliant and save.
   await expect(page.getByText("Are leavers de-provisioned within 24 hours?")).toBeVisible();
-  await page.getByLabel(/^Result for/).selectOption("non_compliant");
-  await page.getByRole("button", { name: "Save", exact: true }).first().click();
+  const leaverRow = checklistRows.filter({ hasText: "Are leavers de-provisioned within 24 hours?" });
+  await leaverRow.getByLabel("Result for Are leavers de-provisioned within 24 hours?").selectOption("non_compliant");
+  await leaverRow.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("cell", { name: "Non-compliant" })).toBeVisible();
 
   // Raise a finding with a corrective-action task.
@@ -312,7 +324,7 @@ test("an audit runs from plan through checklist to a corrective-action task", as
   // Share with an auditor: the owner mints an AUDIT-SCOPED, read-only link.
   await page.goto(auditUrl);
   await expect(page.getByRole("heading", { name: "Share with an auditor" })).toBeVisible();
-  await page.getByLabel("Label").fill("External ISO auditor");
+  await page.getByLabel("Label", { exact: true }).fill("External ISO auditor");
   // Scope defaults to "This audit" and expiry to 14 days — leave them. Mint it.
   await page.getByRole("button", { name: "Create link" }).click();
 
