@@ -45,7 +45,7 @@ export default async function AuditDetailPage({ params }: { params: Promise<{ id
     <PageIntro eyebrow={`AUDIT ${audit.reference} · ${audit.framework}`} title={audit.title} body={audit.scope || "No scope recorded yet."} action={
       <form action={updateAuditStatusAction} style={{ display: "flex", gap: "8px", alignItems: "center" }}>
         <input type="hidden" name="id" value={id} />
-        <select name="status" defaultValue={status} aria-label="Audit status">{(["planned", "in_progress", "reporting", "closed"] as AuditStatus[]).map((s) => <option key={s} value={s}>{AUDIT_STATUS_LABEL[s]}</option>)}</select>
+        <select name="status" className="field" defaultValue={status} aria-label="Audit status">{(["planned", "in_progress", "reporting", "closed"] as AuditStatus[]).map((s) => <option key={s} value={s}>{AUDIT_STATUS_LABEL[s]}</option>)}</select>
         <button className="button secondary">Update status</button>
       </form>
     } />

@@ -38,7 +38,7 @@ export function ImportWizard({ module, fields, recordsHref, recordsLabel, regist
       <h2 style={{ fontSize: "15px", margin: "0 0 10px" }}>1. Upload your workbook</h2>
       <form action={(fd) => start(async () => analyse(fd))} style={{ display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "center" }}>
         <input type="hidden" name="module" value={module} />
-        {registers && registers.length > 0 && <label style={{ fontSize: "13px", fontWeight: 700 }}>Register<select value={registerId} onChange={(e) => setRegisterId(e.target.value)} style={{ display: "block" }} aria-label="Target SoA register">{registers.map((r) => <option key={r.id} value={r.id}>{r.title}</option>)}</select></label>}
+        {registers && registers.length > 0 && <label style={{ fontSize: "13px", fontWeight: 700 }}>Register<select value={registerId} onChange={(e) => setRegisterId(e.target.value)} className="field" style={{ display: "block" }} aria-label="Target SoA register">{registers.map((r) => <option key={r.id} value={r.id}>{r.title}</option>)}</select></label>}
         <input name="file" type="file" accept=".xlsx,.csv" required aria-label="Workbook file (XLSX or CSV)" />
         <button className="button primary" disabled={pending}>Analyse file</button>
       </form>
@@ -51,7 +51,7 @@ export function ImportWizard({ module, fields, recordsHref, recordsLabel, regist
       <div className="data-table-wrap" role="region" aria-label="Column mapping" tabIndex={0}>
         <table><thead><tr><th>File column</th><th>Maps to</th></tr></thead><tbody>
           {headers.map((h) => <tr key={h}><td>{h}</td><td>
-            <select aria-label={`Map column ${h}`} value={mapping[h] ?? ""} onChange={(e) => setMapping({ ...mapping, [h]: e.target.value })}>
+            <select aria-label={`Map column ${h}`} className="field" value={mapping[h] ?? ""} onChange={(e) => setMapping({ ...mapping, [h]: e.target.value })}>
               <option value="">Ignore this column</option>
               {fields.map((f) => <option key={f.key} value={f.key}>{f.label}{f.required ? " *" : ""}</option>)}
             </select>

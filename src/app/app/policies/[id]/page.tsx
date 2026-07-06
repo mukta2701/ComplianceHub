@@ -74,7 +74,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
       <form action={setPolicyStatusAction} style={{ display: "flex", gap: "8px", alignItems: "center", marginTop: "14px", borderTop: "1px solid #edf0f4", paddingTop: "14px", flexWrap: "wrap" }}>
         <input type="hidden" name="id" value={id} />
         <label style={{ fontSize: "12px", color: "#596273" }}>Move to
-          <select name="status" defaultValue={status === "approved" ? "draft" : status} aria-label="Policy status" style={{ marginLeft: "8px" }}>{(["draft", "in_review", "archived"] as PolicyStatus[]).map((s) => <option key={s} value={s}>{POLICY_STATUS_LABEL[s]}</option>)}</select>
+          <select name="status" className="field" defaultValue={status === "approved" ? "draft" : status} aria-label="Policy status" style={{ marginLeft: "8px" }}>{(["draft", "in_review", "archived"] as PolicyStatus[]).map((s) => <option key={s} value={s}>{POLICY_STATUS_LABEL[s]}</option>)}</select>
         </label>
         <button className="button secondary">Set status</button>
       </form>
@@ -96,7 +96,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
       </ul>
       <form action={linkPolicyEvidenceAction} style={{ display: "flex", gap: "8px", alignItems: "center" }}>
         <input type="hidden" name="policyId" value={id} />
-        <select name="evidenceId" defaultValue="" aria-label="Link evidence to this policy"><option value="" disabled>Link evidence…</option>{evidenceOptions?.map((e) => <option key={e.id} value={e.id}>{e.title}</option>)}</select>
+        <select name="evidenceId" className="field" defaultValue="" aria-label="Link evidence to this policy"><option value="" disabled>Link evidence…</option>{evidenceOptions?.map((e) => <option key={e.id} value={e.id}>{e.title}</option>)}</select>
         <button className="button secondary">Link</button>
       </form>
     </Card>

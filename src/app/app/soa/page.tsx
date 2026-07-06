@@ -17,7 +17,7 @@ export default async function SoaPage() {
       <Link className="button secondary" href="/app/soa/import">Import</Link>
     </span>} />
     {assessments?.length ? (
-      <Card style={{ padding: "16px" }}><form action={createSoaAction} style={{ display: "flex", gap: "12px" }}><select name="assessmentId" required style={{ flex: 1 }}><option value="">Select an assessment</option>{assessments.map((a) => <option key={a.id} value={a.id}>{a.title}</option>)}</select><button className="button primary">Generate draft</button></form></Card>
+      <Card style={{ padding: "16px" }}><form action={createSoaAction} style={{ display: "flex", gap: "12px" }}><select name="assessmentId" required className="field" style={{ flex: 1 }}><option value="">Select an assessment</option>{assessments.map((a) => <option key={a.id} value={a.id}>{a.title}</option>)}</select><button className="button primary">Generate draft</button></form></Card>
     ) : (
       <EmptyState icon="clipboard" title="Complete an assessment first" body="A Statement of Applicability is generated from a readiness assessment — its answers decide which controls apply. Complete an assessment, then come back here to generate your draft SoA." primary={{ href: "/app/assessment", label: "Start an assessment" }} />
     )}

@@ -32,7 +32,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
         <td>{owner?.display_name ?? "Unassigned"}</td>
         <td className={overdue ? "overdue" : ""}>{t.due_on ?? "—"}{overdue && <> <Pill tone="red">Overdue</Pill></>}</td>
         <td style={{ textTransform: "capitalize" }}>{t.recurrence ?? "—"}</td><td style={{ textTransform: "capitalize" }}>{t.source.replaceAll("_", " ")}</td>
-        <td><form action={updateTaskStatusAction} style={{ display: "flex", gap: "6px", alignItems: "center" }}><input type="hidden" name="id" value={t.id} /><select name="status" defaultValue={t.status} aria-label={`Status for ${t.title}`} className="rounded"><option value="open">Open</option><option value="in_progress">In progress</option><option value="done">Done</option><option value="cancelled">Cancelled</option></select><button className="button secondary" style={{ minHeight: "32px", padding: "6px 12px" }}>Save</button></form></td>
+        <td><form action={updateTaskStatusAction} style={{ display: "flex", gap: "6px", alignItems: "center" }}><input type="hidden" name="id" value={t.id} /><select name="status" defaultValue={t.status} aria-label={`Status for ${t.title}`} className="field"><option value="open">Open</option><option value="in_progress">In progress</option><option value="done">Done</option><option value="cancelled">Cancelled</option></select><button className="button secondary" style={{ minHeight: "32px", padding: "6px 12px" }}>Save</button></form></td>
       </tr>; })}
       {!tasks.length && <tr><td colSpan={6} style={{ color: "#596273" }}>No tasks match this filter.</td></tr>}
     </tbody></table></div></Card>
