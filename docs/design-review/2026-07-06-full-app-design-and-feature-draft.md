@@ -16,7 +16,7 @@ Every actionable line is tagged `[model · effort · labels]`:
 
 Do the P1 design fixes **before** any new feature work — they are cheap and they fix a first impression that currently undercuts the whole product.
 
-> **Already fixed this session (verified, gate-green, on `main`):** **A1** (readiness single source of truth — dashboard now agrees with the report, empty = 0% not 100%), **A2** (Risks register inviting empty state), **A9** (dashboard "Start assessment" until one exists). Fable can skip these and start at A3.
+> **Already fixed this session (verified, gate-green, on `main`):** **A1** (readiness single source of truth — dashboard now agrees with the report, empty = 0% not 100%), **A2 + A5** (shared `EmptyState` component + inviting empty states rolled across Risks, Assets, Evidence, Audits, KPIs, Assessment), **A4** (mobile dashboard action overlap — `.card-foot` now wraps), **A8** (Tasks filter now renders as segmented pills with an active state — the `.segmented` CSS only matched buttons, not the filter's `<a>` links), **A9** (dashboard "Start assessment" until one exists), **A11** (SoA dead-end — shows an EmptyState pointing to Assessment when none exists). **Remaining for Fable to assign:** A3 (Settings rebuild), A6 (Policy-detail redesign), A7 (humanise Integrations), A10 (mobile table clipping), A12–A17 (P3 polish), and the whole feature roadmap (Part B).
 
 ---
 
