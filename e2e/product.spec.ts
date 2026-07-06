@@ -303,6 +303,43 @@ test("a KPI is logged and its next steps raise a follow-up task", async ({ page 
   await expect(page.getByText("KPI follow-up: Mean time to de-provision leavers")).toBeVisible();
 });
 
+test("the leadership readiness report aggregates the ISMS into one accessible view", async ({ page }, testInfo) => {
+  const suffix = `${Date.now()}-${testInfo.project.name}`;
+  const email = `rpt-${suffix}@example.test`;
+  const password = "Test-only-passphrase-2026";
+
+  await page.goto("/sign-up");
+  await page.getByLabel("Name").fill("Beta Owner");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page.getByLabel("Confirm password").fill(password);
+  await page.getByRole("button", { name: "Create account" }).click();
+
+  await page.waitForURL(/\/sign-in/);
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
+  await page.getByLabel("Organisation name").fill(`Report Workspace ${suffix}`);
+  await page.getByRole("button", { name: "Create workspace" }).click();
+  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
+
+  // Reach the readiness report through the workspace nav.
+  const navToggle = page.getByRole("button", { name: "Open navigation" });
+  if (await navToggle.isVisible()) await navToggle.click();
+  await page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: "Reports", exact: true }).click();
+
+  // Section headings for each area of the leadership snapshot render.
+  await expect(page.getByRole("heading", { name: "Leadership readiness report" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Risk posture" })).toBeVisible();
+  // The SoA readiness ring is present with its readiness label.
+  await expect(page.getByText("READY")).toBeVisible();
+  await expect(page.getByText("OPEN NON-CONFORMITIES")).toBeVisible();
+
+  const axe = await new AxeBuilder({ page }).analyze();
+  expect(axe.violations).toEqual([]);
+});
+
 test("a risk register workbook can be imported through the wizard", async ({ page }, testInfo) => {
   const suffix = `${Date.now()}-${testInfo.project.name}`;
   const email = `imp-${suffix}@example.test`;
