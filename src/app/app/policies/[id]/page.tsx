@@ -1,0 +1,75 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { requireAppContext } from "@/lib/app-context";
+import { POLICY_STATUS_LABEL, POLICY_STATUS_TONE, summarisePolicyAcceptances, type PolicyStatus } from "@/features/policies/domain/policies";
+import { Card, PageIntro, Pill, Progress } from "@/components/ui";
+import { updatePolicyAction, approvePolicyAction, setPolicyStatusAction, acceptPolicyAction } from "../actions";
+
+export default async function PolicyDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const { supabase, user, membership } = await requireAppContext();
+  const { data: policy } = await supabase.from("policies").select("id,reference,title,body,version,status,review_due,owner_id").eq("id", id).maybeSingle();
+  if (!policy) notFound();
+  const [{ data: acceptances }, { data: members }] = await Promise.all([
+    supabase.from("policy_acceptances").select("user_id,accepted_version").eq("policy_id", id),
+    supabase.from("memberships").select("user_id,profiles(display_name)"),
+  ]);
+  const roster = members ?? [];
+  const summary = summarisePolicyAcceptances(policy.version, (acceptances ?? []).map((a) => ({ accepted_version: a.accepted_version })), roster.length);
+  const status = policy.status as PolicyStatus;
+  const isOwner = membership.role === "owner";
+  const myAcceptance = (acceptances ?? []).find((a) => a.user_id === user.id);
+  const acceptedCurrent = myAcceptance?.accepted_version === policy.version;
+  const acceptedByUser = new Map((acceptances ?? []).map((a) => [a.user_id, a.accepted_version]));
+  return <>
+    <Link href="/app/policies" style={{ color: "var(--blue)", fontSize: "13px", fontWeight: 700 }}>← Back to policies</Link>
+    <PageIntro eyebrow={`POLICY ${policy.reference} · v${policy.version}`} title={policy.title} body={policy.review_due ? `Next review due ${policy.review_due}.` : "No review date set."} action={<Pill tone={POLICY_STATUS_TONE[status]}>{POLICY_STATUS_LABEL[status]}</Pill>} />
+
+    <Card style={{ padding: "18px", marginBottom: "16px" }}>
+      <h2 style={{ fontSize: "15px", margin: "0 0 8px" }}>Acceptance</h2>
+      <Progress value={summary.percent} />
+      <p style={{ fontSize: "12px", color: "#596273", margin: "8px 0 0" }}>{summary.acceptedCurrent} of {summary.total} members have accepted version {policy.version} · {summary.outstanding} outstanding</p>
+      <form action={acceptPolicyAction} style={{ marginTop: "12px" }}>
+        <input type="hidden" name="id" value={id} />
+        <button className="button primary" disabled={acceptedCurrent}>{acceptedCurrent ? "You have accepted the current version" : "I accept this policy"}</button>
+      </form>
+    </Card>
+
+    <Card style={{ padding: "18px", marginBottom: "16px" }}>
+      <h2 style={{ fontSize: "15px", margin: "0 0 10px" }}>Policy content</h2>
+      <p style={{ whiteSpace: "pre-wrap", margin: "0 0 16px" }}>{policy.body || "No content yet."}</p>
+      <h3 style={{ fontSize: "14px", margin: "0 0 8px" }}>Edit policy</h3>
+      <form action={updatePolicyAction} className="app-form">
+        <input type="hidden" name="id" value={id} />
+        <div className="form-grid">
+          <label>Reference<input name="reference" required maxLength={40} defaultValue={policy.reference} /></label>
+          <label>Title<input name="title" required maxLength={200} defaultValue={policy.title} /></label>
+          <label>Review due<input name="reviewDue" type="date" defaultValue={policy.review_due ?? ""} /></label>
+        </div>
+        <label>Policy content<textarea name="body" maxLength={100000} rows={8} defaultValue={policy.body} /></label>
+        <p style={{ fontSize: "12px", color: "#596273", margin: 0 }}>Changing the content bumps the version and asks members to re-accept.</p>
+        <button className="button secondary">Save changes</button>
+      </form>
+    </Card>
+
+    {isOwner && <Card style={{ padding: "18px", marginBottom: "16px" }}>
+      <h2 style={{ fontSize: "15px", margin: "0 0 10px" }}>Approval</h2>
+      <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
+        <form action={approvePolicyAction}><input type="hidden" name="id" value={id} /><button className="button primary" disabled={status === "approved"}>Approve policy</button></form>
+        <form action={setPolicyStatusAction} style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+          <input type="hidden" name="id" value={id} />
+          <select name="status" defaultValue={status} aria-label="Policy status">{(["draft", "in_review", "approved", "archived"] as PolicyStatus[]).map((s) => <option key={s} value={s}>{POLICY_STATUS_LABEL[s]}</option>)}</select>
+          <button className="button secondary">Set status</button>
+        </form>
+      </div>
+    </Card>}
+
+    <Card style={{ padding: "18px" }}>
+      <h2 style={{ fontSize: "15px", margin: "0 0 10px" }}>Acceptance roster</h2>
+      <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "6px" }}>
+        {roster.map((m) => { const p = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles; const v = acceptedByUser.get(m.user_id); const current = v === policy.version; return <li key={m.user_id} style={{ display: "flex", justifyContent: "space-between", fontSize: "13px" }}><span>{p?.display_name ?? m.user_id}</span>{current ? <Pill tone="green">Accepted v{v}</Pill> : v ? <Pill tone="amber">Re-accept (accepted v{v})</Pill> : <Pill tone="neutral">Not accepted</Pill>}</li>; })}
+        {!roster.length && <li style={{ color: "#596273", fontSize: "13px" }}>No members yet.</li>}
+      </ul>
+    </Card>
+  </>;
+}

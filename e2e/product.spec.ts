@@ -716,3 +716,72 @@ test("a minted auditor link exposes a read-only view to an unauthenticated visit
 
   await anon.close();
 });
+
+test("a policy is authored, approved, accepted, and re-accepted after a material edit", async ({ page }, testInfo) => {
+  const suffix = `${Date.now()}-${testInfo.project.name}`;
+  const email = `pol-${suffix}@example.test`;
+  const password = "Test-only-passphrase-2026";
+
+  await page.goto("/sign-up");
+  await page.getByLabel("Name").fill("Beta Owner");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page.getByLabel("Confirm password").fill(password);
+  await page.getByRole("button", { name: "Create account" }).click();
+
+  await page.waitForURL(/\/sign-in/);
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
+  await page.getByLabel("Organisation name").fill(`Policy Workspace ${suffix}`);
+  await page.getByRole("button", { name: "Create workspace" }).click();
+  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
+
+  // Reach the policy library through the workspace nav.
+  const navToggle = page.getByRole("button", { name: "Open navigation" });
+  if (await navToggle.isVisible()) await navToggle.click();
+  await page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: "Policies", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Policy library", level: 1 })).toBeVisible();
+
+  const listAxe = await new AxeBuilder({ page }).analyze();
+  expect(listAxe.violations).toEqual([]);
+
+  // Author a policy.
+  await page.getByRole("link", { name: "New policy" }).click();
+  await expect(page.getByRole("heading", { name: "Author a policy", level: 2 })).toBeVisible();
+  await page.getByLabel("Reference", { exact: true }).fill("POL-001");
+  await page.getByLabel("Title").fill("Access Control Policy");
+  await page.getByLabel("Policy content").fill("Access to systems is granted on least privilege.");
+  await page.getByRole("button", { name: "Create policy" }).click();
+
+  // On the detail page (owner is the signed-in user): approve, then accept.
+  await page.waitForURL(/\/app\/policies\/[0-9a-f-]+$/);
+  const policyUrl = page.url();
+  await expect(page.getByText("POLICY POL-001 · v1")).toBeVisible();
+  await page.getByRole("button", { name: "Approve policy" }).click();
+
+  await page.getByRole("button", { name: "I accept this policy" }).click();
+  await expect(page.getByRole("button", { name: "You have accepted the current version" })).toBeVisible();
+  await expect(page.getByText("Accepted v1")).toBeVisible();
+
+  const detailAxe = await new AxeBuilder({ page }).analyze();
+  expect(detailAxe.violations).toEqual([]);
+
+  // A material content edit bumps the version and invalidates the prior acceptance.
+  await page.getByLabel("Policy content").fill("Access to systems is granted on least privilege and reviewed quarterly.");
+  await page.getByRole("button", { name: "Save changes" }).click();
+
+  await expect(page.getByText("POLICY POL-001 · v2")).toBeVisible();
+  await expect(page.getByText("Re-accept (accepted v1)")).toBeVisible();
+
+  // The re-accept notification is posted to the member.
+  if (await navToggle.isVisible()) await navToggle.click();
+  await page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: "Notifications", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Notifications", level: 1 })).toBeVisible();
+  await expect(page.getByText(/POL-001 changed — please review and re-accept/i)).toBeVisible();
+
+  // The detail route re-opens cleanly at the new version.
+  await page.goto(policyUrl);
+  await expect(page.getByText("POLICY POL-001 · v2")).toBeVisible();
+});
