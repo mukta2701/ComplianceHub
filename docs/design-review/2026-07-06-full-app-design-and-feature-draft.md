@@ -16,6 +16,8 @@ Every actionable line is tagged `[model · effort · labels]`:
 
 Do the P1 design fixes **before** any new feature work — they are cheap and they fix a first impression that currently undercuts the whole product.
 
+> **Already fixed this session (verified, gate-green, on `main`):** **A1** (readiness single source of truth — dashboard now agrees with the report, empty = 0% not 100%), **A2** (Risks register inviting empty state), **A9** (dashboard "Start assessment" until one exists). Fable can skip these and start at A3.
+
 ---
 
 ## Executive summary
