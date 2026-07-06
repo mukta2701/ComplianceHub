@@ -907,7 +907,10 @@ test("a task is pushed to a sandbox tracker, polled to In Progress, then the con
   //    Provider defaults to Jira.
   await page.goto("/app/integrations");
   await expect(page.getByRole("heading", { name: "Ticketing integrations", level: 1 })).toBeVisible();
-  await page.getByLabel("Label", { exact: true }).fill("Sandbox Jira");
+  // The page carries a second "Label" input (the evidence-sources section), so
+  // scope this fill to the ticketing connection form.
+  const connectionForm = page.locator("form", { has: page.getByRole("button", { name: "Add connection" }) });
+  await connectionForm.getByLabel("Label", { exact: true }).fill("Sandbox Jira");
   await page.getByRole("button", { name: "Add connection" }).click();
   const connection = page.getByRole("listitem").filter({ hasText: "Sandbox Jira" });
   await expect(connection.getByText("Active")).toBeVisible();
@@ -963,6 +966,76 @@ test("a task is pushed to a sandbox tracker, polled to In Progress, then the con
   const toRevoke = page.getByRole("listitem").filter({ hasText: "Sandbox Jira" });
   await toRevoke.getByRole("button", { name: "Revoke" }).click();
   await expect(toRevoke.getByText("Revoked")).toBeVisible();
+});
+
+test("an owner adds an evidence source, the collector fills the vault, and re-collection does not duplicate", async ({ page }, testInfo) => {
+  const suffix = `${Date.now()}-${testInfo.project.name}`;
+  const email = `evs-${suffix}@example.test`;
+  const password = "Test-only-passphrase-2026";
+
+  await page.goto("/sign-up");
+  await page.getByLabel("Name").fill("Beta Owner");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page.getByLabel("Confirm password").fill(password);
+  await page.getByRole("button", { name: "Create account" }).click();
+
+  await page.waitForURL(/\/sign-in/);
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
+  await page.getByLabel("Organisation name").fill(`Evidence Sources Workspace ${suffix}`);
+  await page.getByRole("button", { name: "Create workspace" }).click();
+  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
+
+  // 1. Open Integrations and add an evidence source. FAKE collector is the dev
+  //    default (EVIDENCE_LIVE is not set); provider defaults to Google Workspace.
+  //    Scope by the add-source form so the two "Label" inputs on the page (one per
+  //    section) don't collide.
+  await page.goto("/app/integrations");
+  await expect(page.getByRole("heading", { name: "Ticketing integrations", level: 1 })).toBeVisible();
+  const sourceForm = page.locator("form", { has: page.getByRole("button", { name: "Add evidence source" }) });
+  await sourceForm.getByLabel("Label", { exact: true }).fill("Sandbox GWS");
+  await sourceForm.getByRole("button", { name: "Add evidence source" }).click();
+  const source = page.getByRole("listitem").filter({ hasText: "Sandbox GWS" });
+  await expect(source.getByText("Active")).toBeVisible();
+
+  // 2. Axe on the integrations page (now carrying both sections).
+  const integrationsAxe = await new AxeBuilder({ page }).analyze();
+  expect(integrationsAxe.violations).toEqual([]);
+
+  // 3. Run the CRON_SECRET-gated collector. The secret is read the same way the
+  //    other cron e2e tests read it; if it is genuinely unavailable, skip the
+  //    collection assertions rather than guess a secret. EVIDENCE_LIVE is never
+  //    set, so the FAKE collector's deterministic sample set is what lands.
+  let cronSecret: string | null = null;
+  try { cronSecret = localEnvironment("CRON_SECRET"); } catch { cronSecret = null; }
+  if (cronSecret) {
+    const first = await page.request.post("/api/cron/evidence-collect", { headers: { authorization: `Bearer ${cronSecret}` } });
+    expect(first.ok()).toBeTruthy();
+
+    // The fake Google Workspace source yields two items; both surface in the vault
+    // with the neutral "Auto" badge naming the provider.
+    await page.goto("/app/evidence");
+    await expect(page.getByRole("heading", { name: "MFA enforcement report" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Access review export" })).toBeVisible();
+    await expect(page.getByText("Auto · Google Workspace")).toHaveCount(2);
+
+    // 4. Re-collect: the (source_id, external_ref) dedup means the count must NOT
+    //    double — the same two items, still exactly one card each.
+    const second = await page.request.post("/api/cron/evidence-collect", { headers: { authorization: `Bearer ${cronSecret}` } });
+    expect(second.ok()).toBeTruthy();
+    await page.goto("/app/evidence");
+    await expect(page.getByRole("heading", { name: "MFA enforcement report" })).toHaveCount(1);
+    await expect(page.getByText("Auto · Google Workspace")).toHaveCount(2);
+
+    // 5. Axe on the evidence vault carrying auto-collected items.
+    const evidenceAxe = await new AxeBuilder({ page }).analyze();
+    expect(evidenceAxe.violations).toEqual([]);
+  } else {
+    console.log("CRON_SECRET unavailable to the Playwright process — skipping the evidence-collection assertions.");
+  }
 });
 
 test("an owner enables a public Trust Center that leaks nothing sensitive", async ({ page, browser }, testInfo) => {
