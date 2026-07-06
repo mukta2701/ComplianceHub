@@ -755,9 +755,23 @@ test("a policy is authored, approved, accepted, and re-accepted after a material
   const listAxe = await new AxeBuilder({ page }).analyze();
   expect(listAxe.violations).toEqual([]);
 
-  // Author a policy.
+  // Author a policy — starting from a starter template.
   await page.getByRole("link", { name: "New policy" }).click();
   await expect(page.getByRole("heading", { name: "Author a policy", level: 2 })).toBeVisible();
+
+  // The template picker renders with zero accessibility violations.
+  await expect(page.getByRole("heading", { name: "Start from a template", level: 2 })).toBeVisible();
+  const pickerAxe = await new AxeBuilder({ page }).analyze();
+  expect(pickerAxe.violations).toEqual([]);
+
+  // Picking a template pre-fills the reference, title and body from that template.
+  await page.getByRole("link", { name: /Information Security Policy/ }).click();
+  await page.waitForURL(/\/app\/policies\/new\?template=information-security$/);
+  await expect(page.getByLabel("Reference", { exact: true })).toHaveValue("POL-001");
+  await expect(page.getByLabel("Title")).toHaveValue("Information Security Policy");
+  await expect(page.getByLabel("Policy content")).not.toHaveValue("");
+
+  // The author edits the pre-filled fields and creates the policy as normal.
   await page.getByLabel("Reference", { exact: true }).fill("POL-001");
   await page.getByLabel("Title").fill("Access Control Policy");
   await page.getByLabel("Policy content").fill("Access to systems is granted on least privilege.");
