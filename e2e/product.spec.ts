@@ -552,6 +552,10 @@ test("a SoA workbook import updates a matched control in the selected register",
   const assessmentSelect = page.locator("select[name=assessmentId]");
   await expect(async () => {
     await page.goto("/app/soa");
+    // The SoA page shows an empty state (no select) until the seeded assessment is
+    // server-rendered — wait for the select itself, then for the seeded option, so
+    // the retry doesn't pass vacuously while the empty state is still showing.
+    await expect(assessmentSelect).toBeVisible();
     await expect(assessmentSelect.locator("option")).not.toHaveCount(1);
   }).toPass({ timeout: 15000 });
   await assessmentSelect.selectOption({ index: 1 });
@@ -619,6 +623,10 @@ test("every register can be downloaded as an XLSX export", async ({ page }, test
   const assessmentSelect = page.locator("select[name=assessmentId]");
   await expect(async () => {
     await page.goto("/app/soa");
+    // The SoA page shows an empty state (no select) until the seeded assessment is
+    // server-rendered — wait for the select itself, then for the seeded option, so
+    // the retry doesn't pass vacuously while the empty state is still showing.
+    await expect(assessmentSelect).toBeVisible();
     await expect(assessmentSelect.locator("option")).not.toHaveCount(1);
   }).toPass({ timeout: 15000 });
   await assessmentSelect.selectOption({ index: 1 });
