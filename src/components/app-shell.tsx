@@ -13,6 +13,7 @@ const navGroups = [
     ["/app/risks", "alert", "Risks"],
     ["/app/assets", "lock", "Assets"],
     ["/app/soa", "file", "SoA"],
+    ["/app/frameworks", "shield", "Frameworks"],
   ] },
   { label: "Manage", items: [
     ["/app/policies", "file", "Policies"],
@@ -36,6 +37,7 @@ const navGroups = [
 const TITLES: Array<[string, string]> = [
   ["/app/assessment", "Assessment"], ["/app/risks/import", "Import risk register"], ["/app/risks", "Risk register"],
   ["/app/soa/import", "Import Statement of Applicability"], ["/app/soa", "Statement of Applicability"],
+  ["/app/frameworks", "Framework crosswalk"],
   ["/app/tasks", "Tasks"], ["/app/evidence", "Evidence vault"], ["/app/notifications", "Notifications"],
   ["/app/activity", "Activity"], ["/app/settings", "Settings"], ["/app/onboarding", "Workspace setup"],
   ["/app/invitations", "Invitation"], ["/app/assets/import", "Import asset inventory"], ["/app/assets", "Asset inventory"],

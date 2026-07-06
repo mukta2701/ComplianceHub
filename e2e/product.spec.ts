@@ -1109,3 +1109,56 @@ test("an owner enables a public Trust Center that leaks nothing sensitive", asyn
 
   await anon.close();
 });
+
+test("an ISO control is crosswalked to a framework requirement and drives coverage", async ({ page }, testInfo) => {
+  const suffix = `${Date.now()}-${testInfo.project.name}`;
+  const email = `crosswalk-${suffix}@example.test`;
+  const password = "Test-only-passphrase-2026";
+
+  await page.goto("/sign-up");
+  await page.getByLabel("Name").fill("Beta Owner");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page.getByLabel("Confirm password").fill(password);
+  await page.getByRole("button", { name: "Create account" }).click();
+
+  await page.waitForURL(/\/sign-in/);
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
+  await page.getByLabel("Organisation name").fill(`Crosswalk Workspace ${suffix}`);
+  await page.getByRole("button", { name: "Create workspace" }).click();
+  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
+
+  // Reach the framework crosswalk through the workspace nav.
+  const navToggle = page.getByRole("button", { name: "Open navigation" });
+  if (await navToggle.isVisible()) await navToggle.click();
+  await page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: "Frameworks", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Framework crosswalk", level: 1 })).toBeVisible();
+
+  // A fresh workspace has no mappings yet.
+  await expect(page.getByText("Record your first crosswalk mapping")).toBeVisible();
+
+  // Record the organisation's own mapping: an ISO control -> SOC 2 CC6.1.
+  await page.locator('select[name="controlId"]').selectOption({ index: 1 });
+  await page.locator('select[name="framework"]').selectOption("soc_2");
+  await page.getByLabel("Requirement reference").fill("CC6.1");
+  await page.getByLabel("Note").fill("Our logical access control satisfies this criterion.");
+  await page.getByRole("button", { name: "Add mapping" }).click();
+
+  // The mapping appears in the list and the SOC 2 coverage summary updates to
+  // reflect one mapped requirement.
+  await expect(page.getByRole("cell", { name: "CC6.1", exact: true })).toBeVisible();
+  await expect(page.getByText("Our logical access control satisfies this criterion.")).toBeVisible();
+  const coverage = page.getByRole("region", { name: "Per-framework coverage" });
+  await expect(coverage.getByText(/of 1 mapped requirement/)).toBeVisible();
+
+  // Accessibility: zero automatically detectable violations on the page.
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+
+  // Remove the mapping and confirm it is gone.
+  await page.getByRole("button", { name: /Remove mapping of/ }).click();
+  await expect(page.getByText("Record your first crosswalk mapping")).toBeVisible();
+  await expect(page.getByRole("cell", { name: "CC6.1", exact: true })).toHaveCount(0);
+});
