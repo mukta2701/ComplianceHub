@@ -99,8 +99,10 @@ Today evidence is manual. The 2026 bar is auto-collection: connect cloud/identit
 **B4. Public Trust Center. ✅ SHIPPED this session (`204d4e0`).**
 Owner-opt-in (off by default) public `/trust/<slug>` page showing only a safe whitelist (org name, ISMS statement, readiness %, control/approved-policy counts, optional policy titles, last-audit date) via a `security definer` RPC mirroring the Phase C auditor-view pattern — no service-role, cross-org no-leak proven in pgTAP 032. Owner UI at `/app/trust`.
 
-**B5. Multi-framework control mapping. `[Opus · L · controls, soa]` — NOT YET BUILT (large; needs framework-selection decisions → Fable).**
-Map controls across ISO 27001 / SOC 2 / GDPR / HIPAA so overlapping requirements share evidence and tests. Large but strategic — it's how modern tools justify their price.
+**B5. Multi-framework control mapping. ✅ SHIPPED this session (`2705778`).**
+A `/app/frameworks` "Framework crosswalk" page where the org records **their own** mappings from ISO 27001 controls to SOC 2 / GDPR / HIPAA / NIST CSF / ISO 27017 requirements (member-RLS `control_crosswalks` table, migration 0039, pgTAP 035), with a per-framework coverage view (a requirement counts as covered once a mapped control is implemented in the SoA, so overlapping requirements reuse existing evidence). **Deliberately does NOT assert AI-generated cross-framework equivalence** — the org owns the mappings (a wrong mapping would be a real compliance harm); the tool provides structure + coverage only.
+
+> **Feature roadmap status: B1–B9 ALL SHIPPED this session.** The only Part-B item not fully built is the *live network connectors* for B3/B7 (Slack/Teams alerts, real evidence/ticket OAuth) — deferred to go-live because they need user OAuth secrets. Everything testable is built and gate-green.
 
 **B6. Scheduled policy review reminders. ✅ SHIPPED this session (`49ebfc2`).**
 The daily sweep now raises a `policy_review` task + notification when a policy's `review_due` passes (deduped, migration 0033 enabled `tasks.policy_id`, pgTAP 029).
