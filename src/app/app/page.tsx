@@ -45,7 +45,7 @@ export default async function AppHome() {
     : { data: [] as { status: string }[] };
   const readiness = summariseSoaReadiness((soaItems ?? []).map((s) => ({ status: s.status as SoaStatus }))).percent;
   return <>
-    <PageIntro eyebrow={organisation.name.toUpperCase()} title="Readiness dashboard" body="Your live view of open work, evidence freshness, and everything the automation is surfacing on its own." action={<Link className="button primary" href="/app/assessment">Continue assessment <Icon name="arrow" /></Link>} />
+    <PageIntro eyebrow={organisation.name.toUpperCase()} title="Readiness dashboard" body="Your live view of open work, evidence freshness, and everything the automation is surfacing on its own." action={<Link className="button primary" href="/app/assessment">{(assessments ?? 0) > 0 ? "Continue assessment" : "Start assessment"} <Icon name="arrow" /></Link>} />
     <div className="stats-grid"><Stat label="OPEN TASKS" value={openTasks ?? 0} detail="in progress or to do" /><Stat label="OVERDUE" value={overdue ?? 0} detail="flagged by the daily sweep" tone="red" /><Stat label="EVIDENCE ITEMS" value={liveEvidence ?? 0} detail="files, links and notes" tone="green" /><Stat label="EXPIRING / EXPIRED" value={expiring ?? 0} detail="need fresh proof" tone="amber" /></div>
     <div className="dashboard-grid">
       <Card><div className="card-head"><div><h3>Needs attention</h3><p>Work the automation has surfaced — start here.</p></div><Link href="/app/tasks">All tasks</Link></div>
