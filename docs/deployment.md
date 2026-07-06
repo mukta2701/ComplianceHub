@@ -7,7 +7,8 @@ account owner can do; everything else is already prepared in the repo.
 ## 0. Prerequisites
 
 - The repo builds clean locally: `npm run lint && npm run typecheck && npm run test && npm run build` (or the `pnpm`/`npx` equivalents), plus `supabase test db` (pgTAP) green.
-- Migrations `supabase/migrations/202607020001 … 202607020033` apply in order from an empty database (verified locally). No data seed is required beyond the approved catalogue content.
+- Migrations `supabase/migrations/202607020001 … 202607020039` (39 files, contiguous) **apply in order from an empty database** — verified via `supabase db reset` (which does exactly what `supabase db push` does on a hosted project): all 39 applied with no errors, then `supabase test db` passed 35 files / 314 pgTAP tests against the fresh DB. So a clean hosted-Supabase `db push` is low-risk.
+- The full Playwright e2e suite (42 tests) passes against a **production build** (`next build && next start`), confirming the deployed artifact serves the whole app end-to-end. (Locally run e2e with `--workers=1` or `--workers=2` — full parallelism overwhelms the single local Supabase with concurrent sign-ups.)
 
 ## 1. Hosted Supabase **(you)**
 
