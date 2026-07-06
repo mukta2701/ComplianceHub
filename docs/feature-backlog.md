@@ -151,3 +151,21 @@ Small backlog items carried forward in the SDD ledger (`.superpowers/sdd/progres
 - Management-review meeting record (agenda + minutes) built on the KPI log.
 
 **Deferred hardening (from reviews):** evidence-pack Content-Disposition filename not escaped; pgTAP 021 per-query cross-org coverage (RPC code-clean, public-view e2e renders full payload); `grant usage public to anon` broader than needed; auditor token `on delete cascade` with its audit.
+
+---
+
+## Phase D — Policies + Integrations (Done)
+
+**What shipped:** A **policy library** with an approval lifecycle (draft → in review → approved → archived), per-employee acceptance tracking, a *material-edit* rule that bumps the version and re-triggers acceptance via an org-scoped notification, and policies attachable as first-class evidence. A **ticketing-integrations** workstream: owner-managed Jira / GitHub Issues connections, a provider-abstracted push that raises a remediation task as a pre-filled ticket, a ticket status chip on the task, and a `CRON_SECRET`-gated poll-sync route — all proven end-to-end with a FAKE provider (a real connection is a documented go-live step behind `INTEGRATIONS_LIVE`). DB-level trigger enforces that only owners approve/status-change a policy and only owner-or-policy-owner edits content (defence-in-depth beyond the server actions).
+
+**Suggested improvements (backlog):**
+- Policy templates: seed a starter set of ISO 27001 policies (Information Security, Access Control, Incident Response, Supplier, BYOD…) so a new org publishes in minutes instead of authoring from a blank box.
+- Rich policy body: markdown/rich-text editing + rendering, headings, and a table of contents (currently a plain textarea + pre-wrapped text).
+- Scheduled policy review reminders (use `review_due` + the daily sweep to raise a task/notification when a policy is due for review).
+- Acceptance nudges: notify members who have not accepted the current version; an owner "chase outstanding" action; acceptance export for audit evidence.
+- E-signature / attestation record (name + timestamp + version hash) for stronger audit defensibility.
+- Integrations: two-way sync (close the ComplianceHub task when the ticket closes), Slack/Teams notifications, and a real OAuth connect flow UI (the code path exists; the connect wizard is a go-live item).
+- Push-to-tracker from findings and risks (not only tasks); bulk-push overdue remediation.
+- Move integration tokens to Supabase Vault / an encrypted column before any real connection (go-live hardening, already flagged on the connect checklist).
+
+**Deferred hardening (from the whole-branch review):** policy evidence link/unlink actions lack the rate-limit the other policy actions carry and `unlink` deletes by `linkId` without re-scoping to `policyId` (RLS still org-scopes it); `024` pgTAP omits an UPDATE-verb assertion (evidence_links has no UPDATE path); poll-cron per-ticket errors now isolated (returns `{synced, failed}`) but failures are counted, not logged per-row.
