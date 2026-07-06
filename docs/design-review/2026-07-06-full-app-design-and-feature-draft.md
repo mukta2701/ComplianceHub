@@ -96,23 +96,26 @@ A "Get certification-ready" checklist on the dashboard: create workspace ✓ →
 **B3. Continuous evidence automation (the biggest differentiator). `[Opus · L · evidence, integrations]`**
 Today evidence is manual. The 2026 bar is auto-collection: connect cloud/identity/HR (e.g. Google Workspace, GitHub, AWS) and auto-refresh evidence + alert on drift. Build on the existing `TicketProvider`-style abstraction: an `EvidenceProvider` interface + FAKE-tested collectors + the daily sweep marking auto-evidence fresh/stale. Real connectors are go-live/user-secret-dependent (same pattern as Jira/GitHub). Turns "40–80h once a year" into "2–4h/month".
 
-**B4. Public Trust Center. `[Opus · L · reports, public]`**
-A branded, public, read-only page showcasing security posture (framework coverage, control status, policy list, uptime) — reusing the Phase C auditor-view security-definer + public-route pattern, but org-configurable and shareable as a sales asset. High commercial value.
+**B4. Public Trust Center. ✅ SHIPPED this session (`204d4e0`).**
+Owner-opt-in (off by default) public `/trust/<slug>` page showing only a safe whitelist (org name, ISMS statement, readiness %, control/approved-policy counts, optional policy titles, last-audit date) via a `security definer` RPC mirroring the Phase C auditor-view pattern — no service-role, cross-org no-leak proven in pgTAP 032. Owner UI at `/app/trust`.
 
-**B5. Multi-framework control mapping. `[Opus · L · controls, soa]`**
+**B5. Multi-framework control mapping. `[Opus · L · controls, soa]` — NOT YET BUILT (large; needs framework-selection decisions → Fable).**
 Map controls across ISO 27001 / SOC 2 / GDPR / HIPAA so overlapping requirements share evidence and tests. Large but strategic — it's how modern tools justify their price.
 
-**B6. Scheduled policy review reminders. `[Sonnet · S · policies, automation]`**
-Use `review_due` + the daily sweep to raise a task/notification when a policy is due — closes the loop on the existing field.
+**B6. Scheduled policy review reminders. ✅ SHIPPED this session (`49ebfc2`).**
+The daily sweep now raises a `policy_review` task + notification when a policy's `review_due` passes (deduped, migration 0033 enabled `tasks.policy_id`, pgTAP 029).
 
-**B7. Integrations two-way sync + chat alerts. `[Opus · M · integrations]`**
-Close the ComplianceHub task when the external ticket closes; post re-accept / overdue / finding alerts to Slack/Teams.
+**B7. Integrations two-way sync. ✅ SHIPPED (task→ticket close-back, `b24f484`).**
+A terminal external ticket status (done/closed/resolved) now auto-closes the linked ComplianceHub task in the poll cron (migration 0034, pgTAP 030). *(Slack/Teams chat alerts still open.)*
 
-**B8. KPI trend charts + RAG + management-review minutes. `[Opus · M · kpis, reporting]`**
-The KPI log is flat today; add trend-over-time, threshold RAG, and an agenda/minutes record for the management review.
+**B8. KPI measurement trends. ✅ SHIPPED this session (`12ffa15`).**
+New `kpi_measurements` table (migration 0035, pgTAP 031) + a per-KPI trend (latest value, delta/direction, recent history) and a record-measurement form. *(Threshold-RAG left out because the KPI threshold field is free-text; management-review minutes still open.)*
 
-**B9. Recurring audits + Annex A checklist templates. `[Opus · M · audits]`**
-Auto-create the annual/quarterly audit cycle; pre-populate the checklist from a framework's full Annex A set.
+**B9. Annex A checklist population. ✅ SHIPPED this session (`19af746`).**
+One-click "Populate from control library" bulk-creates an audit's checklist from all 93 Annex A controls, idempotent. *(Recurring/auto-scheduled audits still open.)*
+
+**B3. Continuous evidence automation — NOT YET BUILT (largest; a Phase-D-sized workstream + external secrets → Fable).**
+The 2026 differentiator: an `EvidenceProvider` abstraction + FAKE-tested collectors + the daily sweep marking auto-evidence fresh/stale, connectors for cloud/identity/HR. Real connectors need user OAuth secrets (same shape as the shipped Jira/GitHub path).
 
 *(Full enhancement list, incl. Phase B/B.5/C/D deferrals, lives in `docs/feature-backlog.md` + `.csv`.)*
 
