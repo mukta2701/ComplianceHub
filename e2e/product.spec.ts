@@ -256,6 +256,53 @@ test("an audit runs from plan through checklist to a corrective-action task", as
   await expect(page.getByRole("heading", { name: "Access control internal audit", level: 2 })).toBeVisible();
 });
 
+test("a KPI is logged and its next steps raise a follow-up task", async ({ page }, testInfo) => {
+  const suffix = `${Date.now()}-${testInfo.project.name}`;
+  const email = `kpi-${suffix}@example.test`;
+  const password = "Test-only-passphrase-2026";
+
+  await page.goto("/sign-up");
+  await page.getByLabel("Name").fill("Beta Owner");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page.getByLabel("Confirm password").fill(password);
+  await page.getByRole("button", { name: "Create account" }).click();
+
+  await page.waitForURL(/\/sign-in/);
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
+  await page.getByLabel("Organisation name").fill(`KPI Workspace ${suffix}`);
+  await page.getByRole("button", { name: "Create workspace" }).click();
+  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
+
+  // Reach the KPI register through the workspace nav.
+  const navToggle = page.getByRole("button", { name: "Open navigation" });
+  if (await navToggle.isVisible()) await navToggle.click();
+  await page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: "KPIs", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Performance measures", level: 1 })).toBeVisible();
+
+  // Log a performance measure with next steps.
+  await page.getByLabel("Indicator").fill("Mean time to de-provision leavers");
+  await page.getByLabel("Next steps").fill("Automate off-boarding on the HR termination event.");
+  await page.getByRole("button", { name: "Add KPI" }).click();
+
+  await expect(page.getByRole("heading", { name: "Performance measures", level: 1 })).toBeVisible();
+  await expect(page.getByText("Mean time to de-provision leavers")).toBeVisible();
+
+  const listAxe = await new AxeBuilder({ page }).analyze();
+  expect(listAxe.violations).toEqual([]);
+
+  // Raise a follow-up task from the KPI's next steps.
+  await page.getByRole("button", { name: "Raise task" }).click();
+  await expect(page.getByText("Task raised.")).toBeVisible();
+
+  // The follow-up appears as a manual task in the tasks module.
+  await page.goto("/app/tasks");
+  await expect(page.getByText("KPI follow-up: Mean time to de-provision leavers")).toBeVisible();
+});
+
 test("a risk register workbook can be imported through the wizard", async ({ page }, testInfo) => {
   const suffix = `${Date.now()}-${testInfo.project.name}`;
   const email = `imp-${suffix}@example.test`;
