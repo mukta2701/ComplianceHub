@@ -6,22 +6,30 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "./icons";
 import { signOutAction } from "@/app/app/actions";
 
-const nav = [
-  ["/app", "home", "Dashboard"],
-  ["/app/assessment", "clipboard", "Assessment"],
-  ["/app/risks", "alert", "Risks"],
-  ["/app/assets", "lock", "Assets"],
-  ["/app/soa", "file", "SoA"],
-  ["/app/policies", "file", "Policies"],
-  ["/app/audits", "shield", "Audits"],
-  ["/app/kpis", "check", "KPIs"],
-  ["/app/reports/readiness", "file", "Reports"],
-  ["/app/tasks", "check", "Tasks"],
-  ["/app/evidence", "file", "Evidence"],
-  ["/app/notifications", "bell", "Notifications"],
-  ["/app/activity", "clipboard", "Activity"],
-  ["/app/settings", "settings", "Settings"],
-  ["/app/integrations", "lock", "Integrations"],
+const navGroups = [
+  { label: "Assess", items: [
+    ["/app", "home", "Dashboard"],
+    ["/app/assessment", "clipboard", "Assessment"],
+    ["/app/risks", "alert", "Risks"],
+    ["/app/assets", "lock", "Assets"],
+    ["/app/soa", "file", "SoA"],
+  ] },
+  { label: "Manage", items: [
+    ["/app/policies", "file", "Policies"],
+    ["/app/audits", "shield", "Audits"],
+    ["/app/kpis", "check", "KPIs"],
+    ["/app/tasks", "check", "Tasks"],
+  ] },
+  { label: "Evidence & reports", items: [
+    ["/app/evidence", "file", "Evidence"],
+    ["/app/reports/readiness", "file", "Reports"],
+    ["/app/notifications", "bell", "Notifications"],
+    ["/app/activity", "clipboard", "Activity"],
+  ] },
+  { label: "Admin", items: [
+    ["/app/settings", "settings", "Settings"],
+    ["/app/integrations", "lock", "Integrations"],
+  ] },
 ] as const;
 
 const TITLES: Array<[string, string]> = [
@@ -56,7 +64,7 @@ export function AppShell({ orgName, orgInitials, userInitials, unreadCount, chil
     <aside className="sidebar" id="app-navigation" data-open={open} aria-label="Workspace navigation">
       <Link className="brand" href="/app" onClick={() => setOpen(false)}><span className="brand-mark"><Icon name="shield" /></span><span>ComplianceHub</span></Link>
       <div className="workspace"><span className="avatar">{orgInitials}</span><span><b>{orgName}</b><small>Workspace</small></span><Icon name="arrow" /></div>
-      <nav aria-label="Workspace">{nav.map(([href, icon, label], index) => <Link ref={index === 0 ? firstNav : undefined} key={href} href={href} className={isActive(path, href) ? "active" : ""} aria-current={isActive(path, href) ? "page" : undefined} onClick={() => setOpen(false)}><Icon name={icon} />{label}</Link>)}</nav>
+      <nav aria-label="Workspace">{navGroups.map((group) => <div className="nav-group" key={group.label}><p className="nav-section-label">{group.label}</p>{group.items.map(([href, icon, label]) => <Link ref={href === "/app" ? firstNav : undefined} key={href} href={href} className={isActive(path, href) ? "active" : ""} aria-current={isActive(path, href) ? "page" : undefined} onClick={() => setOpen(false)}><Icon name={icon} />{label}</Link>)}</div>)}</nav>
       <div className="sidebar-foot"><form action={signOutAction}><button className="button secondary" style={{ width: "100%" }}>Sign out</button></form><p>ComplianceHub supports readiness management. It does not provide ISO certification or legal advice.</p></div>
     </aside>
     <div className="app-main">
