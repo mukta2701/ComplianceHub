@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { requireAppContext } from "@/lib/app-context";
 import { summariseEvidenceFreshness, type EvidenceStatus } from "@/features/evidence/domain/evidence";
-import { Card, PageIntro, Pill, Stat } from "@/components/ui";
+import { Card, EmptyState, PageIntro, Pill, Stat } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { downloadEvidenceAction, linkEvidenceAction, unlinkEvidenceAction, withdrawEvidenceAction } from "./actions";
 
@@ -21,8 +21,11 @@ export default async function EvidencePage() {
       <a className="button secondary" href="/api/app/evidence/export?format=csv">CSV</a>
       <Link className="button primary" href="/app/evidence/new"><Icon name="plus" />Add evidence</Link>
     </span>} />
+    {!items?.length ? (
+      <EmptyState icon="file" title="Add your first evidence" body="Attach immutable proof — files, links, or notes — to any control, risk, or task. The daily sweep re-checks freshness and raises a replacement task automatically when something goes stale." primary={{ href: "/app/evidence/new", label: "Add evidence" }} />
+    ) : (<>
     <div className="stats-grid"><Stat label="EVIDENCE ITEMS" value={freshness.total} detail="files, links and notes" /><Stat label="EXPIRING SOON" value={freshness.expiring} detail="within 30 days" tone="amber" /><Stat label="EXPIRED" value={freshness.expired} detail="replacement task raised" tone="red" /></div>
-    <div style={{ display: "grid", gap: "14px" }}>{items?.map((item) => <Card key={item.id} style={{ padding: "20px" }}>
+    <div style={{ display: "grid", gap: "14px" }}>{items.map((item) => <Card key={item.id} style={{ padding: "20px" }}>
       <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: "12px", alignItems: "center" }}>
         <div><h2 style={{ fontSize: "15px", margin: 0 }}>{item.title}</h2><p style={{ fontSize: "12px", color: "#596273", margin: "3px 0 0" }}>Collected {item.collected_on}{item.valid_until && ` · valid until ${item.valid_until}`}</p></div>
         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}><Pill tone={TONE[item.status]}>{item.status}</Pill>
@@ -36,7 +39,7 @@ export default async function EvidencePage() {
         <form action={linkEvidenceAction} style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}><input type="hidden" name="evidenceId" value={item.id} /><select name="target" defaultValue="" aria-label={`Link ${item.title} to a control`} className="rounded"><option value="" disabled>Link to control…</option>{controls?.map((c) => <option key={c.id} value={`control:${c.id}`}>{c.code}: {c.title}</option>)}<optgroup label="Policies">{policies?.map((p) => <option key={p.id} value={`policy:${p.id}`}>{p.reference}: {p.title}</option>)}</optgroup></select><button className="button secondary" style={{ minHeight: "32px", padding: "6px 12px" }}>Link</button></form>
       </div>
     </Card>)}
-    {!items?.length && <Card style={{ padding: "24px", color: "#596273" }}>No evidence yet. Add your first item to start tracking freshness — files, links, or notes attach to any control, risk, or task.</Card>}
     </div>
+    </>)}
   </>;
 }

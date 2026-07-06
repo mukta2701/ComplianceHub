@@ -5,7 +5,7 @@ import { RiskStatusSelect } from "./risk-status-select";
 import { calculateRiskScore, riskBand, exceedsAppetite, RISK_BAND_LABEL, DEFAULT_RISK_MATRIX_CONFIG, type RiskMatrixConfig } from "@/features/risks/domain/risks";
 import { updateRiskMatrixConfigAction } from "./config-actions";
 import { summariseEvidenceFreshness, type EvidenceStatus } from "@/features/evidence/domain/evidence";
-import { Card, PageIntro, Pill } from "@/components/ui";
+import { Card, EmptyState, PageIntro, Pill } from "@/components/ui";
 import { Icon } from "@/components/icons";
 
 const BAND_TONE: Record<string, string> = { low: "green", moderate: "amber", high: "red", very_high: "critical" };
@@ -33,15 +33,7 @@ export default async function RisksPage() {
     </span>} />
     {Boolean(gaps?.length) && <Card style={{ padding: "20px", marginBottom: "16px", borderColor: "#efe1aa", background: "#fffbef" }}><h2 style={{ fontSize: "15px", margin: "0 0 4px" }}>Assessment gap suggestions</h2><p style={{ fontSize: "12px", color: "#596273", margin: 0 }}>Nothing is created until you accept it.</p>{gaps?.map((g) => { const q = Array.isArray(g.catalogue_questions) ? g.catalogue_questions[0] : g.catalogue_questions; return <div key={`${g.session_id}-${g.question_id}`} style={{ display: "flex", justifyContent: "space-between", gap: "16px", marginTop: "12px" }}><span style={{ fontSize: "13px" }}>{q?.code}: {q?.prompt}</span><span style={{ display: "flex", flexShrink: 0, gap: "16px" }}><form action={acceptRiskSuggestionAction}><input type="hidden" name="questionId" value={g.question_id} /><input type="hidden" name="sessionId" value={g.session_id} /><button style={{ color: "var(--blue)", fontWeight: 700, border: 0, background: "none" }}>Accept as risk</button></form><Link style={{ color: "var(--blue)", fontWeight: 700 }} href={`/app/tasks/from-gap?questionId=${g.question_id}`}>Accept as task</Link></span></div>; })}</Card>}
     {!data?.length ? (
-      <Card style={{ padding: "48px 24px", textAlign: "center" }}>
-        <div style={{ width: "44px", height: "44px", borderRadius: "12px", background: "var(--blue-pale)", color: "var(--blue)", display: "grid", placeItems: "center", margin: "0 auto 14px" }}><Icon name="alert" /></div>
-        <h2 style={{ fontSize: "16px", margin: "0 0 6px" }}>Start your risk register</h2>
-        <p style={{ fontSize: "13px", color: "#596273", margin: "0 auto 18px", maxWidth: "440px" }}>Record the threats to your information — each scored for inherent and residual likelihood and impact on a documented 5×5 matrix. Add your first risk, or import a register you already keep in a spreadsheet.</p>
-        <span style={{ display: "flex", gap: "10px", justifyContent: "center" }}>
-          <Link className="button primary" href="/app/risks/new"><Icon name="plus" />Add your first risk</Link>
-          <Link className="button secondary" href="/app/risks/import">Import from spreadsheet</Link>
-        </span>
-      </Card>
+      <EmptyState icon="alert" title="Start your risk register" body="Record the threats to your information — each scored for inherent and residual likelihood and impact on a documented 5×5 matrix. Add your first risk, or import a register you already keep in a spreadsheet." primary={{ href: "/app/risks/new", label: "Add your first risk" }} secondary={{ href: "/app/risks/import", label: "Import from spreadsheet" }} />
     ) : (<>
     <Card style={{ padding: "18px", marginBottom: "16px" }}>
       <h2 style={{ fontSize: "15px", margin: "0 0 4px" }}>RAG band thresholds</h2>

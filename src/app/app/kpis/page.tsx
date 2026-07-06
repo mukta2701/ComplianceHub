@@ -1,6 +1,6 @@
 import { requireAppContext } from "@/lib/app-context";
 import { MEASUREMENT_TYPE_LABEL, MEASUREMENT_TYPE_TONE, needsReview, type MeasurementType } from "@/features/kpis/domain/kpis";
-import { Card, PageIntro, Pill } from "@/components/ui";
+import { Card, EmptyState, PageIntro, Pill } from "@/components/ui";
 import { createKpiAction, raiseKpiTaskAction } from "./actions";
 
 export default async function KpisPage() {
@@ -13,6 +13,9 @@ export default async function KpisPage() {
   const rows = kpis ?? [];
   return <>
     <PageIntro eyebrow="MANAGEMENT REVIEW" title="Performance measures" body="The KPIs your management review discusses — indicator, measurement type, target, and the next steps that become tasks." />
+    {!rows.length ? (
+      <EmptyState icon="check" title="Add your first KPI" body="Track the performance measures your management review discusses — indicator, measurement type, target, and the next steps that become owned tasks. Add your first measure below." primary={{ href: "#add-kpi", label: "Add your first KPI" }} />
+    ) : (
     <Card style={{ padding: 0, marginBottom: "16px" }}><div className="data-table-wrap" role="region" aria-label="KPI register" tabIndex={0}><table>
       <thead><tr><th>Function</th><th>Indicator</th><th>Type</th><th>Target</th><th>Reviewed</th><th>Next steps</th></tr></thead>
       <tbody>
@@ -24,10 +27,10 @@ export default async function KpisPage() {
           <td>{needsReview(k.last_reviewed, today) ? <Pill tone="amber">Needs review</Pill> : k.last_reviewed}</td>
           <td>{k.next_steps || "—"}{k.next_steps && !k.task_id && <form action={raiseKpiTaskAction} style={{ marginTop: "6px", display: "flex", gap: "6px" }}><input type="hidden" name="id" value={k.id} /><input type="hidden" name="indicator" value={k.indicator} /><input type="hidden" name="nextSteps" value={k.next_steps} /><select name="ownerId" defaultValue="" aria-label={`Task owner for ${k.indicator}`}><option value="">Unassigned</option>{members?.map((m) => { const p = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles; return <option key={m.user_id} value={m.user_id}>{p?.display_name ?? m.user_id}</option>; })}</select><button className="button secondary">Raise task</button></form>}{k.task_id && <small style={{ display: "block", color: "#596273" }}>Task raised.</small>}</td>
         </tr>)}
-        {!rows.length && <tr><td colSpan={6} style={{ color: "#596273" }}>No KPIs yet. Add your first performance measure below.</td></tr>}
       </tbody>
     </table></div></Card>
-    <Card style={{ padding: "18px" }}>
+    )}
+    <Card id="add-kpi" style={{ padding: "18px" }}>
       <h2 style={{ fontSize: "15px", margin: "0 0 10px" }}>Add a KPI</h2>
       <form action={createKpiAction} className="app-form">
         <div className="form-grid">

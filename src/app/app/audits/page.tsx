@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { requireAppContext } from "@/lib/app-context";
 import { AUDIT_STATUS_LABEL, AUDIT_STATUS_TONE, summariseFindings, type AuditStatus, type FindingSeverity, type FindingStatus } from "@/features/audits/domain/audits";
-import { Card, PageIntro, Pill, Stat } from "@/components/ui";
+import { Card, EmptyState, PageIntro, Pill, Stat } from "@/components/ui";
 import { Icon } from "@/components/icons";
 
 export default async function AuditsPage() {
@@ -15,6 +15,9 @@ export default async function AuditsPage() {
   const f = summariseFindings((findings ?? []).map((x) => ({ severity: x.severity as FindingSeverity, status: x.status as FindingStatus })));
   return <>
     <PageIntro eyebrow="AUDIT" title="Internal audits" body="Plan an audit, work the clause and control checklist, and turn findings into owned corrective actions." action={<Link className="button primary" href="/app/audits/new"><Icon name="plus" />Plan an audit</Link>} />
+    {!rows.length ? (
+      <EmptyState icon="shield" title="Plan your first audit" body="Schedule an internal audit, work the clause-and-control checklist, and turn every finding into an owned corrective action. Plan your first one to get started." primary={{ href: "/app/audits/new", label: "Plan your first audit" }} />
+    ) : (<>
     <div className="stats-grid">
       <Stat label="OPEN AUDITS" value={openAudits} detail="not yet closed" />
       <Stat label="OPEN FINDINGS" value={f.open} detail="awaiting closure" tone="amber" />
@@ -29,8 +32,8 @@ export default async function AuditsPage() {
           <td><Pill tone={AUDIT_STATUS_TONE[a.status as AuditStatus]}>{AUDIT_STATUS_LABEL[a.status as AuditStatus]}</Pill></td>
           <td>{a.planned_start ?? "—"} → {a.planned_end ?? "—"}</td>
         </tr>)}
-        {!rows.length && <tr><td colSpan={4} style={{ color: "#596273" }}>No audits yet. Plan your first internal audit to start the checklist.</td></tr>}
       </tbody>
     </table></div></Card>
+    </>)}
   </>;
 }
