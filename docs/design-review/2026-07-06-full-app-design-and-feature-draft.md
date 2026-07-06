@@ -85,11 +85,11 @@ Dashboard (`10`) donut = **100% READY** with "Assessments 0 · Open risks 0 · F
 
 The market bar (Vanta / Drata / Scytale, 2026): continuous monitoring, automated evidence, Trust Centers, multi-framework mapping. ComplianceHub is a complete *manual* ISMS; these are the differentiating bets. Ranked by impact-to-effort.
 
-**B1. First-run onboarding checklist. `[Opus · M · onboarding]`**
-A dismissible "Get certification-ready" checklist on the dashboard: create workspace ✓ → run assessment → publish your first policy → add your first risk → connect a tracker → invite your team. Checklists lift activation from ~25–30% to 40%+. Pairs directly with the A5 empty states. **Do this first — it's the cheapest growth lever.**
+**B1. First-run onboarding checklist. ✅ SHIPPED this session (`bf38f0c`).**
+A "Get certification-ready" checklist on the dashboard: create workspace ✓ → run assessment → publish your first policy → add your first risk → generate your SoA → invite your team → connect a tracker. Auto-hides once every step is complete (no dismiss-persistence needed). Computed from RLS-scoped counts via a unit-tested `buildOnboardingChecklist` helper. (Also fixed a pre-existing WCAG AA contrast fail on `.card-head p` muted text found while running axe here.)
 
-**B2. Policy starter templates. `[Opus · M · policies, onboarding]`**
-Seed a starter set of ISO 27001 policies (Information Security, Access Control, Incident Response, Supplier Security, Acceptable Use, BYOD, Business Continuity…) as original, editable drafts, so a new org publishes in minutes instead of authoring from a blank textarea. Highest-leverage content play; leans on the shipped policy engine.
+**B2. Policy starter templates. ✅ SHIPPED this session (`34d3efd`).**
+10 original, editable ISO 27001 policy templates (POL-001…010: Information Security, Access Control, Acceptable Use, Incident Response, Supplier, Business Continuity, Data Protection, Cryptography, Physical, Secure Development) surfaced as a "Start from a template" picker on `/app/policies/new` that pre-fills the form. Original en-GB content; `createPolicyAction` + schema unchanged.
 
 **B3. Continuous evidence automation (the biggest differentiator). `[Opus · L · evidence, integrations]`**
 Today evidence is manual. The 2026 bar is auto-collection: connect cloud/identity/HR (e.g. Google Workspace, GitHub, AWS) and auto-refresh evidence + alert on drift. Build on the existing `TicketProvider`-style abstraction: an `EvidenceProvider` interface + FAKE-tested collectors + the daily sweep marking auto-evidence fresh/stale. Real connectors are go-live/user-secret-dependent (same pattern as Jira/GitHub). Turns "40–80h once a year" into "2–4h/month".
