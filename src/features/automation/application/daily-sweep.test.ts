@@ -21,6 +21,9 @@ function makeDeps(overrides: Partial<SweepDependencies> = {}): SweepDependencies
       { id: "t1", organisationId: "org1", title: "Fix firewall", ownerId: "u1", status: "open", dueOn: "2026-07-01" },
       { id: "t2", organisationId: "org1", title: "Unowned", ownerId: null, status: "open", dueOn: "2026-07-01" },
     ],
+    listReviewablePolicies: async () => [],
+    listOpenPolicyReviewTaskPolicyIds: async () => [],
+    createPolicyReviewTask: async (task) => { createdTasks.push(task); return true; },
     listOrganisationOwners: async () => ["owner1"],
     createNotification: async (notification) => { createdNotifications.push({ userId: notification.userId, kind: notification.kind }); return true; },
     ...overrides,
@@ -75,6 +78,43 @@ describe("runDailySweep", () => {
     });
     const summary = await runDailySweep(deps);
     expect(deps.statusUpdates).toEqual([]);
+    expect(deps.createdNotifications).toEqual([]);
+    expect(summary).toEqual({ evidenceExpiring: 0, evidenceExpired: 0, tasksCreated: 0, notificationsCreated: 0 });
+  });
+
+  it("raises a review task and notifies the owner for a policy that is due, ignoring future ones", async () => {
+    const deps = makeDeps({
+      listActiveEvidence: async () => [],
+      listOverdueTasks: async () => [],
+      listReviewablePolicies: async () => [
+        { id: "p1", organisationId: "org1", reference: "POL-001", title: "Access control", ownerId: "u1", reviewDue: "2026-07-01" },
+        { id: "p2", organisationId: "org1", reference: "POL-002", title: "Cryptography", ownerId: null, reviewDue: "2026-07-02" },
+        { id: "p3", organisationId: "org1", reference: "POL-003", title: "Not yet due", ownerId: "u1", reviewDue: "2026-08-01" },
+      ],
+    });
+    const summary = await runDailySweep(deps);
+    expect(deps.createdTasks).toEqual([
+      { organisationId: "org1", policyId: "p1", reference: "POL-001", title: "Access control", ownerId: "u1", dueOn: "2026-07-01" },
+      { organisationId: "org1", policyId: "p2", reference: "POL-002", title: "Cryptography", ownerId: null, dueOn: "2026-07-02" },
+    ]);
+    expect(deps.createdNotifications).toEqual([
+      { userId: "u1", kind: "policy_review" },       // owned policy -> owner
+      { userId: "owner1", kind: "policy_review" },    // unowned policy -> org owners
+    ]);
+    expect(summary).toEqual({ evidenceExpiring: 0, evidenceExpired: 0, tasksCreated: 2, notificationsCreated: 2 });
+  });
+
+  it("does not re-raise a review task for a policy that already has an open policy_review task", async () => {
+    const deps = makeDeps({
+      listActiveEvidence: async () => [],
+      listOverdueTasks: async () => [],
+      listReviewablePolicies: async () => [
+        { id: "p1", organisationId: "org1", reference: "POL-001", title: "Access control", ownerId: "u1", reviewDue: "2026-07-01" },
+      ],
+      listOpenPolicyReviewTaskPolicyIds: async () => ["p1"], // an open review task already covers it
+    });
+    const summary = await runDailySweep(deps);
+    expect(deps.createdTasks).toEqual([]);
     expect(deps.createdNotifications).toEqual([]);
     expect(summary).toEqual({ evidenceExpiring: 0, evidenceExpired: 0, tasksCreated: 0, notificationsCreated: 0 });
   });

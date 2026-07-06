@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planEvidenceTransitions, planExpiryTasks, planOverdueTaskAlerts } from "./sweep";
+import { planEvidenceTransitions, planExpiryTasks, planOverdueTaskAlerts, planPolicyReviewTasks } from "./sweep";
 
 const evidence = (over: Partial<Parameters<typeof planEvidenceTransitions>[0][number]>) => ({
   id: "e1", organisationId: "org1", title: "Backup report", ownerId: "u1", status: "current" as const, validUntil: "2026-07-20", ...over,
@@ -48,5 +48,24 @@ describe("planOverdueTaskAlerts", () => {
     expect(planOverdueTaskAlerts(tasks, "2026-07-02")).toEqual([
       { organisationId: "org1", taskId: "t1", title: "Fix firewall", ownerId: "u1" },
     ]);
+  });
+});
+
+describe("planPolicyReviewTasks", () => {
+  const policy = (over: Partial<Parameters<typeof planPolicyReviewTasks>[0][number]>) => ({
+    id: "p1", organisationId: "org1", reference: "POL-001", title: "Access control", ownerId: "u1", reviewDue: "2026-07-01", ...over,
+  });
+
+  it("raises one task per due policy lacking an open review task", () => {
+    const policies = [policy({}), policy({ id: "p2", reference: "POL-002", title: "Future", reviewDue: "2026-08-01" })];
+    expect(planPolicyReviewTasks(policies, [], "2026-07-02")).toEqual([
+      { organisationId: "org1", policyId: "p1", reference: "POL-001", title: "Access control", ownerId: "u1", dueOn: "2026-07-01" },
+    ]);
+  });
+
+  it("raises nothing when the policy is not yet due or already has an open review task", () => {
+    expect(planPolicyReviewTasks([policy({ reviewDue: "2026-12-01" })], [], "2026-07-02")).toEqual([]);
+    expect(planPolicyReviewTasks([policy({ reviewDue: null })], [], "2026-07-02")).toEqual([]);
+    expect(planPolicyReviewTasks([policy({})], ["p1"], "2026-07-02")).toEqual([]);
   });
 });

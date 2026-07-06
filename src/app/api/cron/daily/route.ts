@@ -2,7 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { runDailySweep, type SweepDependencies } from "@/features/automation/application/daily-sweep";
-import type { SweepEvidence, SweepTask } from "@/features/automation/domain/sweep";
+import type { SweepEvidence, SweepPolicy, SweepTask } from "@/features/automation/domain/sweep";
 
 export const dynamic = "force-dynamic";
 
@@ -63,6 +63,36 @@ async function sweep(request: Request) {
         id: row.id, organisationId: row.organisation_id, title: row.title, ownerId: row.owner_id,
         status: row.status, dueOn: row.due_on,
       }));
+    },
+    listReviewablePolicies: async () => {
+      const { data, error } = await supabase.from("policies")
+        .select("id,organisation_id,reference,title,owner_id,review_due")
+        .eq("status", "approved").not("review_due", "is", null);
+      if (error) throw error;
+      return (data ?? []).map((row): SweepPolicy => ({
+        id: row.id, organisationId: row.organisation_id, reference: row.reference,
+        title: row.title, ownerId: row.owner_id, reviewDue: row.review_due,
+      }));
+    },
+    listOpenPolicyReviewTaskPolicyIds: async () => {
+      const { data, error } = await supabase.from("tasks").select("policy_id")
+        .eq("source", "policy_review").in("status", ["open", "in_progress"]).not("policy_id", "is", null);
+      if (error) throw error;
+      return (data ?? []).map((row) => row.policy_id as string);
+    },
+    createPolicyReviewTask: async (task) => {
+      const { data: owner, error: ownerError } = await supabase.from("memberships")
+        .select("user_id").eq("organisation_id", task.organisationId).eq("role", "owner").limit(1).single();
+      if (ownerError) throw ownerError;
+      const { data, error } = await supabase.from("tasks").upsert({
+        organisation_id: task.organisationId,
+        title: `Review policy ${task.reference}: ${task.title}`.slice(0, 200),
+        detail: "Raised automatically because this policy has reached its scheduled review date.",
+        source: "policy_review", owner_id: task.ownerId, due_on: task.dueOn,
+        policy_id: task.policyId, created_by: owner.user_id,
+      }, { onConflict: "organisation_id,policy_id,source", ignoreDuplicates: true }).select("id");
+      if (error) throw error;
+      return Boolean(data?.length);
     },
     listOrganisationOwners: async (organisationId) => {
       const { data, error } = await supabase.from("memberships")

@@ -22,6 +22,7 @@ type Store = {
   tasks: Row[];
   notifications: Row[];
   memberships: Row[];
+  policies: Row[];
 };
 
 type Filter =
@@ -138,9 +139,12 @@ function seed(): Store {
       { id: "ev-1", organisation_id: "org-1", title: "Backup report", owner_id: "owner-1", status: "current", valid_until: yesterdayIso },
     ],
     tasks: [
-      { id: "task-1", organisation_id: "org-1", title: "Fix firewall", owner_id: "owner-1", status: "open", due_on: yesterdayIso, source: "manual", evidence_id: null },
+      { id: "task-1", organisation_id: "org-1", title: "Fix firewall", owner_id: "owner-1", status: "open", due_on: yesterdayIso, source: "manual", evidence_id: null, policy_id: null },
     ],
     notifications: [],
+    policies: [
+      { id: "pol-1", organisation_id: "org-1", reference: "POL-001", title: "Access control", owner_id: "owner-1", status: "approved", review_due: yesterdayIso },
+    ],
   };
 }
 
@@ -163,6 +167,7 @@ afterEach(() => {
 });
 
 const expiryTasks = () => store.tasks.filter((t) => t.source === "evidence_expiry");
+const policyReviewTasks = () => store.tasks.filter((t) => t.source === "policy_review");
 
 describe("GET /api/cron/daily", () => {
   it("moves evidence to expired, raises exactly one expiry task, and notifies the owner", async () => {
@@ -175,7 +180,25 @@ describe("GET /api/cron/daily", () => {
     expect(store.notifications.some((n) => n.user_id === "owner-1" && n.kind === "evidence_expired")).toBe(true);
     expect(store.notifications.some((n) => n.user_id === "owner-1" && n.kind === "task_overdue")).toBe(true);
     expect(summary.evidenceExpired).toBe(1);
-    expect(summary.tasksCreated).toBe(1);
+    // One evidence-expiry task and one policy-review task were raised.
+    expect(summary.tasksCreated).toBe(2);
+  });
+
+  it("raises exactly one policy_review task for the due policy and notifies the owner", async () => {
+    const response = await GET(request("test-secret"));
+    expect(response.status).toBe(200);
+
+    const reviewTasks = policyReviewTasks();
+    expect(reviewTasks).toHaveLength(1);
+    expect(reviewTasks[0].policy_id).toBe("pol-1");
+    expect(store.notifications.some((n) => n.user_id === "owner-1" && n.kind === "policy_review" && n.subject_id === "pol-1")).toBe(true);
+  });
+
+  it("does not re-raise a policy_review task when one is already open", async () => {
+    store.tasks.push({ id: "task-2", organisation_id: "org-1", title: "Existing review", owner_id: "owner-1", status: "open", due_on: null, source: "policy_review", evidence_id: null, policy_id: "pol-1" });
+    await GET(request("test-secret"));
+    // Still only the pre-existing open review task; the sweep raised no duplicate.
+    expect(policyReviewTasks()).toHaveLength(1);
   });
 
   it("stays idempotent when two sweeps run concurrently", async () => {

@@ -1,9 +1,10 @@
 import {
-  planEvidenceTransitions, planExpiryTasks, planOverdueTaskAlerts,
-  type SweepEvidence, type SweepTask,
+  planEvidenceTransitions, planExpiryTasks, planOverdueTaskAlerts, planPolicyReviewTasks,
+  type SweepEvidence, type SweepPolicy, type SweepTask,
 } from "../domain/sweep";
 
 export type NewExpiryTask = { organisationId: string; evidenceId: string; title: string; ownerId: string | null; dueOn: string | null };
+export type NewPolicyReviewTask = { organisationId: string; policyId: string; reference: string; title: string; ownerId: string | null; dueOn: string | null };
 export type NewNotification = { organisationId: string; userId: string; kind: string; subjectType: string; subjectId: string; message: string; sweepOn: string };
 export type SweepSummary = { evidenceExpiring: number; evidenceExpired: number; tasksCreated: number; notificationsCreated: number };
 
@@ -14,6 +15,9 @@ export type SweepDependencies = {
   listOpenExpiryTaskEvidenceIds: () => Promise<string[]>;
   createTask: (task: NewExpiryTask) => Promise<boolean>;
   listOverdueTasks: () => Promise<SweepTask[]>;
+  listReviewablePolicies: () => Promise<SweepPolicy[]>;
+  listOpenPolicyReviewTaskPolicyIds: () => Promise<string[]>;
+  createPolicyReviewTask: (task: NewPolicyReviewTask) => Promise<boolean>;
   listOrganisationOwners: (organisationId: string) => Promise<string[]>;
   createNotification: (notification: NewNotification) => Promise<boolean>;
 };
@@ -65,6 +69,25 @@ export async function runDailySweep(deps: SweepDependencies): Promise<SweepSumma
         organisationId: alert.organisationId, userId, kind: "task_overdue",
         subjectType: "tasks", subjectId: alert.taskId,
         message: `Task "${alert.title}" is overdue.`.slice(0, 500), sweepOn: deps.today,
+      });
+      if (inserted) summary.notificationsCreated += 1;
+    }
+  }
+
+  // Scheduled policy reviews. A task is raised once per due policy and deduped by
+  // the open-task existence check plus the (organisation_id, policy_id, source)
+  // unique key, so it never re-raises day after day. The owner (or, if the policy
+  // is unowned, the org owners) is reminded each sweep, deduped per day by the
+  // notifications day-scoped unique key.
+  const policies = await deps.listReviewablePolicies();
+  const openPolicyReviewPolicyIds = await deps.listOpenPolicyReviewTaskPolicyIds();
+  for (const task of planPolicyReviewTasks(policies, openPolicyReviewPolicyIds, deps.today)) {
+    if (await deps.createPolicyReviewTask(task)) summary.tasksCreated += 1;
+    for (const userId of await recipients(task.ownerId, task.organisationId, deps)) {
+      const inserted = await deps.createNotification({
+        organisationId: task.organisationId, userId, kind: "policy_review",
+        subjectType: "policies", subjectId: task.policyId,
+        message: `Policy ${task.reference} "${task.title}" is due for review.`.slice(0, 500), sweepOn: deps.today,
       });
       if (inserted) summary.notificationsCreated += 1;
     }
