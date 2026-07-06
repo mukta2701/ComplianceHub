@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { readFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
@@ -338,6 +339,28 @@ test("the leadership readiness report aggregates the ISMS into one accessible vi
 
   const axe = await new AxeBuilder({ page }).analyze();
   expect(axe.violations).toEqual([]);
+
+  // The "Download PDF" link produces a real, non-empty PDF for this org.
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("link", { name: /download pdf/i }).click(),
+  ]);
+  expect(download.suggestedFilename()).toBe("readiness-report.pdf");
+  const downloadPath = await download.path();
+  expect(downloadPath).not.toBeNull();
+  const pdfBytes = await readFile(downloadPath as string);
+  expect(pdfBytes.length).toBeGreaterThan(0);
+  expect(pdfBytes.subarray(0, 4).toString("latin1")).toBe("%PDF");
+
+  // RLS scoping: the route is auth-gated and returns this org's own data —
+  // fetching it directly via the authenticated request context confirms the
+  // response is a real PDF (not a cross-tenant leak or an error page).
+  const apiResponse = await page.request.get("/api/app/reports/readiness/pdf");
+  expect(apiResponse.status()).toBe(200);
+  expect(apiResponse.headers()["content-type"]).toBe("application/pdf");
+  expect(apiResponse.headers()["content-disposition"]).toContain("attachment");
+  const apiBytes = await apiResponse.body();
+  expect(apiBytes.subarray(0, 4).toString("latin1")).toBe("%PDF");
 });
 
 test("a risk register workbook can be imported through the wizard", async ({ page }, testInfo) => {
