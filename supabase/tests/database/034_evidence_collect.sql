@@ -29,11 +29,14 @@ set local role service_role;
 
 -- (1) The service role can read sources (the new grant) and (2) the cron's
 -- "active only" filter (revoked_at is null) surfaces exactly the one live source.
+-- Scope the counts to this test's own tenant — the service role bypasses RLS and
+-- would otherwise also see sources left behind by e2e/dev runs (a global count is
+-- not test-isolated).
 select is(
-  (select count(*) from public.evidence_sources),
-  2::bigint, 'the service role can read every source (RLS bypassed)');
+  (select count(*) from public.evidence_sources where organisation_id = '20000000-0000-4000-8000-000000000001'),
+  2::bigint, 'the service role can read every source in the tenant (RLS bypassed)');
 select is(
-  (select count(*) from public.evidence_sources where revoked_at is null),
+  (select count(*) from public.evidence_sources where organisation_id = '20000000-0000-4000-8000-000000000001' and revoked_at is null),
   1::bigint, 'the active-source filter surfaces exactly the live source');
 
 -- (3) The service role inserts an auto-collected evidence row for a source,
