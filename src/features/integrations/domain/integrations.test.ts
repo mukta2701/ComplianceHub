@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { fakeTicketProvider } from "./provider";
-import { buildTicketPayload, isTicketSyncDue, ticketStatusTone } from "./mapping";
+import { buildTicketPayload, isTerminalTicketStatus, isTicketSyncDue, ticketStatusTone } from "./mapping";
 
 const conn = { id: "c1", provider: "jira" as const, config: { projectKey: "ENG" }, accessToken: "t" };
 
@@ -31,6 +31,27 @@ describe("isTicketSyncDue", () => {
     expect(isTicketSyncDue({ lastSyncedAt: null }, "2026-07-06T12:00:00Z")).toBe(true);
     expect(isTicketSyncDue({ lastSyncedAt: "2026-07-06T11:00:00Z" }, "2026-07-06T12:00:00Z")).toBe(true);
     expect(isTicketSyncDue({ lastSyncedAt: "2026-07-06T11:50:00Z" }, "2026-07-06T12:00:00Z")).toBe(false);
+  });
+});
+
+describe("isTerminalTicketStatus", () => {
+  it("is terminal for done/closed/resolved, case-insensitively", () => {
+    expect(isTerminalTicketStatus("Done")).toBe(true);
+    expect(isTerminalTicketStatus("Closed")).toBe(true);
+    expect(isTerminalTicketStatus("Resolved")).toBe(true);
+    expect(isTerminalTicketStatus("DONE")).toBe(true);
+    expect(isTerminalTicketStatus("  resolved  ")).toBe(true);
+  });
+  it("is not terminal for open/in-flight or empty statuses", () => {
+    expect(isTerminalTicketStatus("In Progress")).toBe(false);
+    expect(isTerminalTicketStatus("To Do")).toBe(false);
+    expect(isTerminalTicketStatus("In Review")).toBe(false);
+    expect(isTerminalTicketStatus("")).toBe(false);
+  });
+  it("agrees with the green tone (single source of truth)", () => {
+    for (const status of ["Done", "Closed", "Resolved", "In Progress", "To Do", ""]) {
+      expect(isTerminalTicketStatus(status)).toBe(ticketStatusTone(status) === "green");
+    }
   });
 });
 

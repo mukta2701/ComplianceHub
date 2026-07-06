@@ -25,9 +25,18 @@ export function isTicketSyncDue(
   return ageMs >= maxAgeMinutes * 60 * 1000;
 }
 
+// Terminal tracker statuses: the ticket's work is finished. Kept as the single
+// source of truth for both the "green" status tone and the poll cron's
+// auto-close of the linked ComplianceHub task, so the two never drift.
+const TERMINAL_TICKET_STATUSES = new Set(["done", "closed", "resolved"]);
+
+export function isTerminalTicketStatus(status: string): boolean {
+  return TERMINAL_TICKET_STATUSES.has(status.trim().toLowerCase());
+}
+
 export function ticketStatusTone(status: string): string {
   const s = status.trim().toLowerCase();
-  if (s === "done" || s === "closed" || s === "resolved") return "green";
+  if (TERMINAL_TICKET_STATUSES.has(s)) return "green";
   if (s === "in progress" || s === "in review") return "amber";
   if (s === "to do" || s === "open" || s === "backlog") return "neutral";
   return "blue";
