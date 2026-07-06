@@ -13,15 +13,16 @@ export default async function IntegrationsPage() {
     {!isOwner && <Card style={{ padding: "18px" }} role="note"><p>Only workspace owners can manage integrations.</p></Card>}
     {isOwner && <>
       <Card style={{ padding: "18px", marginBottom: "16px" }}>
-        <h2 style={{ fontSize: "15px", margin: "0 0 8px" }}>Go-live checklist</h2>
-        <ol style={{ margin: 0, paddingLeft: "18px", fontSize: "13px", color: "#4a5163", display: "grid", gap: "4px" }}>
-          <li>Register an OAuth app with your provider (Jira or GitHub) and note the client id and secret.</li>
-          <li>Set the provider client id/secret and <code>INTEGRATIONS_LIVE=1</code> in the server environment.</li>
-          <li>Add the connection below with a valid access token; tokens are stored owner-only and never shown again.</li>
-          <li>Enable the poll cron (<code>/api/cron/integrations-sync</code>) with a Vercel cron and <code>CRON_SECRET</code>.</li>
-          <li>Production only: move tokens to Supabase Vault or an encrypted column.</li>
-        </ol>
-        <p style={{ fontSize: "12px", color: "#596273", margin: "8px 0 0" }}>Until <code>INTEGRATIONS_LIVE=1</code> is set, connections use a built-in sandbox tracker so you can trial the flow safely.</p>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px" }}>
+          <h2 style={{ fontSize: "15px", margin: 0 }}>Connect Jira or GitHub</h2>
+          <Pill tone="amber">Sandbox mode</Pill>
+        </div>
+        <p style={{ fontSize: "13px", color: "#4a5163", margin: "0 0 8px" }}>Add a connection below to push remediation tasks to your tracker as tickets, then sync their status back into ComplianceHub.</p>
+        <p style={{ fontSize: "13px", color: "#596273", margin: 0 }}>You&rsquo;re in <b>sandbox mode</b>: new connections use a built-in tracker, so you can trial the push&rarr;sync flow safely without touching a real Jira or GitHub project. When you&rsquo;re ready to connect the real thing, your workspace administrator can follow the going-live steps below.</p>
+        <details style={{ marginTop: "14px", borderTop: "1px solid #edf0f4", paddingTop: "12px" }}>
+          <summary style={{ cursor: "pointer", fontSize: "13px", fontWeight: 700, color: "var(--blue)", width: "fit-content" }}>For your administrator: going live</summary>
+          <p style={{ fontSize: "12px", color: "#596273", margin: "10px 0 6px" }}>Connecting a real tracker needs a one-off setup by whoever manages your hosting. It involves registering an OAuth app with Jira or GitHub, adding the credentials to your deployment, enabling the background sync, and securing the stored access tokens. Share this page with your administrator when you&rsquo;re ready.</p>
+        </details>
       </Card>
       <Card style={{ padding: "18px", marginBottom: "16px" }}>
         <h2 style={{ fontSize: "15px", margin: "0 0 10px" }}>Add a connection</h2>
