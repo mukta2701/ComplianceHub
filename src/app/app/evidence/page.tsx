@@ -22,7 +22,7 @@ export default async function EvidencePage() {
       <Link className="button primary" href="/app/evidence/new"><Icon name="plus" />Add evidence</Link>
     </span>} />
     {!items?.length ? (
-      <EmptyState icon="file" title="Add your first evidence" body="Attach immutable proof — files, links, or notes — to any control, risk, or task. The daily sweep re-checks freshness and raises a replacement task automatically when something goes stale." primary={{ href: "/app/evidence/new", label: "Add evidence" }} />
+      <EmptyState icon="file" title="Add your first evidence" body="Attach immutable proof — files, links, or notes — to any control, risk, or task. The daily sweep re-checks freshness and raises a replacement task automatically when something goes stale." primary={{ href: "/app/evidence/new", label: "Add your first evidence" }} />
     ) : (<>
     <div className="stats-grid"><Stat label="EVIDENCE ITEMS" value={freshness.total} detail="files, links and notes" /><Stat label="EXPIRING SOON" value={freshness.expiring} detail="within 30 days" tone="amber" /><Stat label="EXPIRED" value={freshness.expired} detail="replacement task raised" tone="red" /></div>
     <div style={{ display: "grid", gap: "14px" }}>{items.map((item) => <Card key={item.id} style={{ padding: "20px" }}>
