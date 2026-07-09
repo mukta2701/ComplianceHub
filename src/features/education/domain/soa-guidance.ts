@@ -29,15 +29,11 @@ export function getSoaControlGuidance(control: { code: string; title: string; ap
   const evidenceExamples = control.code === "8.5"
     ? ["Identity-provider configuration export", "MFA enforcement report", "Access review record"]
     : ["Approved policy or procedure", "Current operational record", "Review or test result"];
-  const decision = control.applicable
-    ? "Record why this control applies to your scope, risks, contracts, or technology, then describe the current implementation and evidence."
-    : "Record the scope-based reason this control does not apply. Exclusions need the same level of care as applicable controls.";
+  const decision = "Choose whether this control applies to your scope, then record a defensible rationale, current implementation status, owner, and evidence. Exclusions need the same level of care as applicable controls.";
   return {
     why: `${themeForControl(control.code)} ${control.title} is part of the control set your organisation needs to assess.`,
     evidenceExamples,
     decision,
-    rationaleTemplate: control.applicable
-      ? "This control is applicable because [scope, risk, contractual, or technology reason]. Current implementation is [status]. Supporting evidence is [reference]. This draft requires human review before save."
-      : "This control is not applicable because [documented scope reason]. This draft requires human review before save.",
+    rationaleTemplate: "If applicable: this control is applicable because [scope, risk, contractual, or technology reason]. Current implementation is [status]. Supporting evidence is [reference]. If not applicable: state the documented scope reason. This draft requires human review before save.",
   };
 }

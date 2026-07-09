@@ -8,13 +8,14 @@ export type AssessmentActionDraft = {
   riskHref: string;
 };
 
-export function getAssessmentActionDraft(question: { id: string; code: string; prompt: string }, answer: AssessmentAnswer): AssessmentActionDraft | null {
+export function getAssessmentActionDraft(question: { id: string; code: string; prompt: string }, answer: AssessmentAnswer, sessionId: string): AssessmentActionDraft | null {
   if (answer !== "partially" && answer !== "no") return null;
   const severity = answer === "no" ? "not currently implemented" : "partially implemented";
   const title = `Close gap: ${question.prompt}`;
   const detail = `${question.code} is ${severity}. Confirm the current process, assign an owner, implement the missing practice, and retain evidence that it is operating.`;
   const parameters = new URLSearchParams({
     source: "assessment",
+    sourceAssessmentSessionId: sessionId,
     title: `Readiness gap: ${question.prompt}`,
     description: `Assessment ${question.code} is ${severity}. Consider the business impact if this control remains incomplete.`,
     treatmentPlan: detail,

@@ -2,13 +2,14 @@ import { requireAppContext } from "@/lib/app-context";
 import { PageIntro } from "@/components/ui";
 import { createRiskAction } from "../../actions";
 
-export default async function NewRiskPage({ searchParams }: { searchParams: Promise<{ title?: string; description?: string; treatmentPlan?: string }> }) {
+export default async function NewRiskPage({ searchParams }: { searchParams: Promise<{ title?: string; description?: string; treatmentPlan?: string; sourceAssessmentSessionId?: string }> }) {
   const suggested = await searchParams;
   const { supabase } = await requireAppContext();
   const { data: categories } = await supabase.from("risk_categories").select("id,name").order("position");
   return <>
     <PageIntro eyebrow="RISK" title="Add risk" body="Record inherent and residual exposure on the documented 5×5 matrix." />
     <form action={createRiskAction} className="card app-form">
+      {suggested.sourceAssessmentSessionId && <input type="hidden" name="sourceAssessmentSessionId" value={suggested.sourceAssessmentSessionId} />}
       <div className="form-grid">
         <label>Reference<input name="reference" required placeholder="e.g. R-001" /></label>
         <label>Title<input name="title" required placeholder="Risk title" defaultValue={suggested.title ?? ""} /></label>
