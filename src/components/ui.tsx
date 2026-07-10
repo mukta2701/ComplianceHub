@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Icon } from "./icons";
+import { PageHeading } from "./page-heading";
 
 export function EmptyState({ icon, title, body, primary, secondary, action }: { icon: string; title: string; body: string; primary?: { href: string; label: string }; secondary?: { href: string; label: string }; action?: React.ReactNode }) {
   return <Card style={{ padding: "48px 24px", textAlign: "center" }}>
@@ -15,7 +16,7 @@ export function EmptyState({ icon, title, body, primary, secondary, action }: { 
   </Card>;
 }
 export function PageIntro({ eyebrow, title, body, action }: { eyebrow?: string; title: string; body: string; action?: React.ReactNode }) {
-  return <div className="page-intro"><div>{eyebrow && <span className="eyebrow">{eyebrow}</span>}<h2>{title}</h2><p>{body}</p></div>{action}</div>;
+  return <PageHeading eyebrow={eyebrow} title={title} body={body} action={action} />;
 }
 export function Card({ children, className = "", ...props }: React.HTMLAttributes<HTMLElement>) { return <section className={`card ${className}`} {...props}>{children}</section>; }
 export function Stat({ label, value, detail, tone = "blue" }: { label: string; value: string | number; detail: string; tone?: string }) { return <Card className="stat"><span className={`stat-icon ${tone}`}><Icon name={tone === "green" ? "check" : tone === "amber" || tone === "red" ? "alert" : "file"}/></span><div><small>{label}</small><strong>{value}</strong><p>{detail}</p></div></Card>; }
