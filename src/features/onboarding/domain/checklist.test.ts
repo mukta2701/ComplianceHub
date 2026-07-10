@@ -8,11 +8,12 @@ describe("buildOnboardingChecklist", () => {
       hasPolicy: false,
       hasRisk: false,
       hasSoa: false,
+      hasEvidence: false,
       hasTeam: false,
     });
-    expect(checklist.total).toBe(6);
+    expect(checklist.total).toBe(7);
     expect(checklist.doneCount).toBe(1);
-    expect(checklist.percent).toBe(17); // round(1/6 * 100)
+    expect(checklist.percent).toBe(14); // round(1/7 * 100)
     expect(checklist.complete).toBe(false);
     // The workspace step is first and always done; the rest are actionable.
     expect(checklist.steps[0]).toMatchObject({ id: "workspace", done: true });
@@ -30,12 +31,13 @@ describe("buildOnboardingChecklist", () => {
       hasPolicy: true,
       hasRisk: false,
       hasSoa: false,
+      hasEvidence: false,
       hasTeam: false,
     });
-    // workspace + assessment + policy = 3 of 6.
+    // workspace + assessment + policy = 3 of 7.
     expect(checklist.doneCount).toBe(3);
-    expect(checklist.total).toBe(6);
-    expect(checklist.percent).toBe(50);
+    expect(checklist.total).toBe(7);
+    expect(checklist.percent).toBe(43); // round(3/7 * 100)
     expect(checklist.complete).toBe(false);
   });
 
@@ -45,10 +47,11 @@ describe("buildOnboardingChecklist", () => {
       hasPolicy: true,
       hasRisk: true,
       hasSoa: true,
+      hasEvidence: true,
       hasTeam: true,
     });
-    expect(checklist.doneCount).toBe(6);
-    expect(checklist.total).toBe(6);
+    expect(checklist.doneCount).toBe(7);
+    expect(checklist.total).toBe(7);
     expect(checklist.percent).toBe(100);
     expect(checklist.complete).toBe(true);
   });
@@ -59,6 +62,7 @@ describe("buildOnboardingChecklist", () => {
       hasPolicy: true,
       hasRisk: true,
       hasSoa: true,
+      hasEvidence: true,
       hasTeam: true,
     });
     expect(without.steps.some((s) => s.id === "integration")).toBe(false);
@@ -68,14 +72,15 @@ describe("buildOnboardingChecklist", () => {
       hasPolicy: true,
       hasRisk: true,
       hasSoa: true,
+      hasEvidence: true,
       hasTeam: true,
       hasIntegration: false,
     });
     // The tracker step lands last and is still outstanding, so the all-else-done
     // workspace is NOT complete and the card stays visible.
-    expect(withStep.total).toBe(7);
-    expect(withStep.doneCount).toBe(6);
-    expect(withStep.percent).toBe(86); // round(6/7 * 100)
+    expect(withStep.total).toBe(8);
+    expect(withStep.doneCount).toBe(7);
+    expect(withStep.percent).toBe(88); // round(7/8 * 100)
     expect(withStep.complete).toBe(false);
     expect(withStep.steps[withStep.steps.length - 1]).toMatchObject({ id: "integration", done: false });
 
@@ -84,12 +89,24 @@ describe("buildOnboardingChecklist", () => {
       hasPolicy: true,
       hasRisk: true,
       hasSoa: true,
+      hasEvidence: true,
       hasTeam: true,
       hasIntegration: true,
     });
-    expect(allDone.total).toBe(7);
-    expect(allDone.doneCount).toBe(7);
+    expect(allDone.total).toBe(8);
+    expect(allDone.doneCount).toBe(8);
     expect(allDone.percent).toBe(100);
     expect(allDone.complete).toBe(true);
+  });
+});
+
+describe("buildOnboardingChecklist order", () => {
+  it("orders steps by real data dependency: assessment, soa, risk, evidence, policy, team", () => {
+    const { steps } = buildOnboardingChecklist({
+      hasAssessment: false, hasSoa: false, hasRisk: false, hasEvidence: false, hasPolicy: false, hasTeam: false,
+    });
+    expect(steps.map((s) => s.id)).toEqual([
+      "workspace", "assessment", "soa", "risk", "evidence", "policy", "team",
+    ]);
   });
 });

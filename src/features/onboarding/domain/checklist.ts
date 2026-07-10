@@ -24,6 +24,7 @@ export type OnboardingInputs = {
   hasPolicy: boolean;
   hasRisk: boolean;
   hasSoa: boolean;
+  hasEvidence: boolean;
   hasTeam: boolean;
   // Optional, last, non-blocking-feeling "power" step. Present only when the
   // workspace has an active tracker connection.
@@ -59,12 +60,12 @@ export function buildOnboardingChecklist(inputs: OnboardingInputs): OnboardingCh
       done: inputs.hasAssessment,
     },
     {
-      id: "policy",
-      label: "Publish your first policy",
-      description: "Start from a template and have something to approve and circulate.",
-      href: "/app/policies/new",
-      cta: "New policy",
-      done: inputs.hasPolicy,
+      id: "soa",
+      label: "Generate your Statement of Applicability",
+      description: "Turn the assessment into a control-by-control SoA register.",
+      href: "/app/soa",
+      cta: "Open SoA",
+      done: inputs.hasSoa,
     },
     {
       id: "risk",
@@ -75,12 +76,20 @@ export function buildOnboardingChecklist(inputs: OnboardingInputs): OnboardingCh
       done: inputs.hasRisk,
     },
     {
-      id: "soa",
-      label: "Generate your Statement of Applicability",
-      description: "Turn the assessment into a control-by-control SoA register.",
-      href: "/app/soa",
-      cta: "Open SoA",
-      done: inputs.hasSoa,
+      id: "evidence",
+      label: "Attach your first evidence",
+      description: "Link proof to a control — freshness is then tracked automatically.",
+      href: "/app/evidence/new",
+      cta: "Add evidence",
+      done: inputs.hasEvidence,
+    },
+    {
+      id: "policy",
+      label: "Publish your first policy",
+      description: "Start from a template and have something to approve and circulate.",
+      href: "/app/policies/new",
+      cta: "New policy",
+      done: inputs.hasPolicy,
     },
     {
       id: "team",

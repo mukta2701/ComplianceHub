@@ -34,9 +34,10 @@ export default async function AppHome() {
   ]);
   const checklist = buildOnboardingChecklist({
     hasAssessment: (assessments ?? 0) > 0,
-    hasPolicy: (policies ?? 0) > 0,
-    hasRisk: (allRisks ?? 0) > 0,
     hasSoa: (soaRegisters ?? 0) > 0 || (snapshots ?? 0) > 0,
+    hasRisk: (allRisks ?? 0) > 0,
+    hasEvidence: (liveEvidence ?? 0) > 0,
+    hasPolicy: (policies ?? 0) > 0,
     hasTeam: (members ?? 0) > 1 || (invites ?? 0) > 0,
     hasIntegration: (integrations ?? 0) > 0,
   });
