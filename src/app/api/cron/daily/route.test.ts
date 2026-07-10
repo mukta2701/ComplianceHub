@@ -23,12 +23,15 @@ type Store = {
   notifications: Row[];
   memberships: Row[];
   policies: Row[];
+  evidence_sources: Row[];
+  task_tickets: Row[];
 };
 
 type Filter =
   | { kind: "eq"; col: string; val: unknown }
   | { kind: "in"; col: string; vals: unknown[] }
   | { kind: "notNull"; col: string }
+  | { kind: "isNull"; col: string }
   | { kind: "lt"; col: string; val: unknown };
 
 let idCounter = 0;
@@ -39,6 +42,7 @@ function matches(row: Row, filters: Filter[]): boolean {
     if (f.kind === "eq") return row[f.col] === f.val;
     if (f.kind === "in") return f.vals.includes(row[f.col]);
     if (f.kind === "notNull") return row[f.col] !== null && row[f.col] !== undefined;
+    if (f.kind === "isNull") return row[f.col] === null || row[f.col] === undefined;
     return (row[f.col] as string) < (f.val as string);
   });
 }
@@ -49,6 +53,7 @@ class Builder implements PromiseLike<{ data: unknown; error: unknown }> {
   private payload: Row = {};
   private upsertKeys: string[] = [];
   private isSingle = false;
+  private isMaybeSingle = false;
 
   constructor(private store: Store, private table: keyof Store) {}
 
@@ -70,6 +75,11 @@ class Builder implements PromiseLike<{ data: unknown; error: unknown }> {
   not(col: string) {
     // Modelled only for `.not(col, "is", null)`, i.e. a not-null filter.
     this.filters.push({ kind: "notNull", col });
+    return this;
+  }
+  is(col: string, _val: null) {
+    // Modelled only for `.is(col, null)`, i.e. an is-null filter.
+    this.filters.push({ kind: "isNull", col });
     return this;
   }
   lt(col: string, val: unknown) {
@@ -94,6 +104,10 @@ class Builder implements PromiseLike<{ data: unknown; error: unknown }> {
     this.isSingle = true;
     return this;
   }
+  maybeSingle() {
+    this.isMaybeSingle = true;
+    return this;
+  }
 
   private resolve(): { data: unknown; error: unknown } {
     if (this.op === "update") {
@@ -111,6 +125,9 @@ class Builder implements PromiseLike<{ data: unknown; error: unknown }> {
     if (this.isSingle) {
       if (found.length === 0) return { data: null, error: { message: "no rows" } };
       return { data: found[0], error: null };
+    }
+    if (this.isMaybeSingle) {
+      return { data: found[0] ?? null, error: null };
     }
     return { data: found, error: null };
   }
@@ -145,6 +162,11 @@ function seed(): Store {
     policies: [
       { id: "pol-1", organisation_id: "org-1", reference: "POL-001", title: "Access control", owner_id: "owner-1", status: "approved", review_due: yesterdayIso },
     ],
+    // No evidence sources or ticket connections wired up in this fixture —
+    // collectEvidence/syncTickets run against an empty set and are no-ops,
+    // exercising the new pipeline stages without changing sweep behaviour.
+    evidence_sources: [],
+    task_tickets: [],
   };
 }
 
@@ -179,9 +201,13 @@ describe("GET /api/cron/daily", () => {
     expect(expiryTasks()).toHaveLength(1);
     expect(store.notifications.some((n) => n.user_id === "owner-1" && n.kind === "evidence_expired")).toBe(true);
     expect(store.notifications.some((n) => n.user_id === "owner-1" && n.kind === "task_overdue")).toBe(true);
-    expect(summary.evidenceExpired).toBe(1);
+    // Response shape changed under Task 10: the sweep summary now lives under
+    // `.sweep`, alongside the new `.collect` and `.sync` pipeline stages.
+    expect(summary.sweep.evidenceExpired).toBe(1);
     // One evidence-expiry task and one policy-review task were raised.
-    expect(summary.tasksCreated).toBe(2);
+    expect(summary.sweep.tasksCreated).toBe(2);
+    expect(summary.collect).toEqual({ collected: 0, refreshed: 0, failed: 0 });
+    expect(summary.sync).toEqual({ synced: 0, failed: 0, tasksClosed: 0 });
   });
 
   it("raises exactly one policy_review task for the due policy and notifies the owner", async () => {

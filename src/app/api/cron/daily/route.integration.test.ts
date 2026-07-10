@@ -122,8 +122,10 @@ describe.skipIf(missingEnv)("GET /api/cron/daily against the live database", () 
     const response = await GET(request(CRON_SECRET));
     expect(response.status).toBe(200);
     const summary = await response.json();
-    expect(summary.evidenceExpired).toBeGreaterThanOrEqual(1);
-    expect(summary.tasksCreated).toBeGreaterThanOrEqual(1);
+    // Response shape changed under Task 10: the sweep summary now lives under
+    // `.sweep`, alongside the new `.collect` and `.sync` pipeline stages.
+    expect(summary.sweep.evidenceExpired).toBeGreaterThanOrEqual(1);
+    expect(summary.sweep.tasksCreated).toBeGreaterThanOrEqual(1);
 
     const { data: evidence } = await admin.from("evidence").select("status").eq("id", evidenceId).single();
     expect(evidence?.status).toBe("expired");

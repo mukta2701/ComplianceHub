@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { runDailySweep, type SweepDependencies } from "@/features/automation/application/daily-sweep";
 import type { SweepEvidence, SweepPolicy, SweepTask } from "@/features/automation/domain/sweep";
+import { collectEvidence } from "@/features/integrations/application/collect-run";
+import { syncTickets } from "@/features/integrations/application/sync-run";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +20,10 @@ function authorised(request: Request): boolean {
 async function sweep(request: Request) {
   if (!authorised(request)) return NextResponse.json({ error: "unauthorised" }, { status: 401 });
   const supabase = createSupabaseServiceClient();
+  // Order matters: collect fresh evidence, then sync ticket statuses, then
+  // sweep (age evidence, raise tasks, notify) — each stage feeds the next.
+  const collectResult = await collectEvidence(supabase);
+  const syncResult = await syncTickets(supabase);
   const today = new Date().toISOString().slice(0, 10);
   const deps: SweepDependencies = {
     today,
@@ -111,7 +117,7 @@ async function sweep(request: Request) {
     },
   };
   const summary = await runDailySweep(deps);
-  return NextResponse.json(summary);
+  return NextResponse.json({ collect: collectResult, sync: syncResult, sweep: summary });
 }
 
 export async function GET(request: Request) { return sweep(request); } // Vercel Cron sends GET
