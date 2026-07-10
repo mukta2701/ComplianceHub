@@ -1,18 +1,20 @@
 import Link from "next/link";
 import { requireAppContext } from "@/lib/app-context";
 import { Card, EmptyState, PageIntro, Pill, Stat } from "@/components/ui";
-import { generateAutomationBaselineAction, reviewAutomationProposalAction, revokeAutomationConnectionAction } from "./actions";
+import { generateAutomationBaselineAction, generateAutomationExplanationAction, reviewAutomationProposalAction, revokeAutomationConnectionAction } from "./actions";
 
-type ProposalOutput = { title?: string; why?: string; recommendedAction?: string; state?: string; confidence?: string };
+type ProposalOutput = { title?: string; why?: string; explanation?: string; recommendedAction?: string; state?: string; confidence?: string };
 
 function asOutput(value: unknown): ProposalOutput { return value && typeof value === "object" ? value as ProposalOutput : {}; }
 
 export default async function AutomationPage({ searchParams }: { searchParams: Promise<{ message?: string }> }) {
-  const { supabase, user, membership } = await requireAppContext();
+  const { supabase, user, membership, organisation } = await requireAppContext();
   const { message } = await searchParams;
-  const [{ data: connections }, { data: proposals }] = await Promise.all([
+  const [{ data: connections }, { data: proposals }, { data: aiSettings }, { data: aiDrafts }] = await Promise.all([
     supabase.from("connector_connections").select("id,provider,label,status,last_collected_at,last_error_at").order("created_at", { ascending: false }),
     supabase.from("automation_proposals").select("id,target_type,assigned_to,status,output,source_references,created_at,automation_signals(signal_type,summary,confidence,occurred_at,connector_connections(label,provider))").order("created_at", { ascending: false }).limit(100),
+    supabase.from("ai_workspace_settings").select("enabled").eq("organisation_id", organisation.id).maybeSingle(),
+    supabase.from("ai_suggestions").select("target_id,output,status,created_at").eq("target_type", "automation_proposal").order("created_at", { ascending: false }),
   ]);
   const drafts = (proposals ?? []).filter((proposal) => proposal.status === "draft");
   const mine = drafts.filter((proposal) => proposal.assigned_to === user.id);
@@ -26,11 +28,12 @@ export default async function AutomationPage({ searchParams }: { searchParams: P
     </Card>
     <section style={{ marginTop: "22px" }} aria-labelledby="automation-inbox"><h2 id="automation-inbox" style={{ fontSize: "16px", margin: "0 0 10px" }}>Automation inbox</h2>
       {!drafts.length && <EmptyState icon="clipboard" title="No automation drafts yet" body="Complete setup, then run a baseline collection. Evidence and remediation drafts will appear here for the people responsible for the work." primary={{ href: "/app/setup", label: "Set up automation" }} />}
-      <div style={{ display: "grid", gap: "12px" }}>{drafts.map((proposal) => { const output = asOutput(proposal.output); const signal = Array.isArray(proposal.automation_signals) ? proposal.automation_signals[0] : proposal.automation_signals; const connection = signal && (Array.isArray(signal.connector_connections) ? signal.connector_connections[0] : signal.connector_connections); const isMine = proposal.assigned_to === user.id; const draftTitle = output.title ?? signal?.summary ?? "Automation review"; return <Card key={proposal.id} aria-label={`Automation draft: ${draftTitle}`} style={{ padding: "18px", borderColor: isMine ? "#cfe0fb" : undefined }}>
+      <div style={{ display: "grid", gap: "12px" }}>{drafts.map((proposal) => { const output = asOutput(proposal.output); const signal = Array.isArray(proposal.automation_signals) ? proposal.automation_signals[0] : proposal.automation_signals; const connection = signal && (Array.isArray(signal.connector_connections) ? signal.connector_connections[0] : signal.connector_connections); const isMine = proposal.assigned_to === user.id; const draftTitle = output.title ?? signal?.summary ?? "Automation review"; const aiDraft = (aiDrafts ?? []).find((draft) => draft.target_id === proposal.id); const aiOutput = asOutput(aiDraft?.output); return <Card key={proposal.id} aria-label={`Automation draft: ${draftTitle}`} style={{ padding: "18px", borderColor: isMine ? "#cfe0fb" : undefined }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "start" }}><div><span className="eyebrow">{proposal.target_type.toUpperCase()} DRAFT</span><h3 style={{ fontSize: "15px", margin: "4px 0" }}>{draftTitle}</h3><p style={{ margin: "0", color: "#596273", fontSize: "13px", lineHeight: 1.5 }}>{output.why ?? "Review the connected-system observation before using it in ComplianceHub."}</p></div><Pill tone={isMine ? "blue" : "neutral"}>{isMine ? "Assigned to you" : "Assigned to another owner"}</Pill></div>
         <p style={{ margin: "10px 0", color: "#596273", fontSize: "12px" }}><b>Source:</b> {connection?.label ?? connection?.provider ?? "Connected system"} · {signal?.confidence ?? output.confidence ?? "low"} confidence · {signal?.signal_type ?? "unclassified signal"}</p>
         <p style={{ margin: "0", color: "#596273", fontSize: "12px" }}><b>Recommended next step:</b> {output.recommendedAction ?? "Review the source and decide whether it belongs in the workspace."}</p>
-        {isMine && <div style={{ display: "grid", gap: "8px", marginTop: "14px" }}><form action={reviewAutomationProposalAction} style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}><input type="hidden" name="id" value={proposal.id} /><input type="hidden" name="decision" value="accepted" /><button className="button primary">{proposal.target_type === "task" ? "Create task" : "Accept as evidence"}</button></form><form action={reviewAutomationProposalAction} style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}><input type="hidden" name="id" value={proposal.id} /><input type="hidden" name="decision" value="dismissed" /><input aria-label={`Reason for dismissing ${output.title ?? "automation draft"}`} name="dismissalReason" maxLength={1000} required placeholder="Why does this not apply?" style={{ flex: "1 1 220px" }} /><button className="button secondary">Dismiss</button></form></div>}
+        {aiDraft && <div role="status" style={{ marginTop: "12px", padding: "10px", borderLeft: "3px solid #87a7ef", background: "#f7f9fd", fontSize: "12px", color: "#596273", lineHeight: 1.5 }}><b>AI draft explanation</b><div>{aiOutput.explanation}</div><div style={{ marginTop: "4px" }}><b>Suggested next step:</b> {aiOutput.recommendedAction}</div><div style={{ marginTop: "4px" }}>Draft only. No compliance record was changed.</div></div>}
+        {isMine && <div style={{ display: "grid", gap: "8px", marginTop: "14px" }}>{aiSettings?.enabled && !aiDraft && <form action={generateAutomationExplanationAction}><input type="hidden" name="id" value={proposal.id} /><button className="button secondary">Draft AI explanation</button></form>}<form action={reviewAutomationProposalAction} style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}><input type="hidden" name="id" value={proposal.id} /><input type="hidden" name="decision" value="accepted" /><button className="button primary">{proposal.target_type === "task" ? "Create task" : "Accept as evidence"}</button></form><form action={reviewAutomationProposalAction} style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}><input type="hidden" name="id" value={proposal.id} /><input type="hidden" name="decision" value="dismissed" /><input aria-label={`Reason for dismissing ${output.title ?? "automation draft"}`} name="dismissalReason" maxLength={1000} required placeholder="Why does this not apply?" style={{ flex: "1 1 220px" }} /><button className="button secondary">Dismiss</button></form></div>}
       </Card>; })}</div>
     </section>
   </>;

@@ -8,6 +8,9 @@ import { resolveEvidenceProvider } from "@/features/integrations/application/evi
 import type { EvidenceProviderKind } from "@/features/integrations/domain/evidence-provider";
 import { automationConnectionId, persistCollectedAutomation } from "@/features/automation/application/collector-persistence";
 import { purgeContentReference } from "@/features/automation/domain/retention";
+import { configuredAiProvider } from "@/features/ai/application/openai-compatible";
+import { generateAiSuggestion } from "@/features/ai/application/suggestion";
+import { buildAutomationProposalAiContext } from "@/features/ai/domain/context";
 
 export async function reviewAutomationProposalAction(formData: FormData) {
   const { supabase, user } = await requireAppContext();
@@ -75,5 +78,41 @@ export async function generateAutomationBaselineAction() {
       // a baseline request must still return the drafts from healthy systems.
     }
   }
+  revalidatePath("/app/automation");
+}
+
+export async function generateAutomationExplanationAction(formData: FormData) {
+  const { supabase, user, organisation } = await requireAppContext();
+  await enforceRateLimit(`automation-ai:${user.id}`, { limit: 20, windowMs: 60 * 60_000 });
+  const proposalId = String(formData.get("id"));
+  const { data: settings } = await supabase.from("ai_workspace_settings").select("enabled").eq("organisation_id", organisation.id).maybeSingle();
+  if (!settings?.enabled) throw new Error("AI assistance is disabled for this workspace");
+  const provider = configuredAiProvider();
+  if (!provider) throw new Error("AI assistance is not configured");
+  const { data: proposal, error: proposalError } = await supabase.from("automation_proposals")
+    .select("id,target_type,assigned_to,output,automation_signals(id,signal_type,summary)").eq("id", proposalId).eq("organisation_id", organisation.id).eq("assigned_to", user.id).maybeSingle();
+  const signal = Array.isArray(proposal?.automation_signals) ? proposal?.automation_signals[0] : proposal?.automation_signals;
+  if (proposalError || !proposal || !signal || !proposal.output || typeof proposal.output !== "object") throw new Error("Automation draft not found");
+  const output = proposal.output as { title?: unknown; confidence?: unknown };
+  const { data: sourceLink } = await supabase.from("automation_proposal_sources")
+    .select("source_objects(id,title)").eq("proposal_id", proposal.id).eq("organisation_id", organisation.id).limit(1).maybeSingle();
+  const source = Array.isArray(sourceLink?.source_objects) ? sourceLink.source_objects[0] : sourceLink?.source_objects;
+  const context = buildAutomationProposalAiContext({
+    proposal: { id: proposal.id, targetType: proposal.target_type, title: typeof output.title === "string" ? output.title : "Automation draft", confidence: typeof output.confidence === "string" ? output.confidence : "low" },
+    signal: { id: signal.id, type: signal.signal_type, summary: signal.summary },
+    sourceObject: source ? { id: source.id, title: source.title } : null,
+  });
+  const suggestion = await generateAiSuggestion({ provider, context });
+  const { error } = await supabase.from("ai_suggestions").insert({
+    organisation_id: organisation.id,
+    target_type: "automation_proposal",
+    target_id: proposal.id,
+    suggestion_type: "automation_explanation",
+    requester_id: user.id,
+    input_snapshot: context,
+    output: suggestion,
+    source_references: suggestion.sourceReferences,
+  });
+  if (error) throw new Error("Could not save the AI draft");
   revalidatePath("/app/automation");
 }
