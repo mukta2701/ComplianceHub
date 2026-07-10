@@ -19,10 +19,16 @@ describe("authFailureDiagnostic", () => {
 });
 
 describe("authFailureMessage", () => {
-  it("guides an existing account to sign in", () => {
-    expect(authFailureMessage("User already registered", "sign-up")).toEqual({
-      path: "/sign-in",
-      message: "An account already exists for this email. Sign in instead.",
+  it("keeps an existing account indistinguishable from an unknown sign-up failure", () => {
+    const unknownFailure = authFailureMessage(
+      "Provider detail that must stay private",
+      "sign-up",
+    );
+
+    expect(authFailureMessage("User already registered", "sign-up")).toEqual(unknownFailure);
+    expect(unknownFailure).toEqual({
+      path: "/sign-up",
+      message: "We could not complete that request. Check your details and try again.",
     });
   });
 

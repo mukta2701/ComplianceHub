@@ -28,13 +28,6 @@ export function authFailureDiagnostic(providerMessage: string, operation: AuthOp
 export function authFailureMessage(providerMessage: string, operation: AuthOperation) {
   const classification = classifyAuthFailure(providerMessage, operation);
 
-  if (classification === "existing-account") {
-    return {
-      path: "/sign-in",
-      message: "An account already exists for this email. Sign in instead.",
-    };
-  }
-
   if (classification === "throttled") {
     return {
       path: operation === "sign-up" ? "/sign-up" : "/sign-in",
