@@ -126,10 +126,11 @@ test("an asset is added to the inventory and the list is accessible", async ({ p
   await page.getByRole("button", { name: "Create workspace" }).click();
   await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
 
-  // Reach the asset inventory through the workspace nav.
+  // Reach the asset inventory through the workspace nav, via the Risks tab strip.
   const navToggle = page.getByRole("button", { name: "Open navigation" });
   if (await navToggle.isVisible()) await navToggle.click();
-  await page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: "Assets", exact: true }).click();
+  await page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: "Risk register", exact: true }).click();
+  await page.getByRole("navigation", { name: "Section" }).getByRole("link", { name: "Assets", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Asset inventory", level: 1 })).toBeVisible();
 
   await page.getByRole("link", { name: "Add asset" }).click();
