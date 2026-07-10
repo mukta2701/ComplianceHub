@@ -21,15 +21,20 @@ export const githubEvidenceProvider = {
     const owner = configValue(connection.config, "owner");
     const repo = configValue(connection.config, "repo");
     if (!connection.accessToken) throw new Error("GitHub evidence source requires an access token");
-    const response = await fetcher(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches?protected=true&per_page=100`, {
-      headers: { Authorization: `Bearer ${connection.accessToken}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2026-03-10" },
-    });
-    if (!response.ok) throw new Error(`GitHub evidence collection failed: ${response.status}`);
-    const branches = await response.json() as { protected?: boolean }[];
+    let protectedCount = 0;
+    for (let page = 1; page <= 5; page += 1) {
+      const response = await fetcher(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches?protected=true&per_page=100&page=${page}`, {
+        headers: { Authorization: `Bearer ${connection.accessToken}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2026-03-10" }, signal: AbortSignal.timeout(15_000),
+      });
+      if (!response.ok) throw new Error(`GitHub evidence collection failed: ${response.status}`);
+      const branches = await response.json() as { protected?: boolean }[];
+      protectedCount += branches.filter((branch) => branch.protected).length;
+      if (branches.length < 100) break;
+    }
     const collectedOn = today(connection.config);
     return [{
       externalRef: `github:${owner}/${repo}:protected-branches`, title: `GitHub protected branches: ${owner}/${repo}`, kind: "note" as const,
-      note: `${branches.filter((branch) => branch.protected).length} protected branches reported. Repository contents and branch names were not collected.`,
+      note: `${protectedCount} protected branches reported. Repository contents and branch names were not collected.`,
       collectedOn, validUntil: addDays(collectedOn, 30),
     }];
   },
