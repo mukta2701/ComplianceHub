@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireAppContext } from "@/lib/app-context";
 import { Card, EmptyState, PageIntro } from "@/components/ui";
+import { SubTabs } from "@/components/sub-tabs";
 import { createSoaAction } from "../actions";
 
 export default async function SoaPage() {
@@ -16,6 +17,7 @@ export default async function SoaPage() {
       <a className="button secondary" href={`/api/app/soa/export?format=csv`}>CSV</a>
       <Link className="button secondary" href="/app/soa/import">Import</Link>
     </span>} />
+    <SubTabs tabs={[{ href: "/app/soa", label: "Statement of Applicability" }, { href: "/app/frameworks", label: "Framework coverage" }]} />
     {assessments?.length ? (
       <Card style={{ padding: "16px" }}><form action={createSoaAction} style={{ display: "flex", gap: "12px" }}><select name="assessmentId" required className="field" style={{ flex: 1 }}><option value="">Select an assessment</option>{assessments.map((a) => <option key={a.id} value={a.id}>{a.title}</option>)}</select><button className="button primary">Generate draft</button></form></Card>
     ) : (

@@ -1,5 +1,6 @@
 import { requireAppContext } from "@/lib/app-context";
 import { Card, EmptyState, PageIntro, Pill, Progress } from "@/components/ui";
+import { SubTabs } from "@/components/sub-tabs";
 import {
   COMPLIANCE_FRAMEWORKS,
   COMPLIANCE_FRAMEWORK_LABEL,
@@ -52,6 +53,7 @@ export default async function FrameworksPage() {
       title="Framework crosswalk"
       body="Record how your ISO 27001 controls map to other frameworks' requirements. These are your organisation's own mappings — a requirement counts as covered once a mapped control is marked implemented in your Statement of Applicability, so overlapping requirements reuse the evidence you have already attached."
     />
+    <SubTabs tabs={[{ href: "/app/soa", label: "Statement of Applicability" }, { href: "/app/frameworks", label: "Framework coverage" }]} />
 
     <section aria-label="Per-framework coverage" style={{ display: "grid", gap: "12px", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", marginBottom: "24px" }}>
       {coverage.map((row) => (
