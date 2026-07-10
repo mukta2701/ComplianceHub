@@ -27,7 +27,7 @@ const nextConfig: NextConfig = {
   allowedDevOrigins: ["127.0.0.1"],
   // PDFKit resolves its bundled AFM font metrics at runtime and must remain a
   // native server dependency rather than being folded into Turbopack output.
-  serverExternalPackages: ["pdfkit"],
+  serverExternalPackages: ["pdfkit", "exceljs", "docx"],
   async headers() {
     return [{ source: "/(.*)", headers: securityHeaders }];
   },
