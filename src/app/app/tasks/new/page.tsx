@@ -1,5 +1,6 @@
 import { requireAppContext } from "@/lib/app-context";
 import { PageIntro } from "@/components/ui";
+import { one } from "@/lib/supabase/one";
 import { createTaskAction } from "../actions";
 
 export default async function NewTaskPage() {
@@ -15,7 +16,7 @@ export default async function NewTaskPage() {
       <label>Title<input name="title" required maxLength={200} /></label>
       <label>Detail<textarea name="detail" maxLength={10000} /></label>
       <div className="form-grid">
-        <label>Owner<select name="ownerId" defaultValue=""><option value="">Unassigned</option>{members?.map((m) => { const p = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles; return <option key={m.user_id} value={m.user_id}>{p?.display_name ?? m.user_id}</option>; })}</select></label>
+        <label>Owner<select name="ownerId" defaultValue=""><option value="">Unassigned</option>{members?.map((m) => { const p = one(m.profiles); return <option key={m.user_id} value={m.user_id}>{p?.display_name ?? m.user_id}</option>; })}</select></label>
         <label>Due date<input name="dueOn" type="date" /></label>
         <label>Recurrence<select name="recurrence" defaultValue=""><option value="">One-off</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="semiannually">Semi-annually</option><option value="annually">Annually</option></select></label>
         <label>Linked control<select name="controlId" defaultValue=""><option value="">None</option>{controls?.map((c) => <option key={c.id} value={c.id}>{c.code}: {c.title}</option>)}</select></label>

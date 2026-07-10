@@ -3,6 +3,7 @@ import { requireAppContext } from "@/lib/app-context";
 import { PageIntro } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { POLICY_TEMPLATES, policyTemplateBySlug } from "@/features/policies/domain/templates";
+import { one } from "@/lib/supabase/one";
 import { createPolicyAction } from "../actions";
 
 export default async function NewPolicyPage({ searchParams }: { searchParams: Promise<{ template?: string }> }) {
@@ -39,7 +40,7 @@ export default async function NewPolicyPage({ searchParams }: { searchParams: Pr
       <div className="form-grid">
         <label>Reference<input name="reference" required maxLength={40} placeholder="POL-001" defaultValue={template?.reference ?? ""} /></label>
         <label>Title<input name="title" required maxLength={200} defaultValue={template?.title ?? ""} /></label>
-        <label>Owner<select name="ownerId" defaultValue=""><option value="">Unassigned</option>{members?.map((m) => { const p = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles; return <option key={m.user_id} value={m.user_id}>{p?.display_name ?? m.user_id}</option>; })}</select></label>
+        <label>Owner<select name="ownerId" defaultValue=""><option value="">Unassigned</option>{members?.map((m) => { const p = one(m.profiles); return <option key={m.user_id} value={m.user_id}>{p?.display_name ?? m.user_id}</option>; })}</select></label>
         <label>Review due<input name="reviewDue" type="date" /></label>
       </div>
       <label>Policy content<textarea name="body" maxLength={100000} rows={10} placeholder="The policy statement, scope, and responsibilities." defaultValue={template?.body ?? ""} /></label>

@@ -6,6 +6,7 @@ import { AUDIT_STATUS_LABEL, CHECKLIST_RESULT_LABEL, CHECKLIST_RESULT_TONE, FIND
 import { AUDITOR_LINK_FLASH_COOKIE } from "@/features/audits/application/auditor-token";
 import { Card, PageIntro, Pill, Progress } from "@/components/ui";
 import { Icon } from "@/components/icons";
+import { one } from "@/lib/supabase/one";
 import { updateAuditStatusAction, addChecklistItemAction, populateAuditChecklistAction, updateChecklistItemAction, raiseFindingAction, updateFindingStatusAction } from "../actions";
 import { mintAuditorTokenAction, revokeAuditorTokenAction } from "./share-actions";
 
@@ -124,7 +125,7 @@ export default async function AuditDetailPage({ params }: { params: Promise<{ id
         <label>Summary<input name="summary" required maxLength={2000} /></label>
         <div className="form-grid">
           <label>Severity<select name="severity" defaultValue="observation"><option value="observation">Observation</option><option value="minor_nc">Minor non-conformity</option><option value="major_nc">Major non-conformity</option></select></label>
-          <label>Owner (for the task)<select name="ownerId" defaultValue=""><option value="">Unassigned</option>{members?.map((m) => { const p = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles; return <option key={m.user_id} value={m.user_id}>{p?.display_name ?? m.user_id}</option>; })}</select></label>
+          <label>Owner (for the task)<select name="ownerId" defaultValue=""><option value="">Unassigned</option>{members?.map((m) => { const p = one(m.profiles); return <option key={m.user_id} value={m.user_id}>{p?.display_name ?? m.user_id}</option>; })}</select></label>
           <label>Due date<input name="dueOn" type="date" /></label>
         </div>
         <label>Corrective action<textarea name="correctiveAction" maxLength={10000} /></label>

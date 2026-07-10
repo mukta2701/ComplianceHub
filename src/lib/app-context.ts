@@ -2,6 +2,7 @@ import "server-only";
 import { cache } from "react";
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { one } from "@/lib/supabase/one";
 
 export const getAuthUser = cache(async () => {
   const supabase = await createSupabaseServerClient();
@@ -22,6 +23,6 @@ export async function requireAppContext() {
   if (!user) redirect("/sign-in");
   const membership = await getMembership();
   if (!membership) redirect("/app/onboarding");
-  const organisation = Array.isArray(membership.organisations) ? membership.organisations[0] : membership.organisations;
+  const organisation = one(membership.organisations);
   return { supabase, user, membership, organisation: organisation as { id: string; name: string } };
 }

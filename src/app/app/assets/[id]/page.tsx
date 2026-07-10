@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { requireAppContext } from "@/lib/app-context";
 import { ASSET_CLASSIFICATION_LABEL, ASSET_VALUE_LABEL, CLASSIFICATION_TONE, VALUE_TONE, type AssetClassification, type AssetValue } from "@/features/assets/domain/assets";
 import { Card, PageIntro, Pill } from "@/components/ui";
+import { one } from "@/lib/supabase/one";
 import { linkAssetRiskAction, unlinkAssetRiskAction, deleteAssetAction } from "../actions";
 
 // Original en-GB handling guidance (reworded, NOT copied from the toolkit).
@@ -30,7 +31,7 @@ export default async function AssetDetailPage({ params }: { params: Promise<{ id
   ]);
   const cls = asset.classification as AssetClassification;
   const val = asset.value_criticality as AssetValue;
-  const cat = Array.isArray(asset.asset_categories) ? asset.asset_categories[0] : asset.asset_categories;
+  const cat = one(asset.asset_categories);
   const linkedRiskIds = new Set((linked ?? []).map((l) => l.risk_id));
   return <>
     <Link href="/app/assets" style={{ color: "var(--blue)", fontSize: "13px", fontWeight: 700 }}>← Back to assets</Link>
@@ -46,7 +47,7 @@ export default async function AssetDetailPage({ params }: { params: Promise<{ id
     <Card style={{ padding: "22px", marginTop: "16px" }}>
       <h2 style={{ fontSize: "15px", margin: "0 0 10px" }}>Linked risks</h2>
       <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "8px" }}>
-        {(linked ?? []).map((l) => { const r = Array.isArray(l.risks) ? l.risks[0] : l.risks; return <li key={l.risk_id} style={{ display: "flex", justifyContent: "space-between", gap: "12px" }}><Link href={`/app/risks/${r?.id}`}>{r?.reference}: {r?.title}</Link><form action={unlinkAssetRiskAction}><input type="hidden" name="assetId" value={id} /><input type="hidden" name="riskId" value={l.risk_id} /><button style={{ color: "var(--red)", border: 0, background: "none" }} aria-label={`Unlink ${r?.reference}`}>Unlink</button></form></li>; })}
+        {(linked ?? []).map((l) => { const r = one(l.risks); return <li key={l.risk_id} style={{ display: "flex", justifyContent: "space-between", gap: "12px" }}><Link href={`/app/risks/${r?.id}`}>{r?.reference}: {r?.title}</Link><form action={unlinkAssetRiskAction}><input type="hidden" name="assetId" value={id} /><input type="hidden" name="riskId" value={l.risk_id} /><button style={{ color: "var(--red)", border: 0, background: "none" }} aria-label={`Unlink ${r?.reference}`}>Unlink</button></form></li>; })}
         {!linked?.length && <li style={{ color: "#596273", fontSize: "13px" }}>No risks linked yet.</li>}
       </ul>
       <form action={linkAssetRiskAction} style={{ marginTop: "12px", display: "flex", gap: "8px", alignItems: "center" }}><input type="hidden" name="assetId" value={id} /><select name="riskId" required defaultValue="" aria-label={`Link a risk to ${asset.description}`}><option value="" disabled>Select a risk…</option>{(allRisks ?? []).filter((r) => !linkedRiskIds.has(r.id)).map((r) => <option key={r.id} value={r.id}>{r.reference}: {r.title}</option>)}</select><button className="button secondary">Link risk</button></form>

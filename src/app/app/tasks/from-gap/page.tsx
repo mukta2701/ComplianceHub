@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { requireAppContext } from "@/lib/app-context";
 import { PageIntro } from "@/components/ui";
+import { one } from "@/lib/supabase/one";
 import { createGapTaskAction } from "../actions";
 
 export default async function FromGapPage({ searchParams }: { searchParams: Promise<{ questionId?: string }> }) {
@@ -25,7 +26,7 @@ export default async function FromGapPage({ searchParams }: { searchParams: Prom
       <label>Title<input name="title" readOnly value={title} style={{ background: "#f6f8fb" }} /></label>
       <label>Detail<textarea name="detail" readOnly defaultValue={question.remediation} style={{ background: "#f6f8fb" }} /></label>
       <div className="form-grid">
-        <label>Owner<select name="ownerId" required defaultValue=""><option value="" disabled>Select an owner</option>{members?.map((m) => { const p = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles; return <option key={m.user_id} value={m.user_id}>{p?.display_name ?? m.user_id}</option>; })}</select></label>
+        <label>Owner<select name="ownerId" required defaultValue=""><option value="" disabled>Select an owner</option>{members?.map((m) => { const p = one(m.profiles); return <option key={m.user_id} value={m.user_id}>{p?.display_name ?? m.user_id}</option>; })}</select></label>
         <label>Due date<input name="dueOn" type="date" required /></label>
       </div>
       <button className="button primary">Create task</button>

@@ -4,6 +4,7 @@ import { requireAppContext } from "@/lib/app-context";
 import { calculateRiskScore, riskBand, RISK_BAND_LABEL, DEFAULT_RISK_MATRIX_CONFIG, type RiskMatrixConfig } from "@/features/risks/domain/risks";
 import { summariseRtpProgress, RTP_STATUS_LABEL, RTP_STATUS_TONE, type RtpStatus } from "@/features/risks/domain/rtp";
 import { Card, PageIntro, Pill } from "@/components/ui";
+import { one } from "@/lib/supabase/one";
 import { createRtpAction, updateRtpStatusAction, deleteRtpAction } from "../rtp-actions";
 
 export default async function RiskDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -18,8 +19,8 @@ export default async function RiskDetailPage({ params }: { params: Promise<{ id:
     supabase.from("controls").select("id,code,title").order("position"),
   ]);
   const config: RiskMatrixConfig = cfg ? { lowMax: cfg.low_max, moderateMax: cfg.moderate_max, highMax: cfg.high_max, appetite: cfg.appetite_threshold } : DEFAULT_RISK_MATRIX_CONFIG;
-  const leadName = new Map((members ?? []).map((m) => { const p = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles; return [m.user_id, p?.display_name ?? null] as const; }));
-  const category = Array.isArray(risk.risk_categories) ? risk.risk_categories[0] : risk.risk_categories;
+  const leadName = new Map((members ?? []).map((m) => { const p = one(m.profiles); return [m.user_id, p?.display_name ?? null] as const; }));
+  const category = one(risk.risk_categories);
   const inherent = calculateRiskScore(risk.likelihood, risk.impact);
   const residual = calculateRiskScore(risk.residual_likelihood, risk.residual_impact);
   const progress = summariseRtpProgress((plans ?? []).map((p) => ({ status: p.status as RtpStatus })));
@@ -56,7 +57,7 @@ export default async function RiskDetailPage({ params }: { params: Promise<{ id:
         <h3 style={{ fontSize: "13px", margin: 0 }}>Add a treatment plan</h3>
         <div className="form-grid">
           <label>Reference<input name="reference" required maxLength={40} defaultValue={nextRef} /></label>
-          <label>Assigned lead<select name="assignedLeadId" defaultValue=""><option value="">Unassigned</option>{members?.map((m) => { const p = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles; return <option key={m.user_id} value={m.user_id}>{p?.display_name ?? m.user_id}</option>; })}</select></label>
+          <label>Assigned lead<select name="assignedLeadId" defaultValue=""><option value="">Unassigned</option>{members?.map((m) => { const p = one(m.profiles); return <option key={m.user_id} value={m.user_id}>{p?.display_name ?? m.user_id}</option>; })}</select></label>
           <label>Control reference<select name="controlId" defaultValue=""><option value="">None</option>{controls?.map((c) => <option key={c.id} value={c.id}>{c.code}: {c.title}</option>)}</select></label>
           <label>Target completion<input name="targetCompletion" type="date" /></label>
         </div>

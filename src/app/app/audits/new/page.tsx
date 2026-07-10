@@ -1,5 +1,6 @@
 import { requireAppContext } from "@/lib/app-context";
 import { PageIntro } from "@/components/ui";
+import { one } from "@/lib/supabase/one";
 import { createAuditAction } from "../actions";
 
 export default async function NewAuditPage() {
@@ -11,7 +12,7 @@ export default async function NewAuditPage() {
       <div className="form-grid">
         <label>Reference<input name="reference" required maxLength={40} placeholder="AUD-001" /></label>
         <label>Title<input name="title" required maxLength={200} /></label>
-        <label>Lead auditor<select name="leadAuditorId" defaultValue=""><option value="">Unassigned</option>{members?.map((m) => { const p = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles; return <option key={m.user_id} value={m.user_id}>{p?.display_name ?? m.user_id}</option>; })}</select></label>
+        <label>Lead auditor<select name="leadAuditorId" defaultValue=""><option value="">Unassigned</option>{members?.map((m) => { const p = one(m.profiles); return <option key={m.user_id} value={m.user_id}>{p?.display_name ?? m.user_id}</option>; })}</select></label>
         <label>Framework<input name="framework" maxLength={120} defaultValue="ISO 27001:2022" /></label>
         <label>Planned start<input name="plannedStart" type="date" /></label>
         <label>Planned end<input name="plannedEnd" type="date" /></label>

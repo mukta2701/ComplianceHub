@@ -1,5 +1,6 @@
 import { requireAppContext } from "@/lib/app-context";
 import { PageIntro } from "@/components/ui";
+import { one } from "@/lib/supabase/one";
 import { createEvidenceAction } from "../actions";
 
 export default async function NewEvidencePage({ searchParams }: { searchParams: Promise<{ replaces?: string; message?: string }> }) {
@@ -17,7 +18,7 @@ export default async function NewEvidencePage({ searchParams }: { searchParams: 
       <label>URL (for link evidence)<input name="url" type="url" placeholder="https://" /></label>
       <label>Description<textarea name="description" maxLength={10000} /></label>
       <div className="form-grid">
-        <label>Owner<select name="ownerId" defaultValue=""><option value="">Unassigned</option>{members?.map((m) => { const p = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles; return <option key={m.user_id} value={m.user_id}>{p?.display_name ?? m.user_id}</option>; })}</select></label>
+        <label>Owner<select name="ownerId" defaultValue=""><option value="">Unassigned</option>{members?.map((m) => { const p = one(m.profiles); return <option key={m.user_id} value={m.user_id}>{p?.display_name ?? m.user_id}</option>; })}</select></label>
         <label>Collected on<input name="collectedOn" type="date" /></label>
         <label>Valid until<input name="validUntil" type="date" /></label>
         <label>Review interval<select name="reviewInterval" defaultValue=""><option value="">None</option><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="semiannually">Semi-annually</option><option value="annually">Annually</option></select></label>

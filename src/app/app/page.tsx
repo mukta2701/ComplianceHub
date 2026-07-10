@@ -6,6 +6,7 @@ import type { SoaStatus } from "@/features/soa/domain/soa";
 import { buildOnboardingChecklist } from "@/features/onboarding/domain/checklist";
 import { Card, PageIntro, Pill, Progress, Ring, Stat } from "@/components/ui";
 import { Icon } from "@/components/icons";
+import { one } from "@/lib/supabase/one";
 import { acceptCalendarSeedAction } from "./tasks/actions";
 
 const STALE_EVIDENCE = new Set(["expired", "withdrawn", "superseded"]);
@@ -42,7 +43,7 @@ export default async function AppHome() {
     hasIntegration: (integrations ?? 0) > 0,
   });
   const attention = (controls ?? []).flatMap((control) => {
-    const statuses = (control.evidence_links ?? []).map((link) => { const ev = Array.isArray(link.evidence) ? link.evidence[0] : link.evidence; return ev?.status ?? null; });
+    const statuses = (control.evidence_links ?? []).map((link) => { const ev = one(link.evidence); return ev?.status ?? null; });
     const staleEvidence = statuses.length > 0 && statuses.every((s) => s !== null && STALE_EVIDENCE.has(s));
     const overdueTasks = (control.tasks ?? []).filter((task) => isOverdue({ status: task.status as TaskStatus, dueOn: task.due_on }, today));
     if (!staleEvidence && overdueTasks.length === 0) return [];

@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getAuthUser, getMembership } from "@/lib/app-context";
 import { AppShell } from "@/components/app-shell";
+import { one } from "@/lib/supabase/one";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,7 @@ export default async function ProtectedLayout({ children }: { children: React.Re
     supabase.from("notifications").select("id", { count: "exact", head: true }).is("read_at", null),
     supabase.from("profiles").select("display_name").eq("id", user.id).maybeSingle(),
   ]);
-  const organisation = membership ? (Array.isArray(membership.organisations) ? membership.organisations[0] : membership.organisations) : null;
+  const organisation = membership ? one(membership.organisations) : null;
   const orgName = organisation?.name ?? "Your workspace";
   const displayName = profile?.display_name ?? user.email ?? "Member";
   return <AppShell orgName={orgName} orgInitials={initials(orgName)} userInitials={initials(displayName)} unreadCount={unread ?? 0}>{children}</AppShell>;

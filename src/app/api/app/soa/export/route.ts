@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { toCsv, toXlsx, type ExportColumn } from "@/features/exports/exports";
 import { SOA_STATUS_LABEL, type SoaStatus } from "@/features/soa/domain/soa";
+import { one } from "@/lib/supabase/one";
 
 type Row = { control_code: string; control_title: string; applicable: boolean; status: string; justification: string; evidence: string; owner_id: string | null };
-const one = <T,>(v: T | T[] | null): T | null => (Array.isArray(v) ? v[0] ?? null : v);
 
 export async function GET(request: Request) {
   const url = new URL(request.url);

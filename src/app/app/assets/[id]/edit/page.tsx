@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { requireAppContext } from "@/lib/app-context";
 import { PageIntro } from "@/components/ui";
 import { ASSET_CLASSIFICATION_LABEL, ASSET_VALUE_LABEL, type AssetClassification, type AssetValue } from "@/features/assets/domain/assets";
+import { one } from "@/lib/supabase/one";
 import { updateAssetAction } from "../../actions";
 
 export default async function EditAssetPage({ params }: { params: Promise<{ id: string }> }) {
@@ -23,7 +24,7 @@ export default async function EditAssetPage({ params }: { params: Promise<{ id: 
         <label>Reference<input name="reference" required maxLength={40} defaultValue={asset.reference} placeholder="AST-001" /></label>
         <label>Description<input name="description" required maxLength={200} defaultValue={asset.description} /></label>
         <label>Owner &amp; location<input name="ownerLocation" maxLength={200} defaultValue={asset.owner_location ?? ""} /></label>
-        <label>In-app owner<select name="ownerId" defaultValue={asset.owner_id ?? ""}><option value="">Unassigned</option>{members?.map((m) => { const p = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles; return <option key={m.user_id} value={m.user_id}>{p?.display_name ?? m.user_id}</option>; })}</select></label>
+        <label>In-app owner<select name="ownerId" defaultValue={asset.owner_id ?? ""}><option value="">Unassigned</option>{members?.map((m) => { const p = one(m.profiles); return <option key={m.user_id} value={m.user_id}>{p?.display_name ?? m.user_id}</option>; })}</select></label>
         <label>Category<select name="categoryId" defaultValue={asset.category_id ?? ""}><option value="">Uncategorised</option>{categories?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
         <label>Classification<select name="classification" defaultValue={asset.classification}>{classifications.map((c) => <option key={c} value={c}>{ASSET_CLASSIFICATION_LABEL[c]}</option>)}</select></label>
         <label>Value (criticality)<select name="valueCriticality" defaultValue={asset.value_criticality}>{values.map((v) => <option key={v} value={v}>{ASSET_VALUE_LABEL[v]}</option>)}</select></label>

@@ -3,6 +3,7 @@ import { requireAppContext } from "@/lib/app-context";
 import { summariseEvidenceFreshness, type EvidenceStatus } from "@/features/evidence/domain/evidence";
 import { Card, EmptyState, PageIntro, Pill, Stat } from "@/components/ui";
 import { Icon } from "@/components/icons";
+import { one } from "@/lib/supabase/one";
 import { downloadEvidenceAction, linkEvidenceAction, unlinkEvidenceAction, withdrawEvidenceAction } from "./actions";
 
 const TONE: Record<string, string> = { current: "green", expiring: "amber", expired: "red", superseded: "neutral", withdrawn: "neutral" };
@@ -35,14 +36,14 @@ export default async function EvidencePage() {
     <div style={{ display: "grid", gap: "14px" }}>{items.map((item) => <Card key={item.id} style={{ padding: "20px" }}>
       <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: "12px", alignItems: "center" }}>
         <div><h2 style={{ fontSize: "15px", margin: 0 }}>{item.title}</h2><p style={{ fontSize: "12px", color: "#596273", margin: "3px 0 0" }}>Collected {item.collected_on}{item.valid_until && ` · valid until ${item.valid_until}`}</p></div>
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>{item.source_id && (() => { const src = Array.isArray(item.evidence_sources) ? item.evidence_sources[0] : item.evidence_sources; const provider = src?.provider ? PROVIDER_LABELS[src.provider] ?? src.provider : null; return <Pill tone="neutral">{provider ? `Auto · ${provider}` : "Auto"}</Pill>; })()}<Pill tone={TONE[item.status]}>{item.status}</Pill>
+        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>{item.source_id && (() => { const src = one(item.evidence_sources); const provider = src?.provider ? PROVIDER_LABELS[src.provider] ?? src.provider : null; return <Pill tone="neutral">{provider ? `Auto · ${provider}` : "Auto"}</Pill>; })()}<Pill tone={TONE[item.status]}>{item.status}</Pill>
           {item.kind === "link" && item.url && <a style={{ color: "var(--blue)", fontWeight: 700, fontSize: "12px" }} href={item.url} rel="noreferrer" target="_blank">Open link</a>}
           {item.kind === "file" && <form action={downloadEvidenceAction}><input type="hidden" name="id" value={item.id} /><button className="button secondary" style={{ minHeight: "32px", padding: "6px 12px" }}>Download</button></form>}
           {(item.status === "current" || item.status === "expiring" || item.status === "expired") && <><Link style={{ color: "var(--blue)", fontWeight: 700, fontSize: "12px" }} href={`/app/evidence/new?replaces=${item.id}`}>Supersede</Link><form action={withdrawEvidenceAction}><input type="hidden" name="id" value={item.id} /><button className="button secondary" style={{ minHeight: "32px", padding: "6px 12px", color: "var(--red)" }}>Withdraw</button></form></>}
         </div>
       </div>
       <div style={{ marginTop: "12px", display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center" }}>
-        {item.evidence_links?.map((link) => { const c = Array.isArray(link.controls) ? link.controls[0] : link.controls; const r = Array.isArray(link.risks) ? link.risks[0] : link.risks; const t = Array.isArray(link.tasks) ? link.tasks[0] : link.tasks; return <span key={link.id} className="pill neutral">{c ? `${c.code}: ${c.title}` : r ? `Risk ${r.reference}` : `Task: ${t?.title}`}<form action={unlinkEvidenceAction} style={{ display: "inline" }}><input type="hidden" name="linkId" value={link.id} /><button aria-label="Remove link" style={{ border: 0, background: "none", color: "#8b94a2", marginLeft: "4px" }}>×</button></form></span>; })}
+        {item.evidence_links?.map((link) => { const c = one(link.controls); const r = one(link.risks); const t = one(link.tasks); return <span key={link.id} className="pill neutral">{c ? `${c.code}: ${c.title}` : r ? `Risk ${r.reference}` : `Task: ${t?.title}`}<form action={unlinkEvidenceAction} style={{ display: "inline" }}><input type="hidden" name="linkId" value={link.id} /><button aria-label="Remove link" style={{ border: 0, background: "none", color: "#8b94a2", marginLeft: "4px" }}>×</button></form></span>; })}
         <form action={linkEvidenceAction} style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}><input type="hidden" name="evidenceId" value={item.id} /><select name="target" defaultValue="" aria-label={`Link ${item.title} to a control`} className="field"><option value="" disabled>Link to control…</option>{linkOptions}</select><button className="button secondary" style={{ minHeight: "32px", padding: "6px 12px" }}>Link</button></form>
       </div>
     </Card>)}

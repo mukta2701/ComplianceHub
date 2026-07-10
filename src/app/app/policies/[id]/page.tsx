@@ -4,6 +4,7 @@ import { requireAppContext } from "@/lib/app-context";
 import { POLICY_STATUS_LABEL, POLICY_STATUS_TONE, summarisePolicyAcceptances, type PolicyStatus } from "@/features/policies/domain/policies";
 import { Card, PageIntro, Pill, Progress } from "@/components/ui";
 import { Icon } from "@/components/icons";
+import { one } from "@/lib/supabase/one";
 import { updatePolicyAction, approvePolicyAction, setPolicyStatusAction, acceptPolicyAction } from "../actions";
 import { linkPolicyEvidenceAction, unlinkPolicyEvidenceAction } from "./evidence-actions";
 
@@ -83,7 +84,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
     <Card style={{ padding: "18px" }}>
       <h2 style={{ fontSize: "15px", margin: "0 0 10px" }}>Acceptance roster</h2>
       <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "6px" }}>
-        {roster.map((m) => { const p = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles; const v = acceptedByUser.get(m.user_id); const current = v === policy.version; return <li key={m.user_id} style={{ display: "flex", justifyContent: "space-between", fontSize: "13px" }}><span>{p?.display_name ?? m.user_id}</span>{current ? <Pill tone="green">Accepted v{v}</Pill> : v ? <Pill tone="amber">Re-accept (accepted v{v})</Pill> : <Pill tone="neutral">Not accepted</Pill>}</li>; })}
+        {roster.map((m) => { const p = one(m.profiles); const v = acceptedByUser.get(m.user_id); const current = v === policy.version; return <li key={m.user_id} style={{ display: "flex", justifyContent: "space-between", fontSize: "13px" }}><span>{p?.display_name ?? m.user_id}</span>{current ? <Pill tone="green">Accepted v{v}</Pill> : v ? <Pill tone="amber">Re-accept (accepted v{v})</Pill> : <Pill tone="neutral">Not accepted</Pill>}</li>; })}
         {!roster.length && <li style={{ color: "#596273", fontSize: "13px" }}>No members yet.</li>}
       </ul>
     </Card>
@@ -91,7 +92,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
     <Card style={{ padding: "18px", marginTop: "16px" }}>
       <h2 style={{ fontSize: "15px", margin: "0 0 10px" }}>Evidence</h2>
       <ul style={{ listStyle: "none", margin: "0 0 12px", padding: 0, display: "grid", gap: "6px" }}>
-        {(links ?? []).map((l) => { const e = Array.isArray(l.evidence) ? l.evidence[0] : l.evidence; return <li key={l.id} style={{ display: "flex", justifyContent: "space-between", fontSize: "13px" }}><span>{e?.title ?? "Evidence"}</span><form action={unlinkPolicyEvidenceAction}><input type="hidden" name="policyId" value={id} /><input type="hidden" name="linkId" value={l.id} /><button aria-label="Remove evidence link" style={{ border: 0, background: "none", color: "#8b94a2" }}>×</button></form></li>; })}
+        {(links ?? []).map((l) => { const e = one(l.evidence); return <li key={l.id} style={{ display: "flex", justifyContent: "space-between", fontSize: "13px" }}><span>{e?.title ?? "Evidence"}</span><form action={unlinkPolicyEvidenceAction}><input type="hidden" name="policyId" value={id} /><input type="hidden" name="linkId" value={l.id} /><button aria-label="Remove evidence link" style={{ border: 0, background: "none", color: "#8b94a2" }}>×</button></form></li>; })}
         {!links?.length && <li style={{ color: "#596273", fontSize: "13px" }}>No evidence linked yet.</li>}
       </ul>
       <form action={linkPolicyEvidenceAction} style={{ display: "flex", gap: "8px", alignItems: "center" }}>

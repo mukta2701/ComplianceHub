@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { toCsv, toXlsx, type ExportColumn } from "@/features/exports/exports";
 import { ASSET_CLASSIFICATION_LABEL, ASSET_VALUE_LABEL, type AssetClassification, type AssetValue } from "@/features/assets/domain/assets";
+import { one } from "@/lib/supabase/one";
 
 type Row = { reference: string; description: string; owner_location: string; classification: string; value_criticality: string; security_controls: string; lifespan: string; last_updated: string | null; remarks: string; asset_categories: { name: string } | { name: string }[] | null };
-const one = <T,>(v: T | T[] | null): T | null => (Array.isArray(v) ? v[0] ?? null : v);
 
 export async function GET(request: Request) {
   const format = new URL(request.url).searchParams.get("format") === "csv" ? "csv" : "xlsx";

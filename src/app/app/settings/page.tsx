@@ -2,6 +2,7 @@ import { requireAppContext } from "@/lib/app-context";
 import { Card, PageIntro, Pill } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { SubTabs } from "@/components/sub-tabs";
+import { one } from "@/lib/supabase/one";
 import { inviteMemberAction } from "../actions";
 
 function initials(name: string): string {
@@ -57,7 +58,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           <div className="settings-head"><h2 style={{ fontSize: "14px", margin: "0 0 4px" }}>Team members</h2><p>People with access to this workspace.</p></div>
           <div className="team-list">
             {(memberRows ?? []).map((m) => {
-              const p = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles;
+              const p = one(m.profiles);
               const name = p?.display_name ?? "Workspace member";
               return <div key={m.user_id}>
                 <i className="avatar" aria-hidden="true">{initials(name)}</i>

@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { resolveTicketProvider } from "./registry";
 import { isTerminalTicketStatus, isTicketSyncDue } from "../domain/mapping";
 import type { IntegrationProvider } from "../domain/provider";
+import { one } from "@/lib/supabase/one";
 
 export async function syncTickets(supabase: SupabaseClient): Promise<{ synced: number; failed: number; tasksClosed: number }> {
   const nowIso = new Date().toISOString();
@@ -13,7 +14,7 @@ export async function syncTickets(supabase: SupabaseClient): Promise<{ synced: n
   let tasksClosed = 0;
   for (const ticket of tickets ?? []) {
     if (!isTicketSyncDue({ lastSyncedAt: ticket.last_synced_at }, nowIso)) continue;
-    const conn = Array.isArray(ticket.integration_connections) ? ticket.integration_connections[0] : ticket.integration_connections;
+    const conn = one(ticket.integration_connections);
     if (!conn || conn.revoked_at) continue;
     // One provider error must not starve the rest of the sweep across other orgs:
     // isolate each ticket, count failures, and keep going.

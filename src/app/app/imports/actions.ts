@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireAppContext } from "@/lib/app-context";
+import { one } from "@/lib/supabase/one";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { parseWorkbook } from "@/features/imports/parse";
 import { coerceAndValidate, suggestMapping, type ColumnMapping } from "@/features/imports/mapping";
@@ -63,7 +64,7 @@ async function categoryResolver(supabase: SupabaseClient, table: "risk_categorie
 async function memberResolver(supabase: SupabaseClient, organisationId: string) {
   const { data } = await supabase.from("memberships").select("user_id,profiles(display_name)").eq("organisation_id", organisationId);
   const byName = new Map<string, string>();
-  for (const m of data ?? []) { const p = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles; if (p?.display_name) byName.set(String(p.display_name).toLowerCase(), String(m.user_id)); }
+  for (const m of data ?? []) { const p = one(m.profiles); if (p?.display_name) byName.set(String(p.display_name).toLowerCase(), String(m.user_id)); }
   return (name: string | null): string | null => (name ? byName.get(name.trim().toLowerCase()) ?? null : null);
 }
 

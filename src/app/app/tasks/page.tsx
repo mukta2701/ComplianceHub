@@ -3,6 +3,7 @@ import { requireAppContext } from "@/lib/app-context";
 import { isOverdue, type TaskStatus } from "@/features/tasks/domain/tasks";
 import { Card, PageIntro, Pill, Stat } from "@/components/ui";
 import { Icon } from "@/components/icons";
+import { one } from "@/lib/supabase/one";
 import { acceptCalendarSeedAction, updateTaskStatusAction } from "./actions";
 
 const FILTERS = ["all", "open", "in_progress", "done", "cancelled", "overdue"] as const;
@@ -34,7 +35,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
     <nav aria-label="Task filters" className="segmented" style={{ marginBottom: "16px" }}>{FILTERS.map((f) => <Link key={f} href={`/app/tasks?filter=${f}`} aria-current={filter === f ? "page" : undefined} className={filter === f ? "active" : ""} style={{ textTransform: "capitalize" }}>{f.replace("_", " ")}</Link>)}</nav>
     {!totalCount && <Card style={{ padding: "20px", marginBottom: "16px" }}><h2 style={{ fontSize: "15px", margin: "0 0 4px" }}>Start with the compliance calendar</h2><p style={{ fontSize: "12px", color: "#596273", margin: "0 0 12px" }}>Add recurring access reviews, policy reviews, and backup restore tests in one click.</p><form action={acceptCalendarSeedAction}><button className="button primary">Add starter calendar</button></form></Card>}
     <Card><div className="data-table-wrap" role="region" aria-label="Tasks table" tabIndex={0}><table><thead><tr><th>Task</th><th>Owner</th><th>Due</th><th>Recurs</th><th>Source</th><th>Status</th></tr></thead><tbody>
-      {tasks.map((t) => { const owner = Array.isArray(t.profiles) ? t.profiles[0] : t.profiles; const overdue = isOverdue({ status: t.status as TaskStatus, dueOn: t.due_on }, today); return <tr key={t.id}>
+      {tasks.map((t) => { const owner = one(t.profiles); const overdue = isOverdue({ status: t.status as TaskStatus, dueOn: t.due_on }, today); return <tr key={t.id}>
         <td><Link href={`/app/tasks/${t.id}`}><b>{t.title}</b></Link>{t.detail && <small>{t.detail}</small>}</td>
         <td>{owner?.display_name ?? "Unassigned"}</td>
         <td className={overdue ? "overdue" : ""}>{t.due_on ?? "—"}{overdue && <> <Pill tone="red">Overdue</Pill></>}</td>

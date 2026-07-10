@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireAppContext } from "@/lib/app-context";
+import { one } from "@/lib/supabase/one";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { resolveTicketProvider } from "@/features/integrations/application/registry";
 import { buildTicketPayload } from "@/features/integrations/domain/mapping";
@@ -19,7 +20,7 @@ export async function pushTaskToTrackerAction(formData: FormData) {
   const { data: task, error: taskError } = await supabase.from("tasks")
     .select("id,title,detail,source,controls(code)").eq("id", taskId).maybeSingle();
   if (taskError || !task) throw new Error("Task not found");
-  const control = Array.isArray(task.controls) ? task.controls[0] : task.controls;
+  const control = one(task.controls);
   const payload = buildTicketPayload({ title: task.title, detail: task.detail, source: task.source, controlCode: control?.code ?? null });
   const provider = resolveTicketProvider(connection.provider as IntegrationProvider);
   const created = await provider.createTicket(

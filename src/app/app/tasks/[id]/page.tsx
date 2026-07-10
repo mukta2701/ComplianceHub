@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { requireAppContext } from "@/lib/app-context";
 import { isOverdue, type TaskStatus } from "@/features/tasks/domain/tasks";
 import { Card, PageIntro, Pill } from "@/components/ui";
+import { one } from "@/lib/supabase/one";
 import { ticketStatusTone } from "@/features/integrations/domain/mapping";
 import { updateTaskStatusAction } from "../actions";
 import { pushTaskToTrackerAction } from "./tracker-actions";
@@ -20,7 +21,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
     task.risk_id ? supabase.from("risks").select("id,reference,title").eq("id", task.risk_id).maybeSingle() : Promise.resolve({ data: null }),
     supabase.from("evidence_links").select("id,evidence(id,title,status,kind)").eq("task_id", id),
   ]);
-  const evidence = (evidenceLinks ?? []).map((l) => (Array.isArray(l.evidence) ? l.evidence[0] : l.evidence)).filter((e): e is { id: string; title: string; status: string; kind: string } => Boolean(e));
+  const evidence = (evidenceLinks ?? []).map((l) => one(l.evidence)).filter((e): e is { id: string; title: string; status: string; kind: string } => Boolean(e));
   const [{ data: ticket }, { data: connections }] = await Promise.all([
     supabase.from("task_tickets").select("external_id,external_url,external_status,external_assignee,last_synced_at").eq("task_id", id).maybeSingle(),
     supabase.from("integration_connections").select("id,provider,label").is("revoked_at", null).order("created_at"),
