@@ -2,7 +2,9 @@
 :root {
   --ch-ink: #171c26;
   --ch-text: #4b5565;
+  /* Use --ch-muted for subtle non-text UI and --ch-text-muted for readable muted text. */
   --ch-muted: #737d8e;
+  --ch-text-muted: #596273;
   --ch-border: #e3e7ed;
   --ch-canvas: #f6f7f9;
   --ch-surface: #ffffff;
@@ -31,7 +33,7 @@
 
   --ink: var(--ch-ink);
   --text: var(--ch-text);
-  --muted: var(--ch-muted);
+  --muted: var(--ch-text-muted);
   --line: var(--ch-border);
   --bg: var(--ch-canvas);
   --blue: var(--ch-primary);
@@ -54,7 +56,6 @@
 .ring small,.preview-stats span{color:#5d6675}
 
 /* Shared AA-contrast overrides (used by both AppShell and DemoShell). */
-.app-shell{--blue:#2456c4;--muted:#5f6878}
 .sidebar-foot .demo-pill{color:#704d00}
 .sidebar-foot p,.header-actions,.legal,.page-intro p,.eyebrow,.stat small,.stat p{color:#596273}
 .data-table-wrap th{color:#596273}
