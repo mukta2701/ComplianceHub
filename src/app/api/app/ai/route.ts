@@ -3,12 +3,16 @@ import { z } from "zod";
 import { requireAppContext } from "@/lib/app-context";
 import { configuredAiProvider } from "@/features/ai/application/openai-compatible";
 import { generateAiSuggestion } from "@/features/ai/application/suggestion";
-import { buildAssessmentAiContext, buildSoaAiContext } from "@/features/ai/domain/context";
+import { buildAssessmentAiContext, buildAuditAiContext, buildReadinessAiContext, buildSoaAiContext } from "@/features/ai/domain/context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
+import { loadReadinessInput } from "@/features/reports/application/load-readiness";
+import { buildReadinessReport } from "@/features/reports/domain/readiness-report";
 
 const requestSchema = z.discriminatedUnion("targetType", [
   z.object({ targetType: z.literal("assessment_question"), sessionId: z.string().uuid(), targetId: z.string().uuid() }),
   z.object({ targetType: z.literal("soa_item"), targetId: z.string().uuid() }),
+  z.object({ targetType: z.literal("audit"), targetId: z.string().uuid() }),
+  z.object({ targetType: z.literal("readiness_report") }),
 ]);
 
 export async function POST(request: Request) {
@@ -22,7 +26,7 @@ export async function POST(request: Request) {
   if (!provider) return NextResponse.json({ error: "AI assistance is not configured" }, { status: 503 });
 
   let targetId: string;
-  let suggestionType: "assessment_remediation" | "soa_rationale";
+  let suggestionType: "assessment_remediation" | "soa_rationale" | "audit_preparation" | "readiness_summary";
   let context;
   if (parsed.data.targetType === "assessment_question") {
     const [{ data: session }, { data: question }, { data: response }] = await Promise.all([
@@ -34,13 +38,24 @@ export async function POST(request: Request) {
     targetId = question.id;
     suggestionType = "assessment_remediation";
     context = buildAssessmentAiContext({ sessionId: session.id, question, answer: response?.answer ?? null });
-  } else {
+  } else if (parsed.data.targetType === "soa_item") {
     const { data: item } = await supabase.from("soa_items").select("id,control_code,control_title,applicable,status,soa_registers(organisation_id)").eq("id", parsed.data.targetId).maybeSingle();
     const register = Array.isArray(item?.soa_registers) ? item.soa_registers[0] : item?.soa_registers;
     if (!item || !register || register.organisation_id !== organisation.id) return NextResponse.json({ error: "SoA item not found" }, { status: 404 });
     targetId = item.id;
     suggestionType = "soa_rationale";
     context = buildSoaAiContext({ item: { id: item.id, controlCode: item.control_code, controlTitle: item.control_title, applicable: item.applicable, status: item.status } });
+  } else if (parsed.data.targetType === "audit") {
+    const { data: audit } = await supabase.from("audits").select("id,reference,title,status").eq("id", parsed.data.targetId).maybeSingle();
+    if (!audit) return NextResponse.json({ error: "Audit not found" }, { status: 404 });
+    targetId = audit.id;
+    suggestionType = "audit_preparation";
+    context = buildAuditAiContext({ audit });
+  } else {
+    const report = buildReadinessReport(await loadReadinessInput(supabase));
+    targetId = organisation.id;
+    suggestionType = "readiness_summary";
+    context = buildReadinessAiContext({ organisationId: organisation.id, soaPercent: report.soaPercent, tasksOpen: report.tasksOpen, tasksOverdue: report.tasksOverdue, evidenceExpired: report.evidence.expired, openFindings: report.openNonConformities });
   }
 
   try {

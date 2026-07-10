@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-type Target = { targetType: "assessment_question"; targetId: string; sessionId: string } | { targetType: "soa_item"; targetId: string };
+type Target = { targetType: "assessment_question"; targetId: string; sessionId: string } | { targetType: "soa_item"; targetId: string } | { targetType: "audit"; targetId: string } | { targetType: "readiness_report" };
 type Draft = { id: string; status: string; output: { explanation: string; recommendedAction: string; confidence: string }; source_references: { type: string; id: string; label: string }[] };
 
 const AI_ROUTE = ["/api", "app", "ai"].join("/");

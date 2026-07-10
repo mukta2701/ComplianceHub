@@ -9,6 +9,7 @@ import { Icon } from "@/components/icons";
 import { one } from "@/lib/supabase/one";
 import { updateAuditStatusAction, addChecklistItemAction, populateAuditChecklistAction, updateChecklistItemAction, raiseFindingAction, updateFindingStatusAction } from "../actions";
 import { mintAuditorTokenAction, revokeAuditorTokenAction } from "./share-actions";
+import { AiSuggestionPanel } from "@/components/ai-suggestion-panel";
 
 const RESULTS: ChecklistResult[] = ["not_tested", "compliant", "non_compliant", "not_applicable"];
 
@@ -29,14 +30,15 @@ export default async function AuditDetailPage({ params }: { params: Promise<{ id
       // Expected in a plain Server Component render; the cookie self-expires.
     }
   }
-  const { supabase } = await requireAppContext();
+  const { supabase, organisation } = await requireAppContext();
   const { data: audit } = await supabase.from("audits").select("id,reference,title,scope,status,framework,planned_start,planned_end").eq("id", id).maybeSingle();
   if (!audit) notFound();
-  const [{ data: items }, { data: findings }, { data: members }, { data: tokens }] = await Promise.all([
+  const [{ data: items }, { data: findings }, { data: members }, { data: tokens }, { data: aiSettings }] = await Promise.all([
     supabase.from("audit_checklist_items").select("id,area,clause_reference,checklist_item,compliant,evidence_note,findings").eq("audit_id", id).order("position"),
     supabase.from("audit_findings").select("id,summary,severity,status,corrective_action,task_id").eq("audit_id", id).order("created_at"),
     supabase.from("memberships").select("user_id,profiles(display_name)"),
     supabase.from("auditor_access_tokens").select("id,label,expires_at,revoked_at,audit_id").order("created_at", { ascending: false }),
+    supabase.from("ai_workspace_settings").select("enabled").eq("organisation_id", organisation.id).maybeSingle(),
   ]);
   const rows = items ?? [];
   const { data: accessRows, error: accessRowsError } = await supabase.from("auditor_access_log")
@@ -63,6 +65,7 @@ export default async function AuditDetailPage({ params }: { params: Promise<{ id
       <h2 style={{ fontSize: "15px", margin: "0 0 8px" }}>Checklist progress</h2>
       <Progress value={completion.percent} />
       <p style={{ fontSize: "12px", color: "#596273", margin: "8px 0 0" }}>{completion.tested} of {completion.total} items tested · {f.openNonConformities} open non-conformities</p>
+      {aiSettings?.enabled && <AiSuggestionPanel target={{ targetType: "audit", targetId: audit.id }} />}
     </Card>
 
     <div style={{ display: "flex", gap: "8px", margin: "0 0 16px" }}>
