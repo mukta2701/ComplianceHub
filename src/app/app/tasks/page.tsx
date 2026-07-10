@@ -15,11 +15,12 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
   let query = supabase.from("tasks").select("id,title,detail,status,due_on,recurrence,source,owner_id,profiles:owner_id(display_name)")
     .order("due_on", { ascending: true, nullsFirst: false }).order("created_at", { ascending: false }).limit(500);
   if (statusFilter) query = query.eq("status", statusFilter);
-  const [{ data }, { count: openCount }, { count: overdueCount }, { count: recurringCount }] = await Promise.all([
+  const [{ data }, { count: openCount }, { count: overdueCount }, { count: recurringCount }, { count: totalCount }] = await Promise.all([
     query,
     supabase.from("tasks").select("id", { count: "exact", head: true }).in("status", ["open", "in_progress"]),
     supabase.from("tasks").select("id", { count: "exact", head: true }).in("status", ["open", "in_progress"]).not("due_on", "is", null).lt("due_on", today),
     supabase.from("tasks").select("id", { count: "exact", head: true }).not("recurrence", "is", null),
+    supabase.from("tasks").select("id", { count: "exact", head: true }),
   ]);
   const all = data ?? [];
   const tasks = all.filter((t) => filter === "all" ? true : filter === "overdue" ? isOverdue({ status: t.status as TaskStatus, dueOn: t.due_on }, today) : t.status === filter);
@@ -31,7 +32,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
     </span>} />
     <div className="stats-grid"><Stat label="OPEN TASKS" value={openCount ?? 0} detail="across all sources" /><Stat label="OVERDUE" value={overdueCount ?? 0} detail="past their due date" tone="red" /><Stat label="RECURRING" value={recurringCount ?? 0} detail="regenerate on completion" tone="green" /></div>
     <nav aria-label="Task filters" className="segmented" style={{ marginBottom: "16px" }}>{FILTERS.map((f) => <Link key={f} href={`/app/tasks?filter=${f}`} aria-current={filter === f ? "page" : undefined} className={filter === f ? "active" : ""} style={{ textTransform: "capitalize" }}>{f.replace("_", " ")}</Link>)}</nav>
-    {!all.length && <Card style={{ padding: "20px", marginBottom: "16px" }}><h2 style={{ fontSize: "15px", margin: "0 0 4px" }}>Start with the compliance calendar</h2><p style={{ fontSize: "12px", color: "#596273", margin: "0 0 12px" }}>Add recurring access reviews, policy reviews, and backup restore tests in one click.</p><form action={acceptCalendarSeedAction}><button className="button primary">Add starter calendar</button></form></Card>}
+    {!totalCount && <Card style={{ padding: "20px", marginBottom: "16px" }}><h2 style={{ fontSize: "15px", margin: "0 0 4px" }}>Start with the compliance calendar</h2><p style={{ fontSize: "12px", color: "#596273", margin: "0 0 12px" }}>Add recurring access reviews, policy reviews, and backup restore tests in one click.</p><form action={acceptCalendarSeedAction}><button className="button primary">Add starter calendar</button></form></Card>}
     <Card><div className="data-table-wrap" role="region" aria-label="Tasks table" tabIndex={0}><table><thead><tr><th>Task</th><th>Owner</th><th>Due</th><th>Recurs</th><th>Source</th><th>Status</th></tr></thead><tbody>
       {tasks.map((t) => { const owner = Array.isArray(t.profiles) ? t.profiles[0] : t.profiles; const overdue = isOverdue({ status: t.status as TaskStatus, dueOn: t.due_on }, today); return <tr key={t.id}>
         <td><Link href={`/app/tasks/${t.id}`}><b>{t.title}</b></Link>{t.detail && <small>{t.detail}</small>}</td>
