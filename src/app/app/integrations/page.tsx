@@ -69,7 +69,7 @@ export default async function IntegrationsPage() {
           <h2 style={{ fontSize: "15px", margin: 0 }}>Evidence sources</h2>
           <Pill tone="amber">Sandbox mode</Pill>
         </div>
-        <p style={{ fontSize: "13px", color: "#4a5163", margin: "0 0 8px" }}>Connect a system so ComplianceHub collects proof automatically — access-control reports, config exports and more land in your evidence vault, and the daily sweep ages them so stale items raise tasks on their own.</p>
+        <p style={{ fontSize: "13px", color: "#4a5163", margin: "0 0 8px" }}>Connect a system so ComplianceHub collects proof automatically — access-control reports, config exports and more land in your evidence vault, and stale items automatically raise a task.</p>
         <p style={{ fontSize: "13px", color: "#596273", margin: 0 }}>You&rsquo;re in <b>sandbox mode</b>: new sources use a built-in collector that returns sample evidence, so you can trial the collect flow safely without touching a real Google Workspace, GitHub or AWS account. When you&rsquo;re ready, your workspace administrator can enable live collection.</p>
         <details style={{ marginTop: "14px", borderTop: "1px solid #edf0f4", paddingTop: "12px" }}>
           <summary style={{ cursor: "pointer", fontSize: "13px", fontWeight: 700, color: "var(--blue)", width: "fit-content" }}>For your administrator: going live</summary>

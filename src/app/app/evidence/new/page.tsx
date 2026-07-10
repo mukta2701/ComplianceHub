@@ -7,7 +7,7 @@ export default async function NewEvidencePage({ searchParams }: { searchParams: 
   const { supabase } = await requireAppContext();
   const { data: members } = await supabase.from("memberships").select("user_id,profiles(display_name)");
   return <>
-    <PageIntro eyebrow="EVIDENCE" title="Add evidence" body="Attach a file, link or note. Set a valid-until date and the daily sweep will track freshness for you." />
+    <PageIntro eyebrow="EVIDENCE" title="Add evidence" body="Attach a file, link or note. Set a valid-until date; freshness is then tracked automatically." />
     {message && <p role="alert" className="card" style={{ padding: "12px", borderColor: "#f0c9c9", background: "#fdf2f2", color: "#963f00", fontSize: "13px", marginBottom: "12px" }}>{message}</p>}
     <form action={createEvidenceAction} className="card app-form">
       {replaces && <input type="hidden" name="replacesEvidenceId" value={replaces} />}

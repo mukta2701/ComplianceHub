@@ -9,7 +9,7 @@ import { Icon } from "@/components/icons";
 import { acceptCalendarSeedAction } from "./tasks/actions";
 
 const STALE_EVIDENCE = new Set(["expired", "withdrawn", "superseded"]);
-const SOURCE_LABEL: Record<string, string> = { gap: "From assessment gap", evidence_expiry: "Raised by daily sweep", system: "From compliance calendar", policy_review: "From policy review", risk_treatment: "From a treatment plan", manual: "Added manually" };
+const SOURCE_LABEL: Record<string, string> = { gap: "From assessment gap", evidence_expiry: "Evidence needs refreshing", system: "From compliance calendar", policy_review: "From policy review", risk_treatment: "From a treatment plan", manual: "Added manually" };
 
 export default async function AppHome() {
   const { supabase, organisation } = await requireAppContext();
@@ -63,7 +63,7 @@ export default async function AppHome() {
     : { data: [] as { status: string }[] };
   const readiness = summariseSoaReadiness((soaItems ?? []).map((s) => ({ status: s.status as SoaStatus }))).percent;
   return <>
-    <PageIntro eyebrow={organisation.name.toUpperCase()} title="Readiness dashboard" body="Your live view of open work, evidence freshness, and everything the automation is surfacing on its own." action={<Link className="button primary" href="/app/assessment">{(assessments ?? 0) > 0 ? "Continue assessment" : "Start assessment"} <Icon name="arrow" /></Link>} />
+    <PageIntro eyebrow={organisation.name.toUpperCase()} title="Readiness dashboard" body="Your live view of open work, evidence freshness, and anything that needs attention." action={<Link className="button primary" href="/app/assessment">{(assessments ?? 0) > 0 ? "Continue assessment" : "Start assessment"} <Icon name="arrow" /></Link>} />
     {!checklist.complete && <Card className="onboarding-card">
       <div className="card-head"><div><h2>Get certification-ready</h2><p>A few high-value steps to activate your workspace — this guide hides itself once every step is done.</p></div><Pill tone={checklist.percent === 100 ? "green" : "blue"}>{checklist.doneCount} of {checklist.total} done</Pill></div>
       <div className="onboarding-progress"><Progress value={checklist.percent} tone="green" /></div>
@@ -75,10 +75,10 @@ export default async function AppHome() {
         </li>)}
       </ol>
     </Card>}
-    <div className="stats-grid"><Stat label="OPEN TASKS" value={openTasks ?? 0} detail="in progress or to do" /><Stat label="OVERDUE" value={overdue ?? 0} detail="flagged by the daily sweep" tone="red" /><Stat label="EVIDENCE ITEMS" value={liveEvidence ?? 0} detail="files, links and notes" tone="green" /><Stat label="EXPIRING / EXPIRED" value={expiring ?? 0} detail="need fresh proof" tone="amber" /></div>
+    <div className="stats-grid"><Stat label="OPEN TASKS" value={openTasks ?? 0} detail="in progress or to do" /><Stat label="OVERDUE" value={overdue ?? 0} detail="past their due date" tone="red" /><Stat label="EVIDENCE ITEMS" value={liveEvidence ?? 0} detail="files, links and notes" tone="green" /><Stat label="EXPIRING / EXPIRED" value={expiring ?? 0} detail="need fresh proof" tone="amber" /></div>
     <div className="dashboard-grid">
-      <Card><div className="card-head"><div><h3>Needs attention</h3><p>Work the automation has surfaced — start here.</p></div><Link href="/app/tasks">All tasks</Link></div>
-        {attention.length > 0 ? <div className="gap-list">{attention.slice(0, 6).map((item) => <Link key={item.id} href={`/app/soa?control=${item.id}`}><b><Icon name="alert" /></b><span><strong>{item.code}: {item.title}</strong><small>{item.reason}</small></span><Pill tone="amber">{item.source}</Pill><Icon name="arrow" /></Link>)}</div> : <p style={{ padding: "22px", color: "#596273", fontSize: "13px" }}>Nothing needs attention right now. New work will appear here as the daily sweep runs.</p>}
+      <Card><div className="card-head"><div><h3>Needs attention</h3><p>What needs attention — start here.</p></div><Link href="/app/tasks">All tasks</Link></div>
+        {attention.length > 0 ? <div className="gap-list">{attention.slice(0, 6).map((item) => <Link key={item.id} href={`/app/soa?control=${item.id}`}><b><Icon name="alert" /></b><span><strong>{item.code}: {item.title}</strong><small>{item.reason}</small></span><Pill tone="amber">{item.source}</Pill><Icon name="arrow" /></Link>)}</div> : <p style={{ padding: "22px", color: "#596273", fontSize: "13px" }}>Nothing needs attention right now. New items appear here automatically as things fall due or evidence ages.</p>}
         <div className="card-foot"><form action={acceptCalendarSeedAction}><button className="button secondary">Add starter calendar</button></form><span className="quick-actions"><Link href="/app/evidence/new">Add evidence</Link><Link href="/app/risks">Review gaps</Link></span></div>
       </Card>
       <Card><div className="card-head"><div><h3>Overall readiness</h3><p>Share of applicable controls implemented on your SoA</p></div><Pill>Live</Pill></div><div className="readiness-body"><Ring value={readiness} /><div className="category-bars"><div><label><span>Assessments</span><b>{assessments ?? 0}</b></label></div><div><label><span>Open risks</span><b>{risks ?? 0}</b></label></div><div><label><span>Finalised SoAs</span><b>{snapshots ?? 0}</b></label></div></div></div><div className="card-foot"><span><Icon name="check" />Updated just now</span><Link href="/app/soa">Open SoA <Icon name="arrow" /></Link></div></Card>
