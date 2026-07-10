@@ -6,7 +6,7 @@ import path from "node:path";
 // **/*.integration.test.ts). They are excluded from the default `vitest run`
 // (vitest.config.ts) because they are non-hermetic; this config runs ONLY the
 // integration suites and expects a running DB plus its env (SUPABASE_* keys,
-// e.g. from `supabase status` or .env.local). Invoke via `pnpm test:integration`.
+// e.g. from `supabase status` or .env.local). Invoke via `npm run test:integration`.
 export default defineConfig({
   plugins: [react()],
   resolve: {

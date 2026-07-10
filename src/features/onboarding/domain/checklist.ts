@@ -102,7 +102,7 @@ export function buildOnboardingChecklist(inputs: OnboardingInputs): OnboardingCh
   ];
 
   // Optional final "connect a tracker" step — only offered when the signal is
-  // provided, so the core checklist stays six steps for workspaces that never
+  // provided, so the core checklist stays seven steps for workspaces that never
   // wire up integrations.
   if (inputs.hasIntegration !== undefined) {
     steps.push({

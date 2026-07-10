@@ -171,7 +171,7 @@ test("a user runs the Phase 1 workflow loop", async ({ page, request }, testInfo
   await expect(page.getByText("Open tasks")).toBeVisible();
   await expect(page.getByText("Evidence items")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Needs attention" })).toBeVisible();
-  await expect(page.getByText("Raised by daily sweep").first()).toBeVisible();
+  await expect(page.getByText("Evidence needs refreshing").first()).toBeVisible();
   await page.goto("/app/tasks");
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await page.goto("/app/evidence");

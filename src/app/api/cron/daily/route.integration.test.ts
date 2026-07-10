@@ -33,7 +33,7 @@ if (missingEnv) {
   console.warn(
     "[route.integration] Skipping live-DB integration tests: NEXT_PUBLIC_SUPABASE_URL and " +
       "SUPABASE_SERVICE_ROLE_KEY are not set. Provide them via .env.local or `supabase status` " +
-      "and run against a live stack with `pnpm test:integration`.",
+      "and run against a live stack with `npm run test:integration`.",
   );
 }
 // Dummy fallbacks keep createClient from throwing at import when env is absent;

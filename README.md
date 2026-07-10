@@ -19,13 +19,13 @@ ComplianceHub supports readiness work. It does **not** provide certification, le
 
 ## Local development
 
-Requirements: Node.js 22+, pnpm 11+, Docker Desktop, and the Supabase CLI.
+Requirements: Node.js 22+, npm, Docker Desktop, and the Supabase CLI.
 
 ```bash
 cp .env.example .env.local
-pnpm install
-pnpm exec supabase start
-pnpm dev
+npm install
+npx supabase start
+npm run dev
 ```
 
 Use the local Supabase values printed by `supabase start` in `.env.local`. Never expose `SUPABASE_SERVICE_ROLE_KEY` to browser code.
@@ -33,9 +33,9 @@ Use the local Supabase values printed by `supabase start` in `.env.local`. Never
 ## Verification
 
 ```bash
-pnpm verify
-pnpm test:db
-pnpm test:e2e
+npm run verify
+npm run test:db
+npm run test:e2e
 ```
 
 ## Deployment

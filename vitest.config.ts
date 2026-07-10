@@ -18,7 +18,7 @@ export default defineConfig({
     include: ["src/**/*.test.{ts,tsx}"],
     // Integration tests hit the live local Supabase stack and are NOT hermetic;
     // keep them out of the default `vitest run` so a clean checkout passes
-    // without a running DB. Run them via `pnpm test:integration`.
+    // without a running DB. Run them via `npm run test:integration`.
     exclude: [...configDefaults.exclude, "**/*.integration.test.{ts,tsx}"],
     coverage: { reporter: ["text", "json", "html"] },
   },
