@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { runDailySweep, type SweepDependencies } from "@/features/automation/application/daily-sweep";
+import { memoizeOwners } from "@/features/automation/application/owner-resolver";
 import type { SweepEvidence, SweepPolicy, SweepTask } from "@/features/automation/domain/sweep";
 import { collectEvidence } from "@/features/integrations/application/collect-run";
 import { syncTickets } from "@/features/integrations/application/sync-run";
@@ -25,6 +26,14 @@ async function sweep(request: Request) {
   const collectResult = await collectEvidence(supabase);
   const syncResult = await syncTickets(supabase);
   const today = new Date().toISOString().slice(0, 10);
+  // Memoized so each organisation's owners are fetched at most once per sweep
+  // run, instead of once per task/policy row (an N+1 at real tenant scale).
+  const resolveOwners = memoizeOwners(async (organisationId) => {
+    const { data, error } = await supabase.from("memberships")
+      .select("user_id").eq("organisation_id", organisationId).eq("role", "owner");
+    if (error) throw error;
+    return (data ?? []).map((row) => row.user_id as string);
+  });
   const deps: SweepDependencies = {
     today,
     listActiveEvidence: async () => {
@@ -48,14 +57,13 @@ async function sweep(request: Request) {
       return (data ?? []).map((row) => row.evidence_id as string);
     },
     createTask: async (task) => {
-      const { data: owner, error: ownerError } = await supabase.from("memberships")
-        .select("user_id").eq("organisation_id", task.organisationId).eq("role", "owner").limit(1).single();
-      if (ownerError) throw ownerError;
+      const owners = await resolveOwners(task.organisationId);
+      if (owners.length === 0) return false; // an org with no owner can't be assigned a creator — skip, don't abort
       const { data, error } = await supabase.from("tasks").upsert({
         organisation_id: task.organisationId, title: task.title,
         detail: "Raised automatically because linked evidence is expiring or expired.",
         source: "evidence_expiry", owner_id: task.ownerId, due_on: task.dueOn,
-        evidence_id: task.evidenceId, created_by: owner.user_id,
+        evidence_id: task.evidenceId, created_by: owners[0],
       }, { onConflict: "organisation_id,evidence_id,source", ignoreDuplicates: true }).select("id");
       if (error) throw error;
       return Boolean(data?.length);
@@ -87,25 +95,19 @@ async function sweep(request: Request) {
       return (data ?? []).map((row) => row.policy_id as string);
     },
     createPolicyReviewTask: async (task) => {
-      const { data: owner, error: ownerError } = await supabase.from("memberships")
-        .select("user_id").eq("organisation_id", task.organisationId).eq("role", "owner").limit(1).single();
-      if (ownerError) throw ownerError;
+      const owners = await resolveOwners(task.organisationId);
+      if (owners.length === 0) return false; // an org with no owner can't be assigned a creator — skip, don't abort
       const { data, error } = await supabase.from("tasks").upsert({
         organisation_id: task.organisationId,
         title: `Review policy ${task.reference}: ${task.title}`.slice(0, 200),
         detail: "Raised automatically because this policy has reached its scheduled review date.",
         source: "policy_review", owner_id: task.ownerId, due_on: task.dueOn,
-        policy_id: task.policyId, created_by: owner.user_id,
+        policy_id: task.policyId, created_by: owners[0],
       }, { onConflict: "organisation_id,policy_id,source", ignoreDuplicates: true }).select("id");
       if (error) throw error;
       return Boolean(data?.length);
     },
-    listOrganisationOwners: async (organisationId) => {
-      const { data, error } = await supabase.from("memberships")
-        .select("user_id").eq("organisation_id", organisationId).eq("role", "owner");
-      if (error) throw error;
-      return (data ?? []).map((row) => row.user_id);
-    },
+    listOrganisationOwners: (organisationId) => resolveOwners(organisationId),
     createNotification: async (notification) => {
       // The full day-scoped constraint makes retries and concurrent runs idempotent.
       const { data, error } = await supabase.from("notifications").upsert({
