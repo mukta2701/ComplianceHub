@@ -4,10 +4,12 @@ export type AuditPreflightInput = {
   expiredEvidence: number;
   overdueTasks: number;
   openFindings: number;
+  scopeGaps?: number;
 };
 
 export function assessAuditPreflight(input: AuditPreflightInput) {
   const blockers: string[] = [];
+  if (input.scopeGaps) blockers.push(`${input.scopeGaps} organisation scope decision${input.scopeGaps === 1 ? " is" : "s are"} incomplete.`);
   if (input.pendingControls) blockers.push(`${input.pendingControls} applicable SoA control${input.pendingControls === 1 ? "" : "s"} still need review.`);
   if (input.ownerGaps) blockers.push(`${input.ownerGaps} applicable SoA control${input.ownerGaps === 1 ? "" : "s"} ${input.ownerGaps === 1 ? "has" : "have"} no owner.`);
   if (input.expiredEvidence) blockers.push(`${input.expiredEvidence} evidence record${input.expiredEvidence === 1 ? " is" : "s are"} expired.`);

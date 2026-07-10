@@ -1,4 +1,4 @@
-export type ModuleKey = "assessment" | "risks" | "assets" | "soa" | "evidence" | "policies" | "audits" | "kpis";
+export type ModuleKey = "assessment" | "scope" | "risks" | "assets" | "soa" | "evidence" | "policies" | "audits" | "kpis";
 
 type GlossaryTerm = { term: string; definition: string };
 
@@ -38,6 +38,13 @@ const moduleGuidance: Record<ModuleKey, ModuleGuidance> = {
       { term: "Evidence", definition: "Proof that a control exists and is being operated, such as an approval record, system report, or review minutes." },
       { term: "Control", definition: "A safeguard or working practice that reduces information-security risk." },
     ],
+  },
+  scope: {
+    why: "Scope makes the boundary of your ISMS clear: what the organisation is protecting, where it operates, and which dependencies matter.",
+    decision: "Describe the services, people, locations, information, suppliers, and exclusions that belong inside the ISMS boundary.",
+    outcome: "You will have a reviewable foundation for assessment answers, SoA applicability, risk decisions, and internal-audit planning.",
+    nextStep: "Use the documented boundary when deciding whether controls apply and when planning audits.",
+    terms: [{ term: "ISMS scope", definition: "The documented organisational boundary covered by your information-security management system." }],
   },
   risks: {
     why: "The risk register turns a weakness or uncertainty into a clear view of possible business harm and the action needed to reduce it.",
