@@ -1,11 +1,11 @@
 export type AiSourceReference = {
-  type: "assessment_question" | "soa_item" | "audit" | "readiness_report";
+  type: "assessment_question" | "soa_item" | "audit" | "readiness_report" | "task" | "evidence";
   id: string;
   label: string;
 };
 
 export type AiContext = {
-  kind: "assessment" | "soa" | "audit" | "readiness_report";
+  kind: "assessment" | "soa" | "audit" | "readiness_report" | "task" | "evidence";
   target: { id: string; code: string };
   facts: Record<string, string | boolean>;
   sourceReferences: AiSourceReference[];
@@ -64,4 +64,15 @@ export function buildReadinessAiContext(input: { organisationId: string; soaPerc
     facts: { soaPercent: String(input.soaPercent), tasksOpen: String(input.tasksOpen), tasksOverdue: String(input.tasksOverdue), evidenceExpired: String(input.evidenceExpired), openFindings: String(input.openFindings) },
     sourceReferences: [{ type: "readiness_report", id: input.organisationId, label: "Current readiness report" }],
   };
+}
+
+export function buildTaskAiContext(input: { task: { id: string; title: string; status: string; source: string; dueOn: string | null }; detail?: string }): AiContext {
+  void input.detail;
+  return { kind: "task", target: { id: input.task.id, code: "task" }, facts: { task: input.task.title, status: input.task.status, source: input.task.source, dueOn: input.task.dueOn ?? "not_set" }, sourceReferences: [{ type: "task", id: input.task.id, label: input.task.title }] };
+}
+
+export function buildEvidenceAiContext(input: { evidence: { id: string; title: string; kind: string; status: string; collectedOn: string; validUntil: string | null }; description?: string; url?: string | null }): AiContext {
+  void input.description;
+  void input.url;
+  return { kind: "evidence", target: { id: input.evidence.id, code: "evidence" }, facts: { evidence: input.evidence.title, kind: input.evidence.kind, status: input.evidence.status, collectedOn: input.evidence.collectedOn, validUntil: input.evidence.validUntil ?? "not_set" }, sourceReferences: [{ type: "evidence", id: input.evidence.id, label: input.evidence.title }] };
 }

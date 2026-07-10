@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildAssessmentAiContext, buildAuditAiContext, buildReadinessAiContext, buildSoaAiContext } from "./context";
+import { buildAssessmentAiContext, buildAuditAiContext, buildEvidenceAiContext, buildReadinessAiContext, buildSoaAiContext, buildTaskAiContext } from "./context";
 
 describe("AI context allowlisting", () => {
   it("uses assessment metadata and the selected answer without exposing evidence notes", () => {
@@ -48,5 +48,10 @@ describe("AI context allowlisting", () => {
     expect(buildReadinessAiContext({ organisationId: "org-1", soaPercent: 72, tasksOpen: 4, tasksOverdue: 1, evidenceExpired: 2, openFindings: 0 })).toEqual({
       kind: "readiness_report", target: { id: "org-1", code: "readiness" }, facts: { soaPercent: "72", tasksOpen: "4", tasksOverdue: "1", evidenceExpired: "2", openFindings: "0" }, sourceReferences: [{ type: "readiness_report", id: "org-1", label: "Current readiness report" }],
     });
+  });
+
+  it("omits task detail and evidence content from task and evidence drafts", () => {
+    expect(buildTaskAiContext({ task: { id: "task-1", title: "Review access", status: "open", source: "gap", dueOn: "2026-07-20" }, detail: "Secret remediation detail" })).toEqual({ kind: "task", target: { id: "task-1", code: "task" }, facts: { task: "Review access", status: "open", source: "gap", dueOn: "2026-07-20" }, sourceReferences: [{ type: "task", id: "task-1", label: "Review access" }] });
+    expect(buildEvidenceAiContext({ evidence: { id: "evidence-1", title: "MFA report", kind: "file", status: "expired", collectedOn: "2026-04-01", validUntil: "2026-07-01" }, description: "raw evidence content", url: "https://private.example" })).toEqual({ kind: "evidence", target: { id: "evidence-1", code: "evidence" }, facts: { evidence: "MFA report", kind: "file", status: "expired", collectedOn: "2026-04-01", validUntil: "2026-07-01" }, sourceReferences: [{ type: "evidence", id: "evidence-1", label: "MFA report" }] });
   });
 });
