@@ -14,7 +14,7 @@ const BAND_TONE: Record<string, string> = { low: "green", moderate: "amber", hig
 export default async function RisksPage() {
   const { supabase } = await requireAppContext();
   const [{ data }, { data: gaps }, { data: linkedTasks }, { data: evidenceLinks }, { data: cfg }] = await Promise.all([
-    supabase.from("risks").select("id,reference,title,category_id,risk_categories(name),likelihood,impact,residual_likelihood,residual_impact,status,review_date").order("updated_at", { ascending: false }),
+    supabase.from("risks").select("id,reference,title,category_id,risk_categories(name),likelihood,impact,residual_likelihood,residual_impact,status,review_date").order("updated_at", { ascending: false }).limit(500),
     supabase.from("assessment_responses").select("session_id,question_id,answer,catalogue_questions!assessment_responses_question_id_fkey(code,prompt)").in("answer", ["no", "partially"]).limit(10),
     supabase.from("tasks").select("id,title,risk_id,status").in("status", ["open", "in_progress"]).not("risk_id", "is", null),
     supabase.from("evidence_links").select("risk_id,evidence(status)").not("risk_id", "is", null),
