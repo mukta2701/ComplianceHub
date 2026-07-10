@@ -1,5 +1,6 @@
 import { requireAppContext } from "@/lib/app-context";
 import { Card, PageIntro, Pill } from "@/components/ui";
+import { SubTabs } from "@/components/sub-tabs";
 import { addConnectionAction, revokeConnectionAction, addEvidenceSourceAction, revokeEvidenceSourceAction } from "./actions";
 
 const EVIDENCE_PROVIDER_LABELS: Record<string, string> = {
@@ -21,6 +22,9 @@ export default async function IntegrationsPage() {
   const isOwner = membership.role === "owner";
   return <>
     <PageIntro eyebrow="INTEGRATIONS" title="Ticketing integrations" body="Connect Jira or GitHub Issues, then push remediation tasks as tickets and sync their status back." />
+
+    <SubTabs tabs={[{ href: "/app/settings", label: "Settings" }, { href: "/app/integrations", label: "Connections" }]} />
+
     {!isOwner && <Card style={{ padding: "18px" }} role="note"><p>Only workspace owners can manage integrations.</p></Card>}
     {isOwner && <>
       <Card style={{ padding: "18px", marginBottom: "16px" }}>

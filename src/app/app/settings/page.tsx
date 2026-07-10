@@ -1,6 +1,7 @@
 import { requireAppContext } from "@/lib/app-context";
 import { Card, PageIntro, Pill } from "@/components/ui";
 import { Icon } from "@/components/icons";
+import { SubTabs } from "@/components/sub-tabs";
 import { inviteMemberAction } from "../actions";
 
 function initials(name: string): string {
@@ -26,6 +27,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
 
   return <>
     <PageIntro eyebrow="SETTINGS" title="Organisation settings" body={`Manage ${organisation.name}, your team and workspace security. Your role: ${membership.role === "owner" ? "Owner" : "Member"}.`} />
+
+    <SubTabs tabs={[{ href: "/app/settings", label: "Settings" }, { href: "/app/integrations", label: "Connections" }]} />
 
     {invite && <Card style={{ padding: "16px", background: "#eef7f0", borderColor: "#cfe6d5", marginBottom: "16px" }} role="status">
       <b>Invitation created.</b>
