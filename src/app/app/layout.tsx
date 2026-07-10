@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getAuthUser, getMembership } from "@/lib/app-context";
 import { AppShell } from "@/components/app-shell";
 
 export const dynamic = "force-dynamic";
@@ -13,11 +14,11 @@ function initials(text: string): string {
 
 export default async function ProtectedLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createSupabaseServerClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/sign-in");
-  const [{ count: unread }, { data: membership }, { data: profile }] = await Promise.all([
+  const membership = await getMembership();
+  const [{ count: unread }, { data: profile }] = await Promise.all([
     supabase.from("notifications").select("id", { count: "exact", head: true }).is("read_at", null),
-    supabase.from("memberships").select("organisations(name)").limit(1).maybeSingle(),
     supabase.from("profiles").select("display_name").eq("id", user.id).maybeSingle(),
   ]);
   const organisation = membership ? (Array.isArray(membership.organisations) ? membership.organisations[0] : membership.organisations) : null;
