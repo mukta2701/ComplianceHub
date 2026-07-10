@@ -21,7 +21,7 @@ export default async function IntegrationsPage() {
   ]);
   const isOwner = membership.role === "owner";
   return <>
-    <PageIntro eyebrow="INTEGRATIONS" title="Ticketing integrations" body="Connect Jira or GitHub Issues, then push remediation tasks as tickets and sync their status back." />
+    <PageIntro eyebrow="SETTINGS · CONNECTIONS" title="Connections" body="Connect a tracker to push remediation tasks as tickets, and a source so proof is collected for you. Both start in a safe sandbox." />
 
     <SubTabs tabs={[{ href: "/app/settings", label: "Settings" }, { href: "/app/integrations", label: "Connections" }]} />
 
@@ -29,7 +29,7 @@ export default async function IntegrationsPage() {
     {isOwner && <>
       <Card style={{ padding: "18px", marginBottom: "16px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px" }}>
-          <h2 style={{ fontSize: "15px", margin: 0 }}>Connect Jira or GitHub</h2>
+          <h2 style={{ fontSize: "15px", margin: 0 }}>Task tracker</h2>
           <Pill tone="amber">Sandbox mode</Pill>
         </div>
         <p style={{ fontSize: "13px", color: "#4a5163", margin: "0 0 8px" }}>Add a connection below to push remediation tasks to your tracker as tickets, then sync their status back into ComplianceHub.</p>
