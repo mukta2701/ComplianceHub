@@ -237,7 +237,7 @@ test("an audit runs from plan through checklist to a corrective-action task", as
   // Reach the audits module through the workspace nav.
   const navToggle = page.getByRole("button", { name: "Open navigation" });
   if (await navToggle.isVisible()) await navToggle.click();
-  await page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: "Audits", exact: true }).click();
+  await page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: "Internal audits", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Internal audits", level: 1 })).toBeVisible();
 
   const listAxe = await new AxeBuilder({ page }).analyze();
@@ -389,15 +389,15 @@ test("a KPI is logged and its next steps raise a follow-up task", async ({ page 
   // Reach the KPI register through the workspace nav.
   const navToggle = page.getByRole("button", { name: "Open navigation" });
   if (await navToggle.isVisible()) await navToggle.click();
-  await page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: "KPIs", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Performance measures", level: 1 })).toBeVisible();
+  await page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: "Performance", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Performance", level: 1 })).toBeVisible();
 
   // Log a performance measure with next steps.
   await page.getByLabel("Indicator").fill("Mean time to de-provision leavers");
   await page.getByLabel("Next steps").fill("Automate off-boarding on the HR termination event.");
   await page.getByRole("button", { name: "Add KPI" }).click();
 
-  await expect(page.getByRole("heading", { name: "Performance measures", level: 1 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Performance", level: 1 })).toBeVisible();
   await expect(page.getByText("Mean time to de-provision leavers")).toBeVisible();
 
   // Record two readings for the KPI and assert the trend reflects the latest
@@ -451,7 +451,7 @@ test("the leadership readiness report aggregates the ISMS into one accessible vi
   // Reach the readiness report through the workspace nav.
   const navToggle = page.getByRole("button", { name: "Open navigation" });
   if (await navToggle.isVisible()) await navToggle.click();
-  await page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: "Reports", exact: true }).click();
+  await page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: "Leadership report", exact: true }).click();
 
   // Section headings for each area of the leadership snapshot render.
   await expect(page.getByRole("heading", { name: "Leadership readiness report" })).toBeVisible();
@@ -790,7 +790,7 @@ test("a policy is authored, approved, accepted, and re-accepted after a material
   const navToggle = page.getByRole("button", { name: "Open navigation" });
   if (await navToggle.isVisible()) await navToggle.click();
   await page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: "Policies", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Policy library", level: 1 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Policies", level: 1 })).toBeVisible();
 
   const listAxe = await new AxeBuilder({ page }).analyze();
   expect(listAxe.violations).toEqual([]);
@@ -906,7 +906,7 @@ test("a task is pushed to a sandbox tracker, polled to In Progress, then the con
   //    with no scroll, so it clips below the viewport — reach the page directly.
   //    Provider defaults to Jira.
   await page.goto("/app/integrations");
-  await expect(page.getByRole("heading", { name: "Ticketing integrations", level: 1 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connections", level: 1 })).toBeVisible();
   // The page carries a second "Label" input (the evidence-sources section), so
   // scope this fill to the ticketing connection form.
   const connectionForm = page.locator("form", { has: page.getByRole("button", { name: "Add connection" }) });
@@ -962,7 +962,7 @@ test("a task is pushed to a sandbox tracker, polled to In Progress, then the con
 
   // 6. Revoke the sandbox connection back on the integrations page.
   await page.goto("/app/integrations");
-  await expect(page.getByRole("heading", { name: "Ticketing integrations", level: 1 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connections", level: 1 })).toBeVisible();
   const toRevoke = page.getByRole("listitem").filter({ hasText: "Sandbox Jira" });
   await toRevoke.getByRole("button", { name: "Revoke" }).click();
   await expect(toRevoke.getByText("Revoked")).toBeVisible();
@@ -994,7 +994,7 @@ test("an owner adds an evidence source, the collector fills the vault, and re-co
   //    Scope by the add-source form so the two "Label" inputs on the page (one per
   //    section) don't collide.
   await page.goto("/app/integrations");
-  await expect(page.getByRole("heading", { name: "Ticketing integrations", level: 1 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connections", level: 1 })).toBeVisible();
   const sourceForm = page.locator("form", { has: page.getByRole("button", { name: "Add evidence source" }) });
   await sourceForm.getByLabel("Label", { exact: true }).fill("Sandbox GWS");
   await sourceForm.getByRole("button", { name: "Add evidence source" }).click();
