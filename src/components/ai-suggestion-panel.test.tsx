@@ -29,4 +29,25 @@ describe("AiSuggestionPanel", () => {
     expect(screen.getByLabelText("AI Explain and Act")).toHaveAttribute("aria-busy", "false");
     expect(screen.getByRole("button", { name: /draft explanation/i })).toBeEnabled();
   });
+
+  it("records a human review without creating or changing a compliance record", async () => {
+    let resolveReview: (response: Response) => void;
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "draft-1", status: "draft", output: { explanation: "Draft explanation", recommendedAction: "Review the report", confidence: "medium" }, source_references: [] }) } as Response)
+      .mockImplementationOnce(() => new Promise<Response>((done) => { resolveReview = done; }));
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<AiSuggestionPanel target={{ targetType: "readiness_report" }} />);
+
+    await user.click(screen.getByRole("button", { name: /draft explanation/i }));
+    await screen.findByRole("button", { name: /mark draft reviewed/i });
+    await user.click(screen.getByRole("button", { name: /mark draft reviewed/i }));
+
+    expect(screen.getByLabelText("AI Explain and Act")).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByRole("button", { name: /dismiss draft/i })).toBeDisabled();
+    resolveReview!({ ok: true, json: async () => ({ status: "accepted" }) } as Response);
+    await waitFor(() => expect(screen.getByText(/draft accepted\. no compliance record was changed/i)).toBeVisible());
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/app/ai/suggestions/draft-1", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ status: "accepted" }) }));
+  });
 });
