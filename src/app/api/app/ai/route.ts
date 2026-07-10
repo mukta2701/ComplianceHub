@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireAppContext } from "@/lib/app-context";
 import { configuredAiProvider } from "@/features/ai/application/openai-compatible";
 import { generateAiSuggestion } from "@/features/ai/application/suggestion";
-import { buildAssessmentAiContext, buildAuditAiContext, buildEvidenceAiContext, buildReadinessAiContext, buildSoaAiContext, buildTaskAiContext } from "@/features/ai/domain/context";
+import { buildAssessmentAiContext, buildAuditAiContext, buildEvidenceAiContext, buildReadinessAiContext, buildRiskAiContext, buildSoaAiContext, buildTaskAiContext } from "@/features/ai/domain/context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { loadReadinessInput } from "@/features/reports/application/load-readiness";
 import { buildReadinessReport } from "@/features/reports/domain/readiness-report";
@@ -15,6 +15,7 @@ const requestSchema = z.discriminatedUnion("targetType", [
   z.object({ targetType: z.literal("readiness_report") }),
   z.object({ targetType: z.literal("task"), targetId: z.string().uuid() }),
   z.object({ targetType: z.literal("evidence"), targetId: z.string().uuid() }),
+  z.object({ targetType: z.literal("risk"), targetId: z.string().uuid() }),
 ]);
 
 export async function POST(request: Request) {
@@ -28,7 +29,7 @@ export async function POST(request: Request) {
   if (!provider) return NextResponse.json({ error: "AI assistance is not configured" }, { status: 503 });
 
   let targetId: string;
-  let suggestionType: "assessment_remediation" | "soa_rationale" | "audit_preparation" | "readiness_summary" | "task_remediation" | "evidence_review";
+  let suggestionType: "assessment_remediation" | "soa_rationale" | "audit_preparation" | "readiness_summary" | "task_remediation" | "evidence_review" | "risk_scenario";
   let context;
   if (parsed.data.targetType === "assessment_question") {
     const [{ data: session }, { data: question }, { data: response }] = await Promise.all([
@@ -64,12 +65,18 @@ export async function POST(request: Request) {
     targetId = task.id;
     suggestionType = "task_remediation";
     context = buildTaskAiContext({ task: { id: task.id, title: task.title, status: task.status, source: task.source, dueOn: task.due_on } });
-  } else {
+  } else if (parsed.data.targetType === "evidence") {
     const { data: evidence } = await supabase.from("evidence").select("id,title,kind,status,collected_on,valid_until").eq("id", parsed.data.targetId).maybeSingle();
     if (!evidence) return NextResponse.json({ error: "Evidence not found" }, { status: 404 });
     targetId = evidence.id;
     suggestionType = "evidence_review";
     context = buildEvidenceAiContext({ evidence: { id: evidence.id, title: evidence.title, kind: evidence.kind, status: evidence.status, collectedOn: evidence.collected_on, validUntil: evidence.valid_until } });
+  } else {
+    const { data: risk } = await supabase.from("risks").select("id,reference,title,status,treatment").eq("id", parsed.data.targetId).eq("organisation_id", organisation.id).maybeSingle();
+    if (!risk) return NextResponse.json({ error: "Risk not found" }, { status: 404 });
+    targetId = risk.id;
+    suggestionType = "risk_scenario";
+    context = buildRiskAiContext({ risk });
   }
 
   try {

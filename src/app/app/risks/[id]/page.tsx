@@ -6,17 +6,19 @@ import { summariseRtpProgress, RTP_STATUS_LABEL, RTP_STATUS_TONE, type RtpStatus
 import { Card, PageIntro, Pill } from "@/components/ui";
 import { one } from "@/lib/supabase/one";
 import { createRtpAction, updateRtpStatusAction, deleteRtpAction } from "../rtp-actions";
+import { AiSuggestionPanel } from "@/components/ai-suggestion-panel";
 
 export default async function RiskDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { supabase } = await requireAppContext();
+  const { supabase, organisation } = await requireAppContext();
   const { data: risk } = await supabase.from("risks").select("id,reference,title,description,likelihood,impact,residual_likelihood,residual_impact,status,review_date,treatment,treatment_plan,risk_categories(name)").eq("id", id).maybeSingle();
   if (!risk) notFound();
-  const [{ data: plans }, { data: cfg }, { data: members }, { data: controls }] = await Promise.all([
+  const [{ data: plans }, { data: cfg }, { data: members }, { data: controls }, { data: aiSettings }] = await Promise.all([
     supabase.from("risk_treatment_plans").select("id,reference,summary,treatment_measures,status,target_completion,actual_completion,assigned_lead_id").eq("risk_id", id).order("reference"),
     supabase.from("risk_matrix_config").select("low_max,moderate_max,high_max,appetite_threshold").maybeSingle(),
     supabase.from("memberships").select("user_id,profiles(display_name)"),
     supabase.from("controls").select("id,code,title").order("position"),
+    supabase.from("ai_workspace_settings").select("enabled").eq("organisation_id", organisation.id).maybeSingle(),
   ]);
   const config: RiskMatrixConfig = cfg ? { lowMax: cfg.low_max, moderateMax: cfg.moderate_max, highMax: cfg.high_max, appetite: cfg.appetite_threshold } : DEFAULT_RISK_MATRIX_CONFIG;
   const leadName = new Map((members ?? []).map((m) => { const p = one(m.profiles); return [m.user_id, p?.display_name ?? null] as const; }));
@@ -36,6 +38,7 @@ export default async function RiskDetailPage({ params }: { params: Promise<{ id:
       <div><dt>Treatment</dt><dd style={{ textTransform: "capitalize" }}>{risk.treatment}</dd></div>
       <div><dt>Review date</dt><dd>{risk.review_date ?? "—"}</dd></div>
     </dl></Card>
+    {aiSettings?.enabled && <AiSuggestionPanel target={{ targetType: "risk", targetId: risk.id }} />}
     <Card style={{ padding: "22px", marginTop: "16px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
         <div><h2 style={{ fontSize: "15px", margin: 0 }}>Treatment plans</h2><p style={{ fontSize: "12px", color: "#596273", margin: "3px 0 0" }}>{progress.total} plan(s) · {progress.open} open{progress.allComplete ? " · all complete" : ""}</p></div>

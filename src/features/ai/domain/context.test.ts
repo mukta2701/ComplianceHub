@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildAssessmentAiContext, buildAuditAiContext, buildEvidenceAiContext, buildReadinessAiContext, buildSoaAiContext, buildTaskAiContext } from "./context";
+import { buildAssessmentAiContext, buildAuditAiContext, buildEvidenceAiContext, buildReadinessAiContext, buildRiskAiContext, buildSoaAiContext, buildTaskAiContext } from "./context";
 
 describe("AI context allowlisting", () => {
   it("uses assessment metadata and the selected answer without exposing evidence notes", () => {
@@ -53,5 +53,12 @@ describe("AI context allowlisting", () => {
   it("omits task detail and evidence content from task and evidence drafts", () => {
     expect(buildTaskAiContext({ task: { id: "task-1", title: "Review access", status: "open", source: "gap", dueOn: "2026-07-20" }, detail: "Secret remediation detail" })).toEqual({ kind: "task", target: { id: "task-1", code: "task" }, facts: { task: "Review access", status: "open", source: "gap", dueOn: "2026-07-20" }, sourceReferences: [{ type: "task", id: "task-1", label: "Review access" }] });
     expect(buildEvidenceAiContext({ evidence: { id: "evidence-1", title: "MFA report", kind: "file", status: "expired", collectedOn: "2026-04-01", validUntil: "2026-07-01" }, description: "raw evidence content", url: "https://private.example" })).toEqual({ kind: "evidence", target: { id: "evidence-1", code: "evidence" }, facts: { evidence: "MFA report", kind: "file", status: "expired", collectedOn: "2026-04-01", validUntil: "2026-07-01" }, sourceReferences: [{ type: "evidence", id: "evidence-1", label: "MFA report" }] });
+  });
+
+  it("omits risk narrative and scores from a risk draft", () => {
+    const context = buildRiskAiContext({ risk: { id: "risk-1", reference: "R-001", title: "Access risk", status: "open", treatment: "mitigate" }, description: "Sensitive risk scenario", likelihood: 5, impact: 5, treatmentPlan: "Secret plan" });
+    expect(context).toEqual({ kind: "risk", target: { id: "risk-1", code: "R-001" }, facts: { risk: "Access risk", status: "open", treatment: "mitigate" }, sourceReferences: [{ type: "risk", id: "risk-1", label: "R-001" }] });
+    expect(JSON.stringify(context)).not.toContain("Sensitive risk");
+    expect(JSON.stringify(context)).not.toContain("Secret plan");
   });
 });

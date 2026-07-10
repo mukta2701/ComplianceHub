@@ -1,11 +1,11 @@
 export type AiSourceReference = {
-  type: "assessment_question" | "soa_item" | "audit" | "readiness_report" | "task" | "evidence";
+  type: "assessment_question" | "soa_item" | "audit" | "readiness_report" | "task" | "evidence" | "risk";
   id: string;
   label: string;
 };
 
 export type AiContext = {
-  kind: "assessment" | "soa" | "audit" | "readiness_report" | "task" | "evidence";
+  kind: "assessment" | "soa" | "audit" | "readiness_report" | "task" | "evidence" | "risk";
   target: { id: string; code: string };
   facts: Record<string, string | boolean>;
   sourceReferences: AiSourceReference[];
@@ -75,4 +75,12 @@ export function buildEvidenceAiContext(input: { evidence: { id: string; title: s
   void input.description;
   void input.url;
   return { kind: "evidence", target: { id: input.evidence.id, code: "evidence" }, facts: { evidence: input.evidence.title, kind: input.evidence.kind, status: input.evidence.status, collectedOn: input.evidence.collectedOn, validUntil: input.evidence.validUntil ?? "not_set" }, sourceReferences: [{ type: "evidence", id: input.evidence.id, label: input.evidence.title }] };
+}
+
+export function buildRiskAiContext(input: { risk: { id: string; reference: string; title: string; status: string; treatment: string }; description?: string; likelihood?: number; impact?: number; treatmentPlan?: string }): AiContext {
+  void input.description;
+  void input.likelihood;
+  void input.impact;
+  void input.treatmentPlan;
+  return { kind: "risk", target: { id: input.risk.id, code: input.risk.reference }, facts: { risk: input.risk.title, status: input.risk.status, treatment: input.risk.treatment }, sourceReferences: [{ type: "risk", id: input.risk.id, label: input.risk.reference }] };
 }
