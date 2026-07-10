@@ -30,9 +30,14 @@ export function AiSuggestionPanel({ target }: { target: Target }) {
   }
   async function review(status: "accepted" | "dismissed") {
     if (!draft) return;
-    const response = await fetch(suggestionRoute(draft.id), { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ status }) });
-    if (!response.ok) { setMessage("Could not record your review."); return; }
-    setDraft({ ...draft, status });
+    setMessage("");
+    try {
+      const response = await fetch(suggestionRoute(draft.id), { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ status }) });
+      if (!response.ok) { setMessage("Could not record your review."); return; }
+      setDraft({ ...draft, status });
+    } catch {
+      setMessage("Could not record your review. Try again.");
+    }
   }
 
   return <aside aria-label="AI Explain and Act" aria-busy={loading} style={{ marginTop: "12px", padding: "12px", border: "1px solid #cfe0fb", borderRadius: "6px", background: "#fbfdff" }}>

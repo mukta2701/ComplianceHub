@@ -6,6 +6,7 @@ declare result_id uuid; register_row public.soa_registers; item_count integer;
 begin
   select * into register_row from public.soa_registers where id=target_register_id for update;
   if not found or not public.is_organisation_member(register_row.organisation_id) then raise exception 'SoA register not found' using errcode='42501'; end if;
+  perform 1 from public.soa_items where soa_register_id=target_register_id for update;
   if exists(select 1 from public.soa_snapshots where soa_register_id=target_register_id) then raise exception 'SoA is already finalised' using errcode='23505'; end if;
   select count(*) into item_count from public.soa_items where soa_register_id=target_register_id;
   if item_count <> 93 then raise exception 'SoA must contain the complete 93-control catalogue'; end if;

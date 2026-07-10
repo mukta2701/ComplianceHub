@@ -1,11 +1,6 @@
 import "server-only";
 import type { EvidenceSourceConnection } from "@/features/integrations/domain/evidence-provider";
 
-function today(config: Record<string, unknown>) {
-  const asOf = config.asOf;
-  return typeof asOf === "string" && /^\d{4}-\d{2}-\d{2}$/.test(asOf) ? asOf : new Date().toISOString().slice(0, 10);
-}
-
 function addDays(iso: string, days: number) {
   const date = new Date(`${iso}T00:00:00Z`); date.setUTCDate(date.getUTCDate() + days); return date.toISOString().slice(0, 10);
 }
@@ -25,6 +20,7 @@ export const googleWorkspaceEvidenceProvider = {
     const { collectedOn, start, end } = collectionWindow(connection.config);
     let count = 0;
     let pageToken: string | undefined;
+    let truncated = false;
     for (let page = 0; page < 5; page += 1) {
       const params = new URLSearchParams({ startTime: `${start}T00:00:00Z`, endTime: end, maxResults: "100", fields: "items(id/time),nextPageToken" });
       if (pageToken) params.set("pageToken", pageToken);
@@ -34,10 +30,11 @@ export const googleWorkspaceEvidenceProvider = {
       count += body.items?.length ?? 0;
       pageToken = body.nextPageToken;
       if (!pageToken) break;
+      if (page === 4) truncated = true;
     }
     return [{
       externalRef: `google_workspace:${domain.trim()}:login-activity`, title: `Google Workspace login activity summary: ${domain.trim()}`, kind: "note" as const,
-      note: `${count} login activity records were observed. User identities and event details were not retained.`, collectedOn, validUntil: addDays(collectedOn, 30),
+      note: `${truncated ? `At least ${count}` : count} login activity records were observed.${truncated ? " Collection stopped at the 500-record safety limit; the count may be incomplete." : ""} User identities and event details were not retained.`, collectedOn, validUntil: addDays(collectedOn, 30),
     }];
   },
 };

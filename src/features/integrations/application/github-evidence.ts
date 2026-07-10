@@ -22,6 +22,7 @@ export const githubEvidenceProvider = {
     const repo = configValue(connection.config, "repo");
     if (!connection.accessToken) throw new Error("GitHub evidence source requires an access token");
     let protectedCount = 0;
+    let truncated = false;
     for (let page = 1; page <= 5; page += 1) {
       const response = await fetcher(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches?protected=true&per_page=100&page=${page}`, {
         headers: { Authorization: `Bearer ${connection.accessToken}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2026-03-10" }, signal: AbortSignal.timeout(15_000),
@@ -30,11 +31,12 @@ export const githubEvidenceProvider = {
       const branches = await response.json() as { protected?: boolean }[];
       protectedCount += branches.filter((branch) => branch.protected).length;
       if (branches.length < 100) break;
+      if (page === 5) truncated = true;
     }
     const collectedOn = today(connection.config);
     return [{
       externalRef: `github:${owner}/${repo}:protected-branches`, title: `GitHub protected branches: ${owner}/${repo}`, kind: "note" as const,
-      note: `${protectedCount} protected branches reported. Repository contents and branch names were not collected.`,
+      note: `${truncated ? `At least ${protectedCount}` : protectedCount} protected branches reported.${truncated ? " Collection stopped at the 500-branch safety limit; the count may be incomplete." : ""} Repository contents and branch names were not collected.`,
       collectedOn, validUntil: addDays(collectedOn, 30),
     }];
   },
