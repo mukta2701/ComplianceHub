@@ -1,0 +1,32 @@
+import { expect, test } from "@playwright/test";
+import { AxeBuilder } from "@axe-core/playwright";
+
+test("a workspace turns selected systems into reviewable automation evidence", async ({ page }, testInfo) => {
+  const suffix = `${Date.now()}-${testInfo.project.name}`;
+  const email = `automation-${suffix}@example.test`;
+  const password = `${suffix}-AutomationA1!`;
+  await page.goto("/sign-up");
+  await page.getByLabel("Name").fill("Automation Owner");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page.getByLabel("Confirm password").fill(password);
+  await page.getByRole("button", { name: "Create account" }).click();
+  await page.waitForURL(/\/sign-in/);
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByLabel("Organisation name").fill(`Automation Workspace ${suffix}`);
+  await page.getByRole("button", { name: "Create workspace" }).click();
+  await expect(page.getByRole("link", { name: "Set up automation" })).toBeVisible();
+  await page.getByRole("link", { name: "Set up automation" }).click();
+  await expect(page.getByRole("heading", { name: "Connect the systems that already know your work" })).toBeVisible();
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await page.getByRole("button", { name: "Save setup and open Automation" }).click();
+  await expect(page.getByRole("heading", { name: "Review the work your systems prepared" })).toBeVisible();
+  await page.getByRole("button", { name: "Generate baseline" }).click();
+  await expect(page.getByRole("heading", { name: "Review GitHub branch protection evidence" })).toBeVisible();
+  const githubDraft = page.getByLabel("Automation draft: Review GitHub branch protection evidence");
+  await githubDraft.getByRole("button", { name: "Accept as evidence" }).click();
+  await page.goto("/app/evidence");
+  await expect(page.getByRole("heading", { name: "Review GitHub branch protection evidence" })).toBeVisible();
+});

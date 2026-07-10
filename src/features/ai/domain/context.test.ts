@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildAssessmentAiContext, buildAuditAiContext, buildEvidenceAiContext, buildReadinessAiContext, buildRiskAiContext, buildSoaAiContext, buildTaskAiContext } from "./context";
+import { buildAssessmentAiContext, buildAuditAiContext, buildAutomationProposalAiContext, buildEvidenceAiContext, buildReadinessAiContext, buildRiskAiContext, buildSoaAiContext, buildTaskAiContext } from "./context";
 
 describe("AI context allowlisting", () => {
   it("uses assessment metadata and the selected answer without exposing evidence notes", () => {
@@ -60,5 +60,22 @@ describe("AI context allowlisting", () => {
     expect(context).toEqual({ kind: "risk", target: { id: "risk-1", code: "R-001" }, facts: { risk: "Access risk", status: "open", treatment: "mitigate" }, sourceReferences: [{ type: "risk", id: "risk-1", label: "R-001" }] });
     expect(JSON.stringify(context)).not.toContain("Sensitive risk");
     expect(JSON.stringify(context)).not.toContain("Secret plan");
+  });
+
+  it("uses automation signal metadata without exposing connected content", () => {
+    expect(buildAutomationProposalAiContext({
+      proposal: { id: "proposal-1", targetType: "evidence", title: "Review GitHub protection", confidence: "high" },
+      signal: { id: "signal-1", type: "github.branch_protection", summary: "Protected branches detected" },
+      sourceObject: { id: "source-1", title: "Branch protection settings", contentRef: "private://never-send", content: "secret connected document" },
+    })).toEqual({
+      kind: "automation_proposal",
+      target: { id: "proposal-1", code: "automation" },
+      facts: { targetType: "evidence", title: "Review GitHub protection", confidence: "high", signal: "github.branch_protection", summary: "Protected branches detected" },
+      sourceReferences: [
+        { type: "automation_proposal", id: "proposal-1", label: "Review GitHub protection" },
+        { type: "automation_signal", id: "signal-1", label: "github.branch_protection" },
+        { type: "source_object", id: "source-1", label: "Branch protection settings" },
+      ],
+    });
   });
 });

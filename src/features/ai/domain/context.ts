@@ -1,11 +1,11 @@
 export type AiSourceReference = {
-  type: "assessment_question" | "soa_item" | "audit" | "readiness_report" | "task" | "evidence" | "risk";
+  type: "assessment_question" | "soa_item" | "audit" | "readiness_report" | "task" | "evidence" | "risk" | "automation_proposal" | "automation_signal" | "source_object";
   id: string;
   label: string;
 };
 
 export type AiContext = {
-  kind: "assessment" | "soa" | "audit" | "readiness_report" | "task" | "evidence" | "risk";
+  kind: "assessment" | "soa" | "audit" | "readiness_report" | "task" | "evidence" | "risk" | "automation_proposal";
   target: { id: string; code: string };
   facts: Record<string, string | boolean>;
   sourceReferences: AiSourceReference[];
@@ -83,4 +83,23 @@ export function buildRiskAiContext(input: { risk: { id: string; reference: strin
   void input.impact;
   void input.treatmentPlan;
   return { kind: "risk", target: { id: input.risk.id, code: input.risk.reference }, facts: { risk: input.risk.title, status: input.risk.status, treatment: input.risk.treatment }, sourceReferences: [{ type: "risk", id: input.risk.id, label: input.risk.reference }] };
+}
+
+export function buildAutomationProposalAiContext(input: {
+  proposal: { id: string; targetType: string; title: string; confidence: string };
+  signal: { id: string; type: string; summary: string };
+  sourceObject?: { id: string; title: string; contentRef?: string; content?: string } | null;
+}): AiContext {
+  void input.sourceObject?.contentRef;
+  void input.sourceObject?.content;
+  return {
+    kind: "automation_proposal",
+    target: { id: input.proposal.id, code: "automation" },
+    facts: { targetType: input.proposal.targetType, title: input.proposal.title, confidence: input.proposal.confidence, signal: input.signal.type, summary: input.signal.summary },
+    sourceReferences: [
+      { type: "automation_proposal", id: input.proposal.id, label: input.proposal.title },
+      { type: "automation_signal", id: input.signal.id, label: input.signal.type },
+      ...(input.sourceObject ? [{ type: "source_object" as const, id: input.sourceObject.id, label: input.sourceObject.title }] : []),
+    ],
+  };
 }

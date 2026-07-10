@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireAppContext } from "@/lib/app-context";
 import { configuredAiProvider } from "@/features/ai/application/openai-compatible";
 import { generateAiSuggestion } from "@/features/ai/application/suggestion";
-import { buildAssessmentAiContext, buildAuditAiContext, buildEvidenceAiContext, buildReadinessAiContext, buildRiskAiContext, buildSoaAiContext, buildTaskAiContext } from "@/features/ai/domain/context";
+import { buildAssessmentAiContext, buildAuditAiContext, buildAutomationProposalAiContext, buildEvidenceAiContext, buildReadinessAiContext, buildRiskAiContext, buildSoaAiContext, buildTaskAiContext } from "@/features/ai/domain/context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { loadReadinessInput } from "@/features/reports/application/load-readiness";
 import { buildReadinessReport } from "@/features/reports/domain/readiness-report";
@@ -16,6 +16,7 @@ const requestSchema = z.discriminatedUnion("targetType", [
   z.object({ targetType: z.literal("task"), targetId: z.string().uuid() }),
   z.object({ targetType: z.literal("evidence"), targetId: z.string().uuid() }),
   z.object({ targetType: z.literal("risk"), targetId: z.string().uuid() }),
+  z.object({ targetType: z.literal("automation_proposal"), targetId: z.string().uuid() }),
 ]);
 
 export async function POST(request: Request) {
@@ -29,7 +30,7 @@ export async function POST(request: Request) {
   if (!provider) return NextResponse.json({ error: "AI assistance is not configured" }, { status: 503 });
 
   let targetId: string;
-  let suggestionType: "assessment_remediation" | "soa_rationale" | "audit_preparation" | "readiness_summary" | "task_remediation" | "evidence_review" | "risk_scenario";
+  let suggestionType: "assessment_remediation" | "soa_rationale" | "audit_preparation" | "readiness_summary" | "task_remediation" | "evidence_review" | "risk_scenario" | "automation_explanation";
   let context;
   if (parsed.data.targetType === "assessment_question") {
     const [{ data: session }, { data: question }, { data: response }] = await Promise.all([
@@ -71,12 +72,28 @@ export async function POST(request: Request) {
     targetId = evidence.id;
     suggestionType = "evidence_review";
     context = buildEvidenceAiContext({ evidence: { id: evidence.id, title: evidence.title, kind: evidence.kind, status: evidence.status, collectedOn: evidence.collected_on, validUntil: evidence.valid_until } });
-  } else {
+  } else if (parsed.data.targetType === "risk") {
     const { data: risk } = await supabase.from("risks").select("id,reference,title,status,treatment").eq("id", parsed.data.targetId).eq("organisation_id", organisation.id).maybeSingle();
     if (!risk) return NextResponse.json({ error: "Risk not found" }, { status: 404 });
     targetId = risk.id;
     suggestionType = "risk_scenario";
     context = buildRiskAiContext({ risk });
+  } else {
+    const { data: proposal } = await supabase.from("automation_proposals")
+      .select("id,target_type,output,automation_signals(id,signal_type,summary)").eq("id", parsed.data.targetId).eq("organisation_id", organisation.id).maybeSingle();
+    const signal = Array.isArray(proposal?.automation_signals) ? proposal?.automation_signals[0] : proposal?.automation_signals;
+    if (!proposal || !signal || !proposal.output || typeof proposal.output !== "object") return NextResponse.json({ error: "Automation draft not found" }, { status: 404 });
+    const output = proposal.output as { title?: unknown; confidence?: unknown };
+    const { data: sourceLink } = await supabase.from("automation_proposal_sources")
+      .select("source_objects(id,title)").eq("proposal_id", proposal.id).eq("organisation_id", organisation.id).limit(1).maybeSingle();
+    const source = Array.isArray(sourceLink?.source_objects) ? sourceLink.source_objects[0] : sourceLink?.source_objects;
+    targetId = proposal.id;
+    suggestionType = "automation_explanation";
+    context = buildAutomationProposalAiContext({
+      proposal: { id: proposal.id, targetType: proposal.target_type, title: typeof output.title === "string" ? output.title : "Automation draft", confidence: typeof output.confidence === "string" ? output.confidence : "low" },
+      signal: { id: signal.id, type: signal.signal_type, summary: signal.summary },
+      sourceObject: source ? { id: source.id, title: source.title } : null,
+    });
   }
 
   try {
