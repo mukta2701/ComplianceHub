@@ -3,6 +3,7 @@ import { requireAppContext } from "@/lib/app-context";
 import { AUDIT_STATUS_LABEL, AUDIT_STATUS_TONE, summariseFindings, type AuditStatus, type FindingSeverity, type FindingStatus } from "@/features/audits/domain/audits";
 import { Card, EmptyState, PageIntro, Pill, Stat } from "@/components/ui";
 import { Icon } from "@/components/icons";
+import { SubTabs } from "@/components/sub-tabs";
 
 export default async function AuditsPage() {
   const { supabase } = await requireAppContext();
@@ -15,6 +16,7 @@ export default async function AuditsPage() {
   const f = summariseFindings((findings ?? []).map((x) => ({ severity: x.severity as FindingSeverity, status: x.status as FindingStatus })));
   return <>
     <PageIntro eyebrow="AUDIT" title="Internal audits" body="Plan an audit, work the clause and control checklist, and turn findings into owned corrective actions." action={<Link className="button primary" href="/app/audits/new"><Icon name="plus" />Plan an audit</Link>} />
+    <SubTabs tabs={[{ href: "/app/audits", label: "Internal audits" }, { href: "/app/activity", label: "Audit trail" }]} />
     {!rows.length ? (
       <EmptyState icon="shield" title="Plan your first audit" body="Schedule an internal audit, work the clause-and-control checklist, and turn every finding into an owned corrective action. Plan your first one to get started." primary={{ href: "/app/audits/new", label: "Plan your first audit" }} />
     ) : (<>
