@@ -3,7 +3,7 @@ import { requireAppContext } from "@/lib/app-context";
 import { loadReadinessInput } from "@/features/reports/application/load-readiness";
 import { buildReadinessReport } from "@/features/reports/domain/readiness-report";
 import { RISK_BAND_LABEL, type RiskBand } from "@/features/risks/domain/risks";
-import { Card, PageIntro, Ring, Stat } from "@/components/ui";
+import { Card, EmptyState, PageIntro, Ring, Stat } from "@/components/ui";
 import { Icon } from "@/components/icons";
 
 const BAND_TONE: Record<RiskBand, string> = { low: "green", moderate: "amber", high: "red", very_high: "critical" };
@@ -11,6 +11,19 @@ const BAND_TONE: Record<RiskBand, string> = { low: "green", moderate: "amber", h
 export default async function ReadinessReportPage() {
   const { supabase, organisation } = await requireAppContext();
   const report = buildReadinessReport(await loadReadinessInput(supabase));
+  if (!report.soaTotal) {
+    return (
+      <>
+        <PageIntro eyebrow="REPORTS" title="Leadership report" body="A board-ready summary of your readiness posture." />
+        <EmptyState
+          icon="file"
+          title="Run an assessment first"
+          body="This report summarises your Statement of Applicability. Complete a gap assessment to generate one, then come back for a board-ready readiness report."
+          primary={{ href: "/app/assessment", label: "Start assessment" }}
+        />
+      </>
+    );
+  }
   return <>
     <PageIntro eyebrow="REPORT" title="Leadership readiness report" body={`A management-review snapshot for ${organisation.name}.`} action={<Link className="button secondary" href="/api/app/reports/readiness/pdf"><Icon name="download" />Download PDF</Link>} />
     <div className="stats-grid" style={{ alignItems: "center" }}>
