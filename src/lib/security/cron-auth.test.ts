@@ -11,6 +11,11 @@ describe("isAuthorisedCron", () => {
     expect(isAuthorisedCron(req("Bearer nope"))).toBe(false);
     expect(isAuthorisedCron(req())).toBe(false);
   });
+  it("rejects a wrong secret of the same length (exercises the content comparison, not just length)", () => {
+    vi.stubEnv("CRON_SECRET", "s3cret");
+    // "Bearer s3cre!" is the same length as "Bearer s3cret" but differs in content
+    expect(isAuthorisedCron(req("Bearer s3cre!"))).toBe(false);
+  });
   it("rejects everything when the secret is unset", () => {
     vi.stubEnv("CRON_SECRET", "");
     expect(isAuthorisedCron(req("Bearer anything"))).toBe(false);
