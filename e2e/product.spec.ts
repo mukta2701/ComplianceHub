@@ -92,7 +92,7 @@ test("a new user creates an isolated workspace and starts an assessment", async 
   // On mobile the sidebar nav is off-canvas until the drawer is opened.
   const navToggle = page.getByRole("button", { name: "Open navigation" });
   if (await navToggle.isVisible()) await navToggle.click();
-  await page.getByRole("link", { name: "Assessment", exact: true }).click();
+  await page.getByRole("link", { name: "Gap assessment", exact: true }).click();
   await page.getByRole("button", { name: "New assessment" }).click();
   await expect(page.getByRole("heading", { name: /readiness assessment/i })).toBeVisible();
   const answers = page.getByRole("combobox");
@@ -840,9 +840,9 @@ test("a policy is authored, approved, accepted, and re-accepted after a material
   await expect(page.getByText("POLICY POL-001 · v2")).toBeVisible();
   await expect(page.getByText("Re-accept (accepted v1)")).toBeVisible();
 
-  // The re-accept notification is posted to the member.
-  if (await navToggle.isVisible()) await navToggle.click();
-  await page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: "Notifications", exact: true }).click();
+  // The re-accept notification is posted to the member; Notifications is
+  // reached via the header bell now that it has left the sidebar.
+  await page.getByRole("link", { name: /Notifications/ }).click();
   await expect(page.getByRole("heading", { name: "Notifications", level: 1 })).toBeVisible();
   await expect(page.getByText(/POL-001 changed — please review and re-accept/i)).toBeVisible();
 
@@ -1131,11 +1131,10 @@ test("an ISO control is crosswalked to a framework requirement and drives covera
   await page.getByRole("button", { name: "Create workspace" }).click();
   await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
 
-  // Reach the framework crosswalk through the workspace nav.
-  const navToggle = page.getByRole("button", { name: "Open navigation" });
-  if (await navToggle.isVisible()) await navToggle.click();
-  await page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: "Frameworks", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Framework crosswalk", level: 1 })).toBeVisible();
+  // Framework coverage is no longer a sidebar door — it moves under SoA via
+  // a tab strip in a later task — so reach it directly for now.
+  await page.goto("/app/frameworks");
+  await expect(page.getByRole("heading", { name: "Framework coverage", level: 1 })).toBeVisible();
 
   // A fresh workspace has no mappings yet.
   await expect(page.getByText("Record your first crosswalk mapping")).toBeVisible();
