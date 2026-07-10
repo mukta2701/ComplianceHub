@@ -3,6 +3,7 @@ import { requireAppContext } from "@/lib/app-context";
 import { summariseAssets, ASSET_CLASSIFICATION_LABEL, ASSET_VALUE_LABEL, CLASSIFICATION_TONE, VALUE_TONE, type AssetClassification, type AssetValue } from "@/features/assets/domain/assets";
 import { Card, EmptyState, PageIntro, Pill, Stat } from "@/components/ui";
 import { Icon } from "@/components/icons";
+import { SubTabs } from "@/components/sub-tabs";
 
 export default async function AssetsPage() {
   const { supabase } = await requireAppContext();
@@ -16,6 +17,7 @@ export default async function AssetsPage() {
       <Link className="button secondary" href="/app/assets/import">Import</Link>
       <Link className="button primary" href="/app/assets/new"><Icon name="plus" />Add asset</Link>
     </span>} />
+    <SubTabs tabs={[{ href: "/app/risks", label: "Risks" }, { href: "/app/assets", label: "Assets" }]} />
     {!rows.length ? (
       <EmptyState icon="lock" title="Add your first asset" body="Build the inventory of information assets you need to protect — their classification, criticality, and owner — then link them to the risks that threaten them. Add one now, or import an inventory you already keep in a spreadsheet." primary={{ href: "/app/assets/new", label: "Add your first asset" }} secondary={{ href: "/app/assets/import", label: "Import from spreadsheet" }} />
     ) : (<>
