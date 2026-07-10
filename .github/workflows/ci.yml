@@ -12,20 +12,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11.7.0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm audit --audit-level high
-      - run: pnpm lint
-      - run: pnpm typecheck
-      - run: pnpm test
-      - run: pnpm build
-      - run: pnpm exec playwright install --with-deps chromium
+          cache: npm
+      - run: npm ci
+      - run: npm audit --audit-level high
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
       - uses: supabase/setup-cli@v1
         with:
           version: latest
@@ -39,9 +36,9 @@ jobs:
           echo "NEXT_PUBLIC_SITE_URL=http://127.0.0.1:3000" >> "$GITHUB_ENV"
       # Non-hermetic integration tests: run only now that the DB stack is up and
       # its env (incl. the service-role key) is provisioned. Excluded from the
-      # earlier `pnpm test` on purpose.
-      - run: pnpm test:integration
-      - run: pnpm test:e2e --project=chromium
+      # earlier `npm test` on purpose.
+      - run: npm run test:integration
+      - run: npm run test:e2e -- --project=chromium
 
   secrets:
     runs-on: ubuntu-latest
