@@ -1,5 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { authFailureMessage } from "./auth-errors";
+import { authFailureDiagnostic, authFailureMessage } from "./auth-errors";
+
+describe("authFailureDiagnostic", () => {
+  it.each([
+    ["sign-up", "existing-account", "User already registered"],
+    ["sign-up", "throttled", "Email rate limit exceeded"],
+    ["sign-in", "throttled", "Too many requests"],
+    ["sign-in", "unexpected", "Provider detail that must stay private"],
+  ] as const)(
+    "reduces a %s failure to the %s classification",
+    (operation, classification, providerMessage) => {
+      expect(authFailureDiagnostic(providerMessage, operation)).toEqual({
+        operation,
+        classification,
+      });
+    },
+  );
+});
 
 describe("authFailureMessage", () => {
   it("guides an existing account to sign in", () => {

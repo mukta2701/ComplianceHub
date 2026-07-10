@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { signInSchema, signUpSchema, requestPasswordResetSchema, updatePasswordSchema } from "@/features/auth/application/auth";
-import { authFailureMessage } from "@/features/auth/application/auth-errors";
+import { authFailureDiagnostic, authFailureMessage } from "@/features/auth/application/auth-errors";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { siteUrl } from "@/lib/site-url";
 import { safePostAuthPath } from "@/lib/auth-destination";
@@ -32,13 +32,10 @@ export async function signInAction(formData: FormData) {
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase.auth.signInWithPassword(result.data);
   if (error) {
-    console.error("Supabase authentication request failed", {
-      operation: "sign-in",
-      name: error.name,
-      code: error.code,
-      status: error.status,
-      message: error.message,
-    });
+    console.error(
+      "Supabase authentication request failed",
+      authFailureDiagnostic(error.message, "sign-in"),
+    );
     const failure = authFailureMessage(error.message, "sign-in");
     redirect(message(failure.path, failure.message, next));
   }
@@ -53,13 +50,10 @@ export async function signUpAction(formData: FormData) {
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase.auth.signUp({ email: result.data.email, password: result.data.password, options: { data: { display_name: result.data.displayName }, emailRedirectTo: authCallbackUrl(next) } });
   if (error) {
-    console.error("Supabase authentication request failed", {
-      operation: "sign-up",
-      name: error.name,
-      code: error.code,
-      status: error.status,
-      message: error.message,
-    });
+    console.error(
+      "Supabase authentication request failed",
+      authFailureDiagnostic(error.message, "sign-up"),
+    );
     const failure = authFailureMessage(error.message, "sign-up");
     redirect(message(failure.path, failure.message, next));
   }
