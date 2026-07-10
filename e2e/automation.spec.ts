@@ -17,8 +17,8 @@ test("a workspace turns selected systems into reviewable automation evidence", a
   await page.getByRole("button", { name: "Sign in" }).click();
   await page.getByLabel("Organisation name").fill(`Automation Workspace ${suffix}`);
   await page.getByRole("button", { name: "Create workspace" }).click();
-  await expect(page.getByRole("link", { name: "Set up automation" })).toBeVisible();
-  await page.getByRole("link", { name: "Set up automation" }).click();
+  await expect(page.getByRole("link", { name: "Explore integrations" })).toBeVisible();
+  await page.getByRole("link", { name: "Explore integrations" }).click();
   await expect(page.getByRole("heading", { name: "Connect the systems that already know your work" })).toBeVisible();
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await page.getByRole("button", { name: "Save setup and open Automation" }).click();
@@ -27,6 +27,8 @@ test("a workspace turns selected systems into reviewable automation evidence", a
   await expect(page.getByRole("heading", { name: "Review GitHub branch protection evidence" })).toBeVisible();
   const githubDraft = page.getByLabel("Automation draft: Review GitHub branch protection evidence");
   await githubDraft.getByRole("button", { name: "Accept as evidence" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Evidence accepted" })).toContainText("Review GitHub branch protection evidence");
+  await expect(githubDraft).toHaveCount(0);
   await page.goto("/app/evidence");
   await expect(page.getByRole("heading", { name: "Review GitHub branch protection evidence" })).toBeVisible();
 });
