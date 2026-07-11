@@ -94,6 +94,25 @@
 .template-picker{padding:20px;margin-bottom:18px}.template-picker-head h2{font-size:16px;margin:0 0 4px}.template-picker-head p{font-size:12px;color:#596273;margin:0 0 16px}.template-list{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.template-card{display:flex;flex-direction:column;gap:6px;height:100%;border:1px solid var(--line);border-radius:11px;padding:14px;background:#fff}.template-card:hover{border-color:#adc0ed;background:#f9fbff}.template-card.active{border-color:#7d9fea;background:var(--blue-pale)}.template-ref{font-size:10px;font-weight:800;letter-spacing:.06em;color:#2d5cc4}.template-card b{font-size:13.5px;color:var(--ink)}.template-card small{font-size:11px;color:#596273;line-height:1.45;flex:1}.template-cue{display:flex;align-items:center;gap:6px;font-size:11.5px;font-weight:700;color:var(--blue);margin-top:4px}.template-cue svg{width:14px}.template-note{margin:14px 0 0}.template-clear{font-size:12px;font-weight:700;color:var(--blue)}@media(max-width:900px){.template-list{grid-template-columns:1fr 1fr}}@media(max-width:540px){.template-list{grid-template-columns:1fr}}
 /* onboarding checklist */.onboarding-card{margin-bottom:18px;border-color:#cfe0fb;box-shadow:0 8px 26px -16px #2f6bed66}.onboarding-card .card-head h2{font-size:16px;margin:0 0 4px;letter-spacing:-.01em}.onboarding-progress{padding:15px 21px 3px}.onboarding-progress .progress{height:8px}.onboarding-steps{list-style:none;margin:0;padding:9px 9px 13px}.onboarding-steps li{display:flex;align-items:center;gap:13px;padding:12px 13px;border-radius:11px}.onboarding-steps li+li{margin-top:2px}.onboarding-steps li:hover{background:#f7f9fd}.onboarding-steps .marker{width:28px;height:28px;flex:none;border-radius:50%;display:grid;place-items:center;border:2px solid #d4dbe6;color:#5b6473;font-size:12.5px;font-weight:800}.onboarding-steps li.done .marker{background:var(--green);border-color:var(--green);color:#fff}.onboarding-steps li.done .marker svg{width:15px}.onboarding-steps .step-body{display:flex;flex-direction:column;flex:1;min-width:0}.onboarding-steps .step-body strong{font-size:13.5px;color:var(--ink)}.onboarding-steps li.done .step-body strong{color:#5b6473}.onboarding-steps .step-body small{font-size:11px;color:#5b6473;margin-top:3px;line-height:1.4}.onboarding-steps .button.secondary{padding:8px 13px;min-height:36px;font-size:12.5px;white-space:nowrap}.onboarding-steps .button svg{width:14px}@media(max-width:540px){.onboarding-steps li{flex-wrap:wrap}.onboarding-steps .step-body{flex-basis:calc(100% - 41px)}.onboarding-steps .button.secondary,.onboarding-steps .pill{margin-left:41px}}
 
+/* dashboard redesign — decision-first priority queue */
+.dashboard-focus{margin-bottom:18px}
+.empty-note{padding:22px;color:#596273;font-size:13px;line-height:1.5}
+.action-list{list-style:none;margin:0;padding:0}
+.action-list>li>a{display:flex;align-items:flex-start;gap:13px;padding:15px 20px;border-bottom:1px solid #edf0f4}
+.action-list>li:last-child>a{border:0}
+.action-list>li>a:hover{background:#f7f9fd}
+.action-rank{width:26px;height:26px;flex:none;border-radius:50%;background:var(--blue-pale);color:var(--blue);display:grid;place-items:center;font-size:12px;font-weight:800;margin-top:1px}
+.action-body{display:flex;flex-direction:column;flex:1;min-width:0;gap:3px}
+.action-body>strong{font-size:13px;color:var(--ink)}
+.action-body>small{font-size:11px;color:#5b6473;line-height:1.4}
+.action-meta{display:flex;flex-wrap:wrap;align-items:center;gap:9px;margin-top:5px;font-size:10.5px;color:#828b99}
+.action-list svg{width:15px;color:#8a93a1;flex:none;margin-top:3px}
+.lifecycle-stage{display:flex;flex-direction:column;gap:8px}
+.lifecycle-stage>b{font-size:17px;color:var(--ink);letter-spacing:-.01em}
+.change-list{list-style:none;margin:0;padding:6px 20px}
+.change-list>li{display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid #edf0f4;font-size:11.5px;color:#5b6473;text-transform:capitalize}
+.change-list>li:last-child{border:0}
+.change-list time{margin-left:auto;color:#929aa7;font-size:10px;white-space:nowrap;text-transform:none}
 /* SoA review workspace */
 .soa-review-workspace{scroll-margin-top:86px;max-width:100%}
 .soa-review-summary{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:12px}
