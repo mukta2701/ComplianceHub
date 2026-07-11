@@ -143,6 +143,7 @@ export async function finaliseSoaAction(formData: FormData) {
 
   const requirementIds = (itemRows ?? []).map((item) => item.control_id);
   const requirementIdsWithLiveEvidence = new Set<string>();
+  const requirementIdsWithExpiredEvidence = new Set<string>();
   if (requirementIds.length) {
     const { data: mappings, error: mappingError } = await supabase
       .from("requirement_control_mappings")
@@ -169,12 +170,19 @@ export async function finaliseSoaAction(formData: FormData) {
       for (const link of evidenceLinks ?? []) {
         if (!link.control_id) continue;
         const evidence = one(link.evidence);
-        if (evidence?.status !== "current" && evidence?.status !== "expiring") continue;
-        for (const requirementId of requirementIdsByControl.get(link.control_id) ?? []) {
-          requirementIdsWithLiveEvidence.add(requirementId);
+        const mappedRequirementIds = requirementIdsByControl.get(link.control_id) ?? [];
+        if (evidence?.status === "expired") {
+          for (const requirementId of mappedRequirementIds) requirementIdsWithExpiredEvidence.add(requirementId);
+        }
+        if (evidence?.status === "current" || evidence?.status === "expiring") {
+          for (const requirementId of mappedRequirementIds) requirementIdsWithLiveEvidence.add(requirementId);
         }
       }
     }
+  }
+
+  for (const requirementId of requirementIdsWithExpiredEvidence) {
+    requirementIdsWithLiveEvidence.delete(requirementId);
   }
 
   const blockers = collectSoaFinalisationBlockers((itemRows ?? []).map((item) => ({

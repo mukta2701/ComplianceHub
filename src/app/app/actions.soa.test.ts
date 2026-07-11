@@ -181,4 +181,18 @@ describe("finaliseSoaAction preflight", () => {
     expect(fake.rpc).toHaveBeenCalledTimes(1);
     expect(fake.rpc).toHaveBeenCalledWith("finalise_soa", { target_register_id: REGISTER_ID });
   });
+
+  it("rejects a requirement that has both current and expired evidence", async () => {
+    const store = reviewedStore();
+    store.evidence_links = [
+      { organisation_id: ORG_ID, control_id: CONTROL_ID, evidence: { status: "current" } },
+      { organisation_id: ORG_ID, control_id: CONTROL_ID, evidence: { status: "expired" } },
+    ];
+    const fake = fakeSupabase(store);
+    hoisted.ctx = context(fake.client);
+    const { finaliseSoaAction } = await import("./actions");
+
+    await expect(finaliseSoaAction(formData())).rejects.toThrow("SoA cannot be finalised");
+    expect(fake.rpc).not.toHaveBeenCalled();
+  });
 });
