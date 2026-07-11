@@ -48,6 +48,7 @@ export default async function AppHome() {
   const { data: register } = await supabase
     .from("soa_registers")
     .select("id")
+    .eq("organisation_id", organisation.id)
     .order("version", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -71,25 +72,25 @@ export default async function AppHome() {
     { count: integrations },
   ] = await Promise.all([
     register
-      ? supabase.from("soa_items").select("id,control_code,control_title").eq("soa_register_id", register.id).eq("status", "pending").order("position").limit(25).then((r) => r.data)
+      ? supabase.from("soa_items").select("id,control_code,control_title").eq("organisation_id", organisation.id).eq("soa_register_id", register.id).eq("status", "pending").order("position").limit(25).then((r) => r.data)
       : Promise.resolve([] as { id: string; control_code: string; control_title: string }[]),
     register
-      ? supabase.from("soa_items").select("status").eq("soa_register_id", register.id).then((r) => r.data)
+      ? supabase.from("soa_items").select("status").eq("organisation_id", organisation.id).eq("soa_register_id", register.id).then((r) => r.data)
       : Promise.resolve([] as { status: string }[]),
-    supabase.from("evidence").select("id,title,status,valid_until").in("status", ["expiring", "expired"]).order("valid_until", { ascending: true, nullsFirst: false }).limit(25).then((r) => r.data),
-    supabase.from("policies").select("id,reference,title,review_due").eq("status", "in_review").order("reference").limit(25).then((r) => r.data),
-    supabase.from("tasks").select("id,title,due_on,source,owner_id").in("status", ["open", "in_progress"]).not("due_on", "is", null).order("due_on", { ascending: true }).limit(25).then((r) => r.data),
-    supabase.from("audit_events").select("action,entity_type,occurred_at").order("occurred_at", { ascending: false }).limit(6).then((r) => r.data),
-    supabase.from("assessment_sessions").select("id", { count: "exact", head: true }),
-    supabase.from("risks").select("id", { count: "exact", head: true }).neq("status", "closed"),
-    supabase.from("soa_snapshots").select("id", { count: "exact", head: true }),
-    supabase.from("risks").select("id", { count: "exact", head: true }),
-    supabase.from("evidence").select("id", { count: "exact", head: true }).in("status", ["current", "expiring", "expired"]),
-    supabase.from("policies").select("id", { count: "exact", head: true }),
-    supabase.from("soa_registers").select("id", { count: "exact", head: true }),
-    supabase.from("memberships").select("user_id", { count: "exact", head: true }),
-    supabase.from("invitations").select("id", { count: "exact", head: true }),
-    supabase.from("integration_connections").select("id", { count: "exact", head: true }).is("revoked_at", null),
+    supabase.from("evidence").select("id,title,status,valid_until").eq("organisation_id", organisation.id).in("status", ["expiring", "expired"]).order("valid_until", { ascending: true, nullsFirst: false }).limit(25).then((r) => r.data),
+    supabase.from("policies").select("id,reference,title,review_due").eq("organisation_id", organisation.id).eq("status", "in_review").order("reference").limit(25).then((r) => r.data),
+    supabase.from("tasks").select("id,title,due_on,source,owner_id").eq("organisation_id", organisation.id).in("status", ["open", "in_progress"]).not("due_on", "is", null).order("due_on", { ascending: true }).limit(25).then((r) => r.data),
+    supabase.from("audit_events").select("action,entity_type,occurred_at").eq("organisation_id", organisation.id).order("occurred_at", { ascending: false }).limit(6).then((r) => r.data),
+    supabase.from("assessment_sessions").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id),
+    supabase.from("risks").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).neq("status", "closed"),
+    supabase.from("soa_snapshots").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id),
+    supabase.from("risks").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id),
+    supabase.from("evidence").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).in("status", ["current", "expiring", "expired"]),
+    supabase.from("policies").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id),
+    supabase.from("soa_registers").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id),
+    supabase.from("memberships").select("user_id", { count: "exact", head: true }).eq("organisation_id", organisation.id),
+    supabase.from("invitations").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id),
+    supabase.from("integration_connections").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).is("revoked_at", null),
   ]);
 
   const actionInputs: DashboardActionInput[] = [
