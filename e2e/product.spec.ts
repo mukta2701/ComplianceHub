@@ -95,14 +95,34 @@ test("a new user creates an isolated workspace and starts an assessment", async 
   await page.getByRole("link", { name: "Gap assessment", exact: true }).click();
   await page.getByRole("button", { name: "New assessment" }).click();
   await expect(page.getByRole("heading", { name: /readiness assessment/i })).toBeVisible();
-  const answers = page.getByRole("combobox");
-  await expect(answers).toHaveCount(10);
   const firstSave = page.waitForResponse((response) => response.url().includes("/api/app/assessment/response"));
-  await answers.nth(0).selectOption("partially");
+  await page.getByRole("radio", { name: "Partially" }).click();
   expect((await firstSave).status()).toBe(200);
-  await expect(page.getByText("saved", { exact: true }).nth(0)).toBeVisible();
-  await answers.nth(1).selectOption("yes");
-  await expect(page.getByText("error", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("status", { name: "Save status" })).toHaveText("Saved");
+  await page.getByRole("textbox", { name: "Evidence note" }).fill("Leadership objectives are awaiting final approval.");
+  const evidenceSave = page.waitForResponse((response) => response.url().includes("/api/app/assessment/response"));
+  await page.getByRole("button", { name: "Save and continue" }).click();
+  expect((await evidenceSave).status()).toBe(200);
+  await expect(page.getByRole("heading", { name: /GOV-02/ })).toBeFocused();
+
+  const secondSave = page.waitForResponse((response) => response.url().includes("/api/app/assessment/response"));
+  await page.getByRole("radio", { name: "Yes" }).click();
+  expect((await secondSave).status()).toBe(200);
+  await expect(page.getByRole("status", { name: "Save status" })).toHaveText("Saved");
+
+  await page.reload();
+  await expect(page.getByRole("heading", { name: /GOV-01/ })).toBeVisible();
+  await expect(page.getByRole("radio", { name: "Partially" })).toBeChecked();
+  await expect(page.getByRole("textbox", { name: "Evidence note" })).toHaveValue("Leadership objectives are awaiting final approval.");
+  await page.getByRole("button", { name: "Save and continue" }).click();
+  await expect(page.getByRole("heading", { name: /GOV-02/ })).toBeFocused();
+  await expect(page.getByRole("radio", { name: "Yes" })).toBeChecked();
+
+  const assessmentAxe = await new AxeBuilder({ page }).analyze();
+  expect(assessmentAxe.violations).toEqual([]);
+  const viewportWidth = await page.evaluate(() => window.innerWidth);
+  const documentWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+  expect(documentWidth).toBeLessThanOrEqual(viewportWidth);
 });
 
 test("an asset is added to the inventory and the list is accessible", async ({ page }, testInfo) => {
