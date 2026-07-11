@@ -1,8 +1,8 @@
+import { readFileSync } from "node:fs";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { SoaQueueItem } from "@/features/soa/application/review-queue";
-import { SoaReviewWorkspace } from "./soa-review-workspace";
+import { SoaReviewWorkspace, type SoaReviewWorkspaceItem } from "./soa-review-workspace";
 
 const navigation = vi.hoisted(() => ({ refresh: vi.fn() }));
 
@@ -12,7 +12,7 @@ vi.mock("next/navigation", () => ({
 
 const CURRENT_USER_ID = "member-1";
 
-const items: SoaQueueItem[] = [
+const items: SoaReviewWorkspaceItem[] = [
   {
     id: "item-1",
     controlId: "control-1",
@@ -31,6 +31,9 @@ const items: SoaQueueItem[] = [
     openTaskCount: 0,
     position: 1,
     reviewState: "missing_decision",
+    linkedEvidence: [],
+    linkedTasks: [],
+    recentAuditEvents: [],
   },
   {
     id: "item-2",
@@ -50,6 +53,20 @@ const items: SoaQueueItem[] = [
     openTaskCount: 1,
     position: 2,
     reviewState: "reviewed",
+    linkedEvidence: [{
+      id: "evidence-2",
+      title: "Annual learning plan",
+      status: "current",
+      validUntil: "2027-06-30",
+      kind: "note",
+    }],
+    linkedTasks: [{
+      id: "task-2",
+      title: "Deliver annual awareness training",
+      status: "open",
+      dueOn: "2026-09-30",
+    }],
+    recentAuditEvents: [{ action: "update", occurredAt: "2026-07-10T09:30:00.000Z" }],
   },
   {
     id: "item-3",
@@ -69,6 +86,18 @@ const items: SoaQueueItem[] = [
     openTaskCount: 2,
     position: 3,
     reviewState: "missing_rationale",
+    linkedEvidence: [{
+      id: "evidence-3",
+      title: "Quarterly scanner report",
+      status: "expired",
+      validUntil: "2026-06-30",
+      kind: "file",
+    }],
+    linkedTasks: [
+      { id: "task-31", title: "Renew scanner report", status: "open", dueOn: "2026-07-31" },
+      { id: "task-32", title: "Patch critical findings", status: "in_progress", dueOn: null },
+    ],
+    recentAuditEvents: [{ action: "update", occurredAt: "2026-07-09T14:15:00.000Z" }],
   },
   {
     id: "item-4",
@@ -88,6 +117,9 @@ const items: SoaQueueItem[] = [
     openTaskCount: 0,
     position: 4,
     reviewState: "missing_evidence",
+    linkedEvidence: [],
+    linkedTasks: [],
+    recentAuditEvents: [],
   },
 ];
 
@@ -96,10 +128,13 @@ const members = [
   { id: "member-2", name: "Alex Morgan" },
 ];
 
-function renderWorkspace(saveAction = vi.fn<(formData: FormData) => Promise<void>>(async () => undefined)) {
+function renderWorkspace(
+  saveAction = vi.fn<(formData: FormData) => Promise<void>>(async () => undefined),
+  workspaceItems = items,
+) {
   return render(
     <SoaReviewWorkspace
-      items={items}
+      items={workspaceItems}
       members={members}
       currentUserId={CURRENT_USER_ID}
       saveAction={saveAction}
@@ -109,6 +144,16 @@ function renderWorkspace(saveAction = vi.fn<(formData: FormData) => Promise<void
 
 function queue() {
   return within(screen.getByRole("region", { name: "SoA review queue" }));
+}
+
+function workspaceItem(overrides: Partial<SoaReviewWorkspaceItem>): SoaReviewWorkspaceItem {
+  return {
+    ...items[0],
+    linkedEvidence: [],
+    linkedTasks: [],
+    recentAuditEvents: [],
+    ...overrides,
+  };
 }
 
 describe("SoaReviewWorkspace", () => {
@@ -139,6 +184,127 @@ describe("SoaReviewWorkspace", () => {
     await user.type(screen.getByRole("searchbox", { name: "Search controls" }), "vulnerabilities");
     expect(queue().queryByText("Policies for information security")).not.toBeInTheDocument();
     expect(queue().getByText("Management of technical vulnerabilities")).toBeInTheDocument();
+  });
+
+  it("applies all six summary filters using their displayed counts", async () => {
+    const user = userEvent.setup();
+    renderWorkspace();
+    const cases = [
+      ["Needs attention 3", ["Policies for information security", "Management of technical vulnerabilities", "Physical security perimeters"]],
+      ["Reviewed 1", ["Information security awareness"]],
+      ["Missing rationale 2", ["Policies for information security", "Management of technical vulnerabilities"]],
+      ["Evidence gaps 3", ["Policies for information security", "Management of technical vulnerabilities", "Physical security perimeters"]],
+      ["Unassigned 1", ["Policies for information security"]],
+      ["Undecided 1", ["Policies for information security"]],
+    ] as const;
+
+    for (const [buttonName, expectedTitles] of cases) {
+      await user.click(screen.getByRole("button", { name: buttonName }));
+      expect(queue().getAllByRole("listitem")).toHaveLength(expectedTitles.length);
+      for (const title of expectedTitles) expect(queue().getByText(title)).toBeInTheDocument();
+    }
+  });
+
+  it("filters by every implementation status", async () => {
+    const user = userEvent.setup();
+    const statuses = ["pending", "absent", "in_progress", "established", "operational", "advanced", "not_applicable"] as const;
+    const statusItems = statuses.map((status, index) => workspaceItem({
+      id: `status-${status}`,
+      code: `S${index + 1}`,
+      title: `Control with ${status}`,
+      status,
+      applicable: status !== "not_applicable",
+      justification: " ",
+      ownerId: CURRENT_USER_ID,
+      ownerName: "Maya Chen",
+      position: index,
+      reviewState: status === "pending" ? "missing_decision" : "missing_rationale",
+    }));
+    renderWorkspace(undefined, statusItems);
+
+    for (const status of statuses) {
+      await user.selectOptions(screen.getByRole("combobox", { name: "Implementation status filter" }), status);
+      expect(queue().getAllByRole("listitem")).toHaveLength(1);
+      expect(queue().getByText(`Control with ${status}`)).toBeInTheDocument();
+    }
+  });
+
+  it("filters deterministic no-evidence, current, expiring, and expired states", async () => {
+    const user = userEvent.setup();
+    const freshnessItems = [
+      workspaceItem({ id: "fresh-none", code: "F1", title: "No evidence control", evidenceTotal: 0, evidenceExpiring: 0, evidenceExpired: 0, justification: " ", status: "operational", reviewState: "missing_rationale", position: 1 }),
+      workspaceItem({ id: "fresh-current", code: "F2", title: "Current evidence control", evidenceTotal: 1, evidenceExpiring: 0, evidenceExpired: 0, justification: " ", status: "operational", reviewState: "missing_rationale", position: 2 }),
+      workspaceItem({ id: "fresh-expiring", code: "F3", title: "Expiring evidence control", evidenceTotal: 1, evidenceExpiring: 1, evidenceExpired: 0, justification: " ", status: "operational", reviewState: "missing_rationale", position: 3 }),
+      workspaceItem({ id: "fresh-expired", code: "F4", title: "Expired evidence control", evidenceTotal: 1, evidenceExpiring: 0, evidenceExpired: 1, justification: " ", status: "operational", reviewState: "missing_rationale", position: 4 }),
+    ];
+    renderWorkspace(undefined, freshnessItems);
+
+    for (const [freshness, title] of [
+      ["none", "No evidence control"],
+      ["current", "Current evidence control"],
+      ["expiring", "Expiring evidence control"],
+      ["expired", "Expired evidence control"],
+    ] as const) {
+      await user.selectOptions(screen.getByRole("combobox", { name: "Evidence freshness" }), freshness);
+      expect(queue().getAllByRole("listitem")).toHaveLength(1);
+      expect(queue().getByText(title)).toBeInTheDocument();
+    }
+  });
+
+  it("places mixed evidence counters in the most severe freshness bucket", async () => {
+    const user = userEvent.setup();
+    const freshnessItems = [
+      workspaceItem({ id: "mixed", code: "M1", title: "Mixed freshness control", evidenceTotal: 2, evidenceExpiring: 1, evidenceExpired: 1, justification: " ", status: "operational", reviewState: "missing_rationale", position: 1 }),
+      workspaceItem({ id: "expiring-only", code: "M2", title: "Only expiring control", evidenceTotal: 1, evidenceExpiring: 1, evidenceExpired: 0, justification: " ", status: "operational", reviewState: "missing_rationale", position: 2 }),
+    ];
+    renderWorkspace(undefined, freshnessItems);
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Evidence freshness" }), "expiring");
+    expect(queue().getAllByRole("listitem")).toHaveLength(1);
+    expect(queue().getByText("Only expiring control")).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Evidence freshness" }), "expired");
+    expect(queue().getAllByRole("listitem")).toHaveLength(1);
+    expect(queue().getByText("Mixed freshness control")).toBeInTheDocument();
+  });
+
+  it("reconciles a clean selection for Reviewed and search filters", async () => {
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await user.click(screen.getByRole("button", { name: "Reviewed 1" }));
+    expect(screen.getByRole("heading", { name: "A.6.3 Information security awareness" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(screen.getByRole("heading", { name: "A.6.3 Information security awareness" })).toBeInTheDocument();
+    await user.clear(screen.getByRole("searchbox", { name: "Search controls" }));
+    await user.type(screen.getByRole("searchbox", { name: "Search controls" }), "physical security");
+    expect(screen.getByRole("heading", { name: "A.7.1 Physical security perimeters" })).toBeInTheDocument();
+  });
+
+  it("shows empty detail and no save commands when filters have no result", async () => {
+    const user = userEvent.setup();
+    const { container } = renderWorkspace();
+
+    await user.type(screen.getByRole("searchbox", { name: "Search controls" }), "no matching control");
+
+    expect(queue().getByText("No controls match these filters.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "No control selected" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save draft" })).not.toBeInTheDocument();
+    expect(container.querySelectorAll("form")).toHaveLength(0);
+  });
+
+  it("retains a dirty filtered-out selection visibly with an explicit notice", async () => {
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await user.type(screen.getByRole("textbox", { name: "Rationale" }), "Unsaved rationale");
+    await user.click(screen.getByRole("button", { name: "Reviewed 1" }));
+
+    expect(queue().getByText("Policies for information security")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "A.5.1 Policies for information security" })).toBeInTheDocument();
+    expect(screen.getByText("This control is shown because it has unsaved changes and does not match the current filters.")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Rationale" })).toHaveValue("Unsaved rationale");
   });
 
   it("supports toolbar filters and only shows clear filters while any filter is active", async () => {
@@ -246,27 +412,82 @@ describe("SoaReviewWorkspace", () => {
     expect(screen.getByRole("combobox", { name: "Review state" })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Owner" })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Applicability" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Implementation status filter" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Evidence freshness" })).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveAttribute("aria-live", "polite");
     expect(screen.getByText("Why this matters")).toBeInTheDocument();
     expect(screen.getByText("What you decide here")).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Evidence" }));
     expect(screen.getByRole("textbox", { name: "Evidence references" })).toBeInTheDocument();
-    expect(within(screen.getByRole("tabpanel")).getByText("No linked evidence")).toBeInTheDocument();
+    expect(within(screen.getByRole("tabpanel")).getByText("No evidence records are currently mapped to this control.")).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Linked work" }));
     expect(screen.getByText("No linked open work")).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "History" }));
+    expect(screen.getByText("No recent item history")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "View audit trail" })).toHaveAttribute("href", "/app/activity");
   });
 
-  it("uses mobile-friendly list markup without a table or min-width dependency", () => {
+  it("renders real linked evidence, task records, and recent item audit events", async () => {
+    const user = userEvent.setup();
+    renderWorkspace();
+    await user.click(queue().getByRole("button", { name: "Review A.8.8 Management of technical vulnerabilities" }));
+
+    await user.click(screen.getByRole("tab", { name: "Evidence" }));
+    const evidenceRecord = screen.getByText("Quarterly scanner report").closest("li");
+    expect(evidenceRecord).not.toBeNull();
+    expect(within(evidenceRecord as HTMLElement).getByText("Expired")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Linked work" }));
+    expect(screen.getByRole("link", { name: "Renew scanner report" })).toHaveAttribute("href", "/app/tasks/task-31");
+    expect(screen.getByRole("link", { name: "Patch critical findings" })).toHaveAttribute("href", "/app/tasks/task-32");
+
+    await user.click(screen.getByRole("tab", { name: "History" }));
+    expect(screen.getByText("Updated")).toBeInTheDocument();
+    expect(screen.getByText("9 Jul 2026, 14:15")).toBeInTheDocument();
+  });
+
+  it("implements roving tab focus with arrow, Home, and End keys", async () => {
+    const user = userEvent.setup();
+    renderWorkspace();
+    const decision = screen.getByRole("tab", { name: "Decision" });
+    const evidence = screen.getByRole("tab", { name: "Evidence" });
+    const history = screen.getByRole("tab", { name: "History" });
+
+    expect(decision).toHaveAttribute("tabindex", "0");
+    expect(evidence).toHaveAttribute("tabindex", "-1");
+    decision.focus();
+    await user.keyboard("{ArrowRight}");
+    expect(evidence).toHaveFocus();
+    expect(evidence).toHaveAttribute("aria-selected", "true");
+
+    await user.keyboard("{End}");
+    expect(history).toHaveFocus();
+    await user.keyboard("{Home}");
+    expect(decision).toHaveFocus();
+    await user.keyboard("{ArrowLeft}");
+    expect(history).toHaveFocus();
+  });
+
+  it("uses list markup without the legacy data-table dependency", () => {
     const { container } = renderWorkspace();
 
     expect(container.querySelector("ol")).toBeInTheDocument();
     expect(container.querySelector("table")).not.toBeInTheDocument();
     expect(container.querySelector(".data-table-wrap")).not.toBeInTheDocument();
     expect(container.querySelector('[style*="min-width"]')).not.toBeInTheDocument();
+  });
+
+  it("keeps the scoped SoA CSS on semantic tokens without clipping outer focus rings", () => {
+    const css = readFileSync("src/app/globals.css", "utf8");
+    const soaCss = css.slice(css.indexOf("/* SoA review workspace */"));
+    const workspaceRule = soaCss.match(/\.soa-review-workspace\{([^}]*)\}/)?.[1] ?? "";
+    const detailRule = soaCss.match(/\.soa-review-detail\{([^}]*)\}/)?.[1] ?? "";
+
+    expect(soaCss).not.toMatch(/#[0-9a-f]{3,8}\b|rgba?\(/i);
+    expect(workspaceRule).not.toContain("overflow:hidden");
+    expect(detailRule).not.toContain("overflow:hidden");
   });
 });

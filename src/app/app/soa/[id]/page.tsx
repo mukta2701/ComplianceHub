@@ -1,17 +1,17 @@
 import { notFound } from "next/navigation";
 import { PageIntro } from "@/components/ui";
-import { summariseEvidenceFreshness, type EvidenceStatus } from "@/features/evidence/domain/evidence";
+import { summariseEvidenceFreshness, type EvidenceKind, type EvidenceStatus } from "@/features/evidence/domain/evidence";
 import {
   deriveSoaReviewState,
   summariseSoaQueue,
   type SoaDomain,
-  type SoaQueueItem,
 } from "@/features/soa/application/review-queue";
 import { SOA_STATUS_LABEL, type SoaStatus } from "@/features/soa/domain/soa";
+import type { TaskStatus } from "@/features/tasks/domain/tasks";
 import { requireAppContext } from "@/lib/app-context";
 import { one } from "@/lib/supabase/one";
 import { finaliseSoaAction, reviewSoaItemAction } from "../../actions";
-import { SoaReviewWorkspace } from "./soa-review-workspace";
+import { SoaReviewWorkspace, type SoaReviewWorkspaceItem } from "./soa-review-workspace";
 
 const SOA_DOMAINS = new Set<SoaDomain>(["organisational", "people", "physical", "technological"]);
 
@@ -51,10 +51,30 @@ export default async function SoaReviewPage({ params }: { params: Promise<{ id: 
   if (itemResult.error || memberResult.error) throw new Error("Could not load the SoA review queue");
 
   const itemRows = itemResult.data ?? [];
+  const itemIds = itemRows.map((item) => item.id);
   const requirementIds = itemRows.map((item) => item.control_id).filter((value): value is string => Boolean(value));
   const domainByRequirement = new Map<string, SoaDomain>();
-  const openTasksByRequirement = new Map<string, number>();
-  const evidenceByRequirement = new Map<string, { status: EvidenceStatus }[]>();
+  const linkedEvidenceByRequirement = new Map<string, SoaReviewWorkspaceItem["linkedEvidence"]>();
+  const linkedTasksByRequirement = new Map<string, SoaReviewWorkspaceItem["linkedTasks"]>();
+  const auditEventsByItem = new Map<string, SoaReviewWorkspaceItem["recentAuditEvents"]>();
+
+  if (itemIds.length) {
+    const { data: auditEvents, error: auditError } = await supabase
+      .from("audit_events")
+      .select("entity_id,action,occurred_at")
+      .eq("organisation_id", organisation.id)
+      .eq("entity_type", "soa_items")
+      .in("entity_id", itemIds)
+      .order("occurred_at", { ascending: false })
+      .limit(500);
+    if (auditError) throw new Error("Could not load SoA item history");
+    for (const event of auditEvents ?? []) {
+      const events = auditEventsByItem.get(event.entity_id) ?? [];
+      if (events.length >= 5) continue;
+      events.push({ action: event.action, occurredAt: event.occurred_at });
+      auditEventsByItem.set(event.entity_id, events);
+    }
+  }
 
   if (requirementIds.length) {
     const [catalogueResult, mappingResult] = await Promise.all([
@@ -76,20 +96,20 @@ export default async function SoaReviewPage({ params }: { params: Promise<{ id: 
     }
 
     const sharedControlIds = [...new Set([...controlsByRequirement.values()].flatMap((controls) => [...controls]))];
-    const openCountByControl = new Map<string, number>();
-    const evidenceByControl = new Map<string, Map<string, EvidenceStatus>>();
+    const tasksByControl = new Map<string, Map<string, SoaReviewWorkspaceItem["linkedTasks"][number]>>();
+    const evidenceByControl = new Map<string, Map<string, SoaReviewWorkspaceItem["linkedEvidence"][number]>>();
 
     if (sharedControlIds.length) {
       const [taskResult, evidenceResult] = await Promise.all([
         supabase
           .from("tasks")
-          .select("id,control_id,status")
+          .select("id,control_id,title,status,due_on")
           .eq("organisation_id", organisation.id)
           .in("status", ["open", "in_progress"])
           .in("control_id", sharedControlIds),
         supabase
           .from("evidence_links")
-          .select("evidence_id,control_id,evidence(status)")
+          .select("evidence_id,control_id,evidence(id,title,status,valid_until,kind)")
           .eq("organisation_id", organisation.id)
           .in("control_id", sharedControlIds),
       ]);
@@ -97,27 +117,40 @@ export default async function SoaReviewPage({ params }: { params: Promise<{ id: 
 
       for (const task of taskResult.data ?? []) {
         if (!task.control_id) continue;
-        openCountByControl.set(task.control_id, (openCountByControl.get(task.control_id) ?? 0) + 1);
+        const controlTasks = tasksByControl.get(task.control_id) ?? new Map<string, SoaReviewWorkspaceItem["linkedTasks"][number]>();
+        controlTasks.set(task.id, {
+          id: task.id,
+          title: task.title,
+          status: task.status as TaskStatus,
+          dueOn: task.due_on,
+        });
+        tasksByControl.set(task.control_id, controlTasks);
       }
       for (const link of evidenceResult.data ?? []) {
         if (!link.control_id) continue;
         const evidence = one(link.evidence);
         if (!evidence) continue;
-        const controlEvidence = evidenceByControl.get(link.control_id) ?? new Map<string, EvidenceStatus>();
-        controlEvidence.set(link.evidence_id, evidence.status as EvidenceStatus);
+        const controlEvidence = evidenceByControl.get(link.control_id) ?? new Map<string, SoaReviewWorkspaceItem["linkedEvidence"][number]>();
+        controlEvidence.set(link.evidence_id, {
+          id: evidence.id,
+          title: evidence.title,
+          status: evidence.status as EvidenceStatus,
+          validUntil: evidence.valid_until,
+          kind: evidence.kind as EvidenceKind,
+        });
         evidenceByControl.set(link.control_id, controlEvidence);
       }
     }
 
     for (const requirementId of requirementIds) {
-      const evidence = new Map<string, EvidenceStatus>();
-      let openTaskCount = 0;
+      const evidence = new Map<string, SoaReviewWorkspaceItem["linkedEvidence"][number]>();
+      const tasks = new Map<string, SoaReviewWorkspaceItem["linkedTasks"][number]>();
       for (const controlId of controlsByRequirement.get(requirementId) ?? []) {
-        openTaskCount += openCountByControl.get(controlId) ?? 0;
-        for (const [evidenceId, status] of evidenceByControl.get(controlId) ?? []) evidence.set(evidenceId, status);
+        for (const [evidenceId, record] of evidenceByControl.get(controlId) ?? []) evidence.set(evidenceId, record);
+        for (const [taskId, record] of tasksByControl.get(controlId) ?? []) tasks.set(taskId, record);
       }
-      openTasksByRequirement.set(requirementId, openTaskCount);
-      evidenceByRequirement.set(requirementId, [...evidence.values()].map((status) => ({ status })));
+      linkedEvidenceByRequirement.set(requirementId, [...evidence.values()]);
+      linkedTasksByRequirement.set(requirementId, [...tasks.values()]);
     }
   }
 
@@ -127,12 +160,14 @@ export default async function SoaReviewPage({ params }: { params: Promise<{ id: 
   });
   const ownerNameById = new Map(memberOptions.map((member) => [member.id, member.name]));
 
-  const queueItems: SoaQueueItem[] = itemRows.map((item) => {
+  const queueItems: SoaReviewWorkspaceItem[] = itemRows.map((item) => {
     const controlId = item.control_id;
     const domain = domainByRequirement.get(controlId);
     if (!domain) throw new Error("SoA item is missing its authoritative control theme");
     if (!isSoaStatus(item.status)) throw new Error("SoA item contains an invalid status");
-    const freshness = summariseEvidenceFreshness(evidenceByRequirement.get(controlId) ?? []);
+    const linkedEvidence = linkedEvidenceByRequirement.get(controlId) ?? [];
+    const linkedTasks = linkedTasksByRequirement.get(controlId) ?? [];
+    const freshness = summariseEvidenceFreshness(linkedEvidence);
     const projected = {
       id: item.id,
       controlId,
@@ -148,8 +183,11 @@ export default async function SoaReviewPage({ params }: { params: Promise<{ id: 
       evidenceTotal: freshness.total,
       evidenceExpiring: freshness.expiring,
       evidenceExpired: freshness.expired,
-      openTaskCount: openTasksByRequirement.get(controlId) ?? 0,
+      openTaskCount: linkedTasks.length,
       position: item.position,
+      linkedEvidence,
+      linkedTasks,
+      recentAuditEvents: auditEventsByItem.get(item.id) ?? [],
     };
     return { ...projected, reviewState: deriveSoaReviewState(projected) };
   });

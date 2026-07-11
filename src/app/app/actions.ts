@@ -6,9 +6,13 @@ import { createOrganisation } from "@/features/organisations/application/organis
 import { inviteMember } from "@/features/organisations/application/organisation";
 import { riskInputSchema } from "@/features/risks/application/risk";
 import { soaItemReviewSchema } from "@/features/soa/application/review";
+import { collectSoaFinalisationBlockers, countSoaFinalisationBlockers } from "@/features/soa/application/finalisation";
+import type { SoaStatus } from "@/features/soa/domain/soa";
 import { requireAppContext } from "@/lib/app-context";
+import { one } from "@/lib/supabase/one";
 import { revalidatePath } from "next/cache";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
+import { z } from "zod";
 
 export async function createOrganisationAction(formData: FormData) {
   const supabase = await createSupabaseServerClient();
@@ -118,10 +122,80 @@ export async function reviewSoaItemAction(formData: FormData) {
 }
 
 export async function finaliseSoaAction(formData: FormData) {
-  const { supabase, user } = await requireAppContext();
+  const { supabase, user, organisation } = await requireAppContext();
   await enforceRateLimit(`soa-finalise:${user.id}`, { limit: 5, windowMs: 60_000 });
-  const registerId = String(formData.get("registerId"));
-  const { data, error } = await supabase.rpc("finalise_soa", { target_register_id: registerId });
+  const requestedRegisterId = z.string().uuid().parse(formData.get("registerId"));
+  const { data: register, error: registerError } = await supabase
+    .from("soa_registers")
+    .select("id")
+    .eq("id", requestedRegisterId)
+    .eq("organisation_id", organisation.id)
+    .maybeSingle();
+  if (registerError) throw new Error("Could not load SoA register");
+  if (!register) throw new Error("SoA register not found");
+
+  const { data: itemRows, error: itemError } = await supabase
+    .from("soa_items")
+    .select("id,control_id,applicable,status,justification,owner_id")
+    .eq("soa_register_id", register.id)
+    .eq("organisation_id", organisation.id);
+  if (itemError) throw new Error("Could not load SoA finalisation preflight");
+
+  const requirementIds = (itemRows ?? []).map((item) => item.control_id);
+  const requirementIdsWithLiveEvidence = new Set<string>();
+  if (requirementIds.length) {
+    const { data: mappings, error: mappingError } = await supabase
+      .from("requirement_control_mappings")
+      .select("requirement_id,control_id")
+      .in("requirement_id", requirementIds);
+    if (mappingError) throw new Error("Could not load SoA evidence mappings");
+
+    const requirementIdsByControl = new Map<string, Set<string>>();
+    for (const mapping of mappings ?? []) {
+      const mappedRequirements = requirementIdsByControl.get(mapping.control_id) ?? new Set<string>();
+      mappedRequirements.add(mapping.requirement_id);
+      requirementIdsByControl.set(mapping.control_id, mappedRequirements);
+    }
+
+    const sharedControlIds = [...requirementIdsByControl.keys()];
+    if (sharedControlIds.length) {
+      const { data: evidenceLinks, error: evidenceError } = await supabase
+        .from("evidence_links")
+        .select("control_id,evidence(status)")
+        .eq("organisation_id", organisation.id)
+        .in("control_id", sharedControlIds);
+      if (evidenceError) throw new Error("Could not load SoA evidence freshness");
+
+      for (const link of evidenceLinks ?? []) {
+        if (!link.control_id) continue;
+        const evidence = one(link.evidence);
+        if (evidence?.status !== "current" && evidence?.status !== "expiring") continue;
+        for (const requirementId of requirementIdsByControl.get(link.control_id) ?? []) {
+          requirementIdsWithLiveEvidence.add(requirementId);
+        }
+      }
+    }
+  }
+
+  const blockers = collectSoaFinalisationBlockers((itemRows ?? []).map((item) => ({
+    id: item.id,
+    controlId: item.control_id,
+    applicable: item.applicable,
+    status: item.status as SoaStatus,
+    justification: item.justification,
+    ownerId: item.owner_id,
+  })), requirementIdsWithLiveEvidence);
+  if (countSoaFinalisationBlockers(blockers) > 0) {
+    const details = [
+      blockers.pending.length ? `${blockers.pending.length} pending` : null,
+      blockers.missingRationale.length ? `${blockers.missingRationale.length} missing rationale` : null,
+      blockers.unassigned.length ? `${blockers.unassigned.length} unassigned` : null,
+      blockers.missingEvidence.length ? `${blockers.missingEvidence.length} missing live evidence` : null,
+    ].filter(Boolean).join(", ");
+    throw new Error(`SoA cannot be finalised: ${details}`);
+  }
+
+  const { data, error } = await supabase.rpc("finalise_soa", { target_register_id: register.id });
   if (error) throw new Error(error.message);
   redirect(`/app/soa?finalised=${data}`);
 }
