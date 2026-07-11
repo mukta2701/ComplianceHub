@@ -59,8 +59,8 @@ export default async function AuditDetailPage({ params }: { params: Promise<{ id
     </Card>
 
     <div style={{ display: "flex", gap: "8px", margin: "0 0 16px" }}>
-      <Link className="button secondary" href={`/api/app/audits/${id}/pack?format=xlsx`}>Evidence pack (XLSX)</Link>
-      <Link className="button secondary" href={`/api/app/audits/${id}/pack?format=csv`}>Evidence pack (CSV)</Link>
+      <a className="button secondary" href={`/api/app/audits/${id}/pack?format=xlsx`}>Evidence pack (XLSX)</a>
+      <a className="button secondary" href={`/api/app/audits/${id}/pack?format=csv`}>Evidence pack (CSV)</a>
     </div>
 
     <Card style={{ padding: 0 }}><div className="data-table-wrap" role="region" aria-label="Audit checklist" tabIndex={0}><table>

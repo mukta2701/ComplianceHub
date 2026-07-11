@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { requireAppContext } from "@/lib/app-context";
 import { loadReadinessInput } from "@/features/reports/application/load-readiness";
 import { buildReadinessReport } from "@/features/reports/domain/readiness-report";
@@ -25,7 +24,7 @@ export default async function ReadinessReportPage() {
     );
   }
   return <>
-    <PageIntro eyebrow="REPORT" title="Leadership readiness report" body={`A management-review snapshot for ${organisation.name}.`} action={<Link className="button secondary" href="/api/app/reports/readiness/pdf"><Icon name="download" />Download PDF</Link>} />
+    <PageIntro eyebrow="REPORT" title="Leadership readiness report" body={`A management-review snapshot for ${organisation.name}.`} action={<a className="button secondary" href="/api/app/reports/readiness/pdf"><Icon name="download" />Download PDF</a>} />
     <div className="stats-grid" style={{ alignItems: "center" }}>
       <Card style={{ display: "grid", placeItems: "center", padding: "20px" }} aria-label={`Statement of Applicability readiness ${report.soaPercent}%`}><Ring value={report.soaPercent} /></Card>
       <Stat label="OPEN TASKS" value={report.tasksOpen} detail={`${report.tasksOverdue} overdue`} tone={report.tasksOverdue > 0 ? "red" : "blue"} />
