@@ -6,9 +6,28 @@ import { Icon } from "@/components/icons";
 import { one } from "@/lib/supabase/one";
 import { createKpiAction, raiseKpiTaskAction, recordKpiMeasurementAction } from "./actions";
 
-const DATE_FMT = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" });
-function shortDate(iso: string) { return DATE_FMT.format(new Date(`${iso}T00:00:00Z`)); }
 const DIRECTION_ROTATION: Record<"up" | "down" | "flat", string> = { up: "rotate(-90deg)", down: "rotate(90deg)", flat: "rotate(0deg)" };
+
+// Inline trend sparkline for a KPI's recorded readings (chronological).
+function Sparkline({ readings }: { readings: MeasurementReading[] }) {
+  if (readings.length < 2) return null;
+  const W = 92, H = 28, pad = 3;
+  const values = readings.map((r) => r.value);
+  const min = Math.min(...values), max = Math.max(...values), span = max - min || 1;
+  const points = readings.map((r, i) => {
+    const x = pad + (i / (readings.length - 1)) * (W - 2 * pad);
+    const y = H - pad - ((r.value - min) / span) * (H - 2 * pad);
+    return [x, y] as const;
+  });
+  const line = points.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+  const area = `${pad.toFixed(1)},${(H - pad).toFixed(1)} ${line} ${(W - pad).toFixed(1)},${(H - pad).toFixed(1)}`;
+  const [ex, ey] = points[points.length - 1];
+  return <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="sparkline" role="img" aria-label={`Trend of ${readings.length} readings`}>
+    <polygon points={area} className="spark-area" />
+    <polyline points={line} className="spark-line" />
+    <circle cx={ex} cy={ey} r={2.4} className="spark-dot" />
+  </svg>;
+}
 
 export default async function KpisPage() {
   const { supabase } = await requireAppContext();
@@ -34,7 +53,6 @@ export default async function KpisPage() {
         {rows.map((k) => {
           const readings = readingsByKpi.get(k.id) ?? [];
           const trend = summariseMeasurements(readings);
-          const recent = [...readings].sort((a, b) => (a.measured_on < b.measured_on ? 1 : -1)).slice(0, 3);
           return <tr key={k.id}>
           <td>{k.control_function || "—"}</td>
           <td><b>{k.indicator}</b></td>
@@ -42,15 +60,13 @@ export default async function KpisPage() {
           <td>{k.threshold || "—"}</td>
           <td>{needsReview(k.last_reviewed, today) ? <Pill tone="amber">Needs review</Pill> : k.last_reviewed}</td>
           <td>
-            {trend.latest === null ? <small style={{ color: "#596273" }}>No readings yet</small> : <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-              <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                <b>{trend.latest}</b>
-                {trend.direction && trend.delta !== null && <Pill tone="blue">
-                  <span aria-hidden="true" style={{ display: "inline-flex", transform: DIRECTION_ROTATION[trend.direction] }}><Icon name="arrow" /></span>
-                  {" "}{trend.delta > 0 ? "+" : ""}{trend.delta}
-                </Pill>}
-              </span>
-              {recent.length > 0 && <small style={{ color: "#596273" }}>{recent.map((r) => `${r.value} (${shortDate(r.measured_on)})`).join(" · ")}</small>}
+            {trend.latest === null ? <small style={{ color: "#596273" }}>No readings yet</small> : <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <Sparkline readings={readings} />
+              <b>{trend.latest}</b>
+              {trend.direction && trend.delta !== null && <Pill tone="blue">
+                <span aria-hidden="true" style={{ display: "inline-flex", transform: DIRECTION_ROTATION[trend.direction] }}><Icon name="arrow" /></span>
+                {" "}{trend.delta > 0 ? "+" : ""}{trend.delta}
+              </Pill>}
             </div>}
             <form action={recordKpiMeasurementAction} style={{ marginTop: "8px", display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "flex-end" }}>
               <input type="hidden" name="kpiId" value={k.id} />

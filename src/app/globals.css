@@ -160,6 +160,11 @@ a.heat-cell:hover{outline:2px solid var(--ink);outline-offset:-2px}
 .heat-legend span{display:flex;align-items:center;gap:5px}
 .heat-legend i{width:9px;height:9px;border-radius:2px;display:inline-block}
 @media(max-width:1050px){.dash-hero{grid-template-columns:1fr}.dash-charts{grid-template-columns:1fr}}
+/* kpi trend sparkline */
+.sparkline{flex:none;display:block}
+.spark-area{fill:var(--blue-pale)}
+.spark-line{fill:none;stroke:var(--blue);stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round}
+.spark-dot{fill:var(--blue)}
 /* SoA review workspace */
 .soa-review-workspace{scroll-margin-top:86px;max-width:100%}
 .soa-review-summary{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:12px}
