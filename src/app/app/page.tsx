@@ -237,10 +237,10 @@ export default async function AppHome() {
       <div className="card-head"><div><h2>Get certification-ready</h2><p>A few high-value steps to activate your workspace — this guide hides itself once every step is done.</p></div><Pill tone={checklist.percent === 100 ? "green" : "blue"}>{checklist.doneCount} of {checklist.total} done</Pill></div>
       <div className="onboarding-progress"><Progress value={checklist.percent} tone="green" /></div>
       <ol className="onboarding-steps">
-        {checklist.steps.map((step, index) => <li key={step.id} className={step.done ? "done" : ""}>
-          <span className="marker">{step.done ? <Icon name="check" /> : index + 1}</span>
-          <span className="step-body"><strong>{step.label}</strong>{!step.done && <small>{step.description}</small>}</span>
-          {step.done ? <Pill tone="green"><Icon name="check" />Done</Pill> : <Link className="button secondary" href={step.href}>{step.cta} <Icon name="arrow" /></Link>}
+        {checklist.steps.filter((step) => !step.done).map((step, index) => <li key={step.id}>
+          <span className="marker">{index + 1}</span>
+          <span className="step-body"><strong>{step.label}</strong><small>{step.description}</small></span>
+          <Link className="button secondary" href={step.href}>{step.cta} <Icon name="arrow" /></Link>
         </li>)}
       </ol>
     </Card>}
