@@ -22,6 +22,16 @@ export default async function RisksPage() {
     supabase.from("risk_matrix_config").select("low_max,moderate_max,high_max,appetite_threshold").maybeSingle(),
   ]);
   const config: RiskMatrixConfig = cfg ? { lowMax: cfg.low_max, moderateMax: cfg.moderate_max, highMax: cfg.high_max, appetite: cfg.appetite_threshold } : DEFAULT_RISK_MATRIX_CONFIG;
+  // Residual-exposure heat map: same 5×5 banding the register uses, so the
+  // overview and the table agree.
+  const BAND_COLOR: Record<string, string> = { low: "var(--rag-low)", moderate: "var(--rag-med)", high: "var(--rag-high)", very_high: "var(--rag-crit)" };
+  const grid: number[][] = Array.from({ length: 6 }, () => Array(6).fill(0));
+  let riskTotal = 0;
+  for (const r of data ?? []) {
+    const l = (r.residual_likelihood ?? r.likelihood) as number;
+    const i = (r.residual_impact ?? r.impact) as number;
+    if (Number.isInteger(l) && Number.isInteger(i) && l >= 1 && l <= 5 && i >= 1 && i <= 5) { grid[l][i] += 1; riskTotal += 1; }
+  }
   const tasksByRisk = new Map<string, { id: string; title: string }[]>();
   for (const t of linkedTasks ?? []) { if (!t.risk_id) continue; const list = tasksByRisk.get(t.risk_id) ?? []; list.push({ id: t.id, title: t.title }); tasksByRisk.set(t.risk_id, list); }
   const evidenceByRisk = new Map<string, { status: EvidenceStatus }[]>();
@@ -38,6 +48,21 @@ export default async function RisksPage() {
     {!data?.length ? (
       <EmptyState icon="alert" title="Start your risk register" body="Record the threats to your information — each scored for inherent and residual likelihood and impact on a documented 5×5 matrix. Add your first risk, or import a register you already keep in a spreadsheet." primary={{ href: "/app/risks/new", label: "Add your first risk" }} secondary={{ href: "/app/risks/import", label: "Import from spreadsheet" }} />
     ) : (<>
+    <Card style={{ padding: "18px", marginBottom: "16px" }}>
+      <h2 style={{ fontSize: "15px", margin: "0 0 4px" }}>Risk posture</h2>
+      <p style={{ fontSize: "12px", color: "#596273", margin: "0 0 14px" }}>Residual exposure across the 5×5 matrix — {riskTotal} open risk{riskTotal === 1 ? "" : "s"} by likelihood × impact.</p>
+      <div className="heatmap" style={{ maxWidth: "380px" }}>
+        <div className="heat-axis heat-axis-y">Likelihood →</div>
+        {[5, 4, 3, 2, 1].map((l) => [1, 2, 3, 4, 5].map((i) => { const c = grid[l][i]; return <span key={`${l}-${i}`} className={`heat-cell${c ? "" : " empty"}`} style={{ background: BAND_COLOR[riskBand(l * i, config)] }} title={`Likelihood ${l} × Impact ${i}${c ? ` — ${c} risk${c > 1 ? "s" : ""}` : ""}`}>{c || ""}</span>; }))}
+        <div className="heat-axis heat-axis-x">Impact →</div>
+      </div>
+      <div className="heat-legend">
+        <span><i style={{ background: "var(--rag-low)" }} />Low</span>
+        <span><i style={{ background: "var(--rag-med)" }} />Medium</span>
+        <span><i style={{ background: "var(--rag-high)" }} />High</span>
+        <span><i style={{ background: "var(--rag-crit)" }} />Critical</span>
+      </div>
+    </Card>
     <Card style={{ padding: "18px", marginBottom: "16px" }}>
       <h2 style={{ fontSize: "15px", margin: "0 0 4px" }}>RAG band thresholds</h2>
       <p style={{ fontSize: "12px", color: "#596273", margin: "0 0 12px" }}>Set the top of each band on the 1–25 scale. Scores above your appetite are flagged Critical.</p>
