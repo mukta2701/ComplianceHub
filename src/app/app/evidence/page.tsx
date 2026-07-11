@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { requireAppContext } from "@/lib/app-context";
-import { summariseEvidenceFreshness, type EvidenceStatus } from "@/features/evidence/domain/evidence";
-import { Card, EmptyState, PageIntro, Pill, Stat } from "@/components/ui";
+import { Card, EmptyState, PageIntro, Pill } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { one } from "@/lib/supabase/one";
 import { downloadEvidenceAction, linkEvidenceAction, unlinkEvidenceAction, withdrawEvidenceAction } from "./actions";
@@ -16,7 +15,9 @@ export default async function EvidencePage() {
     supabase.from("controls").select("id,code,title").order("position"),
     supabase.from("policies").select("id,reference,title").order("reference"),
   ]);
-  const freshness = summariseEvidenceFreshness((items ?? []).map((i) => ({ status: i.status as EvidenceStatus })));
+  const evidence = { current: 0, expiring: 0, expired: 0 };
+  for (const i of items ?? []) { const st = i.status as string; if (st === "current" || st === "expiring" || st === "expired") evidence[st] += 1; }
+  const evidenceTotal = evidence.current + evidence.expiring + evidence.expired;
   const linkOptions = (
     <>
       {controls?.map((c) => <option key={c.id} value={`control:${c.id}`}>{c.code}: {c.title}</option>)}
@@ -32,7 +33,30 @@ export default async function EvidencePage() {
     {!items?.length ? (
       <EmptyState icon="file" title="Add your first evidence" body="Attach immutable proof — files, links, or notes — to any control, risk, or task. Freshness is tracked automatically, and a replacement task is raised when something goes stale." primary={{ href: "/app/evidence/new", label: "Add your first evidence" }} />
     ) : (<>
-    <div className="stats-grid"><Stat label="EVIDENCE ITEMS" value={freshness.total} detail="files, links and notes" /><Stat label="EXPIRING SOON" value={freshness.expiring} detail="within 30 days" tone="amber" /><Stat label="EXPIRED" value={freshness.expired} detail="replacement task raised" tone="red" /></div>
+    <Card style={{ marginBottom: "16px" }}>
+      <div className="card-head"><div><h2 style={{ fontSize: "15px", margin: 0 }}>Evidence freshness</h2><p style={{ fontSize: "11.5px", color: "#596273", margin: "3px 0 0" }}>{evidenceTotal} live {evidenceTotal === 1 ? "item" : "items"} in your vault · stale items raise a replacement task</p></div></div>
+      <div className="donut">
+        <div className="donut-ring">
+          <svg viewBox="0 0 120 120" aria-hidden="true"><g transform="rotate(-90 60 60)">
+            {evidenceTotal === 0
+              ? <circle className="d-empty" cx="60" cy="60" r="46" />
+              : (() => {
+                  const C = 2 * Math.PI * 46;
+                  const parts = [{ v: evidence.current, cls: "d-good" }, { v: evidence.expiring, cls: "d-warn" }, { v: evidence.expired, cls: "d-risk" }].filter((p) => p.v > 0);
+                  const gap = parts.length > 1 ? 3 : 0;
+                  let acc = 0;
+                  return parts.map((p, idx) => { const len = (p.v / evidenceTotal) * C; const dash = Math.max(len - gap, 0.5); const seg = <circle key={idx} className={p.cls} cx="60" cy="60" r="46" style={{ strokeDasharray: `${dash} ${C - dash}`, strokeDashoffset: -acc }} />; acc += len; return seg; });
+                })()}
+          </g></svg>
+          <div className="donut-center"><div className="d-count">{evidenceTotal}</div><div className="d-sub">items</div></div>
+        </div>
+        <div className="donut-legend">
+          <div className="seg-row"><span className="seg-dot" style={{ background: "var(--green)" }} />Current<b>{evidence.current}</b></div>
+          <div className="seg-row"><span className="seg-dot" style={{ background: "var(--amber)" }} />Expiring<b>{evidence.expiring}</b></div>
+          <div className="seg-row"><span className="seg-dot" style={{ background: "var(--red)" }} />Expired<b>{evidence.expired}</b></div>
+        </div>
+      </div>
+    </Card>
     <div style={{ display: "grid", gap: "14px" }}>{items.map((item) => <Card key={item.id} style={{ padding: "20px" }}>
       <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: "12px", alignItems: "center" }}>
         <div><h2 style={{ fontSize: "15px", margin: 0 }}>{item.title}</h2><p style={{ fontSize: "12px", color: "#596273", margin: "3px 0 0" }}>Collected {item.collected_on}{item.valid_until && ` · valid until ${item.valid_until}`}</p></div>
