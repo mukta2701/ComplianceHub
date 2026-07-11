@@ -27,7 +27,7 @@ export default async function ReadinessReportPage() {
   return <>
     <PageIntro eyebrow="REPORT" title="Leadership readiness report" body={`A management-review snapshot for ${organisation.name}.`} action={<Link className="button secondary" href="/api/app/reports/readiness/pdf"><Icon name="download" />Download PDF</Link>} />
     <div className="stats-grid" style={{ alignItems: "center" }}>
-      <Card className="stat" style={{ justifyContent: "center" }} aria-label={`Statement of Applicability readiness ${report.soaPercent}%`}><Ring value={report.soaPercent} /></Card>
+      <Card style={{ display: "grid", placeItems: "center", padding: "20px" }} aria-label={`Statement of Applicability readiness ${report.soaPercent}%`}><Ring value={report.soaPercent} /></Card>
       <Stat label="OPEN TASKS" value={report.tasksOpen} detail={`${report.tasksOverdue} overdue`} tone={report.tasksOverdue > 0 ? "red" : "blue"} />
       <Stat label="EVIDENCE HEALTH" value={report.evidence.total} detail={`${report.evidence.expiring} expiring · ${report.evidence.expired} expired`} tone={report.evidence.expired > 0 ? "red" : "green"} />
       <Stat label="OPEN NON-CONFORMITIES" value={report.openNonConformities} detail={`${report.openAudits} open audits`} tone={report.openNonConformities > 0 ? "amber" : "green"} />

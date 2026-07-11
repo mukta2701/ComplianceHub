@@ -32,7 +32,7 @@ export default async function AuditViewPage({ params }: { params: Promise<{ toke
     <h1 style={{ fontSize: "24px", margin: "0 0 4px" }}>{payload.organisationName} — readiness</h1>
     <p style={{ color: "#596273", margin: "0 0 20px" }}>{payload.framework} · read-only auditor view</p>
     <div className="stats-grid" style={{ alignItems: "center" }}>
-      <Card className="stat" style={{ justifyContent: "center" }}><Ring value={report.soaPercent} /></Card>
+      <Card style={{ display: "grid", placeItems: "center", padding: "20px" }}><Ring value={report.soaPercent} /></Card>
       <Stat label="OPEN TASKS" value={report.tasksOpen} detail={`${report.tasksOverdue} overdue`} tone={report.tasksOverdue > 0 ? "red" : "blue"} />
       <Stat label="EVIDENCE HEALTH" value={report.evidence.total} detail={`${report.evidence.expiring} expiring · ${report.evidence.expired} expired`} tone={report.evidence.expired > 0 ? "red" : "green"} />
       <Stat label="OPEN NON-CONFORMITIES" value={report.openNonConformities} detail={`${report.openAudits} open audits`} tone={report.openNonConformities > 0 ? "amber" : "green"} />

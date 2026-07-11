@@ -39,7 +39,7 @@ export default async function TrustCenterPage({ params }: { params: Promise<{ sl
     <p style={{ color: "#596273", margin: "0 0 20px" }}>Operating an ISO/IEC 27001-aligned information security management system</p>
     {payload.headline && <Card style={{ padding: "18px 22px", marginBottom: "16px" }}><p style={{ margin: 0, fontSize: "15px", color: "#2b3242" }}>{payload.headline}</p></Card>}
     <div className="stats-grid" style={{ alignItems: "center" }}>
-      <Card className="stat" style={{ justifyContent: "center" }}><Ring value={payload.readinessPercent} /></Card>
+      <Card style={{ display: "grid", placeItems: "center", padding: "20px" }}><Ring value={payload.readinessPercent} /></Card>
       <Stat label="CONTROLS IN SCOPE" value={payload.controlsInScope} detail="Annex A controls applied" tone="blue" />
       <Stat label="APPROVED POLICIES" value={payload.approvedPolicyCount} detail="published and approved" tone="green" />
       <Stat label="LAST INTERNAL AUDIT" value={formatDate(payload.latestAuditDate)} detail="most recent completed audit" tone="blue" />

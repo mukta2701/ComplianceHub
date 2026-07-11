@@ -1,7 +1,7 @@
 import { requireAppContext } from "@/lib/app-context";
 import { MEASUREMENT_TYPE_LABEL, MEASUREMENT_TYPE_TONE, needsReview, type MeasurementType } from "@/features/kpis/domain/kpis";
 import { summariseMeasurements, type MeasurementReading } from "@/features/kpis/domain/measurements";
-import { Card, EmptyState, PageIntro, Pill } from "@/components/ui";
+import { Card, PageIntro, Pill } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { one } from "@/lib/supabase/one";
 import { createKpiAction, raiseKpiTaskAction, recordKpiMeasurementAction } from "./actions";
@@ -27,9 +27,7 @@ export default async function KpisPage() {
   }
   return <>
     <PageIntro eyebrow="MANAGEMENT REVIEW" title="Performance measures" body="The KPIs your management review discusses — indicator, measurement type, target, the trend of recorded readings, and the next steps that become tasks." />
-    {!rows.length ? (
-      <EmptyState icon="check" title="Add your first KPI" body="Track the performance measures your management review discusses — indicator, measurement type, target, and the next steps that become owned tasks. Add your first measure below." primary={{ href: "#add-kpi", label: "Add your first KPI" }} />
-    ) : (
+    {rows.length > 0 && (
     <Card style={{ padding: 0, marginBottom: "16px" }}><div className="data-table-wrap" role="region" aria-label="KPI register" tabIndex={0}><table>
       <thead><tr><th>Function</th><th>Indicator</th><th>Type</th><th>Target</th><th>Reviewed</th><th>Trend</th><th>Next steps</th></tr></thead>
       <tbody>

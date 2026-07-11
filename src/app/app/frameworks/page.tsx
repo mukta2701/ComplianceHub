@@ -1,5 +1,5 @@
 import { requireAppContext } from "@/lib/app-context";
-import { Card, EmptyState, PageIntro, Pill, Progress } from "@/components/ui";
+import { Card, PageIntro, Pill, Progress } from "@/components/ui";
 import { SubTabs } from "@/components/sub-tabs";
 import {
   COMPLIANCE_FRAMEWORKS,
@@ -72,10 +72,8 @@ export default async function FrameworksPage() {
       ))}
     </section>
 
-    <h2 style={{ fontSize: "16px", margin: "0 0 12px" }}>Your mappings</h2>
-    {crosswalkRows.length === 0 ? (
-      <EmptyState icon="file" title="Record your first crosswalk mapping" body="Map one of your ISO 27001 controls to another framework's requirement (for example control CH-001 to SOC 2 CC6.1). You own these mappings — ComplianceHub does not assert cross-framework equivalence for you." />
-    ) : (
+    {crosswalkRows.length > 0 && <>
+      <h2 style={{ fontSize: "16px", margin: "0 0 12px" }}>Your mappings</h2>
       <Card style={{ padding: 0, marginBottom: "24px" }}><div className="data-table-wrap" role="region" aria-label="Control crosswalk mappings" tabIndex={0}><table>
         <thead><tr><th>ISO 27001 control</th><th>Framework</th><th>Requirement</th><th>Note</th><th><span className="sr-only">Actions</span></th></tr></thead>
         <tbody>
@@ -96,7 +94,7 @@ export default async function FrameworksPage() {
           })}
         </tbody>
       </table></div></Card>
-    )}
+    </>}
 
     <Card id="add-mapping" style={{ padding: "18px" }}>
       <h2 style={{ fontSize: "15px", margin: "0 0 10px" }}>Add a mapping</h2>
