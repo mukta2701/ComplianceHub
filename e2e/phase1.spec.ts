@@ -106,9 +106,9 @@ test("a user runs the Phase 1 workflow loop", async ({ page, request }, testInfo
   await page.goto("/app/assessment");
   await page.getByRole("button", { name: "New assessment" }).click();
   const firstSave = page.waitForResponse((response) => response.url().includes("/api/app/assessment/response"));
-  await page.getByRole("combobox").first().selectOption("no");
+  await page.getByRole("radio", { name: "No", exact: true }).click();
   expect((await firstSave).status()).toBe(200);
-  await expect(page.getByText("saved", { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("status", { name: "Save status" })).toHaveText("Saved");
 
   await page.goto("/app/risks");
   const acceptAsTask = page.getByRole("link", { name: "Accept as task" }).first();

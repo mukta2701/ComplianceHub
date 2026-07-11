@@ -95,14 +95,34 @@ test("a new user creates an isolated workspace and starts an assessment", async 
   await page.getByRole("link", { name: "Gap assessment", exact: true }).click();
   await page.getByRole("button", { name: "New assessment" }).click();
   await expect(page.getByRole("heading", { name: /readiness assessment/i })).toBeVisible();
-  const answers = page.getByRole("combobox");
-  await expect(answers).toHaveCount(10);
   const firstSave = page.waitForResponse((response) => response.url().includes("/api/app/assessment/response"));
-  await answers.nth(0).selectOption("partially");
+  await page.getByRole("radio", { name: "Partially" }).click();
   expect((await firstSave).status()).toBe(200);
-  await expect(page.getByText("saved", { exact: true }).nth(0)).toBeVisible();
-  await answers.nth(1).selectOption("yes");
-  await expect(page.getByText("error", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("status", { name: "Save status" })).toHaveText("Saved");
+  await page.getByRole("textbox", { name: "Evidence note" }).fill("Leadership objectives are awaiting final approval.");
+  const evidenceSave = page.waitForResponse((response) => response.url().includes("/api/app/assessment/response"));
+  await page.getByRole("button", { name: "Save and continue" }).click();
+  expect((await evidenceSave).status()).toBe(200);
+  await expect(page.getByRole("heading", { name: /GOV-02/ })).toBeFocused();
+
+  const secondSave = page.waitForResponse((response) => response.url().includes("/api/app/assessment/response"));
+  await page.getByRole("radio", { name: "Yes" }).click();
+  expect((await secondSave).status()).toBe(200);
+  await expect(page.getByRole("status", { name: "Save status" })).toHaveText("Saved");
+
+  await page.reload();
+  await expect(page.getByRole("heading", { name: /GOV-01/ })).toBeVisible();
+  await expect(page.getByRole("radio", { name: "Partially" })).toBeChecked();
+  await expect(page.getByRole("textbox", { name: "Evidence note" })).toHaveValue("Leadership objectives are awaiting final approval.");
+  await page.getByRole("button", { name: "Save and continue" }).click();
+  await expect(page.getByRole("heading", { name: /GOV-02/ })).toBeFocused();
+  await expect(page.getByRole("radio", { name: "Yes" })).toBeChecked();
+
+  const assessmentAxe = await new AxeBuilder({ page }).analyze();
+  expect(assessmentAxe.violations).toEqual([]);
+  const viewportWidth = await page.evaluate(() => window.innerWidth);
+  const documentWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+  expect(documentWidth).toBeLessThanOrEqual(viewportWidth);
 });
 
 test("an asset is added to the inventory and the list is accessible", async ({ page }, testInfo) => {
@@ -605,10 +625,8 @@ test("a SoA workbook import updates a matched control in the selected register",
   await expect(page.getByRole("heading", { name: "Statement of Applicability", level: 1 })).toBeVisible();
   const registerUrl = page.url();
 
-  // PageIntro itself renders an <h2> for the page title, so scope to the control forms'
-  // headings (each control is `<h2>{code}: {title}</h2>` inside its review `<form>`).
-  const firstHeading = await page.locator("form h2").first().textContent();
-  const code = (firstHeading ?? "").split(":")[0].trim();
+  const firstHeading = await page.locator(".soa-detail-heading h2").textContent();
+  const code = (firstHeading ?? "").split(" ")[0].trim();
 
   await page.goto("/app/soa/import");
   await expect(page.getByRole("heading", { name: "Import Statement of Applicability", level: 1 })).toBeVisible();
@@ -623,14 +641,80 @@ test("a SoA workbook import updates a matched control in the selected register",
   await page.getByRole("button", { name: /Confirm import/ }).click();
   await expect(page.getByText(/1 control updated/)).toBeVisible();
 
-  // Confirm the matched control's status and justification were actually updated on the register.
+  // Confirm the matched control's status and justification in the focused workspace detail.
   await page.goto(registerUrl);
-  // hasText does substring matching, so anchor to the "{code}: " prefix — otherwise "5.1" would
-  // also match sibling controls like "5.1.1".
-  const codePattern = new RegExp(`^${code.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:`);
-  const updatedForm = page.locator("form", { has: page.locator("h2", { hasText: codePattern }) });
-  await expect(updatedForm.locator('select[name="status"]')).toHaveValue("operational");
-  await expect(updatedForm.locator('textarea[name="justification"]')).toHaveValue("Imported justification");
+  await page.getByRole("searchbox", { name: "Search controls" }).fill(code);
+  await page.getByRole("region", { name: "SoA review queue" }).getByRole("button", { name: new RegExp(`^Review ${code.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} `) }).click();
+  await expect(page.getByRole("combobox", { name: "Implementation status", exact: true })).toHaveValue("operational");
+  await expect(page.getByRole("textbox", { name: "Rationale" })).toHaveValue("Imported justification");
+});
+
+test("the SoA review workspace supports focused review, persistence, accessibility, and mobile width", async ({ page }, testInfo) => {
+  const suffix = `${Date.now()}-${testInfo.project.name}`;
+  const email = `soareview-${suffix}@example.test`;
+  const password = "Test-only-passphrase-2026";
+
+  await page.goto("/sign-up");
+  await page.getByLabel("Name").fill("SoA Review Owner");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page.getByLabel("Confirm password").fill(password);
+  await page.getByRole("button", { name: "Create account" }).click();
+  await page.waitForURL(/\/sign-in/);
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByLabel("Organisation name").fill(`SoA Review Workspace ${suffix}`);
+  await page.getByRole("button", { name: "Create workspace" }).click();
+  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
+
+  await page.goto("/app/assessment");
+  await page.getByRole("button", { name: "New assessment" }).click();
+  const assessmentSelect = page.locator("select[name=assessmentId]");
+  await expect(async () => {
+    await page.goto("/app/soa");
+    await expect(assessmentSelect).toBeVisible();
+    await expect(assessmentSelect.locator("option")).not.toHaveCount(1);
+  }).toPass({ timeout: 15000 });
+  await assessmentSelect.selectOption({ index: 1 });
+  await page.getByRole("button", { name: "Generate draft" }).click();
+  await page.waitForURL(/\/app\/soa\/[0-9a-f-]+$/);
+
+  await expect(page.getByRole("textbox", { name: "Rationale" })).toHaveCount(1);
+  for (const label of ["Needs attention", "Reviewed", "Missing rationale", "Evidence gaps", "Unassigned", "Undecided"]) {
+    await expect(page.getByRole("button", { name: new RegExp(`^${label} \\d+$`) })).toBeVisible();
+  }
+  await page.getByRole("button", { name: /^Reviewed 0$/ }).click();
+  await expect(page.getByText("No controls match these filters.")).toBeVisible();
+  await page.getByRole("button", { name: /^Undecided 93$/ }).click();
+
+  const reviewButtons = page.getByRole("region", { name: "SoA review queue" }).getByRole("button", { name: /^Review / });
+  await expect(reviewButtons).toHaveCount(93);
+  const firstButtonName = await reviewButtons.nth(0).getAttribute("aria-label");
+  const firstHeading = await page.locator(".soa-detail-heading h2").textContent();
+  await reviewButtons.nth(1).click();
+  await expect(page.locator(".soa-detail-heading h2")).not.toHaveText(firstHeading ?? "");
+  await reviewButtons.nth(0).click();
+
+  await page.getByRole("combobox", { name: "Implementation status", exact: true }).selectOption("in_progress");
+  await page.getByRole("combobox", { name: "Owner assignment" }).selectOption({ index: 1 });
+  await page.getByRole("textbox", { name: "Rationale" }).fill("The owner reviewed this control in the live workspace.");
+  await page.getByRole("button", { name: "Save and next" }).click();
+  await expect(page.getByRole("status")).toHaveText("Saved");
+  await expect(page.locator(".soa-detail-heading h2")).not.toHaveText(firstHeading ?? "");
+
+  await page.reload();
+  if (firstButtonName) {
+    await page.getByRole("region", { name: "SoA review queue" }).getByRole("button", { name: firstButtonName }).click();
+  } else {
+    await page.getByRole("region", { name: "SoA review queue" }).getByRole("button", { name: /^Review / }).nth(0).click();
+  }
+  await expect(page.getByRole("textbox", { name: "Rationale" })).toHaveValue("The owner reviewed this control in the live workspace.");
+  await expect(page.getByRole("link", { name: /Review \d+ attention items/ })).toHaveAttribute("href", "#soa-review-blockers");
+
+  const axe = await new AxeBuilder({ page }).analyze();
+  expect(axe.violations).toEqual([]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 });
 
 test("every register can be downloaded as an XLSX export", async ({ page }, testInfo) => {
