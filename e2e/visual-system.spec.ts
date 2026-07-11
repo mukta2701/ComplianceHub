@@ -18,6 +18,7 @@ const expectedTokens = {
   "--ch-risk-soft": "#fbe8ec",
   "--ch-ai": "#6d4aff",
   "--ch-ai-soft": "#eee9ff",
+  "--ch-ai-text": "#6542f3",
   "--ch-space-1": "4px",
   "--ch-space-2": "8px",
   "--ch-space-3": "12px",
@@ -76,15 +77,24 @@ test("protects shared status and page-heading CSS semantics", async ({ page }) =
       const selectors = rule.selectorText.split(",").map((selector) => selector.trim());
       return selectors.includes(".page-heading h1") && selectors.includes(".page-heading h2");
     });
+    const aiLabel = document.createElement("span");
+    aiLabel.className = "status-label";
+    aiLabel.dataset.tone = "ai";
+    aiLabel.textContent = "AI draft";
+    document.body.append(aiLabel);
+    const aiColor = getComputedStyle(aiLabel).color;
+    aiLabel.remove();
 
     return {
       aiBackground: aiRule?.style.background,
+      aiColor,
       headingWeight: headingRule?.style.fontWeight,
     };
   });
 
   expect(contract).toEqual({
     aiBackground: "var(--ch-ai-soft)",
+    aiColor: "rgb(101, 66, 243)",
     headingWeight: "500",
   });
 });
