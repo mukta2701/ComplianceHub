@@ -1,8 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   deriveSoaReviewState,
   filterSoaQueue,
   summariseSoaQueue,
+  type SoaDomain,
+  type SoaQueueFilters,
   type SoaQueueItem,
 } from "./review-queue";
 
@@ -11,7 +13,7 @@ const baseItem: SoaQueueItem = {
   controlId: "control-1",
   code: "A.5.1",
   title: "Policies for information security",
-  domain: "Organisational",
+  domain: "organisational",
   applicable: true,
   status: "operational",
   justification: "Required by the security programme",
@@ -31,13 +33,18 @@ function queueItem(overrides: Partial<SoaQueueItem> = {}): SoaQueueItem {
 }
 
 describe("deriveSoaReviewState", () => {
+  it("uses the SoA domain union for queue items and filters", () => {
+    expectTypeOf<SoaQueueItem["domain"]>().toEqualTypeOf<SoaDomain>();
+    expectTypeOf<NonNullable<SoaQueueFilters["domain"]>>().toEqualTypeOf<SoaDomain>();
+  });
+
   it("flags a pending decision before every other issue", () => {
     expect(deriveSoaReviewState(queueItem({
       status: "pending",
       justification: " ",
       ownerId: null,
       evidenceTotal: 0,
-      evidenceExpired: 1,
+      evidenceExpired: 0,
     }))).toBe("missing_decision");
   });
 
@@ -53,7 +60,7 @@ describe("deriveSoaReviewState", () => {
     expect(deriveSoaReviewState(queueItem({
       ownerId: null,
       evidenceTotal: 0,
-      evidenceExpired: 1,
+      evidenceExpired: 0,
     }))).toBe("missing_owner");
   });
 
@@ -79,7 +86,40 @@ describe("deriveSoaReviewState", () => {
       justification: "The service does not perform software development",
       evidenceText: "",
       evidenceTotal: 0,
+      evidenceExpiring: 0,
+      evidenceExpired: 0,
     }))).toBe("reviewed");
+  });
+
+  it.each([
+    { evidenceTotal: -1 },
+    { evidenceExpiring: -1 },
+    { evidenceExpired: -1 },
+  ])("rejects negative evidence counters: %o", (overrides) => {
+    expect(() => deriveSoaReviewState(queueItem(overrides))).toThrow(RangeError);
+  });
+
+  it.each([
+    { evidenceTotal: 1.5 },
+    { evidenceExpiring: 0.5 },
+    { evidenceExpired: 0.5 },
+  ])("rejects non-integer evidence counters: %o", (overrides) => {
+    expect(() => deriveSoaReviewState(queueItem(overrides))).toThrow(RangeError);
+  });
+
+  it.each([
+    { evidenceTotal: 1, evidenceExpiring: 2 },
+    { evidenceTotal: 1, evidenceExpired: 2 },
+  ])("rejects an evidence status counter above the total: %o", (overrides) => {
+    expect(() => deriveSoaReviewState(queueItem(overrides))).toThrow(RangeError);
+  });
+
+  it("rejects combined expiring and expired counters above the total", () => {
+    expect(() => deriveSoaReviewState(queueItem({
+      evidenceTotal: 2,
+      evidenceExpiring: 1,
+      evidenceExpired: 2,
+    }))).toThrow(RangeError);
   });
 });
 
@@ -89,7 +129,7 @@ describe("filterSoaQueue", () => {
       id: "item-1",
       code: "A.5.1",
       title: "Policies for information security",
-      domain: "Organisational",
+      domain: "organisational",
       ownerId: "member-1",
       position: 1,
       reviewState: "reviewed",
@@ -98,7 +138,7 @@ describe("filterSoaQueue", () => {
       id: "item-2",
       code: "A.6.3",
       title: "Information security awareness",
-      domain: "People",
+      domain: "people",
       ownerId: null,
       ownerName: null,
       position: 2,
@@ -108,7 +148,7 @@ describe("filterSoaQueue", () => {
       id: "item-3",
       code: "A.8.8",
       title: "Management of technical vulnerabilities",
-      domain: "Technological",
+      domain: "technological",
       applicable: false,
       status: "not_applicable",
       ownerId: "member-2",
@@ -132,24 +172,26 @@ describe("filterSoaQueue", () => {
   });
 
   it("filters by domain, owner, applicability, and status", () => {
-    expect(filterSoaQueue(items, { domain: "People" }).map((item) => item.id)).toEqual(["item-2"]);
+    expect(filterSoaQueue(items, { domain: "people" }).map((item) => item.id)).toEqual(["item-2"]);
     expect(filterSoaQueue(items, { ownerId: "member-2" }).map((item) => item.id)).toEqual(["item-3"]);
     expect(filterSoaQueue(items, { ownerId: null }).map((item) => item.id)).toEqual(["item-2"]);
     expect(filterSoaQueue(items, { applicable: false }).map((item) => item.id)).toEqual(["item-3"]);
     expect(filterSoaQueue(items, { status: "not_applicable" }).map((item) => item.id)).toEqual(["item-3"]);
   });
 
-  it("combines filters and preserves the input position order", () => {
-    const orderedItems = [
-      queueItem({ id: "item-2", domain: "People", position: 2, reviewState: "missing_owner" }),
-      queueItem({ id: "item-5", domain: "Organisational", position: 5, reviewState: "reviewed" }),
-      queueItem({ id: "item-8", domain: "People", position: 8, reviewState: "missing_evidence" }),
+  it("combines filters and returns ascending positions without mutating unsorted input", () => {
+    const unsortedItems = [
+      queueItem({ id: "item-8", domain: "people", position: 8, reviewState: "missing_evidence" }),
+      queueItem({ id: "item-5", domain: "organisational", position: 5, reviewState: "reviewed" }),
+      queueItem({ id: "item-2", domain: "people", position: 2, reviewState: "missing_owner" }),
     ];
+    const before = structuredClone(unsortedItems);
 
-    expect(filterSoaQueue(orderedItems, {
-      domain: "People",
+    expect(filterSoaQueue(unsortedItems, {
+      domain: "people",
       reviewState: "needs_attention",
     }).map((item) => item.position)).toEqual([2, 8]);
+    expect(unsortedItems).toEqual(before);
   });
 
   it("does not mutate the input array or its items", () => {
@@ -164,11 +206,11 @@ describe("filterSoaQueue", () => {
 describe("summariseSoaQueue", () => {
   it("counts review outcomes for the queue", () => {
     const items = [
-      queueItem({ id: "decision", reviewState: "missing_decision" }),
-      queueItem({ id: "rationale", reviewState: "missing_rationale" }),
-      queueItem({ id: "owner", reviewState: "missing_owner" }),
-      queueItem({ id: "evidence", reviewState: "missing_evidence" }),
-      queueItem({ id: "stale", reviewState: "stale_evidence" }),
+      queueItem({ id: "decision", status: "pending", reviewState: "missing_decision" }),
+      queueItem({ id: "rationale", justification: " ", reviewState: "missing_rationale" }),
+      queueItem({ id: "owner", ownerId: null, reviewState: "missing_owner" }),
+      queueItem({ id: "evidence", evidenceTotal: 0, reviewState: "missing_evidence" }),
+      queueItem({ id: "stale", evidenceExpired: 1, reviewState: "stale_evidence" }),
       queueItem({ id: "reviewed", reviewState: "reviewed" }),
     ];
 
@@ -178,6 +220,26 @@ describe("summariseSoaQueue", () => {
       reviewed: 1,
       missingRationale: 1,
       evidenceGaps: 2,
+      unassigned: 1,
+      undecided: 1,
+    });
+  });
+
+  it("counts every blocker on an item while retaining its primary review outcome", () => {
+    const item = queueItem({
+      status: "pending",
+      justification: "\n\t ",
+      ownerId: null,
+      evidenceTotal: 0,
+      reviewState: "missing_decision",
+    });
+
+    expect(summariseSoaQueue([item])).toEqual({
+      total: 1,
+      needsAttention: 1,
+      reviewed: 0,
+      missingRationale: 1,
+      evidenceGaps: 1,
       unassigned: 1,
       undecided: 1,
     });

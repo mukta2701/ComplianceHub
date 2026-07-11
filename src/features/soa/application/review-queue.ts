@@ -8,12 +8,14 @@ export type SoaReviewState =
   | "stale_evidence"
   | "reviewed";
 
+export type SoaDomain = "organisational" | "people" | "physical" | "technological";
+
 export type SoaQueueItem = {
   id: string;
   controlId: string;
   code: string;
   title: string;
-  domain: string;
+  domain: SoaDomain;
   applicable: boolean;
   status: SoaStatus;
   justification: string;
@@ -31,7 +33,7 @@ export type SoaQueueItem = {
 export type SoaQueueFilters = {
   search?: string;
   reviewState?: SoaReviewState | "needs_attention";
-  domain?: string;
+  domain?: SoaDomain;
   ownerId?: string | null;
   applicable?: boolean;
   status?: SoaStatus;
@@ -49,10 +51,29 @@ export type SoaQueueSummary = {
 
 type ReviewStateInput = Pick<
   SoaQueueItem,
-  "applicable" | "status" | "justification" | "ownerId" | "evidenceTotal" | "evidenceExpired"
+  | "applicable"
+  | "status"
+  | "justification"
+  | "ownerId"
+  | "evidenceTotal"
+  | "evidenceExpiring"
+  | "evidenceExpired"
 >;
 
 export function deriveSoaReviewState(item: ReviewStateInput): SoaReviewState {
+  const counters = [item.evidenceTotal, item.evidenceExpiring, item.evidenceExpired];
+
+  if (counters.some((counter) => !Number.isInteger(counter) || counter < 0)) {
+    throw new RangeError("Evidence counters must be non-negative integers");
+  }
+  if (
+    item.evidenceExpiring > item.evidenceTotal
+    || item.evidenceExpired > item.evidenceTotal
+    || item.evidenceExpiring + item.evidenceExpired > item.evidenceTotal
+  ) {
+    throw new RangeError("Evidence status counters cannot exceed the evidence total");
+  }
+
   if (item.status === "pending") return "missing_decision";
   if (!item.justification.trim()) return "missing_rationale";
   if (!item.ownerId) return "missing_owner";
@@ -76,7 +97,7 @@ export function filterSoaQueue(
     if (filters.applicable !== undefined && item.applicable !== filters.applicable) return false;
     if (filters.status !== undefined && item.status !== filters.status) return false;
     return true;
-  });
+  }).sort((left, right) => left.position - right.position);
 }
 
 export function summariseSoaQueue(items: readonly SoaQueueItem[]): SoaQueueSummary {
@@ -94,10 +115,10 @@ export function summariseSoaQueue(items: readonly SoaQueueItem[]): SoaQueueSumma
     if (item.reviewState === "reviewed") summary.reviewed += 1;
     else summary.needsAttention += 1;
 
-    if (item.reviewState === "missing_rationale") summary.missingRationale += 1;
-    if (item.reviewState === "missing_evidence" || item.reviewState === "stale_evidence") summary.evidenceGaps += 1;
-    if (item.reviewState === "missing_owner") summary.unassigned += 1;
-    if (item.reviewState === "missing_decision") summary.undecided += 1;
+    if (!item.justification.trim()) summary.missingRationale += 1;
+    if (item.applicable && (item.evidenceTotal === 0 || item.evidenceExpired > 0)) summary.evidenceGaps += 1;
+    if (!item.ownerId) summary.unassigned += 1;
+    if (item.status === "pending") summary.undecided += 1;
   }
 
   return summary;
