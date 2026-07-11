@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
-import { PageHeading } from "./page-heading";
+import { describe, expect, expectTypeOf, it } from "vitest";
+import { PageHeading, type PageHeadingProps } from "./page-heading";
 import { PageIntro } from "./ui";
 
 describe("PageHeading", () => {
@@ -32,6 +32,10 @@ describe("PageHeading", () => {
       "page-heading__action",
     );
   });
+
+  it("accepts only text for body content", () => {
+    expectTypeOf<PageHeadingProps["body"]>().toEqualTypeOf<string>();
+  });
 });
 
 describe("PageIntro compatibility", () => {
@@ -45,7 +49,7 @@ describe("PageIntro compatibility", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { level: 1, name: "Evidence vault" })).toBeVisible();
+    expect(screen.getByRole("heading", { level: 2, name: "Evidence vault" })).toBeVisible();
     expect(screen.getByText("EVIDENCE")).toBeVisible();
     expect(screen.getByText("Keep proof current and reviewable.")).toBeVisible();
     expect(screen.getByRole("link", { name: "Add evidence" })).toHaveAttribute(

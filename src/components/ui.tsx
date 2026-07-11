@@ -16,7 +16,7 @@ export function EmptyState({ icon, title, body, primary, secondary, action }: { 
   </Card>;
 }
 export function PageIntro({ eyebrow, title, body, action }: { eyebrow?: string; title: string; body: string; action?: React.ReactNode }) {
-  return <PageHeading eyebrow={eyebrow} title={title} body={body} action={action} />;
+  return <PageHeading eyebrow={eyebrow} title={title} body={body} action={action} headingLevel={2} />;
 }
 export function Card({ children, className = "", ...props }: React.HTMLAttributes<HTMLElement>) { return <section className={`card ${className}`} {...props}>{children}</section>; }
 export function Stat({ label, value, detail, tone = "blue" }: { label: string; value: string | number; detail: string; tone?: string }) { return <Card className="stat"><span className={`stat-icon ${tone}`}><Icon name={tone === "green" ? "check" : tone === "amber" || tone === "red" ? "alert" : "file"}/></span><div><small>{label}</small><strong>{value}</strong><p>{detail}</p></div></Card>; }

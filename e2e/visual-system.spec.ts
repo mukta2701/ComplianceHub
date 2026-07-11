@@ -61,3 +61,30 @@ test("exposes the complete ComplianceHub token contract in the app shell", async
 
   expect(tokens).toEqual({ root: expectedTokens, shell: expectedTokens });
 });
+
+test("protects shared status and page-heading CSS semantics", async ({ page }) => {
+  await page.goto("/demo/dashboard");
+
+  const contract = await page.evaluate(() => {
+    const rules = Array.from(document.styleSheets).flatMap((sheet) =>
+      Array.from(sheet.cssRules).filter((rule): rule is CSSStyleRule => rule instanceof CSSStyleRule),
+    );
+    const aiRule = rules.find(
+      (rule) => rule.selectorText === '.status-label[data-tone="ai"]',
+    );
+    const headingRule = rules.find((rule) => {
+      const selectors = rule.selectorText.split(",").map((selector) => selector.trim());
+      return selectors.includes(".page-heading h1") && selectors.includes(".page-heading h2");
+    });
+
+    return {
+      aiBackground: aiRule?.style.background,
+      headingWeight: headingRule?.style.fontWeight,
+    };
+  });
+
+  expect(contract).toEqual({
+    aiBackground: "var(--ch-ai-soft)",
+    headingWeight: "500",
+  });
+});
