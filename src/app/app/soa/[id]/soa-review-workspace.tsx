@@ -57,6 +57,7 @@ export type SoaReviewWorkspaceItem = SoaQueueItem & {
 };
 
 type Draft = Pick<SoaQueueItem, "applicable" | "status" | "justification" | "evidenceText" | "ownerId">;
+type OptimisticDraft = { draft: Draft; sourceItems: SoaReviewWorkspaceItem[] };
 
 export type SoaReviewWorkspaceProps = {
   items: SoaReviewWorkspaceItem[];
@@ -192,7 +193,7 @@ function filterWorkspaceItems(
 export function SoaReviewWorkspace({ items, members, currentUserId, saveAction }: SoaReviewWorkspaceProps) {
   const router = useRouter();
   const initialItems = useMemo(() => [...items].sort((left, right) => left.position - right.position), [items]);
-  const [optimisticDrafts, setOptimisticDrafts] = useState<Record<string, Draft>>({});
+  const [optimisticDrafts, setOptimisticDrafts] = useState<Record<string, OptimisticDraft>>({});
   const [search, setSearch] = useState("");
   const [domain, setDomain] = useState<SoaDomain | "">("");
   const [reviewState, setReviewState] = useState<SoaReviewState | "needs_attention" | "">("needs_attention");
@@ -211,7 +212,11 @@ export function SoaReviewWorkspace({ items, members, currentUserId, saveAction }
   const [saving, setSaving] = useState(false);
 
   const queueItems = useMemo(() => initialItems.map((item) => {
-    const optimistic = optimisticDrafts[item.id];
+    const optimisticEntry = optimisticDrafts[item.id];
+    const optimistic = optimisticEntry && (
+      optimisticEntry.sourceItems === items
+      || (dirty && item.id === selectedId)
+    ) ? optimisticEntry.draft : null;
     if (!optimistic) return item;
     const projected = {
       ...item,
@@ -219,7 +224,7 @@ export function SoaReviewWorkspace({ items, members, currentUserId, saveAction }
       ownerName: members.find((member) => member.id === optimistic.ownerId)?.name ?? null,
     };
     return { ...projected, reviewState: deriveSoaReviewState(projected) };
-  }), [initialItems, members, optimisticDrafts]);
+  }), [dirty, initialItems, items, members, optimisticDrafts, selectedId]);
 
   const summary = useMemo(() => summariseSoaQueue(queueItems), [queueItems]);
   const filters = useMemo<SoaQueueFilters>(() => ({
@@ -258,10 +263,16 @@ export function SoaReviewWorkspace({ items, members, currentUserId, saveAction }
       event.returnValue = "";
     }
 
-    function guardFinalisation(event: Event) {
+    function guardExitSubmission(event: Event) {
       const form = event.target;
-      if (!(form instanceof HTMLFormElement) || !form.matches("[data-soa-finalise-form]")) return;
-      if (window.confirm("Discard unsaved changes and finalise this SoA?")) return;
+      if (!(form instanceof HTMLFormElement)) return;
+      const finalising = form.matches("[data-soa-finalise-form]");
+      const exiting = form.matches("[data-app-exit-form]");
+      if (!finalising && !exiting) return;
+      const message = finalising
+        ? "Discard unsaved changes and finalise this SoA?"
+        : "Discard unsaved changes and sign out?";
+      if (window.confirm(message)) return;
       event.preventDefault();
       event.stopImmediatePropagation();
     }
@@ -300,11 +311,11 @@ export function SoaReviewWorkspace({ items, members, currentUserId, saveAction }
 
     window.addEventListener("beforeunload", guardUnload);
     document.addEventListener("click", guardAnchorNavigation, true);
-    document.addEventListener("submit", guardFinalisation, true);
+    document.addEventListener("submit", guardExitSubmission, true);
     return () => {
       window.removeEventListener("beforeunload", guardUnload);
       document.removeEventListener("click", guardAnchorNavigation, true);
-      document.removeEventListener("submit", guardFinalisation, true);
+      document.removeEventListener("submit", guardExitSubmission, true);
     };
   }, [dirty]);
 
@@ -454,7 +465,10 @@ export function SoaReviewWorkspace({ items, members, currentUserId, saveAction }
         reviewState: deriveSoaReviewState({ ...selectedItem, ...selectedDraft }),
       };
       const nextQueue = queueItems.map((item) => item.id === updated.id ? updated : item);
-      setOptimisticDrafts((current) => ({ ...current, [updated.id]: selectedDraft }));
+      setOptimisticDrafts((current) => ({
+        ...current,
+        [updated.id]: { draft: selectedDraft, sourceItems: items },
+      }));
       setSelectedId(updated.id);
       setDraft(toDraft(updated));
       setDirty(false);

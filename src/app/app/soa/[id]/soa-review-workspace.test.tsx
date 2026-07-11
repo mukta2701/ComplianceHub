@@ -400,8 +400,63 @@ describe("SoaReviewWorkspace", () => {
     confirm.mockRestore();
   });
 
+  it("guards sign-out submission without intercepting the workspace save form", async () => {
+    const user = userEvent.setup();
+    const saveAction = vi.fn<(formData: FormData) => Promise<void>>(async () => undefined);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(
+      <>
+        <form data-app-exit-form><button type="submit">Sign out</button></form>
+        <SoaReviewWorkspace items={items} members={members} currentUserId={CURRENT_USER_ID} saveAction={saveAction} />
+      </>,
+    );
+    await user.type(screen.getByRole("textbox", { name: "Rationale" }), "Unsaved before sign-out");
+
+    const signOutForm = screen.getByRole("button", { name: "Sign out" }).closest("form");
+    const submitted = vi.fn();
+    signOutForm!.addEventListener("submit", submitted);
+    expect(signOutForm!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }))).toBe(false);
+    expect(submitted).not.toHaveBeenCalled();
+    expect(screen.getByRole("textbox", { name: "Rationale" })).toHaveValue("Unsaved before sign-out");
+
+    confirm.mockReturnValue(true);
+    expect(signOutForm!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }))).toBe(true);
+    expect(submitted).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    await waitFor(() => expect(saveAction).toHaveBeenCalledTimes(1));
+    expect(confirm).toHaveBeenCalledTimes(2);
+    confirm.mockRestore();
+  });
+
+  it("shows an optimistic save immediately and adopts the next canonical props", async () => {
+    const user = userEvent.setup();
+    const saveAction = vi.fn<(formData: FormData) => Promise<void>>(async () => undefined);
+    const view = renderWorkspace(saveAction);
+
+    await user.type(screen.getByRole("textbox", { name: "Rationale" }), "Optimistic rationale");
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Saved"));
+    expect(screen.getByRole("textbox", { name: "Rationale" })).toHaveValue("Optimistic rationale");
+
+    const refreshedItems = items.map((item) => item.id === "item-1"
+      ? { ...item, justification: "Canonical server rationale" }
+      : item);
+    view.rerender(
+      <SoaReviewWorkspace
+        items={refreshedItems}
+        members={members}
+        currentUserId={CURRENT_USER_ID}
+        saveAction={saveAction}
+      />,
+    );
+
+    expect(screen.getByRole("textbox", { name: "Rationale" })).toHaveValue("Canonical server rationale");
+  });
+
   it("reconciles refreshed queue props without overwriting the active dirty draft", async () => {
     const user = userEvent.setup();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     const view = renderWorkspace();
     await user.type(screen.getByRole("textbox", { name: "Rationale" }), "Local unsaved rationale");
 
@@ -419,6 +474,11 @@ describe("SoaReviewWorkspace", () => {
 
     expect(screen.getByRole("textbox", { name: "Rationale" })).toHaveValue("Local unsaved rationale");
     expect(queue().getByText("Refreshed vulnerability management")).toBeInTheDocument();
+
+    await user.click(queue().getByRole("button", { name: "Review A.7.1 Physical security perimeters" }));
+    await user.click(queue().getByRole("button", { name: "Review A.5.1 Policies for information security" }));
+    expect(screen.getByRole("textbox", { name: "Rationale" })).toHaveValue("New server rationale");
+    confirm.mockRestore();
   });
 
   it("supports toolbar filters and only shows clear filters while any filter is active", async () => {
