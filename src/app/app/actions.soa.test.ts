@@ -25,6 +25,7 @@ type Result = { data: unknown; error: unknown };
 class Builder implements PromiseLike<Result> {
   private equals: [string, unknown][] = [];
   private inclusions: [string, unknown[]][] = [];
+  private updateValues: Row | null = null;
 
   constructor(
     private table: keyof Store,
@@ -33,6 +34,11 @@ class Builder implements PromiseLike<Result> {
   ) {}
 
   select() {
+    return this;
+  }
+
+  update(values: Row) {
+    this.updateValues = values;
     return this;
   }
 
@@ -49,7 +55,8 @@ class Builder implements PromiseLike<Result> {
   }
 
   maybeSingle() {
-    return Promise.resolve({ data: this.matched()[0] ?? null, error: null });
+    const result = this.result();
+    return Promise.resolve({ data: (result.data as Row[])[0] ?? null, error: result.error });
   }
 
   single() {
@@ -63,11 +70,19 @@ class Builder implements PromiseLike<Result> {
     ));
   }
 
+  private result(): Result {
+    const data = this.matched();
+    if (this.updateValues) {
+      for (const row of data) Object.assign(row, this.updateValues);
+    }
+    return { data, error: null };
+  }
+
   then<T1 = Result, T2 = never>(
     onfulfilled?: ((value: Result) => T1 | PromiseLike<T1>) | null,
     onrejected?: ((reason: unknown) => T2 | PromiseLike<T2>) | null,
   ): PromiseLike<T1 | T2> {
-    return Promise.resolve({ data: this.matched(), error: null }).then(onfulfilled, onrejected);
+    return Promise.resolve(this.result()).then(onfulfilled, onrejected);
   }
 }
 
@@ -96,6 +111,17 @@ const OWNER_ID = "00000000-0000-4000-8000-000000000008";
 function formData() {
   const data = new FormData();
   data.set("registerId", REGISTER_ID);
+  return data;
+}
+
+function reviewFormData(itemId = ITEM_ID) {
+  const data = new FormData();
+  data.set("itemId", itemId);
+  data.set("status", "in_progress");
+  data.set("applicable", "true");
+  data.set("ownerId", OWNER_ID);
+  data.set("justification", "Reviewed rationale");
+  data.set("evidence", "Evidence reference");
   return data;
 }
 
@@ -194,5 +220,44 @@ describe("finaliseSoaAction preflight", () => {
 
     await expect(finaliseSoaAction(formData())).rejects.toThrow("SoA cannot be finalised");
     expect(fake.rpc).not.toHaveBeenCalled();
+  });
+});
+
+describe("reviewSoaItemAction tenant scope", () => {
+  it("updates only an item in the active organisation and requests the changed id", async () => {
+    const store = reviewedStore();
+    const fake = fakeSupabase(store);
+    hoisted.ctx = context(fake.client);
+    const { reviewSoaItemAction } = await import("./actions");
+
+    await expect(reviewSoaItemAction(reviewFormData())).resolves.toBeUndefined();
+
+    expect(fake.queries).toContainEqual({
+      table: "soa_items",
+      operation: "eq",
+      column: "organisation_id",
+      value: ORG_ID,
+    });
+    expect(store.soa_items[0]).toMatchObject({ status: "in_progress", evidence: "Evidence reference" });
+  });
+
+  it("rejects an item id belonging only to another membership organisation", async () => {
+    const store = reviewedStore();
+    store.soa_items[0] = { ...store.soa_items[0], organisation_id: OTHER_ORG_ID };
+    const fake = fakeSupabase(store);
+    hoisted.ctx = context(fake.client);
+    const { reviewSoaItemAction } = await import("./actions");
+
+    await expect(reviewSoaItemAction(reviewFormData())).rejects.toThrow("SoA item not found in the active workspace");
+    expect(store.soa_items[0].status).toBe("operational");
+  });
+
+  it("throws when the scoped update changes zero rows", async () => {
+    const fake = fakeSupabase(reviewedStore());
+    hoisted.ctx = context(fake.client);
+    const { reviewSoaItemAction } = await import("./actions");
+
+    await expect(reviewSoaItemAction(reviewFormData("00000000-0000-4000-8000-000000000099")))
+      .rejects.toThrow("SoA item not found in the active workspace");
   });
 });

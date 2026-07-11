@@ -16,7 +16,12 @@ values(current_setting('app.org_a')::uuid,'00000000-0000-4000-8000-000000000001'
 select set_config('app.session_a',(select id::text from public.assessment_sessions where organisation_id=current_setting('app.org_a')::uuid),true);
 select public.save_assessment_response(current_setting('app.session_a')::uuid,(select id from public.catalogue_questions where code='GOV-01'),'partially','Tenant A evidence',0);
 select set_config('app.register_a',public.create_soa_draft(current_setting('app.session_a')::uuid,'Tenant A SoA')::text,true);
-update public.soa_items set justification='Reviewed for applicability' where soa_register_id=current_setting('app.register_a')::uuid;
+update public.soa_items
+set applicable=false,
+    status='not_applicable',
+    justification='Reviewed for applicability',
+    owner_id='50000000-0000-4000-8000-000000000001'
+where soa_register_id=current_setting('app.register_a')::uuid;
 select set_config('app.snapshot_a',public.finalise_soa(current_setting('app.register_a')::uuid)::text,true);
 insert into public.risks(organisation_id,reference,title,description,category_id,owner_id,likelihood,impact,treatment,residual_likelihood,residual_impact,created_by)
 values(current_setting('app.org_a')::uuid,'R-A-1','Tenant A risk','A material risk owned by tenant A',(select id from public.risk_categories where organisation_id=current_setting('app.org_a')::uuid order by position limit 1),'50000000-0000-4000-8000-000000000001',3,4,'mitigate',2,3,'50000000-0000-4000-8000-000000000001');

@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import Link from "next/link";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SoaReviewWorkspace, type SoaReviewWorkspaceItem } from "./soa-review-workspace";
 
@@ -305,6 +306,119 @@ describe("SoaReviewWorkspace", () => {
     expect(screen.getByRole("heading", { name: "A.5.1 Policies for information security" })).toBeInTheDocument();
     expect(screen.getByText("This control is shown because it has unsaved changes and does not match the current filters.")).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Rationale" })).toHaveValue("Unsaved rationale");
+  });
+
+  it("confirms before a queue selection discards a dirty draft", async () => {
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    renderWorkspace();
+
+    await user.type(screen.getByRole("textbox", { name: "Rationale" }), "Keep this draft");
+    await user.click(queue().getByRole("button", { name: "Review A.7.1 Physical security perimeters" }));
+    expect(screen.getByRole("heading", { name: "A.5.1 Policies for information security" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Rationale" })).toHaveValue("Keep this draft");
+
+    confirm.mockReturnValue(true);
+    await user.click(queue().getByRole("button", { name: "Review A.7.1 Physical security perimeters" }));
+    expect(screen.getByRole("heading", { name: "A.7.1 Physical security perimeters" })).toBeInTheDocument();
+    confirm.mockRestore();
+  });
+
+  it("guards linked evidence, task, and history navigation while preserving the draft", async () => {
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    renderWorkspace();
+    await user.click(queue().getByRole("button", { name: "Review A.8.8 Management of technical vulnerabilities" }));
+    await user.type(screen.getByRole("textbox", { name: "Rationale" }), "Unsaved navigation guard");
+
+    await user.click(screen.getByRole("tab", { name: "Evidence" }));
+    expect(fireEvent.click(screen.getByRole("link", { name: "Open evidence library" }))).toBe(false);
+    await user.click(screen.getByRole("tab", { name: "Linked work" }));
+    expect(fireEvent.click(screen.getByRole("link", { name: "Renew scanner report" }))).toBe(false);
+    await user.click(screen.getByRole("tab", { name: "History" }));
+    expect(fireEvent.click(screen.getByRole("link", { name: "View audit trail" }))).toBe(false);
+    expect(screen.getByRole("heading", { name: "A.8.8 Management of technical vulnerabilities" })).toBeInTheDocument();
+    expect(confirm).toHaveBeenCalledTimes(3);
+
+    confirm.mockReturnValue(true);
+    expect(fireEvent.click(screen.getByRole("link", { name: "View audit trail" }))).toBe(true);
+    expect(confirm).toHaveBeenCalledTimes(4);
+    confirm.mockRestore();
+  });
+
+  it("guards surrounding same-origin navigation once and preserves new-tab intent", async () => {
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(
+      <>
+        <nav aria-label="Workspace">
+          <Link href="/app/risks"><span>Risk register</span></Link>
+          <Link href="/app/tasks" target="_blank">Tasks in new tab</Link>
+          <a href="https://example.test/external">External guidance</a>
+          <Link href="#soa-review-blockers">Review summary</Link>
+        </nav>
+        <SoaReviewWorkspace items={items} members={members} currentUserId={CURRENT_USER_ID} saveAction={vi.fn()} />
+      </>,
+    );
+    await user.type(screen.getByRole("textbox", { name: "Rationale" }), "Unsaved shell navigation");
+
+    expect(fireEvent.click(screen.getByText("Risk register"))).toBe(false);
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("textbox", { name: "Rationale" })).toHaveValue("Unsaved shell navigation");
+
+    expect(fireEvent.click(screen.getByText("Risk register"), { metaKey: true })).toBe(true);
+    expect(fireEvent.click(screen.getByRole("link", { name: "Tasks in new tab" }))).toBe(true);
+    expect(fireEvent.click(screen.getByRole("link", { name: "External guidance" }))).toBe(true);
+    expect(fireEvent.click(screen.getByRole("link", { name: "Review summary" }))).toBe(true);
+    expect(confirm).toHaveBeenCalledTimes(1);
+    confirm.mockRestore();
+  });
+
+  it("guards browser unload and finalisation while a draft is dirty", async () => {
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(
+      <>
+        <form data-soa-finalise-form><button type="submit">Finalise immutable v1</button></form>
+        <SoaReviewWorkspace items={items} members={members} currentUserId={CURRENT_USER_ID} saveAction={vi.fn()} />
+      </>,
+    );
+    await user.type(screen.getByRole("textbox", { name: "Rationale" }), "Unsaved before finalisation");
+
+    const unload = new Event("beforeunload", { cancelable: true });
+    expect(window.dispatchEvent(unload)).toBe(false);
+
+    const finaliseForm = screen.getByRole("button", { name: "Finalise immutable v1" }).closest("form");
+    expect(finaliseForm).not.toBeNull();
+    const cancelledSubmit = new Event("submit", { bubbles: true, cancelable: true });
+    expect(finaliseForm!.dispatchEvent(cancelledSubmit)).toBe(false);
+    expect(screen.getByRole("textbox", { name: "Rationale" })).toHaveValue("Unsaved before finalisation");
+
+    confirm.mockReturnValue(true);
+    const acceptedSubmit = new Event("submit", { bubbles: true, cancelable: true });
+    expect(finaliseForm!.dispatchEvent(acceptedSubmit)).toBe(true);
+    confirm.mockRestore();
+  });
+
+  it("reconciles refreshed queue props without overwriting the active dirty draft", async () => {
+    const user = userEvent.setup();
+    const view = renderWorkspace();
+    await user.type(screen.getByRole("textbox", { name: "Rationale" }), "Local unsaved rationale");
+
+    const refreshedItems = items.map((item) => item.id === "item-1"
+      ? { ...item, justification: "New server rationale" }
+      : item.id === "item-3" ? { ...item, title: "Refreshed vulnerability management" } : item);
+    view.rerender(
+      <SoaReviewWorkspace
+        items={refreshedItems}
+        members={members}
+        currentUserId={CURRENT_USER_ID}
+        saveAction={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("textbox", { name: "Rationale" })).toHaveValue("Local unsaved rationale");
+    expect(queue().getByText("Refreshed vulnerability management")).toBeInTheDocument();
   });
 
   it("supports toolbar filters and only shows clear filters while any filter is active", async () => {

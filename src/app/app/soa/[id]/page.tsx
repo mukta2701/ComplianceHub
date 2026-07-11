@@ -204,7 +204,7 @@ export default async function SoaReviewPage({ params }: { params: Promise<{ id: 
       title={register.title}
       body={canFinalise ? `Preflight complete. All ${summary.total} controls have been reviewed.` : preflight}
       action={canFinalise ? (
-        <form action={finaliseSoaAction}>
+        <form action={finaliseSoaAction} data-soa-finalise-form>
           <input type="hidden" name="registerId" value={id} />
           <button className="button primary">Finalise immutable v{register.version}</button>
         </form>

@@ -2,7 +2,14 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+} from "react";
 import { StatusLabel, type StatusTone } from "@/components/status-label";
 import type { EvidenceKind, EvidenceStatus } from "@/features/evidence/domain/evidence";
 import {
@@ -185,7 +192,7 @@ function filterWorkspaceItems(
 export function SoaReviewWorkspace({ items, members, currentUserId, saveAction }: SoaReviewWorkspaceProps) {
   const router = useRouter();
   const initialItems = useMemo(() => [...items].sort((left, right) => left.position - right.position), [items]);
-  const [queueItems, setQueueItems] = useState(initialItems);
+  const [optimisticDrafts, setOptimisticDrafts] = useState<Record<string, Draft>>({});
   const [search, setSearch] = useState("");
   const [domain, setDomain] = useState<SoaDomain | "">("");
   const [reviewState, setReviewState] = useState<SoaReviewState | "needs_attention" | "">("needs_attention");
@@ -202,6 +209,17 @@ export function SoaReviewWorkspace({ items, members, currentUserId, saveAction }
   const [activeTab, setActiveTab] = useState<DetailTab>("decision");
   const [saveMessage, setSaveMessage] = useState("");
   const [saving, setSaving] = useState(false);
+
+  const queueItems = useMemo(() => initialItems.map((item) => {
+    const optimistic = optimisticDrafts[item.id];
+    if (!optimistic) return item;
+    const projected = {
+      ...item,
+      ...optimistic,
+      ownerName: members.find((member) => member.id === optimistic.ownerId)?.name ?? null,
+    };
+    return { ...projected, reviewState: deriveSoaReviewState(projected) };
+  }), [initialItems, members, optimisticDrafts]);
 
   const summary = useMemo(() => summariseSoaQueue(queueItems), [queueItems]);
   const filters = useMemo<SoaQueueFilters>(() => ({
@@ -228,9 +246,67 @@ export function SoaReviewWorkspace({ items, members, currentUserId, saveAction }
   const selectedItem = retainingDirtySelection
     ? stateSelectedItem
     : matchingItems.find((item) => item.id === selectedId) ?? matchingItems[0] ?? null;
-  const selectedDraft = selectedItem?.id === selectedId && draft
+  const selectedDraft = selectedItem?.id === selectedId && draft && dirty
     ? draft
     : selectedItem ? toDraft(selectedItem) : null;
+
+  useEffect(() => {
+    if (!dirty) return;
+
+    function guardUnload(event: BeforeUnloadEvent) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+
+    function guardFinalisation(event: Event) {
+      const form = event.target;
+      if (!(form instanceof HTMLFormElement) || !form.matches("[data-soa-finalise-form]")) return;
+      if (window.confirm("Discard unsaved changes and finalise this SoA?")) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+
+    function guardAnchorNavigation(event: MouseEvent) {
+      if (
+        event.defaultPrevented
+        || event.button !== 0
+        || event.metaKey
+        || event.ctrlKey
+        || event.shiftKey
+        || event.altKey
+      ) return;
+
+      const eventTarget = event.target;
+      const element = eventTarget instanceof Element
+        ? eventTarget
+        : eventTarget instanceof Node ? eventTarget.parentElement : null;
+      const anchor = element?.closest("a[href]");
+      if (!(anchor instanceof HTMLAnchorElement)) return;
+      if (anchor.hasAttribute("download") || (anchor.target && anchor.target !== "_self")) return;
+
+      const destination = new URL(anchor.href, window.location.href);
+      const current = new URL(window.location.href);
+      if (destination.origin !== current.origin) return;
+      if (
+        destination.pathname === current.pathname
+        && destination.search === current.search
+        && destination.hash
+      ) return;
+      if (window.confirm("Discard unsaved changes and leave this control?")) return;
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+
+    window.addEventListener("beforeunload", guardUnload);
+    document.addEventListener("click", guardAnchorNavigation, true);
+    document.addEventListener("submit", guardFinalisation, true);
+    return () => {
+      window.removeEventListener("beforeunload", guardUnload);
+      document.removeEventListener("click", guardAnchorNavigation, true);
+      document.removeEventListener("submit", guardFinalisation, true);
+    };
+  }, [dirty]);
 
   function resetDetailForFilter() {
     setActiveTab("decision");
@@ -378,7 +454,7 @@ export function SoaReviewWorkspace({ items, members, currentUserId, saveAction }
         reviewState: deriveSoaReviewState({ ...selectedItem, ...selectedDraft }),
       };
       const nextQueue = queueItems.map((item) => item.id === updated.id ? updated : item);
-      setQueueItems(nextQueue);
+      setOptimisticDrafts((current) => ({ ...current, [updated.id]: selectedDraft }));
       setSelectedId(updated.id);
       setDraft(toDraft(updated));
       setDirty(false);
