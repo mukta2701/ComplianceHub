@@ -165,6 +165,29 @@ a.heat-cell:hover{outline:2px solid var(--ink);outline-offset:-2px}
 .spark-area{fill:var(--blue-pale)}
 .spark-line{fill:none;stroke:var(--blue);stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round}
 .spark-dot{fill:var(--blue)}
+/* continuous monitoring */
+.monitor-banner{display:flex;gap:14px;align-items:flex-start;padding:18px 20px}
+.monitor-banner strong{font-size:14px;display:block;margin-bottom:3px}
+.monitor-banner p{font-size:12px;color:#596273;margin:0;line-height:1.5;max-width:82ch}
+.monitor-dot{width:12px;height:12px;border-radius:50%;flex:none;margin-top:4px}
+.monitor-dot.ok{background:var(--green);box-shadow:0 0 0 4px #d9f2e3}
+.monitor-dot.watch{background:var(--amber);box-shadow:0 0 0 4px #fbeecb}
+.monitor-signals{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.monitor-signal{background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 1px 2px #1c27370a;padding:16px 18px;display:flex;flex-direction:column;gap:6px;text-decoration:none}
+.monitor-signal:hover{border-color:#c9d3e6}
+.ms-label{font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#828b99}
+.ms-value{font-size:30px;font-weight:800;color:var(--ink);line-height:1;letter-spacing:-.02em}
+.monitor-list{list-style:none;margin:0;padding:0}
+.monitor-list>li>a{display:flex;align-items:center;gap:12px;padding:13px 20px;border-top:1px solid #edf0f4;text-decoration:none}
+.monitor-list>li:first-child>a{border-top:0}
+.monitor-list>li>a:hover{background:#f7f9fd}
+.monitor-list time{font-size:11px;color:#596273;font-variant-numeric:tabular-nums;white-space:nowrap;flex:none;width:90px}
+.monitor-list .ml-body{display:flex;flex-direction:column;gap:4px;flex:1;min-width:0}
+.monitor-list .ml-body>strong{font-size:13px;color:var(--ink)}
+.monitor-list .ml-meta{display:flex;align-items:center;gap:8px;font-size:10.5px;color:#828b99}
+.monitor-list svg{width:15px;color:#8a93a1;flex:none}
+@media(max-width:1050px){.monitor-signals{grid-template-columns:1fr 1fr}}
+@media(max-width:640px){.monitor-signals{grid-template-columns:1fr}}
 /* SoA review workspace */
 .soa-review-workspace{scroll-margin-top:86px;max-width:100%}
 .soa-review-summary{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:12px}

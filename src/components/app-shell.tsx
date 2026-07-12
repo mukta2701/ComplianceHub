@@ -15,6 +15,7 @@ const navGroups = [
     ["/app/tasks", "check", "Tasks"],
   ] },
   { label: "Operate", items: [
+    ["/app/monitoring", "activity", "Monitoring"],
     ["/app/policies", "file", "Policies"],
     ["/app/audits", "shield", "Internal audits"],
     ["/app/kpis", "check", "Performance"],
