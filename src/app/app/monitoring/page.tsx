@@ -1,141 +1,154 @@
 import Link from "next/link";
 import { requireAppContext } from "@/lib/app-context";
-import { deriveEvidenceStatus } from "@/features/evidence/domain/evidence";
-import { isPolicyReviewDue } from "@/features/policies/domain/review";
-import { isOverdue, type TaskStatus } from "@/features/tasks/domain/tasks";
+import { resolveMonitorProvider } from "@/features/monitoring/application/monitor-registry";
+import { summariseChecks } from "@/features/monitoring/domain/detect";
+import type { MonitorProviderKind, CheckSeverity } from "@/features/monitoring/domain/monitor-provider";
 import { Card, PageIntro, Pill } from "@/components/ui";
 import { StatusLabel, type StatusTone } from "@/components/status-label";
-import { Icon } from "@/components/icons";
+import {
+  addAlertChannelAction, addMonitorSourceAction, acknowledgeFindingAction, raiseTaskFromFindingAction,
+  resolveFindingAction, revokeAlertChannelAction, revokeMonitorSourceAction, runMonitoringNowAction,
+} from "./actions";
 
-const SOURCE_LABEL: Record<string, string> = {
-  evidence_expiry: "Stale evidence",
-  policy_review: "Policy review",
-  system: "Compliance calendar",
-  risk_treatment: "Risk treatment",
-  gap: "Assessment gap",
-  manual: "Manual",
+const SEVERITY_TONE: Record<CheckSeverity, StatusTone> = { critical: "risk", high: "risk", medium: "attention", low: "neutral" };
+const SEVERITY_PILL: Record<CheckSeverity, string> = { critical: "red", high: "red", medium: "amber", low: "blue" };
+const STATUS_PILL: Record<string, string> = { open: "red", acknowledged: "amber", resolved: "green" };
+
+type Finding = {
+  id: string; check_id: string; control_ref: string; subject_type: string; subject_id: string;
+  severity: CheckSeverity; title: string; detail: string; status: string; task_id: string | null;
+  detected_at: string; resolved_at: string | null;
 };
-
-function addDays(iso: string, days: number): string {
-  const d = new Date(`${iso}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
+type Source = { id: string; provider: string; label: string; config: { owner?: string; repo?: string } };
+type Channel = { id: string; type: string; label: string; min_severity: string };
 
 export default async function MonitoringPage() {
-  const { supabase, organisation } = await requireAppContext();
+  const { supabase, organisation, membership } = await requireAppContext();
+  const isOwner = membership.role === "owner";
   const today = new Date().toISOString().slice(0, 10);
-  const horizon = addDays(today, 90);
 
-  const { data: register } = await supabase
-    .from("soa_registers").select("id").eq("organisation_id", organisation.id)
-    .order("version", { ascending: false }).limit(1).maybeSingle();
-
-  const [evidence, tasks, policies, soaItems, autoTasks] = await Promise.all([
-    supabase.from("evidence").select("id,title,status,valid_until").eq("organisation_id", organisation.id).in("status", ["current", "expiring", "expired"]).limit(2000).then((r) => r.data ?? []),
-    supabase.from("tasks").select("id,title,status,due_on,source").eq("organisation_id", organisation.id).in("status", ["open", "in_progress"]).limit(1000).then((r) => r.data ?? []),
-    supabase.from("policies").select("id,reference,title,review_due").eq("organisation_id", organisation.id).eq("status", "approved").limit(1000).then((r) => r.data ?? []),
-    register ? supabase.from("soa_items").select("id,control_code,control_title,applicable,status,justification,evidence").eq("organisation_id", organisation.id).eq("soa_register_id", register.id).then((r) => r.data ?? []) : Promise.resolve([] as Array<{ id: string; control_code: string; control_title: string; applicable: boolean; status: string; justification: string; evidence: string }>),
-    supabase.from("tasks").select("id,title,due_on,source").eq("organisation_id", organisation.id).in("status", ["open", "in_progress"]).in("source", ["evidence_expiry", "policy_review", "system", "risk_treatment"]).order("created_at", { ascending: false }).limit(8).then((r) => r.data ?? []),
+  const [findings, sources, channels] = await Promise.all([
+    supabase.from("monitoring_findings").select("id,check_id,control_ref,subject_type,subject_id,severity,title,detail,status,task_id,detected_at,resolved_at").eq("organisation_id", organisation.id).order("detected_at", { ascending: false }).limit(100).then((r) => (r.data ?? []) as Finding[]),
+    supabase.from("monitor_sources").select("id,provider,label,config").eq("organisation_id", organisation.id).is("revoked_at", null).order("created_at", { ascending: false }).then((r) => (r.data ?? []) as Source[]),
+    // config (the webhook) is deliberately NOT selected — it is a credential.
+    supabase.from("alert_channels").select("id,type,label,min_severity").eq("organisation_id", organisation.id).is("revoked_at", null).order("created_at", { ascending: false }).then((r) => (r.data ?? []) as Channel[]),
   ]);
 
-  // Evidence freshness (live-derived from validity, so it is always current).
-  const ev = { current: 0, expiring: 0, expired: 0 };
-  for (const item of evidence) ev[deriveEvidenceStatus(item.valid_until, today)] += 1;
-  const evTotal = ev.current + ev.expiring + ev.expired;
+  // Live posture per connected source (the fake provider is deterministic + no
+  // network; the real GitHub adapter is Phase 2, gated by MONITORING_LIVE).
+  const sourceHealth = await Promise.all(sources.map(async (s) => {
+    const checks = await resolveMonitorProvider(s.provider as MonitorProviderKind).runChecks({
+      id: s.id, provider: s.provider as MonitorProviderKind, config: s.config ?? {}, accessToken: "",
+    });
+    return { source: s, summary: summariseChecks(checks) };
+  }));
 
-  // Overdue work.
-  const overdue = tasks.filter((t) => isOverdue({ status: t.status as TaskStatus, dueOn: t.due_on }, today)).length;
-
-  // Policy reviews.
-  const reviewsDue = policies.filter((p) => isPolicyReviewDue(p.review_due, today)).length;
-
-  // Control coverage / gaps on the live SoA.
-  const applicable = soaItems.filter((i) => i.applicable);
-  const undecided = soaItems.filter((i) => i.status === "pending").length;
-  const missingEvidence = applicable.filter((i) => !i.evidence || !i.evidence.trim()).length;
-
-  // Forward-looking calendar: everything with a date in the next 90 days.
-  type Upcoming = { key: string; date: string; kind: string; label: string; href: string; tone: StatusTone };
-  const upcoming: Upcoming[] = [];
-  for (const e of evidence) {
-    const st = deriveEvidenceStatus(e.valid_until, today);
-    if (e.valid_until && e.valid_until >= today && e.valid_until <= horizon && st !== "expired") {
-      upcoming.push({ key: `ev-${e.id}`, date: e.valid_until, kind: "Evidence expires", label: e.title, href: "/app/evidence", tone: st === "expiring" ? "attention" : "neutral" });
-    }
-  }
-  for (const p of policies) {
-    if (p.review_due && p.review_due >= today && p.review_due <= horizon) {
-      upcoming.push({ key: `pol-${p.id}`, date: p.review_due, kind: "Policy review", label: `${p.reference}: ${p.title}`, href: `/app/policies/${p.id}`, tone: "neutral" });
-    }
-  }
-  for (const t of tasks) {
-    if (t.due_on && t.due_on >= today && t.due_on <= horizon) {
-      upcoming.push({ key: `task-${t.id}`, date: t.due_on, kind: "Task due", label: t.title, href: `/app/tasks/${t.id}`, tone: "neutral" });
-    }
-  }
-  upcoming.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-
-  const signals: Array<{ label: string; value: number; detail: string; tone: StatusTone; href: string }> = [
-    { label: "Evidence health", value: ev.expiring + ev.expired, detail: ev.expiring + ev.expired === 0 ? `all ${evTotal} items current` : `${ev.expiring} expiring · ${ev.expired} expired`, tone: ev.expired > 0 ? "risk" : ev.expiring > 0 ? "attention" : "confirmed", href: "/app/evidence" },
-    { label: "Overdue work", value: overdue, detail: overdue === 0 ? "nothing past due" : "tasks past their due date", tone: overdue > 0 ? "risk" : "confirmed", href: "/app/tasks?filter=overdue" },
-    { label: "Reviews due", value: reviewsDue, detail: reviewsDue === 0 ? "no policy reviews due" : "policy reviews due or overdue", tone: reviewsDue > 0 ? "attention" : "confirmed", href: "/app/policies" },
-    { label: "Control gaps", value: undecided + missingEvidence, detail: undecided + missingEvidence === 0 ? "every applicable control covered" : `${undecided} undecided · ${missingEvidence} without evidence`, tone: undecided + missingEvidence > 0 ? "attention" : "confirmed", href: register ? `/app/soa/${register.id}` : "/app/soa" },
-  ];
-  const allClear = signals.every((s) => s.value === 0);
+  const openFindings = findings.filter((f) => f.status === "open" || f.status === "acknowledged");
+  const criticalOpen = openFindings.filter((f) => f.severity === "critical" || f.severity === "high").length;
 
   return <>
     <PageIntro
       eyebrow="MONITORING"
       title="Continuous monitoring"
-      body="ComplianceHub watches your posture automatically — evidence freshness, overdue work, upcoming reviews, and control gaps. These signals recalculate live every time you look, and a daily automated sweep ages evidence and raises the work on its own."
+      body="ComplianceHub watches the systems where your work happens — it connects to a tool like GitHub, runs compliance checks continuously, and the moment it detects a policy violation or rising risk it raises a finding, alerts you in-app, and notifies your team in Slack."
     />
 
     <Card className="monitor-banner" style={{ marginBottom: "16px" }}>
-      <span className={`monitor-dot ${allClear ? "ok" : "watch"}`} aria-hidden="true" />
-      <div>
-        <strong>{allClear ? "All monitored signals are healthy" : "Monitoring is flagging items that need attention"}</strong>
-        <p>Automated daily sweep is active — it ages evidence to expiring/expired, raises replacement tasks, flags overdue work, and schedules policy reviews. Signals below are live as of {today}.</p>
+      <span className={`monitor-dot ${sources.length === 0 ? "watch" : openFindings.length === 0 ? "ok" : "watch"}`} aria-hidden="true" />
+      <div style={{ flex: 1 }}>
+        <strong>
+          {sources.length === 0 ? "Connect a system to start watching"
+            : openFindings.length === 0 ? "All watched systems are compliant"
+            : `${openFindings.length} open finding${openFindings.length === 1 ? "" : "s"}${criticalOpen > 0 ? ` · ${criticalOpen} high or critical` : ""}`}
+        </strong>
+        <p>
+          {sources.length === 0
+            ? "Add a GitHub source below and ComplianceHub will run continuous checks against it — branch protection, org 2FA, admin changes — and alert you the moment something drifts."
+            : `Watching ${sources.length} source${sources.length === 1 ? "" : "s"}. The hourly run checks posture, raises findings, and alerts in-app + Slack. Live as of ${today}.`}
+        </p>
       </div>
+      {isOwner && sources.length > 0 && <form action={runMonitoringNowAction}><button className="button">Run checks now</button></form>}
     </Card>
 
-    <div className="monitor-signals">
-      {signals.map((s) => <Link key={s.label} className="monitor-signal" href={s.href}>
-        <span className="ms-label">{s.label}</span>
-        <span className="ms-value">{s.value}</span>
-        <StatusLabel tone={s.tone}>{s.detail}</StatusLabel>
-      </Link>)}
-    </div>
+    <Card style={{ marginBottom: "16px" }}>
+      <div className="card-head"><div><h3>Connected systems</h3><p>Workplace tools ComplianceHub watches continuously</p></div><Link href="/app/integrations">All connections</Link></div>
+      {sourceHealth.length > 0
+        ? <ul className="monitor-list">
+            {sourceHealth.map(({ source, summary }) => <li key={source.id}>
+              <span className="ml-body" style={{ width: "100%" }}>
+                <strong>{source.label || `${source.config?.owner}/${source.config?.repo}`}</strong>
+                <span className="ml-meta">
+                  <Pill tone="neutral">GitHub</Pill>
+                  <StatusLabel tone={summary.failing > 0 ? (summary.worstSeverity === "critical" || summary.worstSeverity === "high" ? "risk" : "attention") : "confirmed"}>
+                    {summary.passing}/{summary.total} checks passing{summary.failing > 0 ? ` · ${summary.failing} failing` : ""}
+                  </StatusLabel>
+                </span>
+              </span>
+              {isOwner && <form action={revokeMonitorSourceAction}><input type="hidden" name="id" value={source.id} /><button className="button secondary" style={{ minHeight: "32px", padding: "6px 12px" }}>Disconnect</button></form>}
+            </li>)}
+          </ul>
+        : <p className="empty-note">No systems connected yet. Connect one below to begin continuous monitoring.</p>}
+      {isOwner && <form action={addMonitorSourceAction} className="monitor-connect-form">
+        <div className="mc-field"><label htmlFor="ms-owner">GitHub owner</label><input id="ms-owner" name="owner" placeholder="acme" required /></div>
+        <div className="mc-field"><label htmlFor="ms-repo">Repository</label><input id="ms-repo" name="repo" placeholder="isms" required /></div>
+        <div className="mc-field"><label htmlFor="ms-label">Label (optional)</label><input id="ms-label" name="label" placeholder="Production ISMS repo" /></div>
+        <button className="button">Connect source</button>
+        <p className="field-hint">Sandbox mode — no OAuth needed. A real access token + GitHub OAuth is the go-live step.</p>
+      </form>}
+    </Card>
 
-    <div className="dashboard-grid" style={{ marginTop: "16px" }}>
-      <Card>
-        <div className="card-head"><div><h3>Upcoming in the next 90 days</h3><p>Evidence expiries, policy reviews, and work coming due</p></div></div>
-        {upcoming.length > 0
-          ? <ul className="monitor-list">
-              {upcoming.slice(0, 12).map((u) => <li key={u.key}>
-                <Link href={u.href}>
-                  <time>{u.date}</time>
-                  <span className="ml-body"><strong>{u.label}</strong><StatusLabel tone={u.tone}>{u.kind}</StatusLabel></span>
-                  <Icon name="arrow" />
-                </Link>
-              </li>)}
-            </ul>
-          : <p className="empty-note">Nothing scheduled in the next 90 days. New reviews and expiries appear here automatically as you add evidence and policies.</p>}
-      </Card>
+    <Card style={{ marginBottom: "16px" }}>
+      <div className="card-head"><div><h3>Active findings</h3><p>Detected violations and drift, newest first</p></div></div>
+      {findings.length > 0
+        ? <ul className="finding-list">
+            {findings.map((f) => <li key={f.id} data-status={f.status}>
+              <div className="finding-head">
+                <Pill tone={SEVERITY_PILL[f.severity]}>{f.severity}</Pill>
+                <strong>{f.title}</strong>
+                <Pill tone={STATUS_PILL[f.status] ?? "blue"}>{f.status}</Pill>
+              </div>
+              <p className="finding-detail">{f.detail}</p>
+              <div className="finding-meta">
+                <StatusLabel tone={SEVERITY_TONE[f.severity]}>{f.control_ref}</StatusLabel>
+                <span>{f.subject_id}</span>
+                <span>Detected {new Date(f.detected_at).toLocaleString("en-GB")}</span>
+                {f.task_id && <Link href={`/app/tasks/${f.task_id}`}>Remediation task →</Link>}
+              </div>
+              {isOwner && f.status !== "resolved" && <div className="finding-actions">
+                {f.status === "open" && <form action={acknowledgeFindingAction}><input type="hidden" name="id" value={f.id} /><button className="button secondary">Acknowledge</button></form>}
+                {!f.task_id && <form action={raiseTaskFromFindingAction}><input type="hidden" name="id" value={f.id} /><button className="button secondary">Raise task</button></form>}
+                <form action={resolveFindingAction}><input type="hidden" name="id" value={f.id} /><button className="button secondary">Resolve</button></form>
+              </div>}
+            </li>)}
+          </ul>
+        : <p className="empty-note">{sources.length === 0 ? "Connect a system to start detecting findings." : "No findings — every check on your connected systems is passing. Run checks now or wait for the hourly sweep."}</p>}
+    </Card>
 
-      <Card>
-        <div className="card-head"><div><h3>Raised automatically</h3><p>Work the monitoring created for you</p></div><Link href="/app/tasks">All tasks</Link></div>
-        {autoTasks.length > 0
-          ? <ul className="monitor-list">
-              {autoTasks.map((t) => <li key={t.id}>
-                <Link href={`/app/tasks/${t.id}`}>
-                  <span className="ml-body"><strong>{t.title}</strong><span className="ml-meta"><Pill tone="neutral">{SOURCE_LABEL[t.source] ?? "Automated"}</Pill>{t.due_on && <span>Due {t.due_on}</span>}</span></span>
-                  <Icon name="arrow" />
-                </Link>
-              </li>)}
-            </ul>
-          : <p className="empty-note">Nothing raised automatically yet. As evidence ages or reviews fall due, the daily sweep opens owned tasks here without you asking.</p>}
-      </Card>
-    </div>
+    <Card>
+      <div className="card-head"><div><h3>Alert channels</h3><p>Where ComplianceHub notifies your team when a finding is raised</p></div></div>
+      <ul className="monitor-list">
+        <li>
+          <span className="ml-body"><strong>In-app pop-up &amp; notifications</strong><span className="ml-meta"><Pill tone="green">Always on</Pill><StatusLabel tone="confirmed">Every finding alerts owners in the app</StatusLabel></span></span>
+        </li>
+        {channels.map((c) => <li key={c.id}>
+          <span className="ml-body"><strong>{c.label}</strong><span className="ml-meta"><Pill tone="neutral">Slack</Pill><StatusLabel tone="neutral">Alerts at {c.min_severity} and above</StatusLabel></span></span>
+          {isOwner && <form action={revokeAlertChannelAction}><input type="hidden" name="id" value={c.id} /><button className="button secondary" style={{ minHeight: "32px", padding: "6px 12px" }}>Remove</button></form>}
+        </li>)}
+      </ul>
+      {isOwner && <form action={addAlertChannelAction} className="monitor-connect-form">
+        <div className="mc-field" style={{ flex: "2 1 320px" }}><label htmlFor="ac-url">Slack incoming-webhook URL</label><input id="ac-url" name="webhookUrl" type="url" placeholder="https://hooks.slack.com/services/…" required /></div>
+        <div className="mc-field"><label htmlFor="ac-sev">Alert at</label>
+          <select id="ac-sev" name="minSeverity" defaultValue="high">
+            <option value="low">Low and above</option>
+            <option value="medium">Medium and above</option>
+            <option value="high">High and above</option>
+            <option value="critical">Critical only</option>
+          </select>
+        </div>
+        <div className="mc-field"><label htmlFor="ac-label">Label (optional)</label><input id="ac-label" name="label" placeholder="#compliance-alerts" /></div>
+        <button className="button">Add Slack channel</button>
+        <p className="field-hint">Create an incoming webhook in Slack and paste its URL. It is stored as a credential and never shown again.</p>
+      </form>}
+    </Card>
   </>;
 }

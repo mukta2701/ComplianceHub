@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "./icons";
+import { AlertToaster } from "./alert-toaster";
 import { signOutAction } from "@/app/app/actions";
 
 const navGroups = [
@@ -94,5 +95,6 @@ export function AppShell({ orgName, orgInitials, userInitials, unreadCount, chil
       <main className="content">{children}</main>
       <footer className="legal">ComplianceHub supports readiness management. It does not provide ISO certification or legal advice.</footer>
     </div>
+    <AlertToaster />
   </div>;
 }

@@ -3,7 +3,7 @@ import { Card, PageIntro, Pill } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { markAllNotificationsReadAction, markNotificationReadAction } from "./actions";
 
-const KIND_ICON: Record<string, string> = { evidence_expiry: "file", task_overdue: "check", assessment: "clipboard", risk: "alert", system: "bell" };
+const KIND_ICON: Record<string, string> = { evidence_expiry: "file", task_overdue: "check", assessment: "clipboard", risk: "alert", system: "bell", policy_violation: "alert", control_drift: "activity" };
 
 export default async function NotificationsPage() {
   const { supabase } = await requireAppContext();

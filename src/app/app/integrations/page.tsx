@@ -25,6 +25,14 @@ export default async function IntegrationsPage() {
 
     <SubTabs tabs={[{ href: "/app/settings", label: "Settings" }, { href: "/app/integrations", label: "Connections" }]} />
 
+    <Card style={{ padding: "16px 18px", marginBottom: "16px", display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+      <div style={{ flex: 1, minWidth: "260px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "4px" }}><h2 style={{ fontSize: "15px", margin: 0 }}>Continuous monitoring</h2><Pill tone="green">Active watchdog</Pill></div>
+        <p style={{ fontSize: "13px", color: "#596273", margin: 0 }}>Connect a GitHub source to have ComplianceHub run compliance checks continuously and alert you in-app and in Slack the moment posture drifts. Set it up on the Monitoring page.</p>
+      </div>
+      <a className="button" href="/app/monitoring">Open Monitoring</a>
+    </Card>
+
     {!isOwner && <Card style={{ padding: "18px" }} role="note"><p>Only workspace owners can manage integrations.</p></Card>}
     {isOwner && <>
       <Card style={{ padding: "18px", marginBottom: "16px" }}>
