@@ -1,11 +1,12 @@
 import { requireAppContext } from "@/lib/app-context";
 import { Card, PageIntro, Pill } from "@/components/ui";
+import { siteUrl } from "@/lib/site-url";
 import { saveTrustCenterAction, disableTrustCenterAction } from "./actions";
 
 export default async function TrustCenterSettingsPage() {
   const { supabase, membership, organisation } = await requireAppContext();
   const isOwner = membership.role === "owner";
-  const site = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+  const site = siteUrl();
 
   // Owner-only RLS means a non-owner reads no row; guard the query accordingly.
   const { data: settings } = isOwner

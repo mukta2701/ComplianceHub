@@ -1038,7 +1038,7 @@ test("a task is pushed to a sandbox tracker, polled to In Progress, then the con
     await page.reload();
     await expect(page.getByText(/FAKE-.+: In Progress/)).toBeVisible();
   } else {
-    console.log("CRON_SECRET unavailable to the Playwright process — skipping step 4's poll-sync assertion.");
+    test.info().annotations.push({ type: "skipped-assertion", description: "CRON_SECRET unavailable — step 4's poll-sync assertion was not exercised" });
   }
 
   // 5. Axe on the task detail page with the tracker chip.
@@ -1119,7 +1119,7 @@ test("an owner adds an evidence source, the collector fills the vault, and re-co
     const evidenceAxe = await new AxeBuilder({ page }).analyze();
     expect(evidenceAxe.violations).toEqual([]);
   } else {
-    console.log("CRON_SECRET unavailable to the Playwright process — skipping the evidence-collection assertions.");
+    test.info().annotations.push({ type: "skipped-assertion", description: "CRON_SECRET unavailable — evidence-collection assertions were not exercised" });
   }
 });
 

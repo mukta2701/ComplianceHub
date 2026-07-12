@@ -34,11 +34,17 @@ jobs:
           echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$ANON_KEY" >> "$GITHUB_ENV"
           echo "SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY" >> "$GITHUB_ENV"
           echo "NEXT_PUBLIC_SITE_URL=http://127.0.0.1:3000" >> "$GITHUB_ENV"
+          # Provisioned so the CRON_SECRET-gated e2e steps actually run (rather than
+          # skipping to a vacuous pass) and so secret-encryption paths have a key.
+          echo "CRON_SECRET=ci-test-cron-secret" >> "$GITHUB_ENV"
+          echo "APP_ENCRYPTION_KEY=$(openssl rand -base64 32)" >> "$GITHUB_ENV"
       # Non-hermetic integration tests: run only now that the DB stack is up and
       # its env (incl. the service-role key) is provisioned. Excluded from the
       # earlier `npm test` on purpose.
       - run: npm run test:integration
-      - run: npm run test:e2e -- --project=chromium
+      # Run BOTH Playwright projects (desktop chromium + mobile) so mobile-viewport
+      # regressions are caught in CI, not just locally.
+      - run: npm run test:e2e
 
   secrets:
     runs-on: ubuntu-latest

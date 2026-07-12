@@ -73,7 +73,7 @@ export async function createRiskAction(formData: FormData) {
 
 export async function deleteRiskAction(formData: FormData) {
   const { supabase } = await requireAppContext();
-  await supabase.from("risks").delete().eq("id", String(formData.get("id")));
+  const { error } = await supabase.from("risks").delete().eq("id", String(formData.get("id"))); if (error) throw new Error("Could not delete the risk");
   revalidatePath("/app/risks");
 }
 
@@ -222,6 +222,39 @@ export async function inviteMemberAction(formData: FormData) {
     const { data, error } = await supabase.from("invitations").insert({ organisation_id: row.organisationId, email: row.email, role: row.role, invited_by: row.invitedBy, token_hash: row.tokenHash, expires_at: row.expiresAt }).select("id").single(); if (error) throw error; return data;
   }});
   redirect(`/app/settings?invite=${encodeURIComponent(result.token)}`);
+}
+
+// Owner-managed team lifecycle. The database enforces the hard rules — only
+// owners may update/delete memberships (RLS) and an org must keep at least one
+// owner (protect_last_owner trigger) — so these actions add the app-level guard
+// and translate the trigger error into friendly copy.
+export async function changeMemberRoleAction(formData: FormData) {
+  const { supabase, membership, organisation } = await requireAppContext();
+  if (membership.role !== "owner") throw new Error("Only workspace owners can change roles");
+  const userId = String(formData.get("userId"));
+  const role = String(formData.get("role"));
+  if (role !== "owner" && role !== "member") throw new Error("Invalid role");
+  const { error } = await supabase.from("memberships").update({ role }).eq("organisation_id", organisation.id).eq("user_id", userId);
+  if (error) throw new Error(error.message.includes("at least one owner") ? "An organisation must keep at least one owner." : "Could not change the member's role");
+  revalidatePath("/app/settings");
+}
+
+export async function removeMemberAction(formData: FormData) {
+  const { supabase, membership, organisation } = await requireAppContext();
+  if (membership.role !== "owner") throw new Error("Only workspace owners can remove members");
+  const userId = String(formData.get("userId"));
+  const { error } = await supabase.from("memberships").delete().eq("organisation_id", organisation.id).eq("user_id", userId);
+  if (error) throw new Error(error.message.includes("at least one owner") ? "An organisation must keep at least one owner." : "Could not remove the member");
+  revalidatePath("/app/settings");
+}
+
+export async function revokeInvitationAction(formData: FormData) {
+  const { supabase, membership, organisation } = await requireAppContext();
+  if (membership.role !== "owner") throw new Error("Only workspace owners can revoke invitations");
+  const { error } = await supabase.from("invitations").delete()
+    .eq("organisation_id", organisation.id).eq("email", String(formData.get("email"))).is("accepted_at", null);
+  if (error) throw new Error("Could not revoke the invitation");
+  revalidatePath("/app/settings");
 }
 
 export async function acceptInvitationAction(formData: FormData) {

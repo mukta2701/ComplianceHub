@@ -8,3 +8,8 @@ export const signUpSchema = z.object({
   displayName: z.string().trim().min(1).max(120), email, password,
   confirmPassword: z.string(),
 }).refine((value) => value.password === value.confirmPassword, { message: "Passwords do not match", path: ["confirmPassword"] });
+
+export const requestPasswordResetSchema = z.object({ email });
+export const updatePasswordSchema = z.object({
+  password, confirmPassword: z.string(),
+}).refine((value) => value.password === value.confirmPassword, { message: "Passwords do not match", path: ["confirmPassword"] });

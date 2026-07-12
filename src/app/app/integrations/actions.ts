@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireAppContext } from "@/lib/app-context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
+import { encryptSecret } from "@/lib/security/secrets";
 import { connectionInputSchema } from "@/features/integrations/application/connection";
 import { evidenceSourceInputSchema } from "@/features/integrations/application/evidence-source";
 
@@ -16,7 +17,7 @@ export async function addConnectionAction(formData: FormData) {
     : { owner: parsed.owner, repo: parsed.repo };
   const { error } = await supabase.from("integration_connections").insert({
     organisation_id: organisation.id, provider: parsed.provider, label: parsed.label || parsed.provider,
-    config, access_token: parsed.accessToken || null, connected_by: user.id,
+    config, access_token: encryptSecret(parsed.accessToken || null), connected_by: user.id,
   });
   if (error) throw new Error("Could not add the connection");
   revalidatePath("/app/integrations");
@@ -42,7 +43,7 @@ export async function addEvidenceSourceAction(formData: FormData) {
       : { account: parsed.account, region: parsed.region };
   const { error } = await supabase.from("evidence_sources").insert({
     organisation_id: organisation.id, provider: parsed.provider, label: parsed.label || parsed.provider,
-    config, access_token: parsed.accessToken || null, connected_by: user.id,
+    config, access_token: encryptSecret(parsed.accessToken || null), connected_by: user.id,
   });
   if (error) throw new Error("Could not add the evidence source");
   revalidatePath("/app/integrations");

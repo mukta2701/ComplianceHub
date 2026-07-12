@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireAppContext } from "@/lib/app-context";
 import { one } from "@/lib/supabase/one";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
+import { decryptSecret } from "@/lib/security/secrets";
 import { resolveTicketProvider } from "@/features/integrations/application/registry";
 import { buildTicketPayload } from "@/features/integrations/domain/mapping";
 import type { IntegrationProvider } from "@/features/integrations/domain/provider";
@@ -24,7 +25,7 @@ export async function pushTaskToTrackerAction(formData: FormData) {
   const payload = buildTicketPayload({ title: task.title, detail: task.detail, source: task.source, controlCode: control?.code ?? null });
   const provider = resolveTicketProvider(connection.provider as IntegrationProvider);
   const created = await provider.createTicket(
-    { id: connection.id, provider: connection.provider as IntegrationProvider, config: connection.config as Record<string, unknown>, accessToken: connection.access_token ?? "" },
+    { id: connection.id, provider: connection.provider as IntegrationProvider, config: connection.config as Record<string, unknown>, accessToken: decryptSecret(connection.access_token) ?? "" },
     payload,
   );
   const { error } = await supabase.from("task_tickets").insert({

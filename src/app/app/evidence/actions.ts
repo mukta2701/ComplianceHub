@@ -60,7 +60,7 @@ export async function linkEvidenceAction(formData: FormData) {
 
 export async function unlinkEvidenceAction(formData: FormData) {
   const { supabase } = await requireAppContext();
-  await supabase.from("evidence_links").delete().eq("id", String(formData.get("linkId")));
+  const { error } = await supabase.from("evidence_links").delete().eq("id", String(formData.get("linkId"))); if (error) throw new Error("Could not remove the evidence link");
   revalidatePath("/app/evidence");
 }
 

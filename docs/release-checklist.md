@@ -9,4 +9,4 @@
 - [ ] Backup restoration has been exercised into a separate environment.
 - [ ] Desktop and mobile critical journeys pass keyboard and automated accessibility checks.
 - [ ] PDF and DOCX exports match the finalised snapshot.
-- [ ] `pnpm verify`, `pnpm test:db`, and `pnpm test:e2e` pass from a clean checkout.
+- [ ] `npm run verify`, `npm run test:db`, and `npm run test:e2e` pass from a clean checkout.

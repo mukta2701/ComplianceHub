@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { resolveEvidenceProvider } from "./evidence-registry";
+import { decryptSecret } from "@/lib/security/secrets";
 import { toEvidenceRow } from "../domain/evidence-collection";
 import type { EvidenceProviderKind } from "../domain/evidence-provider";
 
@@ -22,7 +23,7 @@ export async function collectEvidence(supabase: SupabaseClient): Promise<{ colle
         id: source.id,
         provider: source.provider as EvidenceProviderKind,
         config: (source.config ?? {}) as Record<string, unknown>,
-        accessToken: source.access_token ?? "",
+        accessToken: decryptSecret(source.access_token) ?? "",
       });
       for (const item of items) {
         const row = toEvidenceRow(item, { organisationId: source.organisation_id, sourceId: source.id });

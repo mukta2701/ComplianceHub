@@ -58,6 +58,6 @@ export async function raiseKpiTaskAction(formData: FormData) {
     detail: nextSteps, owner_id: ownerId, source: "manual", created_by: user.id,
   }).select("id").single();
   if (error) throw new Error("Could not raise the task");
-  await supabase.from("kpis").update({ task_id: task.id }).eq("id", id);
+  const { error: linkError } = await supabase.from("kpis").update({ task_id: task.id }).eq("id", id); if (linkError) throw new Error("Raised the task but could not link it to the KPI");
   revalidatePath("/app/kpis"); revalidatePath("/app/tasks");
 }

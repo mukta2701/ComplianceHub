@@ -6,16 +6,27 @@ import { memoizeOwners } from "@/features/automation/application/owner-resolver"
 import type { SweepEvidence, SweepPolicy, SweepTask } from "@/features/automation/domain/sweep";
 import { collectEvidence } from "@/features/integrations/application/collect-run";
 import { syncTickets } from "@/features/integrations/application/sync-run";
+import { logError } from "@/lib/observability/logger";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
+
+// Run a named stage in isolation: a failure is logged and turned into an error
+// marker instead of aborting the whole sweep, so one bad stage can't starve the
+// others (evidence ageing + notifications must still run even if collect fails).
+async function stage<T>(name: string, run: () => Promise<T>): Promise<T | { error: string }> {
+  try { return await run(); }
+  catch (error) { await logError("cron", `daily cron stage "${name}" failed`, error); return { error: `${name} failed` }; }
+}
 
 async function sweep(request: Request) {
   if (!isAuthorisedCron(request)) return NextResponse.json({ error: "unauthorised" }, { status: 401 });
   const supabase = createSupabaseServiceClient();
   // Order matters: collect fresh evidence, then sync ticket statuses, then
-  // sweep (age evidence, raise tasks, notify) — each stage feeds the next.
-  const collectResult = await collectEvidence(supabase);
-  const syncResult = await syncTickets(supabase);
+  // sweep (age evidence, raise tasks, notify). Each stage is isolated so a
+  // failure is reported, not fatal.
+  const collectResult = await stage("collect", () => collectEvidence(supabase));
+  const syncResult = await stage("sync", () => syncTickets(supabase));
   const today = new Date().toISOString().slice(0, 10);
   // Memoized so each organisation's owners are fetched at most once per sweep
   // run, instead of once per task/policy row (an N+1 at real tenant scale).
@@ -109,7 +120,7 @@ async function sweep(request: Request) {
       return Boolean(data?.length);
     },
   };
-  const summary = await runDailySweep(deps);
+  const summary = await stage("sweep", () => runDailySweep(deps));
   return NextResponse.json({ collect: collectResult, sync: syncResult, sweep: summary });
 }
 

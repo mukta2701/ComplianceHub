@@ -35,7 +35,7 @@ export async function updateAssetAction(formData: FormData) {
 
 export async function deleteAssetAction(formData: FormData) {
   const { supabase } = await requireAppContext();
-  await supabase.from("assets").delete().eq("id", String(formData.get("id")));
+  const { error } = await supabase.from("assets").delete().eq("id", String(formData.get("id"))); if (error) throw new Error("Could not delete the asset");
   revalidatePath("/app/assets"); redirect("/app/assets");
 }
 
@@ -50,6 +50,6 @@ export async function linkAssetRiskAction(formData: FormData) {
 export async function unlinkAssetRiskAction(formData: FormData) {
   const { supabase } = await requireAppContext();
   const assetId = String(formData.get("assetId"));
-  await supabase.from("asset_risks").delete().eq("asset_id", assetId).eq("risk_id", String(formData.get("riskId")));
+  const { error } = await supabase.from("asset_risks").delete().eq("asset_id", assetId).eq("risk_id", String(formData.get("riskId"))); if (error) throw new Error("Could not unlink the risk");
   revalidatePath(`/app/assets/${assetId}`);
 }

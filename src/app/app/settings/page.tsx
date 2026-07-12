@@ -3,7 +3,8 @@ import { Card, PageIntro, Pill } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { SubTabs } from "@/components/sub-tabs";
 import { one } from "@/lib/supabase/one";
-import { inviteMemberAction } from "../actions";
+import { siteUrl } from "@/lib/site-url";
+import { inviteMemberAction, changeMemberRoleAction, removeMemberAction, revokeInvitationAction } from "../actions";
 
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -12,9 +13,9 @@ function initials(name: string): string {
 }
 
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ invite?: string }> }) {
-  const { supabase, membership, organisation } = await requireAppContext();
+  const { supabase, user, membership, organisation } = await requireAppContext();
   const { invite } = await searchParams;
-  const site = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+  const site = siteUrl();
   const isOwner = membership.role === "owner";
 
   const { data: org } = await supabase.from("organisations").select("slug,created_at").eq("id", organisation.id).maybeSingle();
@@ -62,8 +63,19 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
               const name = p?.display_name ?? "Workspace member";
               return <div key={m.user_id}>
                 <i className="avatar" aria-hidden="true">{initials(name)}</i>
-                <span><b>{name}</b></span>
+                <span><b>{name}</b>{m.user_id === user.id && <small>You</small>}</span>
                 <Pill tone={m.role === "owner" ? "blue" : "neutral"}>{m.role === "owner" ? "Owner" : "Member"}</Pill>
+                {isOwner && m.user_id !== user.id && <span className="member-actions">
+                  <form action={changeMemberRoleAction}>
+                    <input type="hidden" name="userId" value={m.user_id} />
+                    <input type="hidden" name="role" value={m.role === "owner" ? "member" : "owner"} />
+                    <button className="button secondary" style={{ minHeight: "32px", padding: "6px 12px" }}>{m.role === "owner" ? "Make member" : "Make owner"}</button>
+                  </form>
+                  <form action={removeMemberAction}>
+                    <input type="hidden" name="userId" value={m.user_id} />
+                    <button className="button secondary" style={{ minHeight: "32px", padding: "6px 12px" }}>Remove</button>
+                  </form>
+                </span>}
               </div>;
             })}
             {!memberRows?.length && <div><span><b>No members yet.</b></span></div>}
@@ -85,6 +97,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
               <span><b>{i.email}</b><small>Expires {new Date(i.expires_at).toLocaleDateString("en-GB")}</small></span>
               <Pill tone={i.role === "owner" ? "blue" : "neutral"}>{i.role === "owner" ? "Owner" : "Member"}</Pill>
               <Pill tone="amber">Pending</Pill>
+              <span className="member-actions"><form action={revokeInvitationAction}><input type="hidden" name="email" value={i.email} /><button className="button secondary" style={{ minHeight: "32px", padding: "6px 12px" }}>Revoke</button></form></span>
             </div>)}
           </div>
         </Card>}

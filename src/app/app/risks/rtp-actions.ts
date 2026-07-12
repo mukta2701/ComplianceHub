@@ -45,6 +45,6 @@ export async function updateRtpStatusAction(formData: FormData) {
 export async function deleteRtpAction(formData: FormData) {
   const { supabase } = await requireAppContext();
   const riskId = String(formData.get("riskId"));
-  await supabase.from("risk_treatment_plans").delete().eq("id", String(formData.get("id")));
+  const { error } = await supabase.from("risk_treatment_plans").delete().eq("id", String(formData.get("id"))); if (error) throw new Error("Could not delete the treatment plan");
   revalidatePath(`/app/risks/${riskId}`);
 }

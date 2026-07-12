@@ -9,6 +9,7 @@ export default async function SignInPage({ searchParams }: { searchParams: Promi
     <form action={signInAction} className="app-form" style={{ padding: 0, marginTop: "18px" }}>
       <label>Email<input name="email" type="email" autoComplete="email" required /></label>
       <label>Password<input name="password" type="password" autoComplete="current-password" minLength={10} required /></label>
+      <div style={{ textAlign: "right", marginTop: "-6px" }}><Link style={{ color: "var(--blue)", fontWeight: 600, fontSize: "12.5px" }} href="/forgot-password">Forgot password?</Link></div>
       <button className="button primary" style={{ width: "100%" }}>Sign in</button>
     </form>
     <p style={{ marginTop: "22px", textAlign: "center", fontSize: "13px", color: "#6d7787" }}>New to ComplianceHub? <Link style={{ color: "var(--blue)", fontWeight: 700 }} href="/sign-up">Create an account</Link></p>

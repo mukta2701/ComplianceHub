@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { resolveTicketProvider } from "./registry";
 import { isTerminalTicketStatus, isTicketSyncDue } from "../domain/mapping";
 import type { IntegrationProvider } from "../domain/provider";
+import { decryptSecret } from "@/lib/security/secrets";
 import { one } from "@/lib/supabase/one";
 
 export async function syncTickets(supabase: SupabaseClient): Promise<{ synced: number; failed: number; tasksClosed: number }> {
@@ -21,7 +22,7 @@ export async function syncTickets(supabase: SupabaseClient): Promise<{ synced: n
     try {
       const provider = resolveTicketProvider(ticket.provider as IntegrationProvider);
       const fetched = await provider.fetchTicket(
-        { id: ticket.connection_id, provider: ticket.provider as IntegrationProvider, config: (conn.config ?? {}) as Record<string, unknown>, accessToken: conn.access_token ?? "" },
+        { id: ticket.connection_id, provider: ticket.provider as IntegrationProvider, config: (conn.config ?? {}) as Record<string, unknown>, accessToken: decryptSecret(conn.access_token) ?? "" },
         ticket.external_id,
       );
       // Tenant-scoped update: filtered by this row's organisation_id.
