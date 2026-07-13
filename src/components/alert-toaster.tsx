@@ -2,22 +2,31 @@
 
 import { useEffect, useRef, useState } from "react";
 import { fetchRecentAlertsAction } from "@/app/app/monitoring/actions";
+import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { Icon } from "./icons";
 
 type Toast = { id: number; message: string; kind: string };
 
-// A lightweight in-app pop-up for continuous-monitoring alerts. It polls for
-// unread monitoring notifications (the same rows the bell counts) and slides in a
-// toast the first time it sees each one — so a finding raised by a "Run checks
-// now" or the hourly cron surfaces while you're in the app, without a refresh.
-// (Realtime push is a Phase 2 upgrade; polling needs no publication changes.)
-export function AlertToaster() {
+const POLL_INTERVAL_MS = 15_000;
+const TOAST_DURATION_MS = 12_000;
+const REALTIME_SETUP_TIMEOUT_MS = 10_000;
+
+export function isRealtimeFailureStatus(status: string): boolean {
+  return status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED";
+}
+
+// Realtime prompts an immediate refresh when a finding lands. The original poll
+// continues as a deliberately boring safety net for missing env, unavailable
+// Realtime, publication/configuration errors, and dropped channels.
+export function AlertToaster({ organisationId }: { organisationId: string | null }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const seen = useRef<Set<number>>(new Set());
   const primed = useRef(false);
 
   useEffect(() => {
     let active = true;
+    const dismissTimers = new Set<ReturnType<typeof setTimeout>>();
+    let removeRealtime: (() => void) | null = null;
     async function poll() {
       try {
         const alerts = await fetchRecentAlertsAction();
@@ -34,15 +43,63 @@ export function AlertToaster() {
         if (fresh.length > 0) {
           setToasts((current) => [...fresh, ...current].slice(0, 4));
           for (const toast of fresh) {
-            setTimeout(() => { if (active) setToasts((cur) => cur.filter((t) => t.id !== toast.id)); }, 12_000);
+            const timer = setTimeout(() => {
+              dismissTimers.delete(timer);
+              if (active) setToasts((cur) => cur.filter((t) => t.id !== toast.id));
+            }, TOAST_DURATION_MS);
+            dismissTimers.add(timer);
           }
         }
       } catch { /* transient — try again next tick */ }
     }
     poll();
-    const timer = setInterval(poll, 15_000);
-    return () => { active = false; clearInterval(timer); };
-  }, []);
+    const pollTimer = setInterval(poll, POLL_INTERVAL_MS);
+
+    async function setupRealtime() {
+      if (!organisationId) return;
+      try {
+        const client = createSupabaseBrowserClient();
+        if (!client) return;
+        const { data: { session } } = await client.auth.getSession();
+        if (!active || !session?.access_token) return;
+        await client.realtime.setAuth(session.access_token);
+        if (!active) return;
+
+        const channel = client
+          .channel(`monitoring-findings:${organisationId}`)
+          .on("postgres_changes", {
+            event: "INSERT",
+            schema: "public",
+            table: "monitoring_findings",
+            filter: `organisation_id=eq.${organisationId}`,
+          }, () => { void poll(); });
+        let channelRemoved = false;
+        const removeChannel = () => {
+          if (channelRemoved) return;
+          channelRemoved = true;
+          void client.removeChannel(channel);
+        };
+
+        channel.subscribe((status) => {
+          if (active && isRealtimeFailureStatus(status)) {
+            // Polling is already active; discard the failed channel rather than
+            // retaining a broken socket until unmount.
+            removeChannel();
+          }
+        }, REALTIME_SETUP_TIMEOUT_MS);
+        removeRealtime = removeChannel;
+      } catch { /* Invalid/missing client setup: polling remains active. */ }
+    }
+    void setupRealtime();
+
+    return () => {
+      active = false;
+      clearInterval(pollTimer);
+      for (const timer of dismissTimers) clearTimeout(timer);
+      dismissTimers.clear();
+      removeRealtime?.();
+    };
+  }, [organisationId]);
 
   const dismiss = (id: number) => setToasts((cur) => cur.filter((t) => t.id !== id));
   if (toasts.length === 0) return null;

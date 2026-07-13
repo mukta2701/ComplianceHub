@@ -53,7 +53,7 @@ const TITLE_ROUTES: Array<[string, string]> = [
 
 function isActive(path: string, href: string) { return href === "/app" ? path === "/app" : path === href || path.startsWith(`${href}/`); }
 
-export function AppShell({ orgName, orgInitials, userInitials, unreadCount, children }: { orgName: string; orgInitials: string; userInitials: string; unreadCount: number; children: React.ReactNode }) {
+export function AppShell({ organisationId, orgName, orgInitials, userInitials, unreadCount, children }: { organisationId: string | null; orgName: string; orgInitials: string; userInitials: string; unreadCount: number; children: React.ReactNode }) {
   const path = usePathname();
   const [open, setOpen] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
@@ -95,6 +95,6 @@ export function AppShell({ orgName, orgInitials, userInitials, unreadCount, chil
       <main className="content">{children}</main>
       <footer className="legal">ComplianceHub supports readiness management. It does not provide ISO certification or legal advice.</footer>
     </div>
-    <AlertToaster />
+    <AlertToaster key={organisationId ?? "no-organisation"} organisationId={organisationId} />
   </div>;
 }

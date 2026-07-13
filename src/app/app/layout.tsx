@@ -25,5 +25,5 @@ export default async function ProtectedLayout({ children }: { children: React.Re
   const organisation = membership ? one(membership.organisations) : null;
   const orgName = organisation?.name ?? "Your workspace";
   const displayName = profile?.display_name ?? user.email ?? "Member";
-  return <AppShell orgName={orgName} orgInitials={initials(orgName)} userInitials={initials(displayName)} unreadCount={unread ?? 0}>{children}</AppShell>;
+  return <AppShell organisationId={organisation?.id ?? null} orgName={orgName} orgInitials={initials(orgName)} userInitials={initials(displayName)} unreadCount={unread ?? 0}>{children}</AppShell>;
 }
