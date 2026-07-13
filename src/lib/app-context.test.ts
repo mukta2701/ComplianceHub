@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const ORG_A = "10000000-0000-4000-8000-000000000001";
 const ORG_B = "20000000-0000-4000-8000-000000000002";
@@ -85,6 +85,10 @@ describe("active workspace membership resolution", () => {
     hoisted.cookieSet.mockReset();
   });
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("selects the cookie-nominated workspace after revalidating the user's membership", async () => {
     hoisted.activeOrganisationId = ORG_B;
     hoisted.rows = [
@@ -124,7 +128,11 @@ describe("active workspace membership resolution", () => {
     await expect(appContext.getMembership()).resolves.toMatchObject({ organisation_id: ORG_A });
   });
 
-  it("writes a validated active-workspace id using a server-only, same-site cookie", async () => {
+  it.each([
+    ["development", false],
+    ["production", true],
+  ])("writes a validated active-workspace id in %s with secure=%s", async (nodeEnv, secure) => {
+    vi.stubEnv("NODE_ENV", nodeEnv);
     const setActiveOrganisationCookie = (appContext as unknown as {
       setActiveOrganisationCookie: (organisationId: string) => Promise<void>;
     }).setActiveOrganisationCookie;
@@ -137,6 +145,7 @@ describe("active workspace membership resolution", () => {
       expect.objectContaining({
         httpOnly: true,
         sameSite: "lax",
+        secure,
         path: "/",
         maxAge: expect.any(Number),
       }),
