@@ -113,7 +113,7 @@ export async function raiseTaskFromFindingAction(formData: FormData) {
 // scoped to just this org. Uses the service client (findings + notifications are
 // service-role-insert only) but restricts every query to the caller's org.
 export async function runMonitoringNowAction() {
-  const { organisation } = await requireAppContext();
+  const { organisation } = await requireOwner();
   const service = createSupabaseServiceClient();
   await runMonitoring(buildMonitorDependencies(service, { organisationId: organisation.id }));
   revalidatePath("/app/monitoring");
