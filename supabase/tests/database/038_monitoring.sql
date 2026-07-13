@@ -67,6 +67,13 @@ select lives_ok(
      values(current_setting('app.org_a')::uuid,'slack','A slack','high','60000000-0000-4000-8000-000000000001') $$,
   'an owner can add an alert channel');
 
+-- A plain member may NOT add an alert channel (owner-only insert policy).
+select set_config('request.jwt.claims','{"sub":"60000000-0000-4000-8000-000000000002","email":"mon-member-a@example.test","role":"authenticated"}',true);
+select throws_ok(
+  $$ insert into public.alert_channels(organisation_id,type,label,min_severity,connected_by)
+     values(current_setting('app.org_a')::uuid,'slack','sneaky','high','60000000-0000-4000-8000-000000000002') $$,
+  '42501', NULL, 'a non-owner member cannot add an alert channel');
+
 -- A different organisation (owner-b) sees NONE of org A's monitoring rows.
 select set_config('request.jwt.claims','{"sub":"60000000-0000-4000-8000-000000000003","email":"mon-owner-b@example.test","role":"authenticated"}',true);
 select set_config('app.org_b',public.create_organisation_with_owner('Mon Org B','mon-b')::text,true);
