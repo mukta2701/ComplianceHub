@@ -20,3 +20,7 @@ ignore:
     reason: "Autosave PATCH to the app's own same-origin /api/app/assessment/response route; no third-party destination"
   - fingerprint: "417b50e4dc412f04"
     reason: "JSX rendering of static assessment questions and the tenant's own responses; no LLM prompt construction"
+  - fingerprint: "e1275bcd38cd6fc1"
+    reason: "Existing Slack webhook URL input; rendering the form sends no data and the server allowlists hooks.slack.com"
+  - fingerprint: "a4417098d3184a85"
+    reason: "Static explanatory copy for the existing encrypted Slack webhook configuration; no data transfer"
