@@ -28,6 +28,17 @@ export async function setActiveOrganisationCookie(organisationId: string): Promi
   });
 }
 
+export async function clearActiveOrganisationCookie(): Promise<void> {
+  const store = await cookies();
+  store.set(ACTIVE_ORGANISATION_COOKIE, "", {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 0,
+  });
+}
+
 export const getAuthUser = cache(async () => {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -38,15 +49,28 @@ export const getMembership = cache(async () => {
   const user = await getAuthUser();
   if (!user) return null;
   const supabase = await createSupabaseServerClient();
-  const { data } = await supabase.from("memberships")
+  const activeOrganisationId = await readActiveOrganisationId();
+  const membershipQuery = () => supabase.from("memberships")
     .select("organisation_id,role,job_title,created_at,organisations(id,name)")
-    .eq("user_id", user.id)
+    .eq("user_id", user.id);
+
+  if (activeOrganisationId) {
+    const { data: activeMembership, error: activeError } = await membershipQuery()
+      .eq("organisation_id", activeOrganisationId)
+      .maybeSingle();
+    if (activeError) throw new Error("Could not load active workspace");
+    if (activeMembership) return activeMembership;
+  }
+
+  const { data: fallbackMembership, error: fallbackError } = await membershipQuery()
     // Deterministic fallback: the user's oldest membership wins, with the
     // organisation UUID breaking timestamp ties.
     .order("created_at", { ascending: true })
-    .order("organisation_id", { ascending: true });
-  const activeOrganisationId = await readActiveOrganisationId();
-  return data?.find((membership) => membership.organisation_id === activeOrganisationId) ?? data?.[0] ?? null;
+    .order("organisation_id", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (fallbackError) throw new Error("Could not load workspace membership");
+  return fallbackMembership;
 });
 
 export async function requireAppContext() {

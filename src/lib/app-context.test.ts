@@ -18,6 +18,10 @@ const hoisted = vi.hoisted(() => ({
   rows: [] as MembershipRow[],
   eqCalls: [] as Array<[string, unknown]>,
   orderCalls: [] as Array<[string, unknown]>,
+  limitCalls: [] as number[],
+  membershipQueryCount: 0,
+  activeLookupError: null as unknown,
+  fallbackError: null as unknown,
   cookieSet: vi.fn(),
 }));
 
@@ -38,25 +42,47 @@ vi.mock("@/lib/supabase/server", () => ({
     auth: { getUser: () => Promise.resolve({ data: { user: { id: USER_ID, email: "member@example.com" } } }) },
     from: (table: string) => {
       if (table !== "memberships") throw new Error(`Unexpected table ${table}`);
+      hoisted.membershipQueryCount += 1;
       let rows = [...hoisted.rows];
+      const queryEqCalls: Array<[string, unknown]> = [];
+      const queryOrderCalls: Array<[string, { ascending?: boolean }]> = [];
+      let limit: number | undefined;
+      const materialise = () => {
+        const result = [...rows].sort((left, right) => {
+          for (const [column, options] of queryOrderCalls) {
+            const comparison = String(left[column as keyof MembershipRow]).localeCompare(String(right[column as keyof MembershipRow]));
+            if (comparison !== 0) return options.ascending === false ? -comparison : comparison;
+          }
+          return 0;
+        });
+        return limit === undefined ? result : result.slice(0, limit);
+      };
       const chain = {
         select: () => chain,
         eq: (column: string, value: unknown) => {
           hoisted.eqCalls.push([column, value]);
+          queryEqCalls.push([column, value]);
           rows = rows.filter((row) => row[column as keyof MembershipRow] === value);
           return chain;
         },
-        order: (column: string, options: unknown) => {
+        order: (column: string, options: { ascending?: boolean }) => {
           hoisted.orderCalls.push([column, options]);
-          rows.sort((left, right) => String(left[column as keyof MembershipRow]).localeCompare(String(right[column as keyof MembershipRow])));
+          queryOrderCalls.push([column, options]);
           return chain;
         },
         limit: (count: number) => {
-          rows = rows.slice(0, count);
+          hoisted.limitCalls.push(count);
+          limit = count;
           return chain;
         },
-        maybeSingle: () => Promise.resolve({ data: rows[0] ?? null, error: null }),
-        then: (resolve: (value: { data: MembershipRow[]; error: null }) => unknown) => Promise.resolve({ data: rows, error: null }).then(resolve),
+        maybeSingle: () => {
+          const isActiveLookup = queryEqCalls.some(([column]) => column === "organisation_id");
+          const error = isActiveLookup ? hoisted.activeLookupError : hoisted.fallbackError;
+          return Promise.resolve({ data: error ? null : materialise()[0] ?? null, error });
+        },
+        then: (resolve: (value: { data: MembershipRow[]; error: unknown }) => unknown) => {
+          return Promise.resolve({ data: materialise(), error: hoisted.fallbackError }).then(resolve);
+        },
       };
       return chain;
     },
@@ -82,6 +108,10 @@ describe("active workspace membership resolution", () => {
     hoisted.rows = [];
     hoisted.eqCalls = [];
     hoisted.orderCalls = [];
+    hoisted.limitCalls = [];
+    hoisted.membershipQueryCount = 0;
+    hoisted.activeLookupError = null;
+    hoisted.fallbackError = null;
     hoisted.cookieSet.mockReset();
   });
 
@@ -97,14 +127,18 @@ describe("active workspace membership resolution", () => {
     ];
 
     await expect(appContext.getMembership()).resolves.toMatchObject({ organisation_id: ORG_B });
-    expect(hoisted.eqCalls).toContainEqual(["user_id", USER_ID]);
+    expect(hoisted.eqCalls).toEqual([
+      ["user_id", USER_ID],
+      ["organisation_id", ORG_B],
+    ]);
+    expect(hoisted.membershipQueryCount).toBe(1);
   });
 
   it.each([
-    ["malformed", "not-a-uuid"],
-    ["stale", "90000000-0000-4000-8000-000000000009"],
-    ["foreign", "80000000-0000-4000-8000-000000000008"],
-  ])("ignores a %s cookie and uses the deterministic fallback", async (_label, cookieValue) => {
+    ["malformed", "not-a-uuid", 1],
+    ["stale", "90000000-0000-4000-8000-000000000009", 2],
+    ["foreign", "80000000-0000-4000-8000-000000000008", 2],
+  ])("ignores a %s cookie and uses the deterministic fallback", async (_label, cookieValue, expectedQueryCount) => {
     hoisted.activeOrganisationId = cookieValue;
     hoisted.rows = [
       membership(ORG_B, "Beta", "2026-02-01T00:00:00.000Z"),
@@ -117,6 +151,8 @@ describe("active workspace membership resolution", () => {
       ["created_at", { ascending: true }],
       ["organisation_id", { ascending: true }],
     ]);
+    expect(hoisted.limitCalls).toEqual([1]);
+    expect(hoisted.membershipQueryCount).toBe(expectedQueryCount);
   });
 
   it("uses organisation id as a deterministic tie-break for memberships created together", async () => {
@@ -126,6 +162,30 @@ describe("active workspace membership resolution", () => {
     ];
 
     await expect(appContext.getMembership()).resolves.toMatchObject({ organisation_id: ORG_A });
+    expect(hoisted.limitCalls).toEqual([1]);
+  });
+
+  it("throws a safe error when the cookie-selected membership lookup fails", async () => {
+    hoisted.activeOrganisationId = ORG_B;
+    hoisted.activeLookupError = { message: "connection details that must not escape" };
+
+    await expect(appContext.getMembership()).rejects.toThrow("Could not load active workspace");
+    expect(hoisted.membershipQueryCount).toBe(1);
+  });
+
+  it("throws a safe error when the deterministic fallback lookup fails", async () => {
+    hoisted.activeOrganisationId = "90000000-0000-4000-8000-000000000009";
+    hoisted.fallbackError = { message: "connection details that must not escape" };
+
+    await expect(appContext.getMembership()).rejects.toThrow("Could not load workspace membership");
+    expect(hoisted.membershipQueryCount).toBe(2);
+  });
+
+  it("returns null only after a successful empty membership lookup", async () => {
+    hoisted.rows = [];
+
+    await expect(appContext.getMembership()).resolves.toBeNull();
+    expect(hoisted.membershipQueryCount).toBe(1);
   });
 
   it.each([
@@ -159,5 +219,26 @@ describe("active workspace membership resolution", () => {
 
     await expect(setActiveOrganisationCookie("not-a-uuid")).rejects.toThrow("Invalid organisation id");
     expect(hoisted.cookieSet).not.toHaveBeenCalled();
+  });
+
+  it("clears the active workspace using matching host-only cookie attributes", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const clearActiveOrganisationCookie = (appContext as unknown as {
+      clearActiveOrganisationCookie: () => Promise<void>;
+    }).clearActiveOrganisationCookie;
+
+    await clearActiveOrganisationCookie();
+
+    expect(hoisted.cookieSet).toHaveBeenCalledWith(
+      "compliancehub_active_organisation",
+      "",
+      expect.objectContaining({
+        httpOnly: true,
+        sameSite: "lax",
+        secure: true,
+        path: "/",
+        maxAge: 0,
+      }),
+    );
   });
 });

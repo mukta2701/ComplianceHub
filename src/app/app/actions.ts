@@ -8,7 +8,7 @@ import { riskInputSchema } from "@/features/risks/application/risk";
 import { soaItemReviewSchema } from "@/features/soa/application/review";
 import { collectSoaFinalisationBlockers, countSoaFinalisationBlockers } from "@/features/soa/application/finalisation";
 import type { SoaStatus } from "@/features/soa/domain/soa";
-import { requireAppContext, setActiveOrganisationCookie } from "@/lib/app-context";
+import { clearActiveOrganisationCookie, requireAppContext, setActiveOrganisationCookie } from "@/lib/app-context";
 import { one } from "@/lib/supabase/one";
 import { revalidatePath } from "next/cache";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
@@ -19,8 +19,9 @@ export async function createOrganisationAction(formData: FormData) {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/sign-in");
+  let organisation: Awaited<ReturnType<typeof createOrganisation>>;
   try {
-    const organisation = await createOrganisation({ name: formData.get("name") }, {
+    organisation = await createOrganisation({ name: formData.get("name") }, {
       userId: user.id,
       insert: async ({ name, slug, createdBy }) => {
         const uniqueSlug = `${slug}-${crypto.randomUUID().slice(0, 8)}`;
@@ -33,20 +34,15 @@ export async function createOrganisationAction(formData: FormData) {
         return { id: String(data), name, slug: uniqueSlug };
       },
     });
-    // The shared /app layout renders the workspace switcher from a membership
-    // query. Without this, Next.js's router reuses the layout output it already
-    // rendered for /app/onboarding (no membership yet, hence the "Your
-    // workspace" fallback) when it soft-navigates to the dashboard below,
-    // showing the generic label until the next full navigation. Revalidating
-    // the layout segment forces it to refetch with the membership that now
-    // exists.
-    await setActiveOrganisationCookie(organisation.id);
-    revalidatePath("/app", "layout");
-    redirect("/app");
-  } catch (error) {
-    if (error && typeof error === "object" && "digest" in error) throw error;
+  } catch {
     redirect(`/app/onboarding?message=${encodeURIComponent("Could not create the organisation. Check the name and try again.")}`);
   }
+
+  // Selection happens after the database transaction has committed. A cookie
+  // failure must surface as an operational error, not invite a duplicate retry.
+  await setActiveOrganisationCookie(organisation.id);
+  revalidatePath("/app", "layout");
+  redirect("/app");
 }
 
 export async function switchWorkspaceAction(formData: FormData) {
@@ -73,6 +69,7 @@ export async function switchWorkspaceAction(formData: FormData) {
 export async function signOutAction() {
   const supabase = await createSupabaseServerClient();
   await supabase.auth.signOut();
+  await clearActiveOrganisationCookie();
   redirect("/");
 }
 

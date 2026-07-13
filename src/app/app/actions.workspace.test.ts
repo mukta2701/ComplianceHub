@@ -6,6 +6,7 @@ const USER_ID = "30000000-0000-4000-8000-000000000003";
 const hoisted = vi.hoisted(() => ({
   serverClient: null as unknown,
   setActiveOrganisationCookie: vi.fn(),
+  clearActiveOrganisationCookie: vi.fn(),
   revalidatePath: vi.fn(),
   createOrganisation: vi.fn(),
   from: vi.fn(),
@@ -18,6 +19,7 @@ vi.mock("@/lib/supabase/server", () => ({
 vi.mock("@/lib/app-context", () => ({
   requireAppContext: vi.fn(),
   setActiveOrganisationCookie: hoisted.setActiveOrganisationCookie,
+  clearActiveOrganisationCookie: hoisted.clearActiveOrganisationCookie,
 }));
 
 vi.mock("@/features/organisations/application/organisation", () => ({
@@ -72,6 +74,7 @@ function workspaceClient(options: { user?: { id: string } | null; membership?: {
 describe("active workspace actions", () => {
   beforeEach(() => {
     hoisted.setActiveOrganisationCookie.mockReset();
+    hoisted.clearActiveOrganisationCookie.mockReset();
     hoisted.revalidatePath.mockReset();
     hoisted.createOrganisation.mockReset();
     hoisted.from.mockReset();
@@ -145,5 +148,30 @@ describe("active workspace actions", () => {
 
     expect(hoisted.setActiveOrganisationCookie).toHaveBeenCalledWith(ORG_ID);
     expect(hoisted.revalidatePath).toHaveBeenCalledWith("/app", "layout");
+  });
+
+  it("does not relabel post-creation cookie failures as organisation creation failures", async () => {
+    const cookieError = new Error("Could not persist active workspace");
+    hoisted.serverClient = {
+      auth: { getUser: () => Promise.resolve({ data: { user: { id: USER_ID } } }) },
+    };
+    hoisted.createOrganisation.mockResolvedValue({ id: ORG_ID, name: "Acme", slug: "acme" });
+    hoisted.setActiveOrganisationCookie.mockRejectedValueOnce(cookieError);
+    const data = new FormData();
+    data.set("name", "Acme");
+
+    await expect(actions.createOrganisationAction(data)).rejects.toBe(cookieError);
+
+    expect(hoisted.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("clears the active workspace preference when signing out", async () => {
+    const signOut = vi.fn().mockResolvedValue({ error: null });
+    hoisted.serverClient = { auth: { signOut } };
+
+    await expect(actions.signOutAction()).rejects.toThrow("REDIRECT:/");
+
+    expect(signOut).toHaveBeenCalledOnce();
+    expect(hoisted.clearActiveOrganisationCookie).toHaveBeenCalledOnce();
   });
 });
