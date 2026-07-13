@@ -33,7 +33,6 @@ export async function updateTaskStatusAction(formData: FormData) {
   if (status === "done" && task.status !== "done" && task.recurrence && task.due_on) {
     const { error } = await supabase.rpc("complete_recurring_task", {
       target_task_id: task.id,
-      next_due_on: nextDueDate(task.due_on, task.recurrence as TaskRecurrence),
     });
     if (error) throw new Error("Could not complete recurring task");
   } else {

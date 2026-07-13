@@ -85,7 +85,6 @@ describe("updateTaskStatusAction", () => {
     expect(rpc).toHaveBeenCalledOnce();
     expect(rpc).toHaveBeenCalledWith("complete_recurring_task", {
       target_task_id: task.id,
-      next_due_on: "2026-08-31",
     });
     expect(directWrites).toEqual([]);
   });

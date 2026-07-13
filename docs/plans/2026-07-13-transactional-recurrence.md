@@ -17,7 +17,7 @@
 - Modify: `src/app/app/tasks/actions.ts`
 
 1. Write a test whose fake authenticated Supabase client rejects direct update/insert writes and records RPC calls.
-2. Complete a recurring task and assert the action makes exactly one `complete_recurring_task` RPC with the task id and computed next due date.
+2. Complete a recurring task and assert the action makes exactly one `complete_recurring_task` RPC with only the task id.
 3. Run `npm test -- src/app/app/tasks/actions.test.ts` and observe the expected red failure because the action still issues direct writes.
 4. Change only the recurring completion branch to call the RPC and throw when it returns an error.
 5. Re-run the focused test and confirm it passes without warnings.
@@ -40,7 +40,7 @@
 **Files:**
 - Modify: `supabase/migrations/*_transactional_recurrence.sql`
 
-1. Add an idempotent `create or replace function` using `SECURITY INVOKER`, `set search_path = ''`, fully qualified objects, source-row locking, guarded update, and successor insert.
+1. Add an idempotent `create or replace function` using `SECURITY INVOKER`, `set search_path = ''`, fully qualified objects, source-row locking, database-derived recurrence date, guarded update, and successor insert.
 2. Revoke execute from `PUBLIC`, `anon`, and `service_role`; grant only to `authenticated`.
 3. Apply the SQL to the local database with `docker exec -i supabase_db_compliancehub psql` only.
 4. Run the pgTAP test directly in the local database and confirm all assertions pass.

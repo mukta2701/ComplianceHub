@@ -13,18 +13,18 @@ Add one `public.complete_recurring_task` PostgreSQL function and call it from th
 status action only for a transition to `done` on a recurring, dated task. The function
 will be `SECURITY INVOKER`, execute as the authenticated caller, and rely on the existing
 task SELECT/UPDATE/INSERT RLS policies. It will lock and update the source task only when
-its current status is not already `done`, then insert exactly one successor using the
-source row. Both statements run in the function call's database transaction; an insert
-error rolls back the status update.
+its current status is not already `done`, derive the next due date from that locked row,
+then insert exactly one successor. Both statements run in the function call's database
+transaction; an insert error rolls back the status update. Because the RPC accepts only
+the task id, a caller cannot supply an arbitrary or stale successor date.
 
 The function will pin an empty search path and fully qualify every object. Default
 function execution will be revoked from `PUBLIC`, `anon`, and `service_role`, then
 granted only to `authenticated`. Repeated completion calls are guarded by the source
 row's status and return `false` without inserting another successor.
 
-Non-recurring status changes remain ordinary updates. The application computes the next
-due date using its existing, tested recurrence rules and supplies it to the RPC; the
-database validates that it is after the current due date before inserting.
+Non-recurring status changes remain ordinary updates. PostgreSQL applies the same weekly
+and calendar-month clamping semantics as the existing domain recurrence rules.
 
 ## Verification
 
