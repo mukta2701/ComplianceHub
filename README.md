@@ -2,7 +2,7 @@
 
 ComplianceHub is an open-source, UK-first information security management tool for small companies working toward ISO/IEC 27001:2022. It turns a plain-English readiness assessment into a live ISMS: a dashboard with a first-run onboarding checklist, a reviewable Statement of Applicability, an auditable risk register, and the surrounding workflow needed to actually run and evidence a management system.
 
-ComplianceHub supports readiness work. It does **not** provide certification, legal advice, or a substitute for an accredited auditor. The included questions and policy templates are independently written and do not reproduce ISO standards text.
+ComplianceHub supports readiness work. It does **not** provide certification, legal advice, or a substitute for an accredited auditor. The included questions and starter policy content are original to ComplianceHub and do not reproduce ISO standards text.
 
 ## Features
 
@@ -10,7 +10,7 @@ ComplianceHub supports readiness work. It does **not** provide certification, le
 - **Risk & assets** — a documented 5×5 risk register with configurable RAG bands, treatment plans that spawn owned tasks, and an asset inventory. XLSX/CSV import + export for every register.
 - **Evidence vault** — immutable proof attached to controls/risks/tasks, with a daily sweep that re-checks freshness and raises replacement tasks when evidence goes stale. **Continuous evidence automation** collects evidence from external sources (sandbox provider by default).
 - **Internal audit** — plan audits, populate the checklist from the Annex A control library in one click, raise findings that become owned corrective-action tasks, and produce a leadership readiness report + an evidence pack. Time-boxed read-only auditor links.
-- **Policies** — a policy library with an approval lifecycle, per-employee version-stamped acceptance, material-edit re-accept, 10 starter ISO 27001 templates, and scheduled review reminders.
+- **Policies** — a policy library with an approval lifecycle, per-employee version-stamped acceptance, material-edit re-accept, scheduled review reminders, and 10 original, editable starter policies for ISO 27001 readiness.
 - **KPIs & management review** — a KPI register with measurement trends for management review.
 - **Integrations** — push remediation tasks to Jira / GitHub Issues and sync status back (terminal status auto-closes the task); a built-in sandbox tracker for trialling the flow.
 - **Multi-framework** — record how your ISO 27001 controls map to SOC 2 / GDPR / HIPAA / NIST CSF / ISO 27017, with per-framework coverage.

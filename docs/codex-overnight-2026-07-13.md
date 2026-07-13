@@ -45,8 +45,9 @@ work around them:
    pattern). This fails at **build**, not vitest — so always run the full gate.
 3. **Pre-commit privacy hook false-positives.** Commit with `--no-verify` when it blocks
    on known false fingerprints. (Do still eyeball your own diff for real secrets.)
-4. **Playwright:** run with `--workers=1` (or `2`). The dev server line says `pnpm dev`
-   but `reuseExistingServer` is on — start `./node_modules/.bin/next dev` yourself first.
+4. **Playwright:** run with `--workers=1` (or `2`). Its web server uses `npm run dev`;
+   with `reuseExistingServer` on, you can instead start
+   `./node_modules/.bin/next dev` yourself first.
 5. **Local DB writes:** two Docker runtimes both host `supabase_db_compliancehub`; the
    IPv4/IPv6 split makes `supabase db reset` flaky. Apply local SQL via
    `docker exec -i supabase_db_compliancehub psql` against `127.0.0.1:54322`.

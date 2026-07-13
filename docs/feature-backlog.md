@@ -108,7 +108,6 @@ Small backlog items carried forward in the SDD ledger (`.superpowers/sdd/progres
 
 - **CSV formula-injection is unmitigated** — the shared `cell()` escaper (`src/features/exports/exports.ts`) quotes commas / quotes / newlines but does not neutralise a leading `=`, `+`, `-` or `@`, so exported free text can execute as a spreadsheet formula (Task 12 minor; security-relevant, also gates the B.5 round-trip).
 - **XLSX export test checks the container, not the content** — there is no round-trip read-back assertion on the generated workbook (Task 12 minor).
-- **Dual lockfiles / package-manager decision before deploy** — Task 12 created the project's first `package-lock.json` alongside the existing `pnpm-lock.yaml`; both now carry `exceljs`, but a single package manager must be chosen and `pnpm install --frozen-lockfile` verified at deploy (GO-LIVE item).
 - **`risk_matrix_config` update policy does not re-assert `updated_by = auth.uid()`** — the server action always sets it, but the RLS with-check does not pin it (Task 3 minor).
 - **RTP delete action discards the DB error** — `deleteRtpAction` swallows any delete failure, matching the existing pattern but hiding errors (Task 5 minor).
 - **`reviewSoaItemAction` lacks server-side owner-membership re-validation** — the composite FK backstops it and the UI is unreachable for a non-member, but there is no explicit server check (Task 7 minor).
@@ -156,12 +155,10 @@ Small backlog items carried forward in the SDD ledger (`.superpowers/sdd/progres
 
 ## Phase D — Policies + Integrations (Done)
 
-**What shipped:** A **policy library** with an approval lifecycle (draft → in review → approved → archived), per-employee acceptance tracking, a *material-edit* rule that bumps the version and re-triggers acceptance via an org-scoped notification, and policies attachable as first-class evidence. A **ticketing-integrations** workstream: owner-managed Jira / GitHub Issues connections, a provider-abstracted push that raises a remediation task as a pre-filled ticket, a ticket status chip on the task, and a `CRON_SECRET`-gated poll-sync route — all proven end-to-end with a FAKE provider (a real connection is a documented go-live step behind `INTEGRATIONS_LIVE`). DB-level trigger enforces that only owners approve/status-change a policy and only owner-or-policy-owner edits content (defence-in-depth beyond the server actions).
+**What shipped:** A **policy library** with an approval lifecycle (draft → in review → approved → archived), per-employee acceptance tracking, a *material-edit* rule that bumps the version and re-triggers acceptance via an org-scoped notification, policies attachable as first-class evidence, scheduled review reminders, and 10 original starter policies selectable from the authoring form. A **ticketing-integrations** workstream: owner-managed Jira / GitHub Issues connections, a provider-abstracted push that raises a remediation task as a pre-filled ticket, a ticket status chip on the task, and a `CRON_SECRET`-gated poll-sync route — all proven end-to-end with a FAKE provider (a real connection is a documented go-live step behind `INTEGRATIONS_LIVE`). DB-level trigger enforces that only owners approve/status-change a policy and only owner-or-policy-owner edits content (defence-in-depth beyond the server actions).
 
 **Suggested improvements (backlog):**
-- Policy templates: seed a starter set of ISO 27001 policies (Information Security, Access Control, Incident Response, Supplier, BYOD…) so a new org publishes in minutes instead of authoring from a blank box.
 - Rich policy body: markdown/rich-text editing + rendering, headings, and a table of contents (currently a plain textarea + pre-wrapped text).
-- Scheduled policy review reminders (use `review_due` + the daily sweep to raise a task/notification when a policy is due for review).
 - Acceptance nudges: notify members who have not accepted the current version; an owner "chase outstanding" action; acceptance export for audit evidence.
 - E-signature / attestation record (name + timestamp + version hash) for stronger audit defensibility.
 - Integrations: two-way sync (close the ComplianceHub task when the ticket closes), Slack/Teams notifications, and a real OAuth connect flow UI (the code path exists; the connect wizard is a go-live item).
