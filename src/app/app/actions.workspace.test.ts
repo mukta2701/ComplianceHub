@@ -174,4 +174,14 @@ describe("active workspace actions", () => {
     expect(signOut).toHaveBeenCalledOnce();
     expect(hoisted.clearActiveOrganisationCookie).toHaveBeenCalledOnce();
   });
+
+  it("retains the active workspace and does not redirect when sign-out fails", async () => {
+    const signOut = vi.fn().mockResolvedValue({ error: { message: "provider details must not escape" } });
+    hoisted.serverClient = { auth: { signOut } };
+
+    await expect(actions.signOutAction()).rejects.toThrow("Could not sign out");
+
+    expect(signOut).toHaveBeenCalledOnce();
+    expect(hoisted.clearActiveOrganisationCookie).not.toHaveBeenCalled();
+  });
 });

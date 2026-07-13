@@ -68,7 +68,8 @@ export async function switchWorkspaceAction(formData: FormData) {
 
 export async function signOutAction() {
   const supabase = await createSupabaseServerClient();
-  await supabase.auth.signOut();
+  const { error } = await supabase.auth.signOut();
+  if (error) throw new Error("Could not sign out");
   await clearActiveOrganisationCookie();
   redirect("/");
 }
