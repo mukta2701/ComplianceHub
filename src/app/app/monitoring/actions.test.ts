@@ -32,9 +32,22 @@ describe("runMonitoringNowAction", () => {
   });
 
   it("rejects members before constructing a service-role client", async () => {
-    await expect(runMonitoringNowAction()).rejects.toThrow("Only workspace owners can manage monitoring");
+    await expect(runMonitoringNowAction()).rejects.toThrow("Only workspace operators can manage monitoring");
 
     expect(hoisted.createServiceClient).not.toHaveBeenCalled();
     expect(hoisted.runMonitoring).not.toHaveBeenCalled();
   });
+
+  for (const role of ["owner", "admin"] as const) {
+    it(`allows ${role}s to run monitoring`, async () => {
+      hoisted.ctx = { membership: { role }, organisation: { id: "20000000-0000-4000-8000-000000000001" } };
+      hoisted.createServiceClient.mockReturnValue({ service: true });
+      hoisted.runMonitoring.mockResolvedValue(undefined);
+
+      await expect(runMonitoringNowAction()).resolves.toBeUndefined();
+
+      expect(hoisted.createServiceClient).toHaveBeenCalledOnce();
+      expect(hoisted.runMonitoring).toHaveBeenCalledOnce();
+    });
+  }
 });

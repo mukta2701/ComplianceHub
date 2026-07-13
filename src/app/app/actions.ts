@@ -13,6 +13,7 @@ import { one } from "@/lib/supabase/one";
 import { revalidatePath } from "next/cache";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { z } from "zod";
+import { canInviteRole, canManageMembership, hasCapability, membershipRoles, type MembershipRole } from "@/features/organisations/domain/access";
 
 export async function createOrganisationAction(formData: FormData) {
   const supabase = await createSupabaseServerClient();
@@ -218,31 +219,52 @@ export async function finaliseSoaAction(formData: FormData) {
 export async function inviteMemberAction(formData: FormData) {
   const { supabase, user, membership, organisation } = await requireAppContext();
   await enforceRateLimit(`invite:${user.id}`, { limit: 10, windowMs: 60 * 60_000 });
-  const result = await inviteMember({ organisationId: organisation.id, email: formData.get("email"), role: formData.get("role") }, { actorId: user.id, actorRole: membership.role, insertInvitation: async (row) => {
-    const { data, error } = await supabase.from("invitations").insert({ organisation_id: row.organisationId, email: row.email, role: row.role, invited_by: row.invitedBy, token_hash: row.tokenHash, expires_at: row.expiresAt }).select("id").single(); if (error) throw error; return data;
+  const result = await inviteMember({ organisationId: organisation.id, email: formData.get("email"), role: formData.get("role"), jobTitle: formData.get("jobTitle") || undefined }, { actorId: user.id, actorRole: membership.role, insertInvitation: async (row) => {
+    const { data, error } = await supabase.from("invitations").insert({ organisation_id: row.organisationId, email: row.email, role: row.role, job_title: row.jobTitle, invited_by: row.invitedBy, token_hash: row.tokenHash, expires_at: row.expiresAt }).select("id").single(); if (error) throw error; return data;
   }});
   redirect(`/app/settings?invite=${encodeURIComponent(result.token)}`);
 }
 
-// Owner-managed team lifecycle. The database enforces the hard rules — only
-// owners may update/delete memberships (RLS) and an org must keep at least one
-// owner (protect_last_owner trigger) — so these actions add the app-level guard
-// and translate the trigger error into friendly copy.
+// Team lifecycle is guarded in both layers: Owners may manage every role,
+// Admins only ordinary Members, and the database retains the final Owner.
 export async function changeMemberRoleAction(formData: FormData) {
   const { supabase, membership, organisation } = await requireAppContext();
-  if (membership.role !== "owner") throw new Error("Only workspace owners can change roles");
+  if (!hasCapability(membership.role, "manage_owners")) throw new Error("Only workspace owners can change roles");
   const userId = String(formData.get("userId"));
-  const role = String(formData.get("role"));
-  if (role !== "owner" && role !== "member") throw new Error("Invalid role");
+  const parsedRole = z.enum(membershipRoles).safeParse(formData.get("role"));
+  if (!parsedRole.success) throw new Error("Invalid role");
+  const role = parsedRole.data;
   const { error } = await supabase.from("memberships").update({ role }).eq("organisation_id", organisation.id).eq("user_id", userId);
   if (error) throw new Error(error.message.includes("at least one owner") ? "An organisation must keep at least one owner." : "Could not change the member's role");
   revalidatePath("/app/settings");
 }
 
+export async function updateMemberJobTitleAction(formData: FormData) {
+  const { supabase, membership, organisation } = await requireAppContext();
+  if (!hasCapability(membership.role, "manage_members")) throw new Error("You are not allowed to manage team members");
+  const userId = String(formData.get("userId"));
+  const { data: target, error: readError } = await supabase.from("memberships").select("role")
+    .eq("organisation_id", organisation.id).eq("user_id", userId).maybeSingle();
+  if (readError || !target || !canManageMembership(membership.role, target.role as MembershipRole)) {
+    throw new Error("You are not allowed to manage that team member");
+  }
+  const parsed = z.string().trim().max(120).safeParse(formData.get("jobTitle"));
+  if (!parsed.success) throw new Error("Job title must be 120 characters or fewer");
+  const { error } = await supabase.from("memberships").update({ job_title: parsed.data || null })
+    .eq("organisation_id", organisation.id).eq("user_id", userId);
+  if (error) throw new Error("Could not update the member's job title");
+  revalidatePath("/app/settings");
+}
+
 export async function removeMemberAction(formData: FormData) {
   const { supabase, membership, organisation } = await requireAppContext();
-  if (membership.role !== "owner") throw new Error("Only workspace owners can remove members");
+  if (!hasCapability(membership.role, "manage_members")) throw new Error("You are not allowed to manage team members");
   const userId = String(formData.get("userId"));
+  const { data: target, error: readError } = await supabase.from("memberships").select("role")
+    .eq("organisation_id", organisation.id).eq("user_id", userId).maybeSingle();
+  if (readError || !target || !canManageMembership(membership.role, target.role as MembershipRole)) {
+    throw new Error("You are not allowed to manage that team member");
+  }
   const { error } = await supabase.from("memberships").delete().eq("organisation_id", organisation.id).eq("user_id", userId);
   if (error) throw new Error(error.message.includes("at least one owner") ? "An organisation must keep at least one owner." : "Could not remove the member");
   revalidatePath("/app/settings");
@@ -250,9 +272,15 @@ export async function removeMemberAction(formData: FormData) {
 
 export async function revokeInvitationAction(formData: FormData) {
   const { supabase, membership, organisation } = await requireAppContext();
-  if (membership.role !== "owner") throw new Error("Only workspace owners can revoke invitations");
+  if (!hasCapability(membership.role, "manage_members")) throw new Error("You are not allowed to manage invitations");
+  const email = String(formData.get("email"));
+  const { data: invitation, error: readError } = await supabase.from("invitations").select("role")
+    .eq("organisation_id", organisation.id).eq("email", email).is("accepted_at", null).maybeSingle();
+  if (readError || !invitation || !canInviteRole(membership.role, invitation.role as MembershipRole)) {
+    throw new Error("You are not allowed to revoke that invitation");
+  }
   const { error } = await supabase.from("invitations").delete()
-    .eq("organisation_id", organisation.id).eq("email", String(formData.get("email"))).is("accepted_at", null);
+    .eq("organisation_id", organisation.id).eq("email", email).is("accepted_at", null);
   if (error) throw new Error("Could not revoke the invitation");
   revalidatePath("/app/settings");
 }

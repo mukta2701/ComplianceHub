@@ -7,13 +7,14 @@ vi.mock("@/lib/security/rate-limit", () => ({ enforceRateLimit: () => Promise.re
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 vi.mock("next/navigation", () => ({ redirect: (u: string) => { throw new Error(`REDIRECT:${u}`); } }));
 
-import { changeMemberRoleAction, removeMemberAction, revokeInvitationAction } from "./actions";
+import { changeMemberRoleAction, removeMemberAction, revokeInvitationAction, updateMemberJobTitleAction } from "./actions";
 
 // Minimal thenable supabase double: every builder method returns the same chain,
 // which resolves to { error } when awaited (mirrors the real query builder).
-function fakeSupabase(error: unknown = null) {
+function fakeSupabase(error: unknown = null, targetRole = "member") {
   const chain: Record<string, unknown> = {};
-  for (const m of ["update", "delete", "eq", "is"]) chain[m] = () => chain;
+  for (const m of ["select", "update", "delete", "eq", "is"]) chain[m] = () => chain;
+  chain.maybeSingle = () => Promise.resolve({ data: { role: targetRole }, error: null });
   chain.then = (resolve: (v: { error: unknown }) => unknown) => resolve({ error });
   return { from: () => chain };
 }
@@ -24,18 +25,31 @@ function fd(entries: Record<string, string>) {
 }
 
 describe("team lifecycle actions — authorisation", () => {
-  const actions = [
-    { name: "changeMemberRole", run: () => changeMemberRoleAction(fd({ userId: "u", role: "owner" })) },
-    { name: "removeMember", run: () => removeMemberAction(fd({ userId: "u" })) },
-    { name: "revokeInvitation", run: () => revokeInvitationAction(fd({ email: "x@y.z" })) },
-  ];
+  it("refuses team management by an ordinary member", async () => {
+    hoisted.ctx = { membership: { role: "member" }, organisation: { id: "o1" }, supabase: fakeSupabase() };
+    await expect(removeMemberAction(fd({ userId: "u" }))).rejects.toThrow("not allowed");
+    await expect(updateMemberJobTitleAction(fd({ userId: "u", jobTitle: "Developer" }))).rejects.toThrow("not allowed");
+    await expect(revokeInvitationAction(fd({ email: "x@y.z" }))).rejects.toThrow("not allowed");
+  });
 
-  for (const a of actions) {
-    it(`${a.name} refuses a non-owner`, async () => {
-      hoisted.ctx = { membership: { role: "member" }, organisation: { id: "o1" }, supabase: fakeSupabase() };
-      await expect(a.run()).rejects.toThrow("Only workspace owners");
+  it("lets an admin update and remove ordinary members", async () => {
+    hoisted.ctx = { membership: { role: "admin" }, organisation: { id: "o1" }, supabase: fakeSupabase(null, "member") };
+    await expect(updateMemberJobTitleAction(fd({ userId: "u", jobTitle: "Developer" }))).resolves.toBeUndefined();
+    await expect(removeMemberAction(fd({ userId: "u" }))).resolves.toBeUndefined();
+  });
+
+  for (const targetRole of ["owner", "admin"]) {
+    it(`does not let an admin change or remove an ${targetRole}`, async () => {
+      hoisted.ctx = { membership: { role: "admin" }, organisation: { id: "o1" }, supabase: fakeSupabase(null, targetRole) };
+      await expect(updateMemberJobTitleAction(fd({ userId: "u", jobTitle: "Changed" }))).rejects.toThrow("not allowed");
+      await expect(removeMemberAction(fd({ userId: "u" }))).rejects.toThrow("not allowed");
     });
   }
+
+  it("does not let an admin change roles", async () => {
+    hoisted.ctx = { membership: { role: "admin" }, organisation: { id: "o1" }, supabase: fakeSupabase() };
+    await expect(changeMemberRoleAction(fd({ userId: "u", role: "admin" }))).rejects.toThrow("Only workspace owners");
+  });
 
   it("maps the retain-last-owner trigger error to friendly copy", async () => {
     hoisted.ctx = { membership: { role: "owner" }, organisation: { id: "o1" }, supabase: fakeSupabase({ message: "an organisation must retain at least one owner" }) };
@@ -47,6 +61,11 @@ describe("team lifecycle actions — authorisation", () => {
     hoisted.ctx = { membership: { role: "owner" }, organisation: { id: "o1" }, supabase: fakeSupabase(null) };
     await expect(removeMemberAction(fd({ userId: "u" }))).resolves.toBeUndefined();
     await expect(revokeInvitationAction(fd({ email: "x@y.z" }))).resolves.toBeUndefined();
+  });
+
+  it("lets an owner assign the admin role", async () => {
+    hoisted.ctx = { membership: { role: "owner" }, organisation: { id: "o1" }, supabase: fakeSupabase(null) };
+    await expect(changeMemberRoleAction(fd({ userId: "u", role: "admin" }))).resolves.toBeUndefined();
   });
 
   it("rejects an invalid role value", async () => {

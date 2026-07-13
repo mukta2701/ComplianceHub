@@ -1,14 +1,15 @@
 import { randomBytes, createHash } from "node:crypto";
 import { z } from "zod";
+import { canInviteRole, membershipRoles, type MembershipRole } from "../domain/access";
 
 export const organisationInputSchema = z.object({ name: z.string().trim().min(1).max(160) });
 export const invitationInputSchema = z.object({
   organisationId: z.uuid(),
   email: z.string().trim().toLowerCase().email().max(320),
-  role: z.enum(["owner", "member"]).default("member"),
+  role: z.enum(membershipRoles).default("member"),
+  jobTitle: z.string().trim().min(1).max(120).optional(),
 });
-
-export type MembershipRole = "owner" | "member";
+export type { MembershipRole } from "../domain/access";
 
 function slugify(name: string) {
   const slug = name.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
@@ -29,11 +30,11 @@ export async function inviteMember(
   context: {
     actorId: string;
     actorRole: MembershipRole;
-    insertInvitation: (row: { organisationId: string; email: string; role: MembershipRole; invitedBy: string; tokenHash: string; expiresAt: string }) => Promise<{ id: string }>;
+    insertInvitation: (row: { organisationId: string; email: string; role: MembershipRole; jobTitle?: string; invitedBy: string; tokenHash: string; expiresAt: string }) => Promise<{ id: string }>;
   },
 ) {
-  if (context.actorRole !== "owner") throw new Error("Only organisation owners can invite members");
   const parsed = invitationInputSchema.parse(input);
+  if (!canInviteRole(context.actorRole, parsed.role)) throw new Error("Your role cannot invite that role");
   const token = randomBytes(32).toString("base64url");
   const tokenHash = createHash("sha256").update(token).digest("hex");
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();

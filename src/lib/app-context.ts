@@ -13,7 +13,7 @@ export const getAuthUser = cache(async () => {
 export const getMembership = cache(async () => {
   const supabase = await createSupabaseServerClient();
   const { data } = await supabase.from("memberships")
-    .select("organisation_id,role,organisations(id,name)").limit(1).maybeSingle();
+    .select("organisation_id,role,job_title,organisations(id,name)").limit(1).maybeSingle();
   return data;
 });
 

@@ -8,6 +8,7 @@ import { encryptSecret } from "@/lib/security/secrets";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { buildMonitorDependencies } from "@/features/monitoring/application/monitor-deps";
 import { runMonitoring } from "@/features/monitoring/application/monitor-run";
+import { hasCapability } from "@/features/organisations/domain/access";
 
 const sourceSchema = z.object({
   owner: z.string().trim().min(1, "GitHub owner is required").max(120),
@@ -25,9 +26,15 @@ const channelSchema = z.object({
   label: z.string().trim().max(160).optional(),
 });
 
+async function requireOperator() {
+  const ctx = await requireAppContext();
+  if (!hasCapability(ctx.membership.role, "manage_monitoring")) throw new Error("Only workspace operators can manage monitoring");
+  return ctx;
+}
+
 async function requireOwner() {
   const ctx = await requireAppContext();
-  if (ctx.membership.role !== "owner") throw new Error("Only workspace owners can manage monitoring");
+  if (!hasCapability(ctx.membership.role, "manage_owners")) throw new Error("Only workspace owners can manage monitoring configuration");
   return ctx;
 }
 
@@ -113,7 +120,7 @@ export async function raiseTaskFromFindingAction(formData: FormData) {
 // scoped to just this org. Uses the service client (findings + notifications are
 // service-role-insert only) but restricts every query to the caller's org.
 export async function runMonitoringNowAction() {
-  const { organisation } = await requireOwner();
+  const { organisation } = await requireOperator();
   const service = createSupabaseServiceClient();
   await runMonitoring(buildMonitorDependencies(service, { organisationId: organisation.id }));
   revalidatePath("/app/monitoring");
