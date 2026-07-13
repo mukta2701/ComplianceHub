@@ -3,8 +3,7 @@ import { Card, PageIntro, Pill } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { SubTabs } from "@/components/sub-tabs";
 import { one } from "@/lib/supabase/one";
-import { siteUrl } from "@/lib/site-url";
-import { inviteMemberAction, changeMemberRoleAction, removeMemberAction, revokeInvitationAction, updateMemberJobTitleAction } from "../actions";
+import { inviteMemberAction, changeMemberRoleAction, removeMemberAction, resendInvitationAction, revokeInvitationAction, updateMemberJobTitleAction } from "../actions";
 import { canInviteRole, canManageMembership, hasCapability, roleLabel, type MembershipRole } from "@/features/organisations/domain/access";
 
 function initials(name: string): string {
@@ -13,19 +12,38 @@ function initials(name: string): string {
   return (parts[0][0] + (parts[1]?.[0] ?? "")).toUpperCase();
 }
 
-export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ invite?: string }> }) {
+const invitationStatusMessage = {
+  sent: "Invitation email sent.",
+  failed: "Invitation saved, but email delivery failed. You can retry it below.",
+  not_configured: "Invitation saved, but email delivery is not configured. Configure Resend, then retry it below.",
+  pending: "Invitation saved and is waiting for delivery.",
+} as const;
+
+function deliveryLabel(status: string) {
+  if (status === "not_configured") return "Not configured";
+  return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
+export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ inviteStatus?: string; inviteId?: string }> }) {
   const { supabase, user, membership, organisation } = await requireAppContext();
-  const { invite } = await searchParams;
-  const site = siteUrl();
+  const { inviteStatus, inviteId } = await searchParams;
   const isOwner = membership.role === "owner";
   const canManageTeam = hasCapability(membership.role, "manage_members");
 
   const { data: org } = await supabase.from("organisations").select("slug,created_at").eq("id", organisation.id).maybeSingle();
   const { data: memberRows } = await supabase.from("memberships").select("user_id,role,job_title,created_at,profiles(display_name)").order("created_at", { ascending: true });
   const { data: invites } = canManageTeam
-    ? await supabase.from("invitations").select("email,role,job_title,expires_at,accepted_at,created_at").order("created_at", { ascending: false })
+    ? await supabase.from("invitations")
+      .select("id,email,role,job_title,expires_at,accepted_at,revoked_at,delivery_status,last_delivery_attempt_at,delivery_attempt_count,created_at")
+      .eq("organisation_id", organisation.id)
+      .is("accepted_at", null)
+      .is("revoked_at", null)
+      .order("created_at", { ascending: false })
     : { data: null };
-  const pendingInvites = (invites ?? []).filter((i) => !i.accepted_at);
+  const pendingInvites = invites ?? [];
+  const statusMessage = inviteStatus && inviteStatus in invitationStatusMessage
+    ? invitationStatusMessage[inviteStatus as keyof typeof invitationStatusMessage]
+    : null;
 
   const created = org?.created_at ? new Date(org.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }) : "—";
 
@@ -34,9 +52,9 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
 
     <SubTabs tabs={[{ href: "/app/settings", label: "Settings" }, { href: "/app/integrations", label: "Connections" }]} />
 
-    {invite && <Card style={{ padding: "16px", background: "#eef7f0", borderColor: "#cfe6d5", marginBottom: "16px" }} role="status">
-      <b>Invitation created.</b>
-      <p style={{ marginTop: "8px", wordBreak: "break-all", fontSize: "13px" }}>{site}/app/invitations/accept?token={invite}</p>
+    {statusMessage && <Card style={{ padding: "16px", background: "#eef7f0", borderColor: "#cfe6d5", marginBottom: "16px" }} role="status">
+      <b>{statusMessage}</b>
+      {inviteId && <p style={{ marginTop: "8px", fontSize: "13px" }}>Invitation reference: {inviteId}</p>}
     </Card>}
 
     <div className="settings-layout">
@@ -102,14 +120,17 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         </Card>
 
         {canManageTeam && !!pendingInvites.length && <Card id="invites">
-          <div className="settings-head"><h2 style={{ fontSize: "14px", margin: "0 0 4px" }}>Pending invitations</h2><p>Invitations that have been sent but not yet accepted.</p></div>
+          <div className="settings-head"><h2 style={{ fontSize: "14px", margin: "0 0 4px" }}>Pending invitations</h2><p>Active invitations stay here until accepted or revoked. Failed or unconfigured delivery can be retried.</p></div>
           <div className="team-list">
-            {pendingInvites.map((i) => <div key={i.email}>
+            {pendingInvites.map((i) => <div key={i.id}>
               <i className="avatar" aria-hidden="true"><Icon name="bell" /></i>
-              <span><b>{i.email}</b><small>{i.job_title || `Expires ${new Date(i.expires_at).toLocaleDateString("en-GB")}`}</small></span>
+              <span><b>{i.email}</b><small>{i.job_title ? `${i.job_title} · ` : ""}Expires {new Date(i.expires_at).toLocaleDateString("en-GB")}</small></span>
               <Pill tone={i.role === "admin" ? "green" : "neutral"}>{roleLabel(i.role as MembershipRole)}</Pill>
-              <Pill tone="amber">Pending</Pill>
-              {canInviteRole(membership.role, i.role as MembershipRole) && <span className="member-actions"><form action={revokeInvitationAction}><input type="hidden" name="email" value={i.email} /><button className="button secondary" style={{ minHeight: "32px", padding: "6px 12px" }}>Revoke</button></form></span>}
+              <Pill tone={i.delivery_status === "sent" ? "green" : "amber"}>{deliveryLabel(i.delivery_status)}</Pill>
+              {canInviteRole(membership.role, i.role as MembershipRole) && <span className="member-actions">
+                <form action={resendInvitationAction}><input type="hidden" name="invitationId" value={i.id} /><button className="button secondary" style={{ minHeight: "32px", padding: "6px 12px" }}>{i.delivery_status === "sent" ? "Resend" : "Retry"}</button></form>
+                <form action={revokeInvitationAction}><input type="hidden" name="invitationId" value={i.id} /><button className="button secondary" style={{ minHeight: "32px", padding: "6px 12px" }}>Revoke</button></form>
+              </span>}
             </div>)}
           </div>
         </Card>}

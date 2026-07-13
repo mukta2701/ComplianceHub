@@ -1,7 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
-import { createOrganisation, inviteMember, organisationInputSchema } from "./organisation";
+import { createInvitationCredential, createOrganisation, inviteMember, organisationInputSchema } from "./organisation";
 
 describe("organisation application service", () => {
+  it("creates a 32-byte base64url invitation token with a SHA-256 hash and seven-day expiry", () => {
+    const before = Date.now();
+    const credential = createInvitationCredential();
+    const after = Date.now();
+
+    expect(credential.rawToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(Buffer.from(credential.rawToken, "base64url")).toHaveLength(32);
+    expect(credential.tokenHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(new Date(credential.expiresAt).getTime()).toBeGreaterThanOrEqual(before + 7 * 24 * 60 * 60 * 1000);
+    expect(new Date(credential.expiresAt).getTime()).toBeLessThanOrEqual(after + 7 * 24 * 60 * 60 * 1000);
+  });
   it("normalises a valid organisation name and derives its slug", async () => {
     const insert = vi.fn().mockResolvedValue({ id: "org-1", name: "Acme Security", slug: "acme-security" });
     const result = await createOrganisation({ name: "  Acme Security  " }, { userId: "user-1", insert });

@@ -17,6 +17,15 @@ function slugify(name: string) {
   return slug || `organisation-${randomBytes(4).toString("hex")}`;
 }
 
+export function createInvitationCredential(now = Date.now()) {
+  const rawToken = randomBytes(32).toString("base64url");
+  return {
+    rawToken,
+    tokenHash: createHash("sha256").update(rawToken).digest("hex"),
+    expiresAt: new Date(now + 7 * 24 * 60 * 60 * 1000).toISOString(),
+  };
+}
+
 export async function createOrganisation(
   input: unknown,
   context: { userId: string; insert: (row: { name: string; slug: string; createdBy: string }) => Promise<{ id: string; name: string; slug: string }> },
@@ -35,9 +44,7 @@ export async function inviteMember(
 ) {
   const parsed = invitationInputSchema.parse(input);
   if (!canInviteRole(context.actorRole, parsed.role)) throw new Error("Your role cannot invite that role");
-  const token = randomBytes(32).toString("base64url");
-  const tokenHash = createHash("sha256").update(token).digest("hex");
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const { rawToken: token, tokenHash, expiresAt } = createInvitationCredential();
   const invitation = await context.insertInvitation({ ...parsed, invitedBy: context.actorId, tokenHash, expiresAt });
   return { ...invitation, token };
 }

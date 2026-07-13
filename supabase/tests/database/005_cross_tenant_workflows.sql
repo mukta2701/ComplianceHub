@@ -9,8 +9,14 @@ insert into auth.users(id,instance_id,aud,role,email,encrypted_password,email_co
 set local role authenticated;
 select set_config('request.jwt.claims','{"sub":"50000000-0000-4000-8000-000000000001","email":"owner-a@example.test","role":"authenticated"}',true);
 select set_config('app.org_a',public.create_organisation_with_owner('Organisation A','workflow-a')::text,true);
-insert into public.invitations(organisation_id,email,token_hash,invited_by,expires_at)
-values(current_setting('app.org_a')::uuid,'invitee@example.test',encode(extensions.digest(convert_to('valid-invite-token','UTF8'),'sha256'),'hex'),'50000000-0000-4000-8000-000000000001',now()+interval '1 day');
+select public.issue_invitation(
+  current_setting('app.org_a')::uuid,
+  'invitee@example.test',
+  'member',
+  null,
+  encode(extensions.digest(convert_to('valid-invite-token','UTF8'),'sha256'),'hex'),
+  now()+interval '1 day'
+);
 insert into public.assessment_sessions(organisation_id,catalogue_version_id,title,created_by)
 values(current_setting('app.org_a')::uuid,'00000000-0000-4000-8000-000000000001','Tenant A assessment','50000000-0000-4000-8000-000000000001');
 select set_config('app.session_a',(select id::text from public.assessment_sessions where organisation_id=current_setting('app.org_a')::uuid),true);

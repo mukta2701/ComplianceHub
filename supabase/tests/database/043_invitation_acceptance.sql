@@ -11,10 +11,14 @@ select set_config('request.jwt.claims','{"sub":"62000000-0000-4000-8000-00000000
 select set_config('app.invite_org',public.create_organisation_with_owner('Invite Org','invite-org')::text,true);
 insert into public.memberships(organisation_id,user_id,role,job_title)
 values(current_setting('app.invite_org')::uuid,'62000000-0000-4000-8000-000000000003','member','Developer');
-insert into public.invitations(organisation_id,email,role,job_title,token_hash,invited_by,expires_at) values
- (current_setting('app.invite_org')::uuid,'new-admin@example.test','admin','CTO',encode(extensions.digest(convert_to('new-admin-token','UTF8'),'sha256'),'hex'),'62000000-0000-4000-8000-000000000001',now()+interval '1 day'),
- (current_setting('app.invite_org')::uuid,'existing-member@example.test','admin','Changed by invite',encode(extensions.digest(convert_to('existing-member-token','UTF8'),'sha256'),'hex'),'62000000-0000-4000-8000-000000000001',now()+interval '1 day');
+select public.issue_invitation(current_setting('app.invite_org')::uuid,'new-admin@example.test','admin','CTO',encode(extensions.digest(convert_to('new-admin-token','UTF8'),'sha256'),'hex'),now()+interval '1 day');
+-- Seed a legacy/compromised invitation as postgres to keep the acceptance RPC's
+-- existing-member defence independently covered; normal issuance now rejects it.
+set local role postgres;
+insert into public.invitations(organisation_id,email,role,job_title,token_hash,invited_by,expires_at)
+values(current_setting('app.invite_org')::uuid,'existing-member@example.test','admin','Changed by invite',encode(extensions.digest(convert_to('existing-member-token','UTF8'),'sha256'),'hex'),'62000000-0000-4000-8000-000000000001',now()+interval '1 day');
 
+set local role authenticated;
 select set_config('request.jwt.claims','{"sub":"62000000-0000-4000-8000-000000000002","email":"new-admin@example.test","role":"authenticated"}',true);
 select lives_ok($$ select public.accept_invitation('new-admin-token') $$,'a genuinely new user can accept an Owner-issued Admin invitation');
 select is((select role::text from public.memberships where organisation_id=current_setting('app.invite_org')::uuid and user_id='62000000-0000-4000-8000-000000000002'),'admin','accepted Admin invitation grants the Admin role');

@@ -27,6 +27,8 @@ Create a Vercel project from this repo and set these environment variables (name
 | `SUPABASE_SERVICE_ROLE_KEY` | yes | **Server-only.** Used solely by the cron routes; never exposed to the client. |
 | `NEXT_PUBLIC_SITE_URL` | yes | Your real site origin, e.g. `https://app.example.com`. **The code reads `NEXT_PUBLIC_SITE_URL`** (not `…_APP_URL`) for invitation links and auth redirects, falling back to `http://localhost:3000` — so if it is unset, production invite/reset links point at localhost. |
 | `CRON_SECRET` | yes | High-entropy random string; gates both cron routes. |
+| `RESEND_API_KEY` | for invitation delivery | **Server-only.** Resend API key with sending access. Never use a `NEXT_PUBLIC_` variable for it. If absent, invitations remain retryable with status `not_configured` and no mail request is made. |
+| `INVITATION_FROM_EMAIL` | for invitation delivery | **Server-only.** Verified sender, e.g. `ComplianceHub <invites@notify.example.com>`. |
 | `INTEGRATIONS_LIVE` | no | Leave **unset** to use the built-in sandbox tracker. Set to `1` only after step 5. |
 
 ## 3. Cron automation (already declared in `vercel.json`)
@@ -45,9 +47,10 @@ curl -i -X GET http://localhost:3000/api/cron/integrations-sync -H "Authorizatio
 
 ## 4. Production hardening **(you)**
 
-1. Custom SMTP provider in Supabase Auth (so invitation and auth emails send from your domain), with the verified application URL matching `NEXT_PUBLIC_SITE_URL`.
-2. Spend controls, monitoring, and database backups; exercise a restore into a separate project before public launch.
-3. The Supabase free tier and Vercel Hobby are for development, not dependable/commercial production (projects can pause; backups are limited).
+1. Verify a dedicated sending subdomain in Resend and publish the required SPF and DKIM records; publish a DMARC policy as well. Create `RESEND_API_KEY` and set `INVITATION_FROM_EMAIL` only after verification. This enables ComplianceHub's workspace-membership invitations.
+2. Configure a custom SMTP provider in Supabase Auth for sign-up, confirmation, password-reset, and other Auth-owned emails, with the verified application URL matching `NEXT_PUBLIC_SITE_URL`. This is separate from the Resend HTTP adapter used for workspace-membership invitations.
+3. Spend controls, monitoring, and database backups; exercise a restore into a separate project before public launch.
+4. The Supabase free tier and Vercel Hobby are for development, not dependable/commercial production (projects can pause; backups are limited).
 
 ## 5. Real Jira / GitHub integrations (optional) **(you)**
 

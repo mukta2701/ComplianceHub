@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 const hoisted = vi.hoisted(() => ({ ctx: null as unknown }));
+const INVITATION_ID = "40000000-0000-4000-8000-000000000004";
 
 vi.mock("@/lib/app-context", () => ({ requireAppContext: () => Promise.resolve(hoisted.ctx) }));
 vi.mock("@/lib/security/rate-limit", () => ({ enforceRateLimit: () => Promise.resolve() }));
@@ -16,7 +17,7 @@ function fakeSupabase(error: unknown = null, targetRole = "member") {
   for (const m of ["select", "update", "delete", "eq", "is"]) chain[m] = () => chain;
   chain.maybeSingle = () => Promise.resolve({ data: { role: targetRole }, error: null });
   chain.then = (resolve: (v: { error: unknown }) => unknown) => resolve({ error });
-  return { from: () => chain };
+  return { from: () => chain, rpc: vi.fn().mockResolvedValue({ data: null, error }) };
 }
 function fd(entries: Record<string, string>) {
   const f = new FormData();
@@ -29,7 +30,7 @@ describe("team lifecycle actions — authorisation", () => {
     hoisted.ctx = { membership: { role: "member" }, organisation: { id: "o1" }, supabase: fakeSupabase() };
     await expect(removeMemberAction(fd({ userId: "u" }))).rejects.toThrow("not allowed");
     await expect(updateMemberJobTitleAction(fd({ userId: "u", jobTitle: "Developer" }))).rejects.toThrow("not allowed");
-    await expect(revokeInvitationAction(fd({ email: "x@y.z" }))).rejects.toThrow("not allowed");
+    await expect(revokeInvitationAction(fd({ invitationId: INVITATION_ID }))).rejects.toThrow("not allowed");
   });
 
   it("lets an admin update and remove ordinary members", async () => {
@@ -60,7 +61,7 @@ describe("team lifecycle actions — authorisation", () => {
   it("lets an owner through when the write succeeds", async () => {
     hoisted.ctx = { membership: { role: "owner" }, organisation: { id: "o1" }, supabase: fakeSupabase(null) };
     await expect(removeMemberAction(fd({ userId: "u" }))).resolves.toBeUndefined();
-    await expect(revokeInvitationAction(fd({ email: "x@y.z" }))).resolves.toBeUndefined();
+    await expect(revokeInvitationAction(fd({ invitationId: INVITATION_ID }))).resolves.toBeUndefined();
   });
 
   it("lets an owner assign the admin role", async () => {
