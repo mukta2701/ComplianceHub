@@ -23,21 +23,22 @@ export async function createTaskAction(formData: FormData) {
 }
 
 export async function updateTaskStatusAction(formData: FormData) {
-  const { supabase, user } = await requireAppContext();
+  const { supabase } = await requireAppContext();
   const status = String(formData.get("status"));
   if (!["open", "in_progress", "done", "cancelled"].includes(status)) throw new Error("Invalid task status");
   const id = String(formData.get("id"));
   const { data: task, error: readError } = await supabase.from("tasks")
     .select("id,organisation_id,title,detail,owner_id,due_on,recurrence,source,control_id,risk_id,status").eq("id", id).single();
   if (readError || !task) throw new Error("Task not found");
-  const { error } = await supabase.from("tasks").update({ status, updated_at: new Date().toISOString() }).eq("id", id);
-  if (error) throw new Error("Could not update task");
   if (status === "done" && task.status !== "done" && task.recurrence && task.due_on) {
-    await supabase.from("tasks").insert({
-      organisation_id: task.organisation_id, title: task.title, detail: task.detail, owner_id: task.owner_id,
-      due_on: nextDueDate(task.due_on, task.recurrence as TaskRecurrence), recurrence: task.recurrence,
-      source: task.source, control_id: task.control_id, risk_id: task.risk_id, created_by: user.id,
+    const { error } = await supabase.rpc("complete_recurring_task", {
+      target_task_id: task.id,
+      next_due_on: nextDueDate(task.due_on, task.recurrence as TaskRecurrence),
     });
+    if (error) throw new Error("Could not complete recurring task");
+  } else {
+    const { error } = await supabase.from("tasks").update({ status, updated_at: new Date().toISOString() }).eq("id", id);
+    if (error) throw new Error("Could not update task");
   }
   revalidatePath("/app/tasks"); revalidatePath("/app");
 }

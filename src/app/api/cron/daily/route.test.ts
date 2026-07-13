@@ -77,7 +77,8 @@ class Builder implements PromiseLike<{ data: unknown; error: unknown }> {
     this.filters.push({ kind: "notNull", col });
     return this;
   }
-  is(col: string, _val: null) {
+  is(col: string, val: null) {
+    void val;
     // Modelled only for `.is(col, null)`, i.e. an is-null filter.
     this.filters.push({ kind: "isNull", col });
     return this;
