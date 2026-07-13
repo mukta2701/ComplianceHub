@@ -83,6 +83,32 @@ describe("AlertToaster updates", () => {
 
     view.unmount();
     expect(realtime.removeChannel).toHaveBeenCalledTimes(1);
+    await act(async () => { vi.advanceTimersByTime(2_500); });
+    expect(fetchRecentAlertsAction).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries promptly when the finding arrives before its notification", async () => {
+    const realtime = realtimeClient();
+    createBrowserClient.mockReturnValue(realtime.client);
+    const alert = { id: 9, message: "Notification caught by retry", kind: "policy_violation", createdAt: "2026-07-13" };
+    fetchRecentAlertsAction
+      .mockResolvedValue([alert])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    const view = render(<AlertToaster organisationId="org-1" />);
+    await act(async () => undefined);
+
+    const onInsert = realtime.on.mock.calls[0][2] as () => void;
+    await act(async () => { onInsert(); });
+    expect(view.queryByText("Notification caught by retry")).not.toBeInTheDocument();
+
+    await act(async () => { vi.advanceTimersByTime(250); });
+    expect(view.getByText("Notification caught by retry")).toBeInTheDocument();
+    expect(fetchRecentAlertsAction).toHaveBeenCalledTimes(3);
+    await act(async () => { vi.advanceTimersByTime(2_250); });
+    expect(view.getAllByText("Notification caught by retry")).toHaveLength(1);
+    expect(fetchRecentAlertsAction).toHaveBeenCalledTimes(5);
+    view.unmount();
   });
 
   it("keeps polling after a Realtime timeout and cleans the failed channel only once", async () => {

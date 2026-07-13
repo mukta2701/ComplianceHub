@@ -10,6 +10,7 @@ type Toast = { id: number; message: string; kind: string };
 const POLL_INTERVAL_MS = 15_000;
 const TOAST_DURATION_MS = 12_000;
 const REALTIME_SETUP_TIMEOUT_MS = 10_000;
+const REALTIME_RETRY_DELAYS_MS = [250, 1_000, 2_500] as const;
 
 export function isRealtimeFailureStatus(status: string): boolean {
   return status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED";
@@ -26,6 +27,7 @@ export function AlertToaster({ organisationId }: { organisationId: string | null
   useEffect(() => {
     let active = true;
     const dismissTimers = new Set<ReturnType<typeof setTimeout>>();
+    const realtimeRetryTimers = new Set<ReturnType<typeof setTimeout>>();
     let removeRealtime: (() => void) | null = null;
     async function poll() {
       try {
@@ -55,6 +57,19 @@ export function AlertToaster({ organisationId }: { organisationId: string | null
     poll();
     const pollTimer = setInterval(poll, POLL_INTERVAL_MS);
 
+    function refreshAfterRealtimeInsert() {
+      for (const timer of realtimeRetryTimers) clearTimeout(timer);
+      realtimeRetryTimers.clear();
+      void poll();
+      for (const delay of REALTIME_RETRY_DELAYS_MS) {
+        const timer = setTimeout(() => {
+          realtimeRetryTimers.delete(timer);
+          void poll();
+        }, delay);
+        realtimeRetryTimers.add(timer);
+      }
+    }
+
     async function setupRealtime() {
       if (!organisationId) return;
       try {
@@ -72,7 +87,7 @@ export function AlertToaster({ organisationId }: { organisationId: string | null
             schema: "public",
             table: "monitoring_findings",
             filter: `organisation_id=eq.${organisationId}`,
-          }, () => { void poll(); });
+          }, refreshAfterRealtimeInsert);
         let channelRemoved = false;
         const removeChannel = () => {
           if (channelRemoved) return;
@@ -97,6 +112,8 @@ export function AlertToaster({ organisationId }: { organisationId: string | null
       clearInterval(pollTimer);
       for (const timer of dismissTimers) clearTimeout(timer);
       dismissTimers.clear();
+      for (const timer of realtimeRetryTimers) clearTimeout(timer);
+      realtimeRetryTimers.clear();
       removeRealtime?.();
     };
   }, [organisationId]);
