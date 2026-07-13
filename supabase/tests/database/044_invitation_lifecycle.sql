@@ -1,5 +1,5 @@
 begin;
-select plan(42);
+select plan(55);
 
 select has_column('public', 'invitations', 'revoked_at', 'invitations retain revocation history');
 select has_column('public', 'invitations', 'accepted_by', 'invitations record the accepting user');
@@ -16,6 +16,26 @@ select ok(pg_catalog.has_function_privilege('authenticated', 'public.issue_invit
 select ok(not pg_catalog.has_table_privilege('authenticated', 'public.invitations', 'insert'), 'authenticated users cannot bypass issue RPC with direct inserts');
 select ok(not pg_catalog.has_table_privilege('authenticated', 'public.invitations', 'update'), 'authenticated users cannot bypass lifecycle RPCs with direct updates');
 select ok(not pg_catalog.has_table_privilege('authenticated', 'public.invitations', 'delete'), 'authenticated users cannot erase invitation history');
+select ok(pg_catalog.has_table_privilege('authenticated', 'public.invitations', 'select'), 'authenticated operators retain RLS-scoped invitation reads');
+select ok(not pg_catalog.has_table_privilege('authenticated', 'public.invitations', 'truncate'), 'authenticated users cannot bypass RLS by truncating invitations');
+select ok(not pg_catalog.has_table_privilege('authenticated', 'public.invitations', 'references'), 'authenticated users cannot add dependencies to invitations');
+select ok(not pg_catalog.has_table_privilege('authenticated', 'public.invitations', 'trigger'), 'authenticated users cannot install invitation triggers');
+select ok(not pg_catalog.has_table_privilege('anon', 'public.invitations', 'select'), 'anonymous users cannot read invitations');
+select ok(not (
+  pg_catalog.has_table_privilege('anon', 'public.invitations', 'insert')
+  or pg_catalog.has_table_privilege('anon', 'public.invitations', 'update')
+  or pg_catalog.has_table_privilege('anon', 'public.invitations', 'delete')
+  or pg_catalog.has_table_privilege('anon', 'public.invitations', 'truncate')
+  or pg_catalog.has_table_privilege('anon', 'public.invitations', 'references')
+  or pg_catalog.has_table_privilege('anon', 'public.invitations', 'trigger')
+), 'anonymous users have no invitation table mutation privilege');
+select ok(not exists (
+  select 1
+  from pg_catalog.pg_class c,
+       lateral pg_catalog.aclexplode(coalesce(c.relacl, pg_catalog.acldefault('r', c.relowner))) acl
+  where c.oid = 'public.invitations'::pg_catalog.regclass
+    and acl.grantee = 0
+), 'PUBLIC has no invitation table privilege');
 select ok((select convalidated from pg_catalog.pg_constraint where conrelid='public.invitations'::pg_catalog.regclass and conname='invitations_cannot_grant_owner'), 'the active Owner-invitation invariant is validated');
 
 insert into auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data) values
@@ -82,8 +102,21 @@ select set_config('request.jwt.claims','{"sub":"63000000-0000-4000-8000-00000000
 select throws_ok(format($$ select public.record_invitation_delivery(%L::uuid, repeat('6',64), 'sent', 'forged', null) $$, current_setting('app.recreated_member_invite')), '42501', 'your role cannot manage that invitation', 'an outsider cannot record delivery for another organisation');
 select throws_ok($$ select public.accept_invitation('revoked-lifecycle-token') $$, '22023', 'invitation is invalid or expired', 'a revoked invitation cannot be accepted');
 
+select set_config('request.jwt.claims','{"sub":"63000000-0000-4000-8000-000000000001","email":"lifecycle-owner@example.test","role":"authenticated"}',true);
+update public.memberships
+set role = 'member'
+where organisation_id = current_setting('app.invitation_org')::uuid
+  and user_id = '63000000-0000-4000-8000-000000000002';
+select set_config('request.jwt.claims','{"sub":"63000000-0000-4000-8000-000000000002","email":"lifecycle-admin@example.test","role":"authenticated"}',true);
+select throws_ok($$ select public.issue_invitation(current_setting('app.invitation_org')::uuid, 'after-demotion@example.test', 'member', null, repeat('9',64), now()+interval '7 days') $$, '42501', 'you are not allowed to issue invitations', 'a demoted operator immediately loses issue authorization');
+select throws_ok(format($$ select public.resend_invitation(%L::uuid, repeat('0',64), now()+interval '7 days') $$, current_setting('app.admin_member_invite')), '42501', 'your role cannot manage that invitation', 'a demoted operator immediately loses resend authorization');
+select throws_ok(format($$ select public.revoke_invitation(%L::uuid) $$, current_setting('app.admin_member_invite')), '42501', 'your role cannot manage that invitation', 'a demoted operator immediately loses revoke authorization');
+select throws_ok(format($$ select public.record_invitation_delivery(%L::uuid, repeat('f',64), 'sent', 'forged-after-demotion', null) $$, current_setting('app.admin_member_invite')), '42501', 'your role cannot manage that invitation', 'a demoted operator immediately loses delivery-record authorization');
+
 set local role postgres;
 select lives_ok(format($$ insert into public.invitations(organisation_id,email,role,token_hash,invited_by,expires_at,accepted_at) values(%L::uuid,'historical-owner@example.test','owner',repeat('8',64),'63000000-0000-4000-8000-000000000001',now(),now()) $$, current_setting('app.invitation_org')), 'accepted legacy Owner invitation history remains representable');
+select lives_ok(format($$ insert into public.invitations(organisation_id,email,role,token_hash,invited_by,expires_at,revoked_at) values(%L::uuid,'revoked-owner@example.test','owner',repeat('0',64),'63000000-0000-4000-8000-000000000001',now(),now()) $$, current_setting('app.invitation_org')), 'revoked legacy Owner invitation history remains representable');
+select throws_ok(format($$ insert into public.invitations(organisation_id,email,role,token_hash,invited_by,expires_at) values(%L::uuid,'active-owner@example.test','owner',repeat('9',64),'63000000-0000-4000-8000-000000000001',now()+interval '1 day') $$, current_setting('app.invitation_org')), '23514', null, 'an active Owner invitation cannot be directly represented');
 
 select * from finish();
 rollback;

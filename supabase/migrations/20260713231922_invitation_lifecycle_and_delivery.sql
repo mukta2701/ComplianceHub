@@ -462,8 +462,11 @@ end;
 $$;
 
 -- Browser clients can list RLS-scoped invitations, but all lifecycle writes go
--- through the narrowly-authorized functions above.
-revoke insert, update, delete on public.invitations from authenticated;
+-- through the narrowly-authorized functions above. RLS does not apply to
+-- TRUNCATE, REFERENCES, or TRIGGER, so use an explicit table-privilege allowlist
+-- instead of revoking only ordinary DML. Service-role privileges are untouched.
+revoke all privileges on table public.invitations from public, anon, authenticated;
+grant select on table public.invitations to authenticated;
 
 revoke all on function public.issue_invitation(uuid,text,public.membership_role,text,text,timestamptz) from public;
 revoke all on function public.issue_invitation(uuid,text,public.membership_role,text,text,timestamptz) from anon;
