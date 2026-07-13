@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { requireAppContext } from "@/lib/app-context";
-import { AUDIT_STATUS_LABEL, CHECKLIST_RESULT_LABEL, CHECKLIST_RESULT_TONE, FINDING_SEVERITY_LABEL, FINDING_SEVERITY_TONE, FINDING_STATUS_LABEL, checklistCompletion, summariseFindings, type AuditStatus, type ChecklistResult, type FindingSeverity, type FindingStatus } from "@/features/audits/domain/audits";
+import { AUDIT_STATUS_LABEL, CHECKLIST_RESULT_LABEL, CHECKLIST_RESULT_TONE, FINDING_SEVERITY_LABEL, FINDING_SEVERITY_TONE, FINDING_STATUS_LABEL, checklistCompletion, recentAuditorViews, summariseFindings, type AuditStatus, type ChecklistResult, type FindingSeverity, type FindingStatus } from "@/features/audits/domain/audits";
 import { AUDITOR_LINK_FLASH_COOKIE } from "@/features/audits/application/auditor-token";
 import { Card, PageIntro, Pill, Progress } from "@/components/ui";
 import { Icon } from "@/components/icons";
@@ -39,6 +39,13 @@ export default async function AuditDetailPage({ params }: { params: Promise<{ id
     supabase.from("auditor_access_tokens").select("id,label,expires_at,revoked_at,audit_id").order("created_at", { ascending: false }),
   ]);
   const rows = items ?? [];
+  const { data: accessRows, error: accessRowsError } = await supabase.from("auditor_access_log")
+    .select("viewed_at,auditor_access_tokens!inner(label)")
+    .eq("auditor_access_tokens.audit_id", id)
+    .order("viewed_at", { ascending: false })
+    .limit(10);
+  if (accessRowsError) throw new Error("Could not load recent auditor views");
+  const recentViews = recentAuditorViews(accessRows ?? []);
   const completion = checklistCompletion(rows.map((i) => ({ compliant: i.compliant as ChecklistResult })));
   const f = summariseFindings((findings ?? []).map((x) => ({ severity: x.severity as FindingSeverity, status: x.status as FindingStatus })));
   const status = audit.status as AuditStatus;
@@ -148,6 +155,14 @@ export default async function AuditDetailPage({ params }: { params: Promise<{ id
       <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "6px" }}>
         {(tokens ?? []).map((t) => { const state = t.revoked_at ? "Revoked" : new Date(t.expires_at) < new Date() ? "Expired" : "Active"; return <li key={t.id} style={{ display: "flex", justifyContent: "space-between", gap: "12px", fontSize: "13px" }}><span>{t.label} · <Pill tone={state === "Active" ? "green" : "neutral"}>{state}</Pill> <small style={{ color: "#596273" }}>expires {new Date(t.expires_at).toISOString().slice(0, 10)}</small></span>{!t.revoked_at && <form action={revokeAuditorTokenAction}><input type="hidden" name="id" value={t.id} /><input type="hidden" name="auditId" value={id} /><button style={{ color: "var(--red)", border: 0, background: "none", fontWeight: 700 }}>Revoke</button></form>}</li>; })}
         {!tokens?.length && <li style={{ color: "#596273", fontSize: "13px" }}>No auditor links yet.</li>}
+      </ul>
+      <h3 style={{ fontSize: "14px", margin: "18px 0 8px" }}>Recent auditor views</h3>
+      <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "6px" }}>
+        {recentViews.map((view, index) => <li key={`${view.viewedAt}-${index}`} style={{ display: "flex", justifyContent: "space-between", gap: "12px", fontSize: "13px" }}>
+          <span>{view.label}</span>
+          <time dateTime={view.viewedAt} style={{ color: "#596273" }}>{new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(new Date(view.viewedAt))} UTC</time>
+        </li>)}
+        {!recentViews.length && <li style={{ color: "#596273", fontSize: "13px" }}>No auditor views recorded yet.</li>}
       </ul>
     </Card>
   </>;

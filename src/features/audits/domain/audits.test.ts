@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AUDIT_STATUS_LABEL, CHECKLIST_RESULT_LABEL, checklistCompletion, summariseFindings } from "./audits";
+import { AUDIT_STATUS_LABEL, CHECKLIST_RESULT_LABEL, checklistCompletion, recentAuditorViews, summariseFindings } from "./audits";
 
 describe("audit labels", () => {
   it("labels statuses and results in en-GB", () => {
@@ -26,5 +26,23 @@ describe("summariseFindings", () => {
       { severity: "observation", status: "open" },
       { severity: "major_nc", status: "in_progress" },
     ])).toEqual({ total: 4, open: 3, majorNc: 2, minorNc: 1, observations: 1, openNonConformities: 2 });
+  });
+});
+
+describe("recentAuditorViews", () => {
+  it("returns at most ten safe label and timestamp fields", () => {
+    const rows = Array.from({ length: 12 }, (_, index) => ({
+      viewed_at: `2026-07-13T01:${String(index).padStart(2, "0")}:00.000Z`,
+      token_id: `secret-token-id-${index}`,
+      auditor_access_tokens: { label: index === 0 ? "" : `Auditor ${index}`, token_hash: `secret-hash-${index}` },
+    }));
+
+    const result = recentAuditorViews(rows);
+
+    expect(result).toHaveLength(10);
+    expect(result[0]).toEqual({ label: "Auditor link", viewedAt: "2026-07-13T01:00:00.000Z" });
+    expect(result[1]).toEqual({ label: "Auditor 1", viewedAt: "2026-07-13T01:01:00.000Z" });
+    expect(result[0]).not.toHaveProperty("token_id");
+    expect(result[0]).not.toHaveProperty("token_hash");
   });
 });

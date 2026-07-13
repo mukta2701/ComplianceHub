@@ -72,3 +72,22 @@ export function summariseFindings(
   ).length;
   return { total, open, majorNc, minorNc, observations, openNonConformities };
 }
+
+type AuditorAccessLogRow = {
+  viewed_at: string;
+  auditor_access_tokens: { label: string } | { label: string }[] | null;
+};
+
+export function recentAuditorViews(
+  rows: readonly AuditorAccessLogRow[],
+): { label: string; viewedAt: string }[] {
+  return rows.slice(0, 10).map((row) => {
+    const token = Array.isArray(row.auditor_access_tokens)
+      ? row.auditor_access_tokens[0]
+      : row.auditor_access_tokens;
+    return {
+      label: token?.label.trim() || "Auditor link",
+      viewedAt: row.viewed_at,
+    };
+  });
+}
