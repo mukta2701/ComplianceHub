@@ -6,6 +6,25 @@ import type { NextConfig } from "next";
 // in production builds), so the shipped policy is unchanged.
 const scriptSrc = process.env.NODE_ENV === "production" ? "'self' 'unsafe-inline'" : "'self' 'unsafe-inline' 'unsafe-eval'";
 
+const hostedSupabaseConnectSrc = "'self' https://*.supabase.co wss://*.supabase.co";
+
+export function buildConnectSrc(nodeEnv = process.env.NODE_ENV, supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL): string {
+  if (nodeEnv === "production" || !supabaseUrl) return hostedSupabaseConnectSrc;
+
+  try {
+    const url = new URL(supabaseUrl);
+    if (!["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)) return hostedSupabaseConnectSrc;
+
+    const websocketUrl = new URL(url.origin);
+    websocketUrl.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    return `${hostedSupabaseConnectSrc} ${url.origin} ${websocketUrl.origin}`;
+  } catch {
+    return hostedSupabaseConnectSrc;
+  }
+}
+
+const connectSrc = buildConnectSrc();
+
 const securityHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "X-Frame-Options", value: "DENY" },
@@ -15,7 +34,7 @@ const securityHeaders = [
   { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
   {
     key: "Content-Security-Policy",
-    value: `default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; object-src 'none'; img-src 'self' data:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src ${scriptSrc}; connect-src 'self' https://*.supabase.co wss://*.supabase.co`,
+    value: `default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; object-src 'none'; img-src 'self' data:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src ${scriptSrc}; connect-src ${connectSrc}`,
   },
 ];
 
