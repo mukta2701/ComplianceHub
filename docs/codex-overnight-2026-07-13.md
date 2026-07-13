@@ -131,8 +131,43 @@ unset (so no creds needed to run). Route by `min_severity` like the Slack adapte
 
 ---
 
-## 6. Morning report
-Before you go quiet, append a short summary to `docs/codex-overnight-notes.md`:
-which tasks merged (with commit SHAs), which were skipped and why, and any new blocker
-that needs the human. Keep `main` green — a merged-but-broken `main` is worse than an
-unfinished task left on its branch.
+## 6. PRIME DIRECTIVE — "working & ready by morning"
+This outranks every task below. By morning `main` must be in a verified, deployable,
+**proven-working** state. A green + working `main` with 2 features shipped beats a broken
+`main` with 6. If a change risks that, leave it unmerged on its branch. **Never leave
+`main` broken.**
+
+"Working & ready" is not "it compiles". It means ALL of:
+1. `npm run verify` green on `main` (lint → tsc → vitest → build).
+2. The app **boots and runs** locally — you started it (`./node_modules/.bin/next dev`),
+   hit `GET /api/health` (ok), signed in, and clicked through the core pages (dashboard,
+   risks, SoA, tasks, evidence, monitoring, settings) with **zero** runtime/500 errors in
+   the server log or browser console.
+3. Every feature you merged was **exercised at runtime**, not just unit-tested. For a
+   schema change: apply the migration locally (`docker exec -i supabase_db_compliancehub
+   psql` @ 127.0.0.1:54322) and drive the feature end to end before merging.
+4. The readiness report (§8) is written.
+
+Per-task merge gate (in addition to §3): after `npm run verify` is green, do the runtime
+smoke for the exact flow you changed. Only then self-merge. Local DB only — **never**
+`supabase db push` (hosted prod is human-gated).
+
+## 7. FINAL READINESS PASS (do this LAST, before going quiet — most important step)
+1. Confirm you are on the latest `main`.
+2. `npm run verify` — must be green.
+3. Start the app fresh, `GET /api/health`, sign in, click through dashboard, risks, SoA,
+   tasks, evidence, monitoring, settings. Confirm zero runtime errors end to end.
+4. If anything is red or broken, and you can't fix it safely, **revert the offending
+   merge** so `main` returns to the last known-good state, and record it in the report.
+
+## 8. Morning readiness report
+Append to `docs/codex-overnight-notes.md`:
+- **GO / NO-GO for deploy**, with a one-line justification (based on §7, not hope).
+- Tasks merged (with commit SHAs); tasks skipped (with reason).
+- Any new blocker that needs the human.
+- Confirm the **only** remaining human step is: set Vercel env vars
+  (`APP_ENCRYPTION_KEY`, `CRON_SECRET`, `NEXT_PUBLIC_SITE_URL`) + trigger the Vercel
+  deploy. Flag loudly if anything else is now required.
+
+Bottom line: "ready by morning" = `main` is proven-good and one ~5-minute Vercel action
+away from live. Getting there safely is the job; shipping extra features is a bonus.
