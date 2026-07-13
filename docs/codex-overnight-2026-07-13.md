@@ -78,9 +78,9 @@ work around them:
 
 ### T1 — Docs accuracy sweep  *(file-area: docs/ + README)*
 README/docs overstate policy-template capabilities and may still mention `pnpm`.
-- Correct the policy-templates claim to match what actually ships (policies exist;
-  prebuilt template library does NOT — verify against `src/features/policies` &
-  `src/app/app/policies`).
+- Correct policy-template claims to match what actually ships: 10 original starter
+  policies are selectable from the authoring form and editable after pre-fill. Do not
+  imply they are official ISO templates; keep backlog/current guidance aligned.
 - Grep for `pnpm` in docs and fix to `npm`/`npx` (only `package-lock.json` exists).
 - **DoD:** `npm run verify` green (docs-only, so trivially green); merge.
 
