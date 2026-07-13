@@ -70,10 +70,37 @@ export function buildSlackPayload(finding: AlertFinding): {
   };
 }
 
+export type WhatsAppPayload = {
+  to: string;
+  body: string;
+};
+
+export function normalizeWhatsAppAddress(address: string): string {
+  return `whatsapp:${address.trim().replace(/^whatsapp:/i, "")}`;
+}
+
+// Twilio's transport details stay in the injected adapter. This pure payload is
+// deterministic and contains no credentials or sender configuration.
+export function buildWhatsAppPayload(recipient: string, finding: AlertFinding): WhatsAppPayload {
+  return {
+    to: normalizeWhatsAppAddress(recipient),
+    body: [
+      `ComplianceHub alert — ${finding.severity.toUpperCase()}`,
+      finding.title,
+      `Control: ${finding.controlRef}`,
+      `Subject: ${finding.subjectId}`,
+      finding.detail,
+    ].join("\n"),
+  };
+}
+
 // Side-effecting adapters, injected by the cron so this stays unit-testable.
 export type DeliverPorts = {
   // Fire the Slack incoming-webhook. Throws on a non-2xx response.
   postSlack: (webhookUrl: string, payload: unknown) => Promise<void>;
+  // Post a Twilio WhatsApp message. Undefined when the complete server-side
+  // Twilio environment gate is not configured.
+  postWhatsApp?: (payload: WhatsAppPayload) => Promise<void>;
   // Write the in-app notification(s) for this finding (recipient resolution +
   // idempotent upsert live in the orchestrator, which owns the DB handle).
   notifyInApp: (finding: AlertFinding) => Promise<void>;
@@ -102,9 +129,15 @@ export async function deliverAlert(
         await ports.notifyInApp(finding);
         return { ...base, status: "delivered" };
       }
-      case "whatsapp":
-        // Phase 2 (Twilio). Stubbed so a WhatsApp channel is inert, not an error.
-        return { ...base, status: "skipped", reason: "whatsapp delivery not implemented (Phase 2)" };
+      case "whatsapp": {
+        const recipient = typeof channel.config.to === "string" ? channel.config.to.trim() : "";
+        if (!recipient) return { ...base, status: "skipped", reason: "no WhatsApp recipient configured" };
+        if (!ports.postWhatsApp) {
+          return { ...base, status: "skipped", reason: "Twilio WhatsApp is not configured" };
+        }
+        await ports.postWhatsApp(buildWhatsAppPayload(recipient, finding));
+        return { ...base, status: "delivered" };
+      }
     }
   } catch (error) {
     return { ...base, status: "failed", reason: error instanceof Error ? error.message : "delivery error" };

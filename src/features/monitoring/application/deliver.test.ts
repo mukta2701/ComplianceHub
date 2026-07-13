@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildSlackPayload, deliverAlert, meetsSeverity, type AlertChannel, type AlertFinding } from "./deliver";
+import {
+  buildSlackPayload, buildWhatsAppPayload, deliverAlert, meetsSeverity,
+  type AlertChannel, type AlertFinding,
+} from "./deliver";
 
 const finding: AlertFinding = {
   organisationId: "org1", sourceId: "src1", checkId: "github.branch_protection",
@@ -29,8 +32,28 @@ describe("buildSlackPayload", () => {
   });
 });
 
+describe("buildWhatsAppPayload", () => {
+  it("builds a deterministic body and normalizes the recipient prefix", () => {
+    expect(buildWhatsAppPayload("+447700900123", finding)).toEqual({
+      to: "whatsapp:+447700900123",
+      body: [
+        "ComplianceHub alert — CRITICAL",
+        "Production branch is unprotected",
+        "Control: A.8.32",
+        "Subject: acme/isms",
+        "No protection rule on main.",
+      ].join("\n"),
+    });
+    expect(buildWhatsAppPayload("whatsapp:+447700900123", finding).to).toBe("whatsapp:+447700900123");
+  });
+});
+
 describe("deliverAlert", () => {
-  const ports = () => ({ postSlack: vi.fn().mockResolvedValue(undefined), notifyInApp: vi.fn().mockResolvedValue(undefined) });
+  const ports = () => ({
+    postSlack: vi.fn().mockResolvedValue(undefined),
+    postWhatsApp: vi.fn().mockResolvedValue(undefined),
+    notifyInApp: vi.fn().mockResolvedValue(undefined),
+  });
 
   it("skips a channel whose min_severity outranks the finding", async () => {
     const p = ports();
@@ -60,9 +83,58 @@ describe("deliverAlert", () => {
     expect(p.notifyInApp).toHaveBeenCalledWith(finding);
   });
 
-  it("stubs whatsapp as skipped (Phase 2)", async () => {
-    const result = await deliverAlert(channel({ type: "whatsapp" }), finding, ports());
+  it("applies min_severity before calling the WhatsApp adapter", async () => {
+    const p = ports();
+    const result = await deliverAlert(
+      channel({ type: "whatsapp", minSeverity: "critical", config: { to: "+447700900123" } }),
+      { ...finding, severity: "medium" },
+      p,
+    );
     expect(result.status).toBe("skipped");
+    expect(p.postWhatsApp).not.toHaveBeenCalled();
+  });
+
+  it("skips WhatsApp deterministically when no recipient is configured", async () => {
+    const p = ports();
+    const result = await deliverAlert(channel({ type: "whatsapp" }), finding, p);
+    expect(result).toMatchObject({ status: "skipped", reason: "no WhatsApp recipient configured" });
+    expect(p.postWhatsApp).not.toHaveBeenCalled();
+  });
+
+  it("skips WhatsApp deterministically when Twilio env did not construct a port", async () => {
+    const p = ports();
+    const result = await deliverAlert(
+      channel({ type: "whatsapp", config: { to: "+447700900123" } }),
+      finding,
+      { postSlack: p.postSlack, notifyInApp: p.notifyInApp },
+    );
+    expect(result).toMatchObject({ status: "skipped", reason: "Twilio WhatsApp is not configured" });
+    expect(p.postWhatsApp).not.toHaveBeenCalled();
+  });
+
+  it("delivers the deterministic WhatsApp payload through the injected adapter", async () => {
+    const p = ports();
+    const result = await deliverAlert(
+      channel({ type: "whatsapp", config: { to: "+447700900123" } }),
+      finding,
+      p,
+    );
+    expect(result.status).toBe("delivered");
+    expect(p.postWhatsApp).toHaveBeenCalledWith({
+      to: "whatsapp:+447700900123",
+      body: expect.stringContaining("Production branch is unprotected"),
+    });
+  });
+
+  it("isolates a throwing WhatsApp adapter as a failed result", async () => {
+    const p = ports();
+    p.postWhatsApp.mockRejectedValue(new Error("Twilio Messages API failed: 503"));
+    const result = await deliverAlert(
+      channel({ type: "whatsapp", config: { to: "+447700900123" } }),
+      finding,
+      p,
+    );
+    expect(result).toMatchObject({ status: "failed", reason: "Twilio Messages API failed: 503" });
   });
 
   it("isolates a throwing adapter as a failed result rather than propagating", async () => {

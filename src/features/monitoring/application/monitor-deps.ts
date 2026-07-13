@@ -4,6 +4,7 @@ import { decryptSecret } from "@/lib/security/secrets";
 import { resolveMonitorProvider } from "./monitor-registry";
 import { deliverAlert, type AlertChannel, type AlertFinding, type DeliverPorts } from "./deliver";
 import { findingKey, type MonitorDependencies, type MonitorSource } from "./monitor-run";
+import { createTwilioWhatsAppPort } from "./twilio-whatsapp";
 import type { MonitorProviderKind, CheckSeverity } from "../domain/monitor-provider";
 
 // A finding key is `checkId::subjectId`; both halves are opaque strings, so split
@@ -43,6 +44,7 @@ export function buildMonitorDependencies(
       });
       if (!res.ok) throw new Error(`Slack webhook failed: ${res.status}`);
     },
+    postWhatsApp: createTwilioWhatsAppPort(),
     notifyInApp: async (finding: AlertFinding) => {
       const owners = await resolveOwners(finding.organisationId);
       for (const userId of owners) {
