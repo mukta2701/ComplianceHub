@@ -3,7 +3,7 @@ import { z } from "zod";
 
 export const organisationInputSchema = z.object({ name: z.string().trim().min(1).max(160) });
 export const invitationInputSchema = z.object({
-  organisationId: z.string().uuid(),
+  organisationId: z.uuid(),
   email: z.string().trim().toLowerCase().email().max(320),
   role: z.enum(["owner", "member"]).default("member"),
 });

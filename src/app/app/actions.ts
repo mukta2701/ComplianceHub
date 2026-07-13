@@ -131,7 +131,7 @@ export async function reviewSoaItemAction(formData: FormData) {
 export async function finaliseSoaAction(formData: FormData) {
   const { supabase, user, organisation } = await requireAppContext();
   await enforceRateLimit(`soa-finalise:${user.id}`, { limit: 5, windowMs: 60_000 });
-  const requestedRegisterId = z.string().uuid().parse(formData.get("registerId"));
+  const requestedRegisterId = z.uuid().parse(formData.get("registerId"));
   const { data: register, error: registerError } = await supabase
     .from("soa_registers")
     .select("id")

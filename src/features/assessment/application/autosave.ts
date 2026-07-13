@@ -1,8 +1,8 @@
 import { z } from "zod";
 
 export const assessmentAutosaveSchema = z.object({
-  sessionId: z.string().uuid(),
-  questionId: z.string().uuid(),
+  sessionId: z.uuid(),
+  questionId: z.uuid(),
   answer: z.enum(["yes", "partially", "no", "not_applicable"]),
   evidenceNote: z.string().max(10_000).default(""),
   expectedRevision: z.number().int().nonnegative(),

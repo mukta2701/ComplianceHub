@@ -8,13 +8,13 @@ export const ALLOWED_EVIDENCE_MIME_TYPES = [
   "text/csv", "text/plain",
 ] as const;
 
-const optionalUuid = z.union([z.string().uuid(), z.literal("")]).optional()
+const optionalUuid = z.union([z.uuid(), z.literal("")]).optional()
   .transform((value) => (value ? value : null));
 const optionalDate = z.union([z.iso.date(), z.literal("")]).optional()
   .transform((value) => (value ? value : null));
 
 export const evidenceInputSchema = z.object({
-  organisationId: z.string().uuid(),
+  organisationId: z.uuid(),
   title: z.string().trim().min(1).max(200),
   kind: z.enum(["file", "link", "note"]),
   url: z.union([z.url(), z.literal("")]).optional().transform((value) => (value ? value : null)),

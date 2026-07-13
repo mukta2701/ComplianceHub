@@ -1,12 +1,12 @@
 import { z } from "zod";
 
-const optionalUuid = z.union([z.string().uuid(), z.literal("")]).optional()
+const optionalUuid = z.union([z.uuid(), z.literal("")]).optional()
   .transform((value) => (value ? value : null));
 const optionalDate = z.union([z.iso.date(), z.literal("")]).optional()
   .transform((value) => (value ? value : null));
 
 export const taskInputSchema = z.object({
-  organisationId: z.string().uuid(),
+  organisationId: z.uuid(),
   title: z.string().trim().min(1).max(200),
   detail: z.string().max(10_000).default(""),
   status: z.enum(["open", "in_progress", "done", "cancelled"]).default("open"),
