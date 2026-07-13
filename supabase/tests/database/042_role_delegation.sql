@@ -1,5 +1,5 @@
 begin;
-select plan(30);
+select plan(31);
 
 select ok(
   (select p.proconfig @> array['search_path=""'] from pg_catalog.pg_proc p where p.oid='public.is_organisation_operator(uuid)'::pg_catalog.regprocedure),
@@ -56,6 +56,12 @@ select set_config('request.jwt.claims','{"sub":"61000000-0000-4000-8000-00000000
 select throws_ok($$ update public.memberships set organisation_id=current_setting('app.org_b')::uuid where organisation_id=current_setting('app.org_a')::uuid and user_id='61000000-0000-4000-8000-000000000006' $$,'42501','admins may only update member job titles','admin cannot rewrite a member organisation identity');
 select throws_ok($$ update public.memberships set user_id='61000000-0000-4000-8000-000000000009' where organisation_id=current_setting('app.org_a')::uuid and user_id='61000000-0000-4000-8000-000000000007' $$,'42501','admins may only update member job titles','admin cannot rewrite a member user identity');
 select throws_ok($$ update public.memberships set created_at=created_at - interval '1 year' where organisation_id=current_setting('app.org_a')::uuid and user_id='61000000-0000-4000-8000-000000000008' $$,'42501','admins may only update member job titles','admin cannot rewrite membership creation time');
+set local role postgres;
+alter table public.memberships add column future_identity_field text;
+set local role authenticated;
+-- The guard must fail closed: columns added by future migrations are immutable
+-- to Admins unless they are explicitly the existing job_title field.
+select throws_ok($$ update public.memberships set future_identity_field='tampered' where organisation_id=current_setting('app.org_a')::uuid and user_id='61000000-0000-4000-8000-000000000008' $$,'42501','admins may only update member job titles','admin cannot rewrite a membership column added by a future migration');
 
 select lives_ok($$ update public.memberships set job_title='Senior Developer' where organisation_id=current_setting('app.org_a')::uuid and user_id='61000000-0000-4000-8000-000000000003' $$,'admin can update a member job title');
 select is((select job_title from public.memberships where organisation_id=current_setting('app.org_a')::uuid and user_id='61000000-0000-4000-8000-000000000003'),'Senior Developer','member job title is updated');

@@ -28,13 +28,13 @@ const channelSchema = z.object({
 
 async function requireOperator() {
   const ctx = await requireAppContext();
-  if (!hasCapability(ctx.membership.role, "manage_monitoring")) throw new Error("Only workspace operators can manage monitoring");
+  if (!hasCapability(ctx.membership.role, "run_monitoring")) throw new Error("Only workspace operators can run monitoring");
   return ctx;
 }
 
 async function requireOwner() {
   const ctx = await requireAppContext();
-  if (!hasCapability(ctx.membership.role, "manage_owners")) throw new Error("Only workspace owners can manage monitoring configuration");
+  if (!hasCapability(ctx.membership.role, "manage_monitoring")) throw new Error("Only workspace owners can manage monitoring configuration");
   return ctx;
 }
 

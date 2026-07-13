@@ -32,7 +32,7 @@ describe("runMonitoringNowAction", () => {
   });
 
   it("rejects members before constructing a service-role client", async () => {
-    await expect(runMonitoringNowAction()).rejects.toThrow("Only workspace operators can manage monitoring");
+    await expect(runMonitoringNowAction()).rejects.toThrow("Only workspace operators can run monitoring");
 
     expect(hoisted.createServiceClient).not.toHaveBeenCalled();
     expect(hoisted.runMonitoring).not.toHaveBeenCalled();

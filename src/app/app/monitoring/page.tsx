@@ -9,6 +9,7 @@ import {
   addAlertChannelAction, addMonitorSourceAction, acknowledgeFindingAction, raiseTaskFromFindingAction,
   resolveFindingAction, revokeAlertChannelAction, revokeMonitorSourceAction, runMonitoringNowAction,
 } from "./actions";
+import { shouldShowRunMonitoring } from "./monitoring-access";
 
 const SEVERITY_TONE: Record<CheckSeverity, StatusTone> = { critical: "risk", high: "risk", medium: "attention", low: "neutral" };
 const SEVERITY_PILL: Record<CheckSeverity, string> = { critical: "red", high: "red", medium: "amber", low: "blue" };
@@ -67,7 +68,7 @@ export default async function MonitoringPage() {
             : `Watching ${sources.length} source${sources.length === 1 ? "" : "s"}. The hourly run checks posture, raises findings, and alerts in-app + Slack. Live as of ${today}.`}
         </p>
       </div>
-      {isOwner && sources.length > 0 && <form action={runMonitoringNowAction}><button className="button">Run checks now</button></form>}
+      {shouldShowRunMonitoring(membership.role, sources.length) && <form action={runMonitoringNowAction}><button className="button">Run checks now</button></form>}
     </Card>
 
     <Card style={{ marginBottom: "16px" }}>

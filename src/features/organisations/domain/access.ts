@@ -2,13 +2,14 @@ export const membershipRoles = ["owner", "admin", "member"] as const;
 export type MembershipRole = (typeof membershipRoles)[number];
 
 export type WorkspaceCapability =
+  | "run_monitoring"
   | "manage_monitoring"
   | "manage_members"
   | "manage_owners";
 
 const capabilities: Record<MembershipRole, ReadonlySet<WorkspaceCapability>> = {
-  owner: new Set(["manage_monitoring", "manage_members", "manage_owners"]),
-  admin: new Set(["manage_monitoring", "manage_members"]),
+  owner: new Set(["run_monitoring", "manage_monitoring", "manage_members", "manage_owners"]),
+  admin: new Set(["run_monitoring", "manage_members"]),
   member: new Set(),
 };
 

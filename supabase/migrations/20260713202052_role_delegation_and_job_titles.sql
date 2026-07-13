@@ -70,12 +70,7 @@ as $$
 begin
   if current_user = 'authenticated'
     and not public.is_organisation_owner(old.organisation_id)
-    and (
-      new.organisation_id is distinct from old.organisation_id
-      or new.user_id is distinct from old.user_id
-      or new.role is distinct from old.role
-      or new.created_at is distinct from old.created_at
-    )
+    and (pg_catalog.to_jsonb(new) - 'job_title') is distinct from (pg_catalog.to_jsonb(old) - 'job_title')
   then
     raise exception 'admins may only update member job titles' using errcode = '42501';
   end if;
@@ -166,9 +161,16 @@ begin
     raise exception 'invitation is invalid or expired' using errcode = '22023';
   end if;
 
+  if exists (
+    select 1 from public.memberships m
+    where m.organisation_id = invitation_row.organisation_id
+      and m.user_id = (select auth.uid())
+  ) then
+    raise exception 'user is already a member of this organisation' using errcode = '23505';
+  end if;
+
   insert into public.memberships (organisation_id, user_id, role, job_title)
-  values (invitation_row.organisation_id, (select auth.uid()), invitation_row.role, invitation_row.job_title)
-  on conflict (organisation_id, user_id) do nothing;
+  values (invitation_row.organisation_id, (select auth.uid()), invitation_row.role, invitation_row.job_title);
 
   update public.invitations set accepted_at = now() where id = invitation_row.id;
   return invitation_row.organisation_id;
