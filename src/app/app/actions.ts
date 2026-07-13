@@ -8,7 +8,7 @@ import { riskInputSchema } from "@/features/risks/application/risk";
 import { soaItemReviewSchema } from "@/features/soa/application/review";
 import { collectSoaFinalisationBlockers, countSoaFinalisationBlockers } from "@/features/soa/application/finalisation";
 import type { SoaStatus } from "@/features/soa/domain/soa";
-import { requireAppContext } from "@/lib/app-context";
+import { requireAppContext, setActiveOrganisationCookie } from "@/lib/app-context";
 import { one } from "@/lib/supabase/one";
 import { revalidatePath } from "next/cache";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
@@ -40,12 +40,34 @@ export async function createOrganisationAction(formData: FormData) {
     // showing the generic label until the next full navigation. Revalidating
     // the layout segment forces it to refetch with the membership that now
     // exists.
+    await setActiveOrganisationCookie(organisation.id);
     revalidatePath("/app", "layout");
-    redirect(`/app?organisation=${organisation.id}`);
+    redirect("/app");
   } catch (error) {
     if (error && typeof error === "object" && "digest" in error) throw error;
     redirect(`/app/onboarding?message=${encodeURIComponent("Could not create the organisation. Check the name and try again.")}`);
   }
+}
+
+export async function switchWorkspaceAction(formData: FormData) {
+  const supabase = await createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/sign-in");
+
+  const parsedOrganisationId = z.uuid().safeParse(formData.get("organisationId"));
+  if (!parsedOrganisationId.success) throw new Error("Invalid workspace");
+
+  const { data: membership, error } = await supabase.from("memberships")
+    .select("organisation_id")
+    .eq("user_id", user.id)
+    .eq("organisation_id", parsedOrganisationId.data)
+    .maybeSingle();
+  if (error) throw new Error("Could not verify workspace membership");
+  if (!membership) throw new Error("You are not a member of that workspace");
+
+  await setActiveOrganisationCookie(parsedOrganisationId.data);
+  revalidatePath("/app", "layout");
+  redirect("/app");
 }
 
 export async function signOutAction() {
