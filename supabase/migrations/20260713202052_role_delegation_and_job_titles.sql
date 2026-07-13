@@ -1,11 +1,46 @@
 alter table public.memberships
-  add column job_title text,
-  add constraint memberships_job_title_length check (job_title is null or char_length(job_title) between 1 and 120);
+  add column if not exists job_title text;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_catalog.pg_constraint
+    where conrelid = 'public.memberships'::pg_catalog.regclass
+      and conname = 'memberships_job_title_length'
+  ) then
+    alter table public.memberships
+      add constraint memberships_job_title_length
+      check (job_title is null or char_length(job_title) between 1 and 120);
+  end if;
+end;
+$$;
 
 alter table public.invitations
-  add column job_title text,
-  add constraint invitations_job_title_length check (job_title is null or char_length(job_title) between 1 and 120),
-  add constraint invitations_cannot_grant_owner check (role <> 'owner') not valid;
+  add column if not exists job_title text;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_catalog.pg_constraint
+    where conrelid = 'public.invitations'::pg_catalog.regclass
+      and conname = 'invitations_job_title_length'
+  ) then
+    alter table public.invitations
+      add constraint invitations_job_title_length
+      check (job_title is null or char_length(job_title) between 1 and 120);
+  end if;
+
+  if not exists (
+    select 1 from pg_catalog.pg_constraint
+    where conrelid = 'public.invitations'::pg_catalog.regclass
+      and conname = 'invitations_cannot_grant_owner'
+  ) then
+    alter table public.invitations
+      add constraint invitations_cannot_grant_owner
+      check (role <> 'owner') not valid;
+  end if;
+end;
+$$;
 
 create or replace function public.is_organisation_operator(target_organisation_id uuid)
 returns boolean
@@ -27,7 +62,39 @@ revoke all on function public.is_organisation_operator(uuid) from public;
 revoke all on function public.is_organisation_operator(uuid) from anon;
 grant execute on function public.is_organisation_operator(uuid) to authenticated;
 
-drop policy memberships_update_owners on public.memberships;
+create or replace function public.restrict_admin_membership_update()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if current_user = 'authenticated'
+    and not public.is_organisation_owner(old.organisation_id)
+    and (
+      new.organisation_id is distinct from old.organisation_id
+      or new.user_id is distinct from old.user_id
+      or new.role is distinct from old.role
+      or new.created_at is distinct from old.created_at
+    )
+  then
+    raise exception 'admins may only update member job titles' using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function public.restrict_admin_membership_update() from public;
+revoke all on function public.restrict_admin_membership_update() from anon;
+grant execute on function public.restrict_admin_membership_update() to authenticated;
+grant execute on function public.restrict_admin_membership_update() to service_role;
+
+drop trigger if exists memberships_restrict_admin_update on public.memberships;
+create trigger memberships_restrict_admin_update
+before update on public.memberships
+for each row execute function public.restrict_admin_membership_update();
+
+drop policy if exists memberships_update_owners on public.memberships;
+drop policy if exists memberships_update_delegated on public.memberships;
 create policy memberships_update_delegated on public.memberships
 for update to authenticated
 using (
@@ -39,7 +106,8 @@ with check (
   or (public.is_organisation_operator(organisation_id) and role = 'member')
 );
 
-drop policy memberships_delete_owners on public.memberships;
+drop policy if exists memberships_delete_owners on public.memberships;
+drop policy if exists memberships_delete_delegated on public.memberships;
 create policy memberships_delete_delegated on public.memberships
 for delete to authenticated
 using (
@@ -47,12 +115,14 @@ using (
   or (public.is_organisation_operator(organisation_id) and role = 'member')
 );
 
-drop policy invitations_select_owners on public.invitations;
+drop policy if exists invitations_select_owners on public.invitations;
+drop policy if exists invitations_select_operators on public.invitations;
 create policy invitations_select_operators on public.invitations
 for select to authenticated
 using (public.is_organisation_operator(organisation_id));
 
-drop policy invitations_insert_owners on public.invitations;
+drop policy if exists invitations_insert_owners on public.invitations;
+drop policy if exists invitations_insert_delegated on public.invitations;
 create policy invitations_insert_delegated on public.invitations
 for insert to authenticated
 with check (
@@ -64,7 +134,8 @@ with check (
   )
 );
 
-drop policy invitations_delete_owners on public.invitations;
+drop policy if exists invitations_delete_owners on public.invitations;
+drop policy if exists invitations_delete_delegated on public.invitations;
 create policy invitations_delete_delegated on public.invitations
 for delete to authenticated
 using (
