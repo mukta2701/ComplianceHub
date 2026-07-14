@@ -985,25 +985,33 @@ test("a task is pushed to a sandbox tracker, polled to In Progress, then the con
   const taskUrl = page.url();
   const taskId = new URL(taskUrl).pathname.split("/").pop() as string;
 
-  // 1. Open Settings, then its Connections tab. OAuth providers remain untouched:
-  //    this deterministic scenario uses only the explicitly local sandbox forms.
-  await page.goto("/app/settings");
-  await page.getByRole("navigation", { name: "Section" }).getByRole("link", { name: "Connections" }).click();
-  await expect(page.getByRole("heading", { name: "Connections", level: 1 })).toBeVisible();
-  await expect(page.getByText("Owners and Admins connect workplace systems and choose where monitoring alerts are delivered.")).toBeVisible();
-  await page.getByText("Local sandbox / developer setup", { exact: true }).click();
+  // 1. Open the focused provider catalogue directly. This deterministic local
+  //    scenario uses the development-only sample-data forms; provider prompts
+  //    remain untouched.
+  await page.goto("/app/integrations");
+  await expect(page.getByRole("heading", { name: "Connections", level: 2 })).toBeVisible();
+  const githubCard = page.getByRole("article", { name: "GitHub connection" });
+  const jiraCard = page.getByRole("article", { name: "Jira connection" });
+  const slackCard = page.getByRole("article", { name: "Slack connection" });
+  await expect(githubCard).toBeVisible();
+  await expect(jiraCard).toContainText("Not connected");
+  await expect(slackCard).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Monitoring sources" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Evidence sources" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Alert channels" })).toHaveCount(0);
+  await expect(page.getByText(/OAuth|SSO|Nango/i)).toHaveCount(0);
+  await page.getByText("Local preview tools", { exact: true }).click();
   const connectionForm = page.locator("form", { has: page.getByRole("button", { name: "Add sandbox tracker" }) });
   await connectionForm.getByLabel("Label", { exact: true }).fill("Sandbox Jira");
-  await connectionForm.getByRole("button", { name: "Add sandbox tracker" }).click();
-  const connection = page.getByRole("listitem").filter({ hasText: "Sandbox Jira" });
-  await expect(connection.getByText("Enabled")).toBeVisible();
-  await expect(connection.getByText("Sandbox", { exact: true })).toBeVisible();
+  await submitServerAction(page, connectionForm.getByRole("button", { name: "Add sandbox tracker" }), "/app/integrations");
+  await expect(jiraCard).toContainText("Connected");
+  await expect(jiraCard.getByRole("button", { name: "Manage" })).toBeVisible();
 
   // Add a local GitHub monitoring source from the same Settings tab, then prove
   // Monitoring renders only connected systems and active findings.
   const addMonitorSource = page.getByRole("button", { name: "Add sandbox monitoring source" });
   if (!await addMonitorSource.isVisible()) {
-    await page.getByText("Local sandbox / developer setup", { exact: true }).click();
+    await page.getByText("Local preview tools", { exact: true }).click();
   }
   const monitorForm = page.locator("form", { has: addMonitorSource });
   await monitorForm.getByLabel("GitHub owner").fill("acme");
@@ -1018,14 +1026,10 @@ test("a task is pushed to a sandbox tracker, polled to In Progress, then the con
     monitorSourcePost,
   ]);
   expect(response.status()).toBeLessThan(400);
-  // Re-open the server-rendered view after the action has committed, then check
-  // durable persistence independently of a streamed RSC refresh frame.
-  await page.reload();
-  await expect(page.getByRole("listitem").filter({ hasText: "Sandbox GitHub monitoring" }).getByText("Enabled")).toBeVisible();
-
   // 2. Axe on the integrations page.
   const integrationsAxe = await new AxeBuilder({ page }).analyze();
   expect(integrationsAxe.violations).toEqual([]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 
   await page.goto("/app/monitoring");
   await expect(page.getByRole("heading", { name: "Continuous monitoring", level: 2 })).toBeVisible();
@@ -1086,11 +1090,14 @@ test("a task is pushed to a sandbox tracker, polled to In Progress, then the con
 
   // 6. Revoke the sandbox connection back on the integrations page.
   await page.goto("/app/integrations");
-  await expect(page.getByRole("heading", { name: "Connections", level: 1 })).toBeVisible();
-  const toRevoke = page.getByRole("listitem").filter({ hasText: "Sandbox Jira" });
-  await toRevoke.getByRole("button", { name: "Revoke" }).click();
-  await expect(toRevoke).toHaveCount(0);
-  await expect(page.getByText("No GitHub or Jira systems are connected yet.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connections", level: 2 })).toBeVisible();
+  const jiraConnectionCard = page.getByRole("article", { name: "Jira connection" });
+  await jiraConnectionCard.getByRole("button", { name: "Manage" }).click();
+  const jiraPanel = page.getByRole("region", { name: "Manage Jira" });
+  await expect(jiraPanel.getByText("Sandbox Jira")).toBeVisible();
+  await submitServerAction(page, jiraPanel.getByRole("button", { name: "Disconnect" }), "/app/integrations");
+  await expect(jiraConnectionCard).toContainText("Not connected");
+  await expect(jiraConnectionCard.getByRole("button", { name: "Connect" })).toBeVisible();
   expect(consoleErrors).toEqual([]);
   expect(failedRequests).toEqual([]);
   expect(serverErrors).toEqual([]);
@@ -1098,7 +1105,7 @@ test("a task is pushed to a sandbox tracker, polled to In Progress, then the con
 });
 
 test("an owner adds an evidence source, the collector fills the vault, and re-collection does not duplicate", async ({ page }, testInfo) => {
-  await createWorkspaceOwner(page, testInfo, {
+  const { email, password, organisationName } = await createWorkspaceOwner(page, testInfo, {
     emailPrefix: "evs",
     ownerName: "Beta Owner",
     organisationPrefix: "Evidence Sources Workspace",
@@ -1109,17 +1116,36 @@ test("an owner adds an evidence source, the collector fills the vault, and re-co
   //    Scope by the add-source form so the two "Label" inputs on the page (one per
   //    section) don't collide.
   await page.goto("/app/integrations");
-  await expect(page.getByRole("heading", { name: "Connections", level: 1 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connections", level: 2 })).toBeVisible();
+  await page.getByText("Local preview tools", { exact: true }).click();
   const sourceForm = page.locator("form", { has: page.getByRole("button", { name: "Add evidence source" }) });
   await sourceForm.getByLabel("Label", { exact: true }).fill("Sandbox GWS");
   await submitServerAction(page, sourceForm.getByRole("button", { name: "Add evidence source" }), "/app/integrations");
-  const source = page.getByRole("listitem").filter({ hasText: "Sandbox GWS" });
-  await expect(source).toBeVisible();
-  await expect(source.getByText("Google Workspace")).toBeVisible();
-  await page.reload();
-  await expect(source).toBeVisible();
 
-  // 2. Axe on the integrations page (now carrying both sections).
+  // The catalogue intentionally has no saved evidence-source list. Prove the
+  // action durably persisted through the same owner-scoped API the page uses.
+  const owner = createClient(
+    localEnvironment("NEXT_PUBLIC_SUPABASE_URL"),
+    localEnvironment("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
+    { auth: { persistSession: false, autoRefreshToken: false } },
+  );
+  const { error: signInError } = await owner.auth.signInWithPassword({ email, password });
+  expect(signInError).toBeNull();
+  const { data: organisation, error: organisationError } = await owner.from("organisations")
+    .select("id").eq("name", organisationName).single();
+  expect(organisationError).toBeNull();
+  await expect.poll(async () => {
+    const { count, error } = await owner.from("evidence_sources")
+      .select("id", { count: "exact", head: true })
+      .eq("organisation_id", organisation!.id)
+      .eq("label", "Sandbox GWS")
+      .is("revoked_at", null);
+    expect(error).toBeNull();
+    return count;
+  }).toBe(1);
+  await expect(page.getByRole("heading", { name: "Evidence sources" })).toHaveCount(0);
+
+  // 2. Axe on the simplified catalogue.
   const integrationsAxe = await new AxeBuilder({ page }).analyze();
   expect(integrationsAxe.violations).toEqual([]);
 
@@ -1154,6 +1180,7 @@ test("an owner adds an evidence source, the collector fills the vault, and re-co
   } else {
     test.info().annotations.push({ type: "skipped-assertion", description: "CRON_SECRET unavailable — evidence-collection assertions were not exercised" });
   }
+  await owner.auth.signOut({ scope: "local" });
 });
 
 test("an owner enables a public Trust Center that leaks nothing sensitive", async ({ page, browser }, testInfo) => {
