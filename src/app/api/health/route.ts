@@ -13,7 +13,7 @@ export async function GET() {
     // Cheap round-trip against the existing service-role-only error store. This
     // table is present in every hardened deployment and already grants SELECT
     // to service_role, so the probe needs no additional database privileges.
-    const { error } = await supabase.from("app_errors").select("id", { head: true, count: "exact" }).limit(1);
+    const { error } = await supabase.from("app_errors").select("id").limit(1);
     if (error) throw error;
     return NextResponse.json({ status: "ok", db: "ok", ms: Date.now() - started });
   } catch (error) {

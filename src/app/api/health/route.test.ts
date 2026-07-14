@@ -22,7 +22,7 @@ describe("GET /api/health", () => {
     vi.clearAllMocks();
     hoisted.from.mockReturnValue({ select: hoisted.select });
     hoisted.select.mockReturnValue({ limit: hoisted.limit });
-    hoisted.limit.mockResolvedValue({ error: null });
+    hoisted.limit.mockResolvedValue({ data: [], error: null });
   });
 
   it("checks connectivity through the existing service-readable error store", async () => {
@@ -31,7 +31,8 @@ describe("GET /api/health", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ status: "ok", db: "ok" });
     expect(hoisted.from).toHaveBeenCalledWith("app_errors");
-    expect(hoisted.select).toHaveBeenCalledWith("id", { head: true, count: "exact" });
+    expect(hoisted.select).toHaveBeenCalledWith("id");
+    expect(hoisted.select).not.toHaveBeenCalledWith("id", expect.anything());
     expect(hoisted.limit).toHaveBeenCalledWith(1);
     expect(hoisted.logError).not.toHaveBeenCalled();
   });
