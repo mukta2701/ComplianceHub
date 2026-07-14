@@ -27,7 +27,6 @@ const navGroups = [
     ["/app/trust", "shield", "Trust Center"],
   ] },
   { label: "Admin", items: [
-    ["/app/integrations", "activity", "Connections"],
     ["/app/settings", "settings", "Settings"],
   ] },
 ] as const;
@@ -52,6 +51,7 @@ const EXTRA_TITLES: Array<[string, string]> = [
   ["/app/frameworks", "Framework coverage"],
   ["/app/activity", "Audit trail"],
   ["/app/notifications", "Notifications"],
+  ["/app/integrations", "Connections"],
   ["/app/risks/import", "Import risk register"],
   ["/app/soa/import", "Import Statement of Applicability"],
   ["/app/audits/new", "Plan an audit"],
@@ -64,7 +64,11 @@ const TITLE_ROUTES: Array<[string, string]> = [
   ...EXTRA_TITLES,
 ].sort((a, b) => b[0].length - a[0].length);
 
-function isActive(path: string, href: string) { return href === "/app" ? path === "/app" : path === href || path.startsWith(`${href}/`); }
+function isActive(path: string, href: string) {
+  if (href === "/app") return path === "/app";
+  if (href === "/app/settings" && (path === "/app/integrations" || path.startsWith("/app/integrations/"))) return true;
+  return path === href || path.startsWith(`${href}/`);
+}
 
 export function AppShell({ organisationId, orgName, orgInitials, userInitials, unreadCount, role, jobTitle, children }: { organisationId: string | null; orgName: string; orgInitials: string; userInitials: string; unreadCount: number; role: MembershipRole | null; jobTitle: string | null; children: React.ReactNode }) {
   const path = usePathname();

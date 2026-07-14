@@ -49,17 +49,18 @@ describe("AppShell role-specific navigation", () => {
     expect(screen.getByRole("link", { name: "Dashboard" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Gap assessment" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Tasks" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Connections" })).toHaveAttribute("href", "/app/integrations");
-    expect(screen.getByRole("link", { name: "Settings" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Connections" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute("href", "/app/settings");
     expect(screen.getByText(role === "owner" ? "Owner" : "Admin", { selector: "span" })).toBeInTheDocument();
   });
 
-  it("marks Connections as the active Admin destination", () => {
+  it("keeps Settings active and titles the page on the Connections route", () => {
     hoisted.pathname = "/app/integrations";
     renderShell("owner");
 
-    expect(screen.getByRole("link", { name: "Connections" })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("link", { name: "Settings" })).not.toHaveAttribute("aria-current");
+    expect(screen.queryByRole("link", { name: "Connections" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("heading", { name: "Connections", level: 1 })).toBeInTheDocument();
   });
 
   it("shows workspace setup without operational navigation before membership exists", () => {
