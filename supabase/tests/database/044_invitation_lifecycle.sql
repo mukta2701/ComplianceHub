@@ -1,5 +1,5 @@
 begin;
-select plan(55);
+select plan(59);
 
 select has_column('public', 'invitations', 'revoked_at', 'invitations retain revocation history');
 select has_column('public', 'invitations', 'accepted_by', 'invitations record the accepting user');
@@ -78,6 +78,10 @@ select throws_ok($$ select public.issue_invitation(current_setting('app.invitati
 select set_config('request.jwt.claims','{"sub":"63000000-0000-4000-8000-000000000001","email":"lifecycle-owner@example.test","role":"authenticated"}',true);
 select lives_ok(format($$ select public.resend_invitation(%L::uuid, repeat('4',64), now()+interval '7 days') $$, current_setting('app.member_invite')), 'Owner can resend an active invitation');
 select is((select token_hash from public.invitations where id=current_setting('app.member_invite')::uuid), repeat('4',64), 'resend rotates the token hash');
+select throws_ok(format($$ select public.record_invitation_delivery(%L::uuid, null, 'sent', 'email_null_hash', null) $$, current_setting('app.member_invite')), '22023', 'invalid invitation token hash', 'delivery recording rejects a NULL token hash');
+select throws_ok(format($$ select public.record_invitation_delivery(%L::uuid, 'NOT-A-LOWERCASE-HASH', 'sent', 'email_bad_hash', null) $$, current_setting('app.member_invite')), '22023', 'invalid invitation token hash', 'delivery recording rejects a malformed token hash');
+select throws_ok(format($$ select public.record_invitation_delivery(%L::uuid, repeat('4',64), 'sent', null, null) $$, current_setting('app.member_invite')), '22023', 'sent delivery requires a provider message id', 'sent delivery requires a nonempty provider message id');
+select throws_ok(format($$ select public.record_invitation_delivery(%L::uuid, repeat('4',64), 'failed', 'unexpected-provider-id', 'failed safely') $$, current_setting('app.member_invite')), '22023', 'provider message id is only permitted for sent delivery', 'non-sent delivery rejects a provider message id');
 select lives_ok(format($$ select public.record_invitation_delivery(%L::uuid, repeat('4',64), 'sent', 'email_123', null) $$, current_setting('app.member_invite')), 'operator can record the current token delivery outcome');
 select is((select delivery_status from public.invitations where id=current_setting('app.member_invite')::uuid), 'sent', 'sent delivery status is persisted');
 select is((select delivery_attempt_count from public.invitations where id=current_setting('app.member_invite')::uuid), 1, 'delivery attempt is counted');

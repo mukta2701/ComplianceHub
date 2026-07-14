@@ -178,6 +178,7 @@ declare
   normalized_email text := lower(trim(coalesce(target_email, '')));
   normalized_job_title text := nullif(trim(target_job_title), '');
   invitation_row public.invitations;
+  invitation_exists boolean;
 begin
   if actor_id is null then
     raise exception 'authentication required' using errcode = '42501';
@@ -196,25 +197,39 @@ begin
     raise exception 'invalid invitation expiry' using errcode = '22023';
   end if;
 
+  if target_role = 'owner' then
+    raise exception 'owner invitations are not permitted' using errcode = '42501';
+  end if;
+
+  -- Lifecycle lock order is consistent across the write RPCs: lock the target
+  -- lifecycle identity first (this advisory key for issue/reissue, invitation
+  -- row elsewhere), then lock the actor membership FOR SHARE. The membership
+  -- lock keeps a validated operator role stable through the mutation and makes
+  -- a concurrent demotion wait rather than allowing stale authorization.
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(target_organisation_id::text || ':' || normalized_email, 0)
+  );
+
+  select i.* into invitation_row
+  from public.invitations i
+  where i.organisation_id = target_organisation_id
+    and lower(i.email) = normalized_email
+    and i.accepted_at is null
+    and i.revoked_at is null
+  for update;
+  invitation_exists := found;
+
   select m.role into actor_role
   from public.memberships m
-  where m.organisation_id = target_organisation_id and m.user_id = actor_id;
+  where m.organisation_id = target_organisation_id and m.user_id = actor_id
+  for share;
 
   if actor_role is null or actor_role = 'member' then
     raise exception 'you are not allowed to issue invitations' using errcode = '42501';
   end if;
-  if target_role = 'owner' then
-    raise exception 'owner invitations are not permitted' using errcode = '42501';
-  end if;
   if actor_role = 'admin' and target_role <> 'member' then
     raise exception 'your role cannot invite that role' using errcode = '42501';
   end if;
-
-  -- All issue/reissue callers use the same tenant+email lock, so two requests
-  -- cannot both observe an absent invitation before the partial unique index.
-  perform pg_catalog.pg_advisory_xact_lock(
-    pg_catalog.hashtextextended(target_organisation_id::text || ':' || normalized_email, 0)
-  );
 
   if exists (
     select 1
@@ -226,15 +241,7 @@ begin
     raise exception 'user is already a member of this organisation' using errcode = '23505';
   end if;
 
-  select i.* into invitation_row
-  from public.invitations i
-  where i.organisation_id = target_organisation_id
-    and lower(i.email) = normalized_email
-    and i.accepted_at is null
-    and i.revoked_at is null
-  for update;
-
-  if found then
+  if invitation_exists then
     if actor_role = 'admin' and invitation_row.role <> 'member' then
       raise exception 'your role cannot manage that invitation' using errcode = '42501';
     end if;
@@ -305,7 +312,8 @@ begin
 
   select m.role into actor_role
   from public.memberships m
-  where m.organisation_id = invitation_row.organisation_id and m.user_id = actor_id;
+  where m.organisation_id = invitation_row.organisation_id and m.user_id = actor_id
+  for share;
   if actor_role is null or actor_role = 'member'
     or (actor_role = 'admin' and invitation_row.role <> 'member') then
     raise exception 'your role cannot manage that invitation' using errcode = '42501';
@@ -354,7 +362,8 @@ begin
 
   select m.role into actor_role
   from public.memberships m
-  where m.organisation_id = invitation_row.organisation_id and m.user_id = actor_id;
+  where m.organisation_id = invitation_row.organisation_id and m.user_id = actor_id
+  for share;
   if actor_role is null or actor_role = 'member'
     or (actor_role = 'admin' and invitation_row.role <> 'member') then
     raise exception 'your role cannot manage that invitation' using errcode = '42501';
@@ -386,6 +395,18 @@ begin
   if new_delivery_status not in ('sent', 'failed', 'not_configured') then
     raise exception 'invalid delivery status' using errcode = '22023';
   end if;
+  if issued_token_hash is null or issued_token_hash !~ '^[0-9a-f]{64}$' then
+    raise exception 'invalid invitation token hash' using errcode = '22023';
+  end if;
+  if new_delivery_status = 'sent'
+    and (new_provider_message_id is null
+      or char_length(trim(new_provider_message_id)) = 0
+      or char_length(trim(new_provider_message_id)) > 255) then
+    raise exception 'sent delivery requires a provider message id' using errcode = '22023';
+  end if;
+  if new_delivery_status <> 'sent' and nullif(trim(new_provider_message_id), '') is not null then
+    raise exception 'provider message id is only permitted for sent delivery' using errcode = '22023';
+  end if;
 
   select i.* into invitation_row
   from public.invitations i
@@ -399,18 +420,19 @@ begin
 
   select m.role into actor_role
   from public.memberships m
-  where m.organisation_id = invitation_row.organisation_id and m.user_id = actor_id;
+  where m.organisation_id = invitation_row.organisation_id and m.user_id = actor_id
+  for share;
   if actor_role is null or actor_role = 'member'
     or (actor_role = 'admin' and invitation_row.role <> 'member') then
     raise exception 'your role cannot manage that invitation' using errcode = '42501';
   end if;
-  if invitation_row.token_hash <> issued_token_hash then
+  if invitation_row.token_hash is distinct from issued_token_hash then
     raise exception 'invitation token has changed' using errcode = '22023';
   end if;
 
   update public.invitations
   set delivery_status = new_delivery_status,
-      provider_message_id = case when new_delivery_status = 'sent' then nullif(left(new_provider_message_id, 255), '') else null end,
+      provider_message_id = case when new_delivery_status = 'sent' then trim(new_provider_message_id) else null end,
       delivery_error = case when new_delivery_status = 'sent' then null else nullif(left(new_delivery_error, 500), '') end,
       last_delivery_attempt_at = now(),
       delivery_attempt_count = delivery_attempt_count + 1
