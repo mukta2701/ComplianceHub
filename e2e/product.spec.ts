@@ -985,10 +985,22 @@ test("a task is pushed to a sandbox tracker, polled to In Progress, then the con
   const taskUrl = page.url();
   const taskId = new URL(taskUrl).pathname.split("/").pop() as string;
 
-  // 1. Open the focused provider catalogue directly. This deterministic local
-  //    scenario uses the development-only sample-data forms; provider prompts
-  //    remain untouched.
-  await page.goto("/app/integrations");
+  // 1. Connections lives inside Settings: the main workspace navigation keeps
+  //    one Settings destination, while the route-backed tabs switch between
+  //    organisation settings and the focused provider catalogue.
+  await page.goto("/app/settings");
+  const workspaceNavigation = page.getByRole("navigation", { name: "Workspace" });
+  await expect(workspaceNavigation.getByRole("link", { name: "Settings" })).toHaveAttribute("aria-current", "page");
+  await expect(workspaceNavigation.getByRole("link", { name: "Connections" })).toHaveCount(0);
+  const settingsTabs = page.getByRole("navigation", { name: "Section" });
+  await expect(settingsTabs.getByRole("link", { name: "Settings" })).toHaveAttribute("aria-current", "page");
+  await settingsTabs.getByRole("link", { name: "Connections" }).click();
+  await page.waitForURL(/\/app\/integrations$/);
+  await expect(settingsTabs.getByRole("link", { name: "Connections" })).toHaveAttribute("aria-current", "page");
+  await expect(workspaceNavigation.getByRole("link", { name: "Settings" })).toHaveAttribute("aria-current", "page");
+
+  // This deterministic local scenario uses the development-only sample-data
+  // forms; provider prompts remain untouched.
   await expect(page.getByRole("heading", { name: "Connections", level: 2 })).toBeVisible();
   const githubCard = page.getByRole("article", { name: "GitHub connection" });
   const jiraCard = page.getByRole("article", { name: "Jira connection" });
