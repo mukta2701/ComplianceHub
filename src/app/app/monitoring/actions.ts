@@ -32,14 +32,14 @@ async function requireOperator() {
   return ctx;
 }
 
-async function requireOwner() {
+async function requireMonitoringManager() {
   const ctx = await requireAppContext();
-  if (!hasCapability(ctx.membership.role, "manage_monitoring")) throw new Error("Only workspace owners can manage monitoring configuration");
+  if (!hasCapability(ctx.membership.role, "manage_monitoring")) throw new Error("Only workspace operators can manage monitoring configuration");
   return ctx;
 }
 
 export async function addMonitorSourceAction(formData: FormData) {
-  const { supabase, user, organisation } = await requireOwner();
+  const { supabase, user, organisation } = await requireMonitoringManager();
   await enforceRateLimit(`monitor-source:${user.id}`, { limit: 10, windowMs: 60_000 });
   const parsed = sourceSchema.parse(Object.fromEntries(formData));
   const { error } = await supabase.from("monitor_sources").insert({
@@ -53,7 +53,7 @@ export async function addMonitorSourceAction(formData: FormData) {
 }
 
 export async function revokeMonitorSourceAction(formData: FormData) {
-  const { supabase } = await requireOwner();
+  const { supabase } = await requireMonitoringManager();
   const { error } = await supabase.from("monitor_sources")
     .update({ revoked_at: new Date().toISOString() }).eq("id", String(formData.get("id")));
   if (error) throw new Error("Could not disconnect the monitoring source");
@@ -61,7 +61,7 @@ export async function revokeMonitorSourceAction(formData: FormData) {
 }
 
 export async function addAlertChannelAction(formData: FormData) {
-  const { supabase, user, organisation } = await requireOwner();
+  const { supabase, user, organisation } = await requireMonitoringManager();
   await enforceRateLimit(`alert-channel:${user.id}`, { limit: 10, windowMs: 60_000 });
   const parsed = channelSchema.parse(Object.fromEntries(formData));
   const { error } = await supabase.from("alert_channels").insert({
@@ -73,7 +73,7 @@ export async function addAlertChannelAction(formData: FormData) {
 }
 
 export async function revokeAlertChannelAction(formData: FormData) {
-  const { supabase } = await requireOwner();
+  const { supabase } = await requireMonitoringManager();
   const { error } = await supabase.from("alert_channels")
     .update({ revoked_at: new Date().toISOString() }).eq("id", String(formData.get("id")));
   if (error) throw new Error("Could not remove the alert channel");
@@ -81,7 +81,7 @@ export async function revokeAlertChannelAction(formData: FormData) {
 }
 
 export async function acknowledgeFindingAction(formData: FormData) {
-  const { supabase } = await requireOwner();
+  const { supabase } = await requireMonitoringManager();
   const { error } = await supabase.from("monitoring_findings")
     .update({ status: "acknowledged" }).eq("id", String(formData.get("id")));
   if (error) throw new Error("Could not acknowledge the finding");
@@ -89,7 +89,7 @@ export async function acknowledgeFindingAction(formData: FormData) {
 }
 
 export async function resolveFindingAction(formData: FormData) {
-  const { supabase } = await requireOwner();
+  const { supabase } = await requireMonitoringManager();
   const { error } = await supabase.from("monitoring_findings")
     .update({ status: "resolved", resolved_at: new Date().toISOString() }).eq("id", String(formData.get("id")));
   if (error) throw new Error("Could not resolve the finding");
@@ -97,7 +97,7 @@ export async function resolveFindingAction(formData: FormData) {
 }
 
 export async function raiseTaskFromFindingAction(formData: FormData) {
-  const { supabase, user, organisation } = await requireOwner();
+  const { supabase, user, organisation } = await requireMonitoringManager();
   const id = String(formData.get("id"));
   const { data: finding, error: readError } = await supabase.from("monitoring_findings")
     .select("id,title,detail,control_ref,subject_id,task_id").eq("id", id).maybeSingle();

@@ -8,8 +8,8 @@ import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { mintAuditorToken, AUDITOR_LINK_FLASH_COOKIE } from "@/features/audits/application/auditor-token";
 
 export async function mintAuditorTokenAction(formData: FormData) {
-  // Owner-only at the data layer: auditor_access_tokens' RLS insert policy
-  // requires is_organisation_owner + created_by = auth.uid(); requireAppContext
+  // Operator-only at the data layer: auditor_access_tokens' RLS insert policy
+  // requires is_organisation_operator + created_by = auth.uid(); requireAppContext
   // yields the RLS-scoped (never service-role) client.
   const { supabase, user, organisation } = await requireAppContext();
   await enforceRateLimit(`auditor-token:${user.id}`, { limit: 10, windowMs: 60 * 60_000 });

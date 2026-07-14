@@ -2,23 +2,24 @@ import { requireAppContext } from "@/lib/app-context";
 import { Card, PageIntro, Pill } from "@/components/ui";
 import { siteUrl } from "@/lib/site-url";
 import { saveTrustCenterAction, disableTrustCenterAction } from "./actions";
+import { hasCapability } from "@/features/organisations/domain/access";
 
 export default async function TrustCenterSettingsPage() {
   const { supabase, membership, organisation } = await requireAppContext();
-  const isOwner = membership.role === "owner";
+  const canManageTrustCenter = hasCapability(membership.role, "manage_trust_center");
   const site = siteUrl();
 
-  // Owner-only RLS means a non-owner reads no row; guard the query accordingly.
-  const { data: settings } = isOwner
+  // Sensitive settings are operator-only; ordinary Members never load them.
+  const { data: settings } = canManageTrustCenter
     ? await supabase.from("trust_center_settings").select("enabled,slug,show_policy_titles,headline,updated_at").eq("organisation_id", organisation.id).maybeSingle()
     : { data: null };
 
   return <>
     <PageIntro eyebrow="TRUST CENTER" title="Public Trust Center" body="Publish a read-only, public page that shares your security posture with prospects and customers. It is off by default and shows only safe summary data — never risks, findings, evidence or policy contents." />
 
-    {!isOwner && <Card style={{ padding: "18px" }} role="note"><p>Only workspace owners can manage the Trust Center.</p></Card>}
+    {!canManageTrustCenter && <Card style={{ padding: "18px" }} role="note"><p>The Trust Center is managed by workspace Owners and Admins.</p></Card>}
 
-    {isOwner && <>
+    {canManageTrustCenter && <>
       {settings?.enabled && settings.slug && <Card style={{ padding: "18px", marginBottom: "16px", background: "#eef7f0", borderColor: "#cfe6d5" }} role="status">
         <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "6px" }}>
           <h2 style={{ fontSize: "15px", margin: 0 }}>Your Trust Center is live</h2>

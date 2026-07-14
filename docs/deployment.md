@@ -53,6 +53,12 @@ curl -i -X GET http://localhost:3000/api/cron/integrations-sync -H "Authorizatio
 2. Configure a custom SMTP provider in Supabase Auth for sign-up, confirmation, password-reset, and other Auth-owned emails, with the verified application URL matching `NEXT_PUBLIC_SITE_URL`. This is separate from the Resend HTTP adapter used for workspace-membership invitations.
 3. Spend controls, monitoring, and database backups; exercise a restore into a separate project before public launch.
 4. The Supabase free tier and Vercel Hobby are for development, not dependable/commercial production (projects can pause; backups are limited).
+5. Confirm the hosted project's exposed schemas remain the Supabase defaults and
+   verify Storage operations through the official API. `storage.objects` is owned
+   by `supabase_storage_admin`; do not change its ownership or revoke its managed
+   grants from an application migration. Escalate unexpected provider grants or
+   behavior to Supabase before launch. ComplianceHub's own `public` tables must
+   still pass `048_special_table_privileges.sql`.
 
 ## 4a. Optional Google / Microsoft login **(you — external authorization checkpoint)**
 
@@ -104,9 +110,9 @@ scripts, referrer overrides, or raw-token query/form handling to invitation page
 The integration code is complete and proven with a fake provider; connecting a **real** tracker is a documented setup step:
 
 1. Register an OAuth app with Jira or GitHub; note the client id/secret.
-2. Add a connection in **Settings → Integrations** with a valid access token (owner-only).
+2. Add a connection in **Settings → Integrations** with a valid access token (Owner/Admin operator-only).
 3. Set `INTEGRATIONS_LIVE=1` in the Vercel environment.
-4. **Token storage hardening:** connection `access_token`/`refresh_token` are stored in `integration_connections` under owner-only RLS. Before relying on a real connection, move these to Supabase Vault or an encrypted column — plaintext-at-rest is acceptable only for the sandbox/dev path.
+4. **Token storage hardening:** connection `access_token`/`refresh_token` are stored in `integration_connections` under operator-only RLS. Before relying on a real connection, move these to Supabase Vault or an encrypted column — plaintext-at-rest is acceptable only for the sandbox/dev path.
 
 ## Self-hosting (alternative)
 

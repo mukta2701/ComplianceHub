@@ -2,12 +2,17 @@ import { describe, expect, it } from "vitest";
 import { canInviteRole, canManageMembership, hasCapability, roleLabel } from "./access";
 
 describe("workspace access policy", () => {
-  it("lets owners and admins run monitoring without granting broader monitoring management", () => {
+  it("lets owners and admins manage operational areas while Members stay read-only", () => {
     expect(hasCapability("owner", "run_monitoring")).toBe(true);
     expect(hasCapability("admin", "run_monitoring")).toBe(true);
     expect(hasCapability("member", "run_monitoring")).toBe(false);
     expect(hasCapability("owner", "manage_monitoring")).toBe(true);
-    expect(hasCapability("admin", "manage_monitoring")).toBe(false);
+    expect(hasCapability("admin", "manage_monitoring")).toBe(true);
+    for (const capability of ["manage_policies", "manage_connections", "manage_trust_center"] as const) {
+      expect(hasCapability("owner", capability)).toBe(true);
+      expect(hasCapability("admin", capability)).toBe(true);
+      expect(hasCapability("member", capability)).toBe(false);
+    }
   });
 
   it("limits invitation role delegation", () => {

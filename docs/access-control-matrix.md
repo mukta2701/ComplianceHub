@@ -2,7 +2,7 @@
 
 This document is the reviewed database contract for the Owner, Admin, and Member
 portals. It reflects the schema after
-`20260714011727_member_read_only_access_and_policy_acceptance.sql`.
+`20260714015507_harden_operator_policy_access.sql`.
 
 - **Operator** means an organisation membership with role `owner` or `admin`.
 - **Member** means the ordinary `member` role.
@@ -46,7 +46,7 @@ policies are reviewed.
 | `monitoring_findings` | R/U | R | Monitoring worker inserts; operators resolve/update; Members read active findings. |
 | `notifications` | own R/U | own R/U | Every role may read its own notifications and update its own read state only. |
 | `policies` | R/W | approved R | Members cannot see draft, in-review, or archived policies. |
-| `policy_acceptances` | organisation R | own R | No direct writes for any authenticated role; `accept_policy` is the only write path. |
+| `policy_acceptances` | organisation R | own R | No direct writes for any authenticated role; `accept_policy` is the only write path. Pre-upgrade rows remain hidden until securely re-accepted and stamped `trusted_at`. |
 | `risk_categories` | R/W | R | Member receives read-only risk reference data. |
 | `risk_matrix_config` | R/W | R | Member receives the current matrix but cannot reconfigure it. |
 | `risk_treatment_plans` | R/W | R | Member receives read-only treatment progress. |
@@ -61,6 +61,15 @@ policies are reviewed.
 The private `storage.objects` evidence bucket follows the same model: tenant
 Members may read evidence objects; only operators may upload. There are no
 authenticated update/delete policies for evidence objects.
+
+`storage.objects` is a Supabase-managed exception to the application-owned table
+privilege inventory. Supabase requires storage-schema entities to remain owned by
+`supabase_storage_admin`; application migrations must not change that ownership
+or revoke the platform-managed API grants. ComplianceHub therefore hardens
+`TRUNCATE`, `REFERENCES`, and `TRIGGER` on every application-owned `public` table
+and its `postgres` default ACL, verifies that no API-executable application
+function exposes `TRUNCATE` or storage DDL, and relies on the provider boundary
+plus the evidence-object RLS policies for Storage operations.
 
 ## Public tables without `organisation_id`
 
@@ -83,7 +92,7 @@ depth for security-invoker functions.
 
 | Function | Who may mutate | Security rule |
 |---|---|---|
-| `accept_policy(uuid)` | Any verified current member | Locks an approved policy and current membership, derives user/org/version/time, and upserts one acceptance. |
+| `accept_policy(uuid)` | Any verified current member | Locks an approved policy and current membership, derives user/org/version/time, stamps `trusted_at`, and upserts one authoritative acceptance. |
 | `complete_recurring_task(uuid)` | Operator | Checks the operator before locking/completing and creating the successor. |
 | `create_evidence_record(jsonb)` | Operator | Derives the target organisation from the validated payload and checks operator before insert/supersession. |
 | `create_soa_draft(uuid,text)` | Operator | Target assessment must belong to an operated organisation. |

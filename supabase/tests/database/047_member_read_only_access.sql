@@ -273,7 +273,7 @@ select results_eq(
 
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub":"77000000-0000-4000-8000-000000000001","email":"access-owner-a@example.test","role":"authenticated"}', true);
-update public.policies set version = 4 where id = '77000000-0000-4000-8000-000000000101';
+update public.policies set body = 'approved body, revised' where id = '77000000-0000-4000-8000-000000000101';
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub":"77000000-0000-4000-8000-000000000003","email":"access-member-a@example.test","role":"authenticated"}', true);
 select lives_ok($$ select public.accept_policy('77000000-0000-4000-8000-000000000101') $$, 're-accepting is idempotent and refreshes the authoritative version');

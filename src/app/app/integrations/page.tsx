@@ -2,6 +2,7 @@ import { requireAppContext } from "@/lib/app-context";
 import { Card, PageIntro, Pill } from "@/components/ui";
 import { SubTabs } from "@/components/sub-tabs";
 import { addConnectionAction, revokeConnectionAction, addEvidenceSourceAction, revokeEvidenceSourceAction } from "./actions";
+import { hasCapability } from "@/features/organisations/domain/access";
 
 const EVIDENCE_PROVIDER_LABELS: Record<string, string> = {
   google_workspace: "Google Workspace",
@@ -11,15 +12,17 @@ const EVIDENCE_PROVIDER_LABELS: Record<string, string> = {
 
 export default async function IntegrationsPage() {
   const { supabase, membership } = await requireAppContext();
+  const canManageConnections = hasCapability(membership.role, "manage_connections");
   // Tokens are NEVER selected here — only non-secret columns.
-  const [{ data: connections }, { data: sources }] = await Promise.all([
-    supabase.from("integration_connections")
-      .select("id,provider,label,config,created_at,revoked_at").order("created_at", { ascending: false }),
-    // access_token / refresh_token are deliberately excluded from this select.
-    supabase.from("evidence_sources")
-      .select("id,provider,label,config,created_at,revoked_at").order("created_at", { ascending: false }),
-  ]);
-  const isOwner = membership.role === "owner";
+  const [{ data: connections }, { data: sources }] = canManageConnections
+    ? await Promise.all([
+        supabase.from("integration_connections")
+          .select("id,provider,label,config,created_at,revoked_at").order("created_at", { ascending: false }),
+        // access_token / refresh_token are deliberately excluded from this select.
+        supabase.from("evidence_sources")
+          .select("id,provider,label,config,created_at,revoked_at").order("created_at", { ascending: false }),
+      ])
+    : [{ data: [] }, { data: [] }];
   return <>
     <PageIntro eyebrow="SETTINGS · CONNECTIONS" title="Connections" body="Connect a tracker to push remediation tasks as tickets, and a source so proof is collected for you. Both start in a safe sandbox." />
 
@@ -33,8 +36,8 @@ export default async function IntegrationsPage() {
       <a className="button" href="/app/monitoring">Open Monitoring</a>
     </Card>
 
-    {!isOwner && <Card style={{ padding: "18px" }} role="note"><p>Only workspace owners can manage integrations.</p></Card>}
-    {isOwner && <>
+    {!canManageConnections && <Card style={{ padding: "18px" }} role="note"><p>Connections are managed by workspace Owners and Admins.</p></Card>}
+    {canManageConnections && <>
       <Card style={{ padding: "18px", marginBottom: "16px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px" }}>
           <h2 style={{ fontSize: "15px", margin: 0 }}>Task tracker</h2>

@@ -4,6 +4,15 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireAppContext } from "@/lib/app-context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
+import { hasCapability } from "@/features/organisations/domain/access";
+
+async function requireTrustCenterManager() {
+  const context = await requireAppContext();
+  if (!hasCapability(context.membership.role, "manage_trust_center")) {
+    throw new Error("Only workspace operators can manage the Trust Center");
+  }
+  return context;
+}
 
 // Slug charset mirrors the DB check (^[a-z0-9-]+$). Headline is bounded to match
 // the trust_center_settings.headline length check.
@@ -15,11 +24,7 @@ const saveSchema = z.object({
 });
 
 export async function saveTrustCenterAction(formData: FormData) {
-  // Owner-only at the data layer: trust_center_settings' RLS gates every verb on
-  // is_organisation_owner. The explicit role check fails fast with a clear
-  // message; requireAppContext yields the RLS-scoped (never service-role) client.
-  const { supabase, user, organisation, membership } = await requireAppContext();
-  if (membership.role !== "owner") throw new Error("Only workspace owners can manage the Trust Center");
+  const { supabase, user, organisation } = await requireTrustCenterManager();
   await enforceRateLimit(`trust-center:${user.id}`, { limit: 20, windowMs: 60_000 });
   const parsed = saveSchema.parse({
     enabled: formData.get("enabled"),
@@ -43,8 +48,7 @@ export async function saveTrustCenterAction(formData: FormData) {
 }
 
 export async function disableTrustCenterAction() {
-  const { supabase, organisation, membership } = await requireAppContext();
-  if (membership.role !== "owner") throw new Error("Only workspace owners can manage the Trust Center");
+  const { supabase, organisation } = await requireTrustCenterManager();
   const { error } = await supabase.from("trust_center_settings")
     .update({ enabled: false, updated_at: new Date().toISOString() })
     .eq("organisation_id", organisation.id);

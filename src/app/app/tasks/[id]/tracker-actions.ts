@@ -14,7 +14,7 @@ export async function pushTaskToTrackerAction(formData: FormData) {
   await enforceRateLimit(`ticket-push:${user.id}`, { limit: 20, windowMs: 60_000 });
   const taskId = String(formData.get("taskId"));
   const connectionId = String(formData.get("connectionId"));
-  // Connection is owner-only RLS; a non-owner sees no rows here and cannot push.
+  // Connection is operator-only RLS; a Member sees no rows here and cannot push.
   const { data: connection, error: connError } = await supabase.from("integration_connections")
     .select("id,provider,config,access_token").eq("id", connectionId).is("revoked_at", null).maybeSingle();
   if (connError || !connection) throw new Error("Connection not found or revoked");

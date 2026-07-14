@@ -1,13 +1,16 @@
 import Link from "next/link";
 import { requireAppContext } from "@/lib/app-context";
+import { notFound } from "next/navigation";
 import { PageIntro } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { POLICY_TEMPLATES, policyTemplateBySlug } from "@/features/policies/domain/templates";
 import { one } from "@/lib/supabase/one";
 import { createPolicyAction } from "../actions";
+import { hasCapability } from "@/features/organisations/domain/access";
 
 export default async function NewPolicyPage({ searchParams }: { searchParams: Promise<{ template?: string }> }) {
-  const { supabase } = await requireAppContext();
+  const { supabase, membership } = await requireAppContext();
+  if (!hasCapability(membership.role, "manage_policies")) notFound();
   const { template: templateSlug } = await searchParams;
   // Pre-fill is presentation only: pick a template by slug and seed the form's
   // defaultValues. The blank-form path (no/unknown slug) keeps its current empty

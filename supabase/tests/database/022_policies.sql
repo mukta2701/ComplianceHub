@@ -40,8 +40,8 @@ select results_eq(
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated"}', true);
 select lives_ok(
-  $$ update public.policies set status = 'approved', version = 2 where id = '50000000-0000-4000-8000-000000000001' $$,
-  'members progress their own policy');
+  $$ update public.policies set status = 'approved', body = 'The approved policy text.' where id = '50000000-0000-4000-8000-000000000001' $$,
+  'workspace operators progress their policy and let the database advance its version');
 select is(
   (select count(*) from public.audit_events where entity_type = 'policies' and organisation_id = '20000000-0000-4000-8000-000000000001'),
   2::bigint, 'policy inserts and updates are captured to the audit trail');

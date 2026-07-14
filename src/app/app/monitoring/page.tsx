@@ -10,6 +10,7 @@ import {
   resolveFindingAction, revokeAlertChannelAction, revokeMonitorSourceAction, runMonitoringNowAction,
 } from "./actions";
 import { shouldShowRunMonitoring } from "./monitoring-access";
+import { hasCapability } from "@/features/organisations/domain/access";
 
 const SEVERITY_TONE: Record<CheckSeverity, StatusTone> = { critical: "risk", high: "risk", medium: "attention", low: "neutral" };
 const SEVERITY_PILL: Record<CheckSeverity, string> = { critical: "red", high: "red", medium: "amber", low: "blue" };
@@ -25,7 +26,7 @@ type Channel = { id: string; type: string; label: string; min_severity: string }
 
 export default async function MonitoringPage() {
   const { supabase, organisation, membership } = await requireAppContext();
-  const isOwner = membership.role === "owner";
+  const canManageMonitoring = hasCapability(membership.role, "manage_monitoring");
   const today = new Date().toISOString().slice(0, 10);
 
   const [findings, sources, channels] = await Promise.all([
@@ -85,11 +86,11 @@ export default async function MonitoringPage() {
                   </StatusLabel>
                 </span>
               </span>
-              {isOwner && <form action={revokeMonitorSourceAction}><input type="hidden" name="id" value={source.id} /><button className="button secondary" style={{ minHeight: "32px", padding: "6px 12px" }}>Disconnect</button></form>}
+              {canManageMonitoring && <form action={revokeMonitorSourceAction}><input type="hidden" name="id" value={source.id} /><button className="button secondary" style={{ minHeight: "32px", padding: "6px 12px" }}>Disconnect</button></form>}
             </li>)}
           </ul>
         : <p className="empty-note">No systems connected yet. Connect one below to begin continuous monitoring.</p>}
-      {isOwner && <form action={addMonitorSourceAction} className="monitor-connect-form">
+      {canManageMonitoring && <form action={addMonitorSourceAction} className="monitor-connect-form">
         <div className="mc-field"><label htmlFor="ms-owner">GitHub owner</label><input id="ms-owner" name="owner" placeholder="acme" required /></div>
         <div className="mc-field"><label htmlFor="ms-repo">Repository</label><input id="ms-repo" name="repo" placeholder="isms" required /></div>
         <div className="mc-field"><label htmlFor="ms-label">Label (optional)</label><input id="ms-label" name="label" placeholder="Production ISMS repo" /></div>
@@ -115,7 +116,7 @@ export default async function MonitoringPage() {
                 <span>Detected {new Date(f.detected_at).toLocaleString("en-GB")}</span>
                 {f.task_id && <Link href={`/app/tasks/${f.task_id}`}>Remediation task →</Link>}
               </div>
-              {isOwner && f.status !== "resolved" && <div className="finding-actions">
+              {canManageMonitoring && f.status !== "resolved" && <div className="finding-actions">
                 {f.status === "open" && <form action={acknowledgeFindingAction}><input type="hidden" name="id" value={f.id} /><button className="button secondary">Acknowledge</button></form>}
                 {!f.task_id && <form action={raiseTaskFromFindingAction}><input type="hidden" name="id" value={f.id} /><button className="button secondary">Raise task</button></form>}
                 <form action={resolveFindingAction}><input type="hidden" name="id" value={f.id} /><button className="button secondary">Resolve</button></form>
@@ -129,14 +130,14 @@ export default async function MonitoringPage() {
       <div className="card-head"><div><h3>Alert channels</h3><p>Where ComplianceHub notifies your team when a finding is raised</p></div></div>
       <ul className="monitor-list">
         <li>
-          <span className="ml-body"><strong>In-app pop-up &amp; notifications</strong><span className="ml-meta"><Pill tone="green">Always on</Pill><StatusLabel tone="confirmed">Every finding alerts owners in the app</StatusLabel></span></span>
+          <span className="ml-body"><strong>In-app pop-up &amp; notifications</strong><span className="ml-meta"><Pill tone="green">Always on</Pill><StatusLabel tone="confirmed">Every finding alerts workspace operators in the app</StatusLabel></span></span>
         </li>
         {channels.map((c) => <li key={c.id}>
           <span className="ml-body"><strong>{c.label}</strong><span className="ml-meta"><Pill tone="neutral">Slack</Pill><StatusLabel tone="neutral">Alerts at {c.min_severity} and above</StatusLabel></span></span>
-          {isOwner && <form action={revokeAlertChannelAction}><input type="hidden" name="id" value={c.id} /><button className="button secondary" style={{ minHeight: "32px", padding: "6px 12px" }}>Remove</button></form>}
+          {canManageMonitoring && <form action={revokeAlertChannelAction}><input type="hidden" name="id" value={c.id} /><button className="button secondary" style={{ minHeight: "32px", padding: "6px 12px" }}>Remove</button></form>}
         </li>)}
       </ul>
-      {isOwner && <form action={addAlertChannelAction} className="monitor-connect-form">
+      {canManageMonitoring && <form action={addAlertChannelAction} className="monitor-connect-form">
         <div className="mc-field" style={{ flex: "2 1 320px" }}><label htmlFor="ac-url">Slack incoming-webhook URL</label><input id="ac-url" name="webhookUrl" type="url" placeholder="https://hooks.slack.com/services/…" required /></div>
         <div className="mc-field"><label htmlFor="ac-sev">Alert at</label>
           <select id="ac-sev" name="minSeverity" defaultValue="high">
