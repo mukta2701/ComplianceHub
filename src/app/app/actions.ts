@@ -387,11 +387,3 @@ export async function resendInvitationAction(formData: FormData) {
   const outcome = await deliverInvitation(supabase, organisation.name, issued, credential.rawToken, credential.tokenHash);
   redirectToInvitationStatus(outcome, issued.id);
 }
-
-export async function acceptInvitationAction(formData: FormData) {
-  const supabase = await createSupabaseServerClient();
-  const { data: { user } } = await supabase.auth.getUser(); if (!user) redirect(`/sign-in?message=${encodeURIComponent("Sign in before accepting the invitation.")}`);
-  const { error } = await supabase.rpc("accept_invitation", { raw_token: String(formData.get("token")) });
-  if (error) redirect(`/app/invitations/accept?message=${encodeURIComponent("Invitation is invalid, expired, or belongs to another email address.")}`);
-  redirect("/app");
-}

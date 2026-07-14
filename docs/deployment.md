@@ -7,7 +7,7 @@ account owner can do; everything else is already prepared in the repo.
 ## 0. Prerequisites
 
 - The repo builds clean locally: `npm run lint && npm run typecheck && npm run test && npm run build`, plus `supabase test db` (pgTAP) green.
-- Migrations `supabase/migrations/202607020001 … 202607020039` (39 files, contiguous) **apply in order from an empty database** — verified via `supabase db reset` (which does exactly what `supabase db push` does on a hosted project): all 39 applied with no errors, then `supabase test db` passed 35 files / 314 pgTAP tests against the fresh DB. So a clean hosted-Supabase `db push` is low-risk.
+- All committed migrations must apply in order from an empty local database via `supabase db reset`, followed by a green `supabase test db`, before applying them to a hosted project. Never infer production safety from a stale migration/test count in documentation.
 - The full Playwright e2e suite (42 tests) passes against a **production build** (`next build && next start`), confirming the deployed artifact serves the whole app end-to-end. (Locally run e2e with `--workers=1` or `--workers=2` — full parallelism overwhelms the single local Supabase with concurrent sign-ups.)
 
 ## 1. Hosted Supabase **(you)**
@@ -25,10 +25,12 @@ Create a Vercel project from this repo and set these environment variables (name
 | `NEXT_PUBLIC_SUPABASE_URL` | yes | Supabase Project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | yes | Supabase anon (public) key |
 | `SUPABASE_SERVICE_ROLE_KEY` | yes | **Server-only.** Used solely by the cron routes; never exposed to the client. |
-| `NEXT_PUBLIC_SITE_URL` | yes | Your real site origin, e.g. `https://app.example.com`. **The code reads `NEXT_PUBLIC_SITE_URL`** (not `…_APP_URL`) for invitation links and auth redirects, falling back to `http://localhost:3000` — so if it is unset, production invite/reset links point at localhost. |
+| `NEXT_PUBLIC_SITE_URL` | yes | Your real site origin, e.g. `https://app.example.com`. It is the canonical origin for invitation and Auth redirects; production fails closed if it is absent. |
 | `CRON_SECRET` | yes | High-entropy random string; gates both cron routes. |
 | `RESEND_API_KEY` | for invitation delivery | **Server-only.** Resend API key with sending access. Never use a `NEXT_PUBLIC_` variable for it. If absent, invitations remain retryable with status `not_configured` and no mail request is made. |
 | `INVITATION_FROM_EMAIL` | for invitation delivery | **Server-only.** Verified sender, e.g. `ComplianceHub <invites@notify.example.com>`. |
+| `GOOGLE_AUTH_ENABLED` | after Google setup | Server-side flag. Leave unset until the Google + Supabase checkpoints below are complete, then set to `1`. |
+| `MICROSOFT_AUTH_ENABLED` | after Microsoft setup | Server-side flag. Leave unset until the Entra + Supabase checkpoints below are complete, then set to `1`. |
 | `INTEGRATIONS_LIVE` | no | Leave **unset** to use the built-in sandbox tracker. Set to `1` only after step 5. |
 
 ## 3. Cron automation (already declared in `vercel.json`)
@@ -51,6 +53,51 @@ curl -i -X GET http://localhost:3000/api/cron/integrations-sync -H "Authorizatio
 2. Configure a custom SMTP provider in Supabase Auth for sign-up, confirmation, password-reset, and other Auth-owned emails, with the verified application URL matching `NEXT_PUBLIC_SITE_URL`. This is separate from the Resend HTTP adapter used for workspace-membership invitations.
 3. Spend controls, monitoring, and database backups; exercise a restore into a separate project before public launch.
 4. The Supabase free tier and Vercel Hobby are for development, not dependable/commercial production (projects can pause; backups are limited).
+
+## 4a. Optional Google / Microsoft login **(you — external authorization checkpoint)**
+
+The application code is wired but both providers stay hidden and make no provider
+call until their server-side flag is exactly `1`. Do not enable either flag until
+all steps for that provider have been completed and tested in a non-production
+Supabase project.
+
+Common Supabase steps:
+
+1. In **Supabase Auth → URL Configuration**, keep the Site URL equal to
+   `NEXT_PUBLIC_SITE_URL` and add `${NEXT_PUBLIC_SITE_URL}/auth/callback` to the
+   redirect allowlist. Add the localhost equivalent only to the local/staging
+   project, not production.
+2. The redirect URI registered with Google or Microsoft is the Supabase Auth
+   callback, `https://<project-ref>.supabase.co/auth/v1/callback`. The application
+   callback above is the allowlisted `redirectTo` that Supabase uses after its PKCE
+   exchange; these are two different URLs.
+3. Store provider client IDs/secrets only in the Supabase provider settings. They
+   are never `NEXT_PUBLIC_*` variables and do not belong in this repository.
+4. Exercise sign-in, sign-up, sign-out, and `/invite` continuation in staging,
+   including a wrong-account invitation, before enabling a production flag.
+
+Google checkpoint:
+
+1. Create a Google OAuth web client, configure its consent screen, and register
+   the Supabase Auth callback URL.
+2. Enable Google in Supabase Auth with that client ID/secret.
+3. Set `GOOGLE_AUTH_ENABLED=1` only after the staging round trip succeeds.
+
+Microsoft checkpoint:
+
+1. Register a Microsoft Entra web application, select the intended tenant/account
+   audience, add the Supabase Auth callback URL, and create a client secret with a
+   monitored expiry/rotation date.
+2. Add the optional `email` and `xms_edov` claims to the Entra application. The app
+   requests the required `email` OAuth scope; `xms_edov` lets Supabase distinguish
+   a Microsoft-verified email and reduces email-impersonation risk.
+3. Enable Azure in Supabase Auth with the application ID/secret and appropriate
+   tenant URL, then set `MICROSOFT_AUTH_ENABLED=1` only after staging succeeds.
+
+Workspace invitation links contain a 256-bit bearer token. The raw link endpoint
+immediately exchanges it for a 45-minute HttpOnly, SameSite=Lax cookie scoped to
+`/invite`, then redirects to a token-free URL. Do not add analytics, third-party
+scripts, referrer overrides, or raw-token query/form handling to invitation pages.
 
 ## 5. Real Jira / GitHub integrations (optional) **(you)**
 

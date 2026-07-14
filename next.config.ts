@@ -38,6 +38,12 @@ const securityHeaders = [
   },
 ];
 
+const invitationSecurityHeaders = [
+  { key: "Cache-Control", value: "no-store" },
+  { key: "Referrer-Policy", value: "no-referrer" },
+  { key: "X-Robots-Tag", value: "noindex, nofollow" },
+];
+
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   // Dev-only: the e2e suite and local browsers reach the dev server via
@@ -48,7 +54,10 @@ const nextConfig: NextConfig = {
   // native server dependency rather than being folded into Turbopack output.
   serverExternalPackages: ["pdfkit", "exceljs", "docx"],
   async headers() {
-    return [{ source: "/(.*)", headers: securityHeaders }];
+    return [
+      { source: "/(.*)", headers: securityHeaders },
+      { source: "/invite/:path*", headers: invitationSecurityHeaders },
+    ];
   },
 };
 

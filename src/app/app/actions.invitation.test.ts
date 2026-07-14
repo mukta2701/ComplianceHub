@@ -23,7 +23,9 @@ vi.mock("next/navigation", () => ({
   },
 }));
 
-import { inviteMemberAction, resendInvitationAction, revokeInvitationAction } from "./actions";
+import * as actions from "./actions";
+
+const { inviteMemberAction, resendInvitationAction, revokeInvitationAction } = actions;
 
 function form(entries: Record<string, string>) {
   const data = new FormData();
@@ -51,6 +53,10 @@ function invitationClient() {
 }
 
 describe("invitation delivery actions", () => {
+  it("does not export the legacy form-token acceptance action", () => {
+    expect((actions as { acceptInvitationAction?: unknown }).acceptInvitationAction).toBeUndefined();
+  });
+
   beforeEach(() => {
     hoisted.enforceRateLimit.mockReset().mockResolvedValue(undefined);
     hoisted.sendInvitationEmail.mockReset();

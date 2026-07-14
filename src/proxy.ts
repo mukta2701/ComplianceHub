@@ -8,6 +8,6 @@ export async function proxy(request: NextRequest) {
 export const config = {
   // Public, authentication, and demo routes must remain available before a
   // Supabase project is configured. Session refresh is required only for the
-  // protected application tree.
-  matcher: ["/app/:path*"],
+  // protected application tree and the invitation OAuth continuation.
+  matcher: ["/app/:path*", "/invite"],
 };
