@@ -108,6 +108,72 @@ describe("ConnectionsCatalog", () => {
     expect(screen.queryByRole("searchbox", { name: "Search connections" })).not.toBeInTheDocument();
   });
 
+  it("shows paused providers while preserving setup-required precedence", () => {
+    render(<ConnectionsCatalog
+      connections={[{
+        id: "github-paused",
+        provider: "github",
+        label: "Paused GitHub",
+        config: { owner: "acme", repo: "isms" },
+        connection_mode: "oauth",
+        enabled: false,
+      }, {
+        id: "jira-setup",
+        provider: "jira",
+        label: "Jira setup",
+        config: {},
+        connection_mode: "oauth",
+        enabled: true,
+      }]}
+      alertChannels={[{
+        id: "slack-paused",
+        type: "slack",
+        label: "#paused-alerts",
+        min_severity: "high",
+        enabled: false,
+      }]}
+    />);
+
+    const githubCard = screen.getByRole("article", { name: "GitHub connection" });
+    expect(within(githubCard).getByText("Paused")).toBeVisible();
+    expect(within(githubCard).getByRole("button", { name: "Manage" })).toHaveClass("secondary");
+
+    const slackCard = screen.getByRole("article", { name: "Slack connection" });
+    expect(within(slackCard).getByText("Paused")).toBeVisible();
+    expect(within(slackCard).getByRole("button", { name: "Manage" })).toHaveClass("secondary");
+
+    const jiraCard = screen.getByRole("article", { name: "Jira connection" });
+    expect(within(jiraCard).getByText("Setup required")).toBeVisible();
+    expect(within(jiraCard).getByRole("button", { name: "Continue setup" })).toHaveClass("primary");
+  });
+
+  it("shows a provider as connected when any record is enabled", () => {
+    render(<ConnectionsCatalog
+      connections={[]}
+      alertChannels={[{
+        id: "slack-paused",
+        type: "slack",
+        label: "#paused-alerts",
+        min_severity: "high",
+        enabled: false,
+      }, {
+        id: "slack-active",
+        type: "slack",
+        label: "#active-alerts",
+        min_severity: "critical",
+        enabled: true,
+      }]}
+    />);
+
+    const slackCard = screen.getByRole("article", { name: "Slack connection" });
+    expect(within(slackCard).getByText("Connected")).toBeVisible();
+    expect(within(slackCard).getByRole("button", { name: "Manage" })).toHaveClass("secondary");
+
+    const githubCard = screen.getByRole("article", { name: "GitHub connection" });
+    expect(within(githubCard).getByText("Not connected")).toBeVisible();
+    expect(within(githubCard).getByRole("button", { name: "Connect" })).toHaveClass("primary");
+  });
+
   it("opens only the selected provider management panel", async () => {
     const user = userEvent.setup();
     render(<ConnectionsCatalog connections={connections} alertChannels={alertChannels} />);

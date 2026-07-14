@@ -305,7 +305,14 @@ export function ConnectionsCatalog({ connections, alertChannels, navigation }: {
         const providerConnections = connections.filter((connection) => connection.provider === provider.id);
         const records = provider.id === "slack" ? liveSlackChannels : providerConnections;
         const needsSetup = providerConnections.some(connectionNeedsSetup);
-        const status = records.length === 0 ? "Not connected" : needsSetup ? "Setup required" : "Connected";
+        const hasEnabledRecord = records.some((record) => record.enabled);
+        const status = records.length === 0
+          ? "Not connected"
+          : needsSetup
+            ? "Setup required"
+            : hasEnabledRecord
+              ? "Connected"
+              : "Paused";
         const action = records.length === 0 ? "Connect" : needsSetup ? "Continue setup" : "Manage";
         const targetSummary = providerTargetSummary(provider.id, connections, liveSlackChannels);
         return <article className="connections-provider-card connection-card" aria-label={`${provider.label} connection`} key={provider.id}>
@@ -320,7 +327,7 @@ export function ConnectionsCatalog({ connections, alertChannels, navigation }: {
           <div className="connection-card-footer">
             <span className="connection-card-target">{targetSummary}</span>
             <button
-              className="button secondary"
+              className={`button ${records.length === 0 || needsSetup ? "primary" : "secondary"}`}
               type="button"
               ref={(element) => { triggerRefs.current[provider.id] = element; }}
               aria-controls="connection-management-panel"
