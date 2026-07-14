@@ -70,6 +70,9 @@ describe("ConnectionsCatalog", () => {
     expect(githubCard).toHaveClass("connection-card");
     expect(githubCard).toHaveTextContent("Connected");
     expect(githubCard).toHaveTextContent("acme/isms");
+    expect(within(githubCard).getByText("acme/isms")).toHaveClass("connection-card-target");
+    expect(within(githubCard).getByRole("button", { name: "Manage" }).parentElement)
+      .toHaveClass("connection-card-footer");
     expect(jiraCard).toHaveTextContent("Setup required");
     expect(jiraCard).toHaveTextContent("Project not selected");
     expect(slackCard).toHaveTextContent("Connected");
