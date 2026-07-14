@@ -6,8 +6,8 @@ import { markAllNotificationsReadAction, markNotificationReadAction } from "./ac
 const KIND_ICON: Record<string, string> = { evidence_expiry: "file", task_overdue: "check", assessment: "clipboard", risk: "alert", system: "bell", policy_violation: "alert", control_drift: "activity" };
 
 export default async function NotificationsPage() {
-  const { supabase } = await requireAppContext();
-  const { data } = await supabase.from("notifications").select("id,kind,message,read_at,created_at").order("created_at", { ascending: false }).limit(100);
+  const { supabase, organisation } = await requireAppContext();
+  const { data } = await supabase.from("notifications").select("id,kind,message,read_at,created_at").eq("organisation_id", organisation.id).order("created_at", { ascending: false }).limit(100);
   const unread = data?.filter((n) => !n.read_at) ?? [];
   return <>
     <PageIntro eyebrow="NOTIFICATIONS" title="Notifications" body="Updates appear here automatically when evidence expires or work falls overdue." action={unread.length > 0 ? <form action={markAllNotificationsReadAction}><button className="button secondary">Mark all read</button></form> : undefined} />

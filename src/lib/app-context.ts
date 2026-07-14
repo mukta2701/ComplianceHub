@@ -5,14 +5,17 @@ import { cookies } from "next/headers";
 import { z } from "zod";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { one } from "@/lib/supabase/one";
+import {
+  ACTIVE_ORGANISATION_COOKIE,
+  ACTIVE_ORGANISATION_COOKIE_MAX_AGE,
+  parseActiveOrganisationId,
+} from "@/lib/active-workspace";
 
-export const ACTIVE_ORGANISATION_COOKIE = "compliancehub_active_organisation";
-export const ACTIVE_ORGANISATION_COOKIE_MAX_AGE = 60 * 60 * 24 * 180;
+export { ACTIVE_ORGANISATION_COOKIE, ACTIVE_ORGANISATION_COOKIE_MAX_AGE } from "@/lib/active-workspace";
 
 async function readActiveOrganisationId(): Promise<string | null> {
   const store = await cookies();
-  const parsed = z.uuid().safeParse(store.get(ACTIVE_ORGANISATION_COOKIE)?.value);
-  return parsed.success ? parsed.data : null;
+  return parseActiveOrganisationId(store.get(ACTIVE_ORGANISATION_COOKIE)?.value);
 }
 
 export async function setActiveOrganisationCookie(organisationId: string): Promise<void> {

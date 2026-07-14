@@ -18,12 +18,18 @@ export default async function ProtectedLayout({ children }: { children: React.Re
   const user = await getAuthUser();
   if (!user) redirect("/sign-in");
   const membership = await getMembership();
+  const unreadQuery = membership
+    ? supabase.from("notifications")
+        .select("id", { count: "exact", head: true })
+        .eq("organisation_id", membership.organisation_id)
+        .is("read_at", null)
+    : Promise.resolve({ count: 0 });
   const [{ count: unread }, { data: profile }] = await Promise.all([
-    supabase.from("notifications").select("id", { count: "exact", head: true }).is("read_at", null),
+    unreadQuery,
     supabase.from("profiles").select("display_name").eq("id", user.id).maybeSingle(),
   ]);
   const organisation = membership ? one(membership.organisations) : null;
   const orgName = organisation?.name ?? "Your workspace";
   const displayName = profile?.display_name ?? user.email ?? "Member";
-  return <AppShell organisationId={organisation?.id ?? null} orgName={orgName} orgInitials={initials(orgName)} userInitials={initials(displayName)} unreadCount={unread ?? 0}>{children}</AppShell>;
+  return <AppShell organisationId={organisation?.id ?? null} orgName={orgName} orgInitials={initials(orgName)} userInitials={initials(displayName)} unreadCount={unread ?? 0} role={membership?.role ?? null} jobTitle={membership?.job_title ?? null}>{children}</AppShell>;
 }

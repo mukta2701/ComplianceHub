@@ -11,6 +11,8 @@ import {
 } from "./actions";
 import { shouldShowRunMonitoring } from "./monitoring-access";
 import { hasCapability } from "@/features/organisations/domain/access";
+import { loadMemberMonitoring } from "@/features/monitoring/application/load-member-monitoring";
+import { MemberMonitoring } from "@/features/monitoring/components/member-monitoring";
 
 const SEVERITY_TONE: Record<CheckSeverity, StatusTone> = { critical: "risk", high: "risk", medium: "attention", low: "neutral" };
 const SEVERITY_PILL: Record<CheckSeverity, string> = { critical: "red", high: "red", medium: "amber", low: "blue" };
@@ -26,6 +28,9 @@ type Channel = { id: string; type: string; label: string; min_severity: string }
 
 export default async function MonitoringPage() {
   const { supabase, organisation, membership } = await requireAppContext();
+  if (membership.role === "member") {
+    return <MemberMonitoring data={await loadMemberMonitoring(supabase, organisation.id)} />;
+  }
   const canManageMonitoring = hasCapability(membership.role, "manage_monitoring");
   const today = new Date().toISOString().slice(0, 10);
 

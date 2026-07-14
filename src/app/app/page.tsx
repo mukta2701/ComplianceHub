@@ -18,6 +18,8 @@ import { Card, PageIntro, Pill, Progress } from "@/components/ui";
 import { StatusLabel, type StatusTone } from "@/components/status-label";
 import { Icon } from "@/components/icons";
 import { acceptCalendarSeedAction } from "./tasks/actions";
+import { loadMemberOverview } from "@/features/dashboard/application/load-member-overview";
+import { MemberOverview } from "@/features/dashboard/components/member-overview";
 
 const SOURCE_LABEL: Record<string, string> = {
   gap: "From assessment gap",
@@ -65,7 +67,15 @@ function readinessStage(percent: number): string {
 }
 
 export default async function AppHome() {
-  const { supabase, organisation } = await requireAppContext();
+  const { supabase, organisation, membership } = await requireAppContext();
+  if (membership.role === "member") {
+    const overview = await loadMemberOverview(supabase, {
+      organisationId: organisation.id,
+      organisationName: organisation.name,
+      jobTitle: membership.job_title,
+    });
+    return <MemberOverview data={overview} />;
+  }
   const today = new Date().toISOString().slice(0, 10);
 
   // The latest SoA register anchors readiness, the maturity chart, and the

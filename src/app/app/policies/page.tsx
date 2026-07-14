@@ -6,13 +6,13 @@ import { Card, PageIntro, Pill, Stat } from "@/components/ui";
 import { Icon } from "@/components/icons";
 
 export default async function PoliciesPage() {
-  const { supabase, user, membership } = await requireAppContext();
+  const { supabase, user, membership, organisation } = await requireAppContext();
   const access = policyPortalAccess(membership.role);
   const [{ data: policies }, { data: acceptances }, { count: memberCount }] = await Promise.all([
-    supabase.from("policies").select("id,reference,title,status,version,review_due").order("reference"),
-    supabase.from("policy_acceptances").select("policy_id,user_id,accepted_version"),
+    supabase.from("policies").select("id,reference,title,status,version,review_due").eq("organisation_id", organisation.id).order("reference"),
+    supabase.from("policy_acceptances").select("policy_id,user_id,accepted_version").eq("organisation_id", organisation.id),
     access.loadRoster
-      ? supabase.from("memberships").select("user_id", { count: "exact", head: true })
+      ? supabase.from("memberships").select("user_id", { count: "exact", head: true }).eq("organisation_id", organisation.id)
       : Promise.resolve({ count: 0 }),
   ]);
   const rows = policies ?? [];
@@ -24,6 +24,9 @@ export default async function PoliciesPage() {
     const presentation = policyAcceptancePresentation(membership.role, user.id, policy.version, byPolicy.get(policy.id) ?? [], members);
     return presentation.mode === "personal" && presentation.acceptedCurrent;
   }).length;
+  const emptyMessage = access.canManage
+    ? "No policies yet. Author your first policy to start tracking acceptance."
+    : "No approved policies are available yet.";
   return <>
     <PageIntro eyebrow="POLICIES" title="Policy library" body={access.canManage ? "Author policies, approve them, and track who has accepted the current version." : "Read your organisation's approved policies and record your own acceptance."} action={access.canManage ? <Link className="button primary" href="/app/policies/new"><Icon name="plus" />New policy</Link> : undefined} />
     <div className="stats-grid">
@@ -48,7 +51,7 @@ export default async function PoliciesPage() {
               : acceptance.acceptedCurrent ? "Accepted" : "Not accepted"}</td>
           </tr>;
         })}
-        {!rows.length && <tr><td colSpan={5} style={{ color: "#596273" }}>No policies yet. Author your first policy to start tracking acceptance.</td></tr>}
+        {!rows.length && <tr><td colSpan={5} style={{ color: "#596273" }}>{emptyMessage}</td></tr>}
       </tbody>
     </table></div></Card>
   </>;

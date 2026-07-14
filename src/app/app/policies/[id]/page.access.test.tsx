@@ -54,14 +54,14 @@ function contextFor(role: "owner" | "admin" | "member") {
     supabase: { from }, user: { id: USER_ID }, membership: { role },
     organisation: { id: "78000000-0000-4000-8000-000000000003" },
   };
-  return from;
+  return { from, results };
 }
 
 describe("policy detail role presentation", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("shows Members only their personal acceptance and read-only policy evidence", async () => {
-    const from = contextFor("member");
+    const { from, results } = contextFor("member");
 
     render(await PolicyDetailPage({ params: Promise.resolve({ id: POLICY_ID }) }));
 
@@ -76,6 +76,9 @@ describe("policy detail role presentation", () => {
     expect(screen.queryByRole("button", { name: "Link" })).not.toBeInTheDocument();
     expect(from).not.toHaveBeenCalledWith("memberships");
     expect(from).not.toHaveBeenCalledWith("evidence");
+    expect(results.policies.eq).toHaveBeenCalledWith("organisation_id", "78000000-0000-4000-8000-000000000003");
+    expect(results.policy_acceptances.eq).toHaveBeenCalledWith("organisation_id", "78000000-0000-4000-8000-000000000003");
+    expect(results.evidence_links.eq).toHaveBeenCalledWith("organisation_id", "78000000-0000-4000-8000-000000000003");
   });
 
   it("shows Admins organisation reporting and policy management controls", async () => {

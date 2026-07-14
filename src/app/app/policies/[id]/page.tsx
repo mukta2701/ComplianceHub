@@ -11,18 +11,18 @@ import { linkPolicyEvidenceAction, unlinkPolicyEvidenceAction } from "./evidence
 
 export default async function PolicyDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { supabase, user, membership } = await requireAppContext();
+  const { supabase, user, membership, organisation } = await requireAppContext();
   const access = policyPortalAccess(membership.role);
-  const { data: policy } = await supabase.from("policies").select("id,reference,title,body,version,status,review_due,owner_id").eq("id", id).maybeSingle();
+  const { data: policy } = await supabase.from("policies").select("id,reference,title,body,version,status,review_due,owner_id").eq("id", id).eq("organisation_id", organisation.id).maybeSingle();
   if (!policy) notFound();
   const [{ data: acceptances }, { data: members }, { data: links }, { data: evidenceOptions }] = await Promise.all([
-    supabase.from("policy_acceptances").select("user_id,accepted_version").eq("policy_id", id),
+    supabase.from("policy_acceptances").select("user_id,accepted_version").eq("policy_id", id).eq("organisation_id", organisation.id),
     access.loadRoster
-      ? supabase.from("memberships").select("user_id,profiles(display_name)")
+      ? supabase.from("memberships").select("user_id,profiles(display_name)").eq("organisation_id", organisation.id)
       : Promise.resolve({ data: [] }),
-    supabase.from("evidence_links").select("id,evidence(id,title)").eq("policy_id", id),
+    supabase.from("evidence_links").select("id,evidence(id,title)").eq("policy_id", id).eq("organisation_id", organisation.id),
     access.canManage
-      ? supabase.from("evidence").select("id,title").order("title")
+      ? supabase.from("evidence").select("id,title").eq("organisation_id", organisation.id).order("title")
       : Promise.resolve({ data: [] }),
   ]);
   const roster = members ?? [];

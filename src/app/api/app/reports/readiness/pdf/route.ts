@@ -9,7 +9,7 @@ import { generateReadinessPdf } from "@/features/reports/application/readiness-p
 // report page (src/app/app/reports/readiness/page.tsx) this route exports from.
 export async function GET() {
   const { supabase, organisation } = await requireAppContext();
-  const report = buildReadinessReport(await loadReadinessInput(supabase));
+  const report = buildReadinessReport(await loadReadinessInput(supabase, organisation.id));
   const buffer = await generateReadinessPdf(report, organisation.name);
   return new NextResponse(new Uint8Array(buffer), {
     headers: {

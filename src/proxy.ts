@@ -9,5 +9,5 @@ export const config = {
   // Public, authentication, and demo routes must remain available before a
   // Supabase project is configured. Session refresh is required only for the
   // protected application tree and the invitation OAuth continuation.
-  matcher: ["/app/:path*", "/invite"],
+  matcher: ["/app/:path*", "/api/app/:path*", "/invite"],
 };

@@ -8,17 +8,20 @@ import { Icon } from "@/components/icons";
 const BAND_TONE: Record<RiskBand, string> = { low: "green", moderate: "amber", high: "red", very_high: "critical" };
 
 export default async function ReadinessReportPage() {
-  const { supabase, organisation } = await requireAppContext();
-  const report = buildReadinessReport(await loadReadinessInput(supabase));
+  const { supabase, organisation, membership } = await requireAppContext();
+  const report = buildReadinessReport(await loadReadinessInput(supabase, organisation.id));
   if (!report.soaTotal) {
+    const isMember = membership.role === "member";
     return (
       <>
         <PageIntro eyebrow="REPORTS" title="Leadership report" body="A board-ready summary of your readiness posture." />
         <EmptyState
           icon="file"
-          title="Run an assessment first"
-          body="This report summarises your Statement of Applicability. Complete a gap assessment to generate one, then come back for a board-ready readiness report."
-          primary={{ href: "/app/assessment", label: "Start assessment" }}
+          title={isMember ? "Leadership report not available yet" : "Run an assessment first"}
+          body={isMember
+            ? "No leadership report is available for members yet. A workspace operator can publish readiness information when it is ready."
+            : "This report summarises your Statement of Applicability. Complete a gap assessment to generate one, then come back for a board-ready readiness report."}
+          primary={isMember ? undefined : { href: "/app/assessment", label: "Start assessment" }}
         />
       </>
     );

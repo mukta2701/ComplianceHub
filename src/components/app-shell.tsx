@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "./icons";
 import { AlertToaster } from "./alert-toaster";
 import { signOutAction } from "@/app/app/actions";
+import { roleLabel, type MembershipRole } from "@/features/organisations/domain/access";
 
 const navGroups = [
   { label: "Get ready", items: [
@@ -28,6 +29,13 @@ const navGroups = [
   { label: "Admin", items: [
     ["/app/settings", "settings", "Settings"],
   ] },
+] as const;
+
+const memberNavItems = [
+  ["/app", "home", "Overview"],
+  ["/app/policies", "file", "Policies"],
+  ["/app/monitoring", "activity", "Monitoring"],
+  ["/app/reports/readiness", "file", "Leadership report"],
 ] as const;
 
 // Routes not in the sidebar still need a header title.
@@ -53,7 +61,7 @@ const TITLE_ROUTES: Array<[string, string]> = [
 
 function isActive(path: string, href: string) { return href === "/app" ? path === "/app" : path === href || path.startsWith(`${href}/`); }
 
-export function AppShell({ organisationId, orgName, orgInitials, userInitials, unreadCount, children }: { organisationId: string | null; orgName: string; orgInitials: string; userInitials: string; unreadCount: number; children: React.ReactNode }) {
+export function AppShell({ organisationId, orgName, orgInitials, userInitials, unreadCount, role, jobTitle, children }: { organisationId: string | null; orgName: string; orgInitials: string; userInitials: string; unreadCount: number; role: MembershipRole | null; jobTitle: string | null; children: React.ReactNode }) {
   const path = usePathname();
   const [open, setOpen] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
@@ -65,13 +73,30 @@ export function AppShell({ organisationId, orgName, orgInitials, userInitials, u
     document.addEventListener("keydown", close);
     return () => document.removeEventListener("keydown", close);
   }, [open]);
-  const title = TITLE_ROUTES.find(([href]) => isActive(path, href))?.[1] ?? "ComplianceHub";
+  const isMember = role === "member";
+  const isOperator = role === "owner" || role === "admin";
+  const title = isMember && path === "/app"
+    ? "Overview"
+    : TITLE_ROUTES.find(([href]) => isActive(path, href))?.[1] ?? "ComplianceHub";
+  const accessCue = isMember ? "Member view" : role ? roleLabel(role) : "Workspace setup";
+  const workspaceSubtitle = isMember
+    ? `${jobTitle?.trim() || "Member"} · Read only`
+    : role ? roleLabel(role) : "Workspace setup";
   return <div className="app-shell">
     <button className="nav-overlay" data-open={open} onClick={() => setOpen(false)} aria-label="Close navigation" />
     <aside className="sidebar" id="app-navigation" data-open={open} aria-label="Workspace navigation">
       <Link className="brand" href="/app" onClick={() => setOpen(false)}><span className="brand-mark"><Icon name="shield" /></span><span>ComplianceHub</span></Link>
-      <div className="workspace"><span className="avatar">{orgInitials}</span><span><b>{orgName}</b><small>Workspace</small></span><Icon name="arrow" /></div>
-      <nav aria-label="Workspace">
+      <div className="workspace"><span className="avatar">{orgInitials}</span><span><b>{orgName}</b><small>{workspaceSubtitle}</small></span><Icon name="arrow" /></div>
+      {isMember && <nav aria-label="Workspace">
+        <div className="nav-group">
+          {memberNavItems.map(([href, icon, label], index) => (
+            <Link ref={index === 0 ? firstNav : undefined} key={href} href={href} className={isActive(path, href) ? "active" : ""} aria-current={isActive(path, href) ? "page" : undefined} onClick={() => setOpen(false)}>
+              <Icon name={icon} />{label}
+            </Link>
+          ))}
+        </div>
+      </nav>}
+      {isOperator && <nav aria-label="Workspace">
         <div className="nav-group">
           <Link ref={firstNav} href="/app" className={isActive(path, "/app") ? "active" : ""} aria-current={isActive(path, "/app") ? "page" : undefined} onClick={() => setOpen(false)}>
             <Icon name="home" />Dashboard
@@ -87,11 +112,11 @@ export function AppShell({ organisationId, orgName, orgInitials, userInitials, u
             ))}
           </div>
         ))}
-      </nav>
+      </nav>}
       <div className="sidebar-foot"><form action={signOutAction} data-app-exit-form><button className="button secondary" style={{ width: "100%" }}>Sign out</button></form><p>ComplianceHub supports readiness management. It does not provide ISO certification or legal advice.</p></div>
     </aside>
     <div className="app-main">
-      <header className="app-header"><button ref={menuButton} className="menu" onClick={() => setOpen(value => !value)} aria-label={open ? "Close navigation" : "Open navigation"} aria-expanded={open} aria-controls="app-navigation"><Icon name="menu" /></button><h1>{title}</h1><div className="header-actions"><Link href="/app/notifications" className="notif-bell" aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"}><Icon name="bell" />{unreadCount > 0 && <span className="notif-count">{unreadCount}</span>}</Link><span className="user-avatar">{userInitials}</span></div></header>
+      <header className="app-header"><button ref={menuButton} className="menu" onClick={() => setOpen(value => !value)} aria-label={open ? "Close navigation" : "Open navigation"} aria-expanded={open} aria-controls="app-navigation"><Icon name="menu" /></button><h1>{title}</h1><div className="header-actions"><span className="pill neutral" aria-label="Portal access">{accessCue}</span><Link href="/app/notifications" className="notif-bell" aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"}><Icon name="bell" />{unreadCount > 0 && <span className="notif-count">{unreadCount}</span>}</Link><span className="user-avatar">{userInitials}</span></div></header>
       <main className="content">{children}</main>
       <footer className="legal">ComplianceHub supports readiness management. It does not provide ISO certification or legal advice.</footer>
     </div>
