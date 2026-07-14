@@ -61,7 +61,7 @@ export function buildMonitorDependencies(
   return {
     listActiveSources: async () => {
       let query = supabase.from("monitor_sources")
-        .select("id,organisation_id,provider,config,access_token").is("revoked_at", null);
+        .select("id,organisation_id,provider,config,access_token").is("revoked_at", null).eq("enabled", true);
       if (opts.organisationId) query = query.eq("organisation_id", opts.organisationId);
       const { data, error } = await query;
       if (error) throw error;
@@ -109,7 +109,7 @@ export function buildMonitorDependencies(
     listExternalChannels: async (organisationId) => {
       const { data, error } = await supabase.from("alert_channels")
         .select("id,type,config,min_severity")
-        .eq("organisation_id", organisationId).is("revoked_at", null).in("type", ["slack", "whatsapp"]);
+        .eq("organisation_id", organisationId).is("revoked_at", null).eq("enabled", true).in("type", ["slack", "whatsapp"]);
       if (error) throw error;
       return (data ?? []).map((row): AlertChannel => {
         // The webhook is stored encrypted; decrypt it so the delivery adapter can POST.

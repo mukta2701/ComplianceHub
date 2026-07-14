@@ -12,7 +12,7 @@ const EVIDENCE_TONE: Record<string, string> = { current: "green", expiring: "amb
 
 export default async function TaskDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { supabase } = await requireAppContext();
+  const { supabase, organisation } = await requireAppContext();
   const { data: task } = await supabase.from("tasks").select("id,title,detail,status,due_on,recurrence,source,owner_id,control_id,risk_id,created_at,updated_at").eq("id", id).maybeSingle();
   if (!task) notFound();
   const [{ data: owner }, { data: control }, { data: risk }, { data: evidenceLinks }] = await Promise.all([
@@ -24,7 +24,8 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
   const evidence = (evidenceLinks ?? []).map((l) => one(l.evidence)).filter((e): e is { id: string; title: string; status: string; kind: string } => Boolean(e));
   const [{ data: ticket }, { data: connections }] = await Promise.all([
     supabase.from("task_tickets").select("external_id,external_url,external_status,external_assignee,last_synced_at").eq("task_id", id).maybeSingle(),
-    supabase.from("integration_connections").select("id,provider,label").is("revoked_at", null).order("created_at"),
+    supabase.from("integration_connections").select("id,provider,label")
+      .eq("organisation_id", organisation.id).eq("enabled", true).is("revoked_at", null).order("created_at"),
   ]);
   const today = new Date().toISOString().slice(0, 10);
   const overdue = isOverdue({ status: task.status as TaskStatus, dueOn: task.due_on }, today);

@@ -32,4 +32,34 @@ describe("buildMonitorDependencies WhatsApp delivery", () => {
     expect(result.status).toBe("delivered");
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
+
+  it("loads only enabled, non-revoked sources in the requested organisation", async () => {
+    const builder: Record<string, ReturnType<typeof vi.fn>> = {};
+    builder.select = vi.fn(() => builder);
+    builder.is = vi.fn(() => builder);
+    builder.eq = vi.fn(() => builder);
+    builder.then = vi.fn((resolve) => Promise.resolve({ data: [], error: null }).then(resolve));
+    const supabase = { from: vi.fn(() => builder) } as unknown as SupabaseClient;
+
+    const deps = buildMonitorDependencies(supabase, { organisationId: "org1" });
+    await expect(deps.listActiveSources()).resolves.toEqual([]);
+
+    expect(builder.is).toHaveBeenCalledWith("revoked_at", null);
+    expect(builder.eq).toHaveBeenCalledWith("enabled", true);
+    expect(builder.eq).toHaveBeenCalledWith("organisation_id", "org1");
+  });
+
+  it("loads only enabled external alert channels", async () => {
+    const builder: Record<string, ReturnType<typeof vi.fn>> = {};
+    for (const method of ["select", "eq", "is", "in"]) builder[method] = vi.fn(() => builder);
+    builder.then = vi.fn((resolve) => Promise.resolve({ data: [], error: null }).then(resolve));
+    const supabase = { from: vi.fn(() => builder) } as unknown as SupabaseClient;
+
+    const deps = buildMonitorDependencies(supabase);
+    await expect(deps.listExternalChannels("org1")).resolves.toEqual([]);
+
+    expect(builder.eq).toHaveBeenCalledWith("organisation_id", "org1");
+    expect(builder.eq).toHaveBeenCalledWith("enabled", true);
+    expect(builder.is).toHaveBeenCalledWith("revoked_at", null);
+  });
 });

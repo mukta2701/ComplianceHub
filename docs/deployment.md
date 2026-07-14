@@ -32,6 +32,10 @@ Create a Vercel project from this repo and set these environment variables (name
 | `GOOGLE_AUTH_ENABLED` | after Google setup | Server-side flag. Leave unset until the Google + Supabase checkpoints below are complete, then set to `1`. |
 | `MICROSOFT_AUTH_ENABLED` | after Microsoft setup | Server-side flag. Leave unset until the Entra + Supabase checkpoints below are complete, then set to `1`. |
 | `INTEGRATIONS_LIVE` | no | Leave **unset** to use the built-in sandbox tracker. Set to `1` only after step 5. |
+| `NANGO_BASE_URL` | for provider OAuth | **Server-only.** Defaults to `https://api.nango.dev`; set only when using another reviewed Nango deployment. |
+| `NANGO_SECRET_KEY` | for provider OAuth | **Server-only. Never `NEXT_PUBLIC_*`.** Creates short-lived Connect sessions and authorizes Nango Proxy calls. |
+| `NANGO_GITHUB_INTEGRATION_ID` | for GitHub OAuth | Nango integration ID/unique key configured for the reviewed GitHub OAuth app. |
+| `NANGO_JIRA_INTEGRATION_ID` | for Jira OAuth | Nango integration ID/unique key configured for the reviewed Jira OAuth app. |
 
 ## 3. Cron automation (already declared in `vercel.json`)
 
@@ -105,14 +109,53 @@ immediately exchanges it for a 45-minute HttpOnly, SameSite=Lax cookie scoped to
 `/invite`, then redirects to a token-free URL. Do not add analytics, third-party
 scripts, referrer overrides, or raw-token query/form handling to invitation pages.
 
-## 5. Real Jira / GitHub integrations (optional) **(you)**
+## 5. Real Jira / GitHub integrations through Nango (optional) **(you — external authorization checkpoint)**
 
-The integration code is complete and proven with a fake provider; connecting a **real** tracker is a documented setup step:
+ComplianceHub contains the tested server boundary and Connect UI, but it cannot
+create provider apps, accept consent, or enter deployment secrets for you. Keep
+`INTEGRATIONS_LIVE` unset until every staging checkpoint below passes.
 
-1. Register an OAuth app with Jira or GitHub; note the client id/secret.
-2. Add a connection in **Settings → Integrations** with a valid access token (Owner/Admin operator-only).
-3. Set `INTEGRATIONS_LIVE=1` in the Vercel environment.
-4. **Token storage hardening:** connection `access_token`/`refresh_token` are stored in `integration_connections` under operator-only RLS. Before relying on a real connection, move these to Supabase Vault or an encrypted column — plaintext-at-rest is acceptable only for the sandbox/dev path.
+1. Create a Nango environment. Register a GitHub OAuth app and Jira OAuth app with
+   the callback URLs and least-privilege scopes shown by Nango. Complete any
+   provider consent/app-review requirements.
+2. Configure one Nango integration for GitHub and one for Jira. Set
+   `NANGO_SECRET_KEY`, `NANGO_GITHUB_INTEGRATION_ID`, and
+   `NANGO_JIRA_INTEGRATION_ID` as server-only deployment variables. Leave
+   `NANGO_BASE_URL` at `https://api.nango.dev` unless a reviewed self-hosted Nango
+   deployment is intentionally used.
+3. In staging, sign in as an Owner or Admin and open **Settings → Connections**.
+   Authorize one provider through its OAuth button. ComplianceHub creates a
+   short-lived Connect session bound to the signed-in user and workspace; the
+   browser never receives `NANGO_SECRET_KEY`.
+4. After Nango reports success, ComplianceHub verifies the opaque connection
+   reference by making a safe provider identity call through Nango Proxy. Only
+   then is the reference stored. Provider OAuth access/refresh tokens remain in
+   Nango and are not stored in `integration_connections`.
+5. The new record remains **Authorized · setup required**. Enter a GitHub
+   owner/repository or an Atlassian Cloud URL/project key. Database constraints
+   prevent a forged request from enabling an OAuth row before this target is
+   valid.
+6. Set `INTEGRATIONS_LIVE=1` in staging. Create a remediation ticket and run the
+   integration sync; verify the ticket URL/status and Nango request logs. Disabled
+   and revoked connections must remain no-ops.
+7. Repeat the flow in production only after staging succeeds. Record who approved
+   the provider scopes and schedule rotation/review of the Nango secret and OAuth
+   applications.
+
+OAuth here is **provider authorization**: it grants ComplianceHub access to a
+GitHub/Jira API. It is separate from Google/Microsoft SSO in section 4a, which
+authenticates a person signing in to ComplianceHub.
+
+The manual password-token forms remain inside **Local sandbox / developer setup**
+for deterministic local tests. They are not the recommended production path.
+
+## 6. Slack alert channel (optional) **(you)**
+
+1. Create a Slack incoming webhook for the intended workspace/channel.
+2. In **Settings → Connections → Alert channels**, add the webhook and minimum
+   severity. The encrypted webhook is never selected back into the page.
+3. Disable or remove the channel to stop delivery. In-app notifications remain
+   always on; disabled Slack channels are excluded by the monitoring worker.
 
 ## Self-hosting (alternative)
 

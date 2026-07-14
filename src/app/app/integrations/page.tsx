@@ -1,95 +1,269 @@
+import Link from "next/link";
 import { requireAppContext } from "@/lib/app-context";
 import { Card, PageIntro, Pill } from "@/components/ui";
 import { SubTabs } from "@/components/sub-tabs";
-import { addConnectionAction, revokeConnectionAction, addEvidenceSourceAction, revokeEvidenceSourceAction } from "./actions";
 import { hasCapability } from "@/features/organisations/domain/access";
+import { OAuthConnectButton } from "./oauth-connect-button";
+import {
+  addAlertChannelAction,
+  addConnectionAction,
+  addEvidenceSourceAction,
+  addMonitorSourceAction,
+  configureOAuthConnectionAction,
+  revokeAlertChannelAction,
+  revokeConnectionAction,
+  revokeEvidenceSourceAction,
+  revokeMonitorSourceAction,
+  setAlertChannelEnabledAction,
+  setIntegrationConnectionEnabledAction,
+  setMonitorSourceEnabledAction,
+} from "./actions";
 
 const EVIDENCE_PROVIDER_LABELS: Record<string, string> = {
   google_workspace: "Google Workspace",
   github: "GitHub",
   aws: "AWS",
 };
+const PROVIDER_LABELS: Record<string, string> = { github: "GitHub", jira: "Jira" };
+
+type Connection = {
+  id: string;
+  provider: "github" | "jira";
+  label: string;
+  config: { owner?: string; repo?: string; baseUrl?: string; projectKey?: string };
+  connection_mode: "sandbox" | "oauth";
+  enabled: boolean;
+  created_at: string;
+  revoked_at: string | null;
+};
+type MonitorSource = {
+  id: string;
+  provider: "github";
+  label: string;
+  config: { owner?: string; repo?: string };
+  enabled: boolean;
+  created_at: string;
+  revoked_at: string | null;
+};
+type AlertChannel = {
+  id: string;
+  type: string;
+  label: string;
+  min_severity: string;
+  enabled: boolean;
+  created_at: string;
+  revoked_at: string | null;
+};
+type EvidenceSource = {
+  id: string;
+  provider: string;
+  label: string;
+  config: Record<string, unknown>;
+  created_at: string;
+  revoked_at: string | null;
+};
+
+function ToggleForm({
+  id,
+  enabled,
+  label,
+  action,
+}: {
+  id: string;
+  enabled: boolean;
+  label: string;
+  action: (formData: FormData) => void | Promise<void>;
+}) {
+  return <form action={action}>
+    <input type="hidden" name="id" value={id} />
+    <input type="hidden" name="enabled" value={String(!enabled)} />
+    <button className="button secondary" style={{ minHeight: "32px", padding: "6px 12px" }}>
+      {enabled ? `Disable ${label}` : `Enable ${label}`}
+    </button>
+  </form>;
+}
+
+function OAuthTargetForm({ connection }: { connection: Connection }) {
+  const providerLabel = PROVIDER_LABELS[connection.provider];
+  return <form action={configureOAuthConnectionAction} className="app-form" style={{ marginTop: "12px" }}>
+    <input type="hidden" name="id" value={connection.id} />
+    <input type="hidden" name="provider" value={connection.provider} />
+    <div className="form-grid">
+      {connection.provider === "github" ? <>
+        <label>GitHub owner<input name="owner" maxLength={120} placeholder="acme" required /></label>
+        <label>Repository<input name="repo" maxLength={120} placeholder="isms" required /></label>
+      </> : <>
+        <label>Jira Cloud URL<input name="baseUrl" type="url" maxLength={300} placeholder="https://acme.atlassian.net" required /></label>
+        <label>Project key<input name="projectKey" maxLength={80} placeholder="SEC" required /></label>
+      </>}
+    </div>
+    <button className="button primary">Save target and enable {providerLabel} connection</button>
+  </form>;
+}
 
 export default async function IntegrationsPage() {
   const { supabase, membership } = await requireAppContext();
   const canManageConnections = hasCapability(membership.role, "manage_connections");
-  // Tokens are NEVER selected here — only non-secret columns.
-  const [{ data: connections }, { data: sources }] = canManageConnections
+  const [connections, monitorSources, alertChannels, evidenceSources] = canManageConnections
     ? await Promise.all([
         supabase.from("integration_connections")
-          .select("id,provider,label,config,created_at,revoked_at").order("created_at", { ascending: false }),
-        // access_token / refresh_token are deliberately excluded from this select.
+          .select("id,provider,label,config,connection_mode,enabled,created_at,revoked_at")
+          .order("created_at", { ascending: false }).then((result) => (result.data ?? []) as Connection[]),
+        // Tokens are deliberately excluded. Only the target label is rendered.
+        supabase.from("monitor_sources")
+          .select("id,provider,label,config,enabled,created_at,revoked_at")
+          .order("created_at", { ascending: false }).then((result) => (result.data ?? []) as MonitorSource[]),
+        // config contains the encrypted webhook and must never be selected here.
+        supabase.from("alert_channels")
+          .select("id,type,label,min_severity,enabled,created_at,revoked_at")
+          .order("created_at", { ascending: false }).then((result) => (result.data ?? []) as AlertChannel[]),
+        // access_token / refresh_token are deliberately excluded.
         supabase.from("evidence_sources")
-          .select("id,provider,label,config,created_at,revoked_at").order("created_at", { ascending: false }),
+          .select("id,provider,label,config,created_at,revoked_at")
+          .order("created_at", { ascending: false }).then((result) => (result.data ?? []) as EvidenceSource[]),
       ])
-    : [{ data: [] }, { data: [] }];
-  return <>
-    <PageIntro eyebrow="SETTINGS · CONNECTIONS" title="Connections" body="Connect a tracker to push remediation tasks as tickets, and a source so proof is collected for you. Both start in a safe sandbox." />
+    : [[], [], [], []];
 
+  const liveConnections = connections.filter((connection) => !connection.revoked_at);
+  const liveMonitorSources = monitorSources.filter((source) => !source.revoked_at);
+  const liveAlertChannels = alertChannels.filter((channel) => !channel.revoked_at);
+
+  return <>
+    <PageIntro
+      eyebrow="SETTINGS · CONNECTIONS"
+      title="Connections"
+      body="Owners and Admins connect workplace systems and choose where monitoring alerts are delivered."
+    />
     <SubTabs tabs={[{ href: "/app/settings", label: "Settings" }, { href: "/app/integrations", label: "Connections" }]} />
 
-    <Card style={{ padding: "16px 18px", marginBottom: "16px", display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
-      <div style={{ flex: 1, minWidth: "260px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "4px" }}><h2 style={{ fontSize: "15px", margin: 0 }}>Continuous monitoring</h2><Pill tone="green">Active watchdog</Pill></div>
-        <p style={{ fontSize: "13px", color: "#596273", margin: 0 }}>Connect a GitHub source to have ComplianceHub run compliance checks continuously and alert you in-app and in Slack the moment posture drifts. Set it up on the Monitoring page.</p>
-      </div>
-      <a className="button" href="/app/monitoring">Open Monitoring</a>
-    </Card>
+    {!canManageConnections && <Card style={{ padding: "18px" }} role="note">
+      <p style={{ margin: 0 }}>Connections are managed by workspace Owners and Admins.</p>
+    </Card>}
 
-    {!canManageConnections && <Card style={{ padding: "18px" }} role="note"><p>Connections are managed by workspace Owners and Admins.</p></Card>}
     {canManageConnections && <>
       <Card style={{ padding: "18px", marginBottom: "16px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px" }}>
-          <h2 style={{ fontSize: "15px", margin: 0 }}>Task tracker</h2>
-          <Pill tone="amber">Sandbox mode</Pill>
+        <div className="card-head"><div>
+          <h3>Systems</h3>
+          <p>Authorize GitHub or Jira with OAuth, then choose the repository or project ComplianceHub may use.</p>
+        </div><Link href="/app/monitoring">Open Monitoring</Link></div>
+        <p style={{ fontSize: "13px", color: "#596273", margin: "0 0 14px" }}>
+          OAuth grants ComplianceHub access to a provider. It is separate from SSO, which signs people into ComplianceHub.
+          Provider tokens stay with the OAuth broker and are never sent to this page.
+        </p>
+        <div className="form-grid" style={{ marginBottom: "16px" }}>
+          <div className="soft-panel" style={{ padding: "14px" }}>
+            <strong>GitHub</strong>
+            <p style={{ fontSize: "12px", color: "#596273" }}>GitHub Issues and authorized provider API access.</p>
+            <OAuthConnectButton provider="github" />
+          </div>
+          <div className="soft-panel" style={{ padding: "14px" }}>
+            <strong>Jira</strong>
+            <p style={{ fontSize: "12px", color: "#596273" }}>Projects, remediation tickets and status sync.</p>
+            <OAuthConnectButton provider="jira" />
+          </div>
         </div>
-        <p style={{ fontSize: "13px", color: "#4a5163", margin: "0 0 8px" }}>Add a connection below to push remediation tasks to your tracker as tickets, then sync their status back into ComplianceHub.</p>
-        <p style={{ fontSize: "13px", color: "#596273", margin: 0 }}>You&rsquo;re in <b>sandbox mode</b>: new connections use a built-in tracker, so you can trial the push&rarr;sync flow safely without touching a real Jira or GitHub project. When you&rsquo;re ready to connect the real thing, your workspace administrator can follow the going-live steps below.</p>
-        <details style={{ marginTop: "14px", borderTop: "1px solid #edf0f4", paddingTop: "12px" }}>
-          <summary style={{ cursor: "pointer", fontSize: "13px", fontWeight: 700, color: "var(--blue)", width: "fit-content" }}>For your administrator: going live</summary>
-          <p style={{ fontSize: "12px", color: "#596273", margin: "10px 0 6px" }}>Connecting a real tracker needs a one-off setup by whoever manages your hosting. It involves registering an OAuth app with Jira or GitHub, adding the credentials to your deployment, enabling the background sync, and securing the stored access tokens. Share this page with your administrator when you&rsquo;re ready.</p>
-        </details>
+        <div id="deployment-checkpoint" className="notice" style={{ marginBottom: "16px" }}>
+          If a Connect button reports that provider setup is required, complete the Nango, GitHub and Jira steps in <code>docs/deployment.md</code>.
+          Nothing is connected until those deployment credentials and your provider approval are in place.
+        </div>
+        {liveConnections.length > 0 ? <ul className="monitor-list">
+          {liveConnections.map((connection) => {
+            const label = connection.label || PROVIDER_LABELS[connection.provider];
+            const pendingTarget = connection.connection_mode === "oauth" && !connection.enabled
+              && Object.keys(connection.config ?? {}).length === 0;
+            return <li key={connection.id} style={{ alignItems: "flex-start", flexWrap: "wrap" }}>
+              <span className="ml-body" style={{ flex: "1 1 260px" }}>
+                <strong>{label}</strong>
+                <span className="ml-meta">
+                  <Pill tone="neutral">{PROVIDER_LABELS[connection.provider]}</Pill>
+                  <Pill tone={pendingTarget ? "amber" : connection.enabled ? "green" : "neutral"}>
+                    {pendingTarget ? "Authorized · setup required" : connection.enabled ? "Enabled" : "Disabled"}
+                  </Pill>
+                  <span>{connection.connection_mode === "oauth" ? "OAuth" : "Sandbox"}</span>
+                </span>
+                {pendingTarget && <OAuthTargetForm connection={connection} />}
+              </span>
+              <span style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                {!pendingTarget && <ToggleForm id={connection.id} enabled={connection.enabled} label={`${PROVIDER_LABELS[connection.provider]} connection`} action={setIntegrationConnectionEnabledAction} />}
+                <form action={revokeConnectionAction}><input type="hidden" name="id" value={connection.id} /><button className="button secondary">Revoke</button></form>
+              </span>
+            </li>;
+          })}
+        </ul> : <p className="empty-note">No GitHub or Jira systems are connected yet.</p>}
       </Card>
+
       <Card style={{ padding: "18px", marginBottom: "16px" }}>
-        <h2 style={{ fontSize: "15px", margin: "0 0 10px" }}>Add a connection</h2>
+        <div className="card-head"><div><h3>Monitoring sources</h3><p>Enabled sources are checked and shown to Members.</p></div></div>
+        {liveMonitorSources.length > 0 ? <ul className="monitor-list">
+          {liveMonitorSources.map((source) => <li key={source.id} style={{ flexWrap: "wrap" }}>
+            <span className="ml-body"><strong>{source.label}</strong><span className="ml-meta">
+              <Pill tone="neutral">GitHub</Pill><Pill tone={source.enabled ? "green" : "neutral"}>{source.enabled ? "Enabled" : "Disabled"}</Pill>
+              <span>{source.config?.owner}/{source.config?.repo}</span>
+            </span></span>
+            <span style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+              <ToggleForm id={source.id} enabled={source.enabled} label={source.label} action={setMonitorSourceEnabledAction} />
+              <form action={revokeMonitorSourceAction}><input type="hidden" name="id" value={source.id} /><button className="button secondary">Disconnect</button></form>
+            </span>
+          </li>)}
+        </ul> : <p className="empty-note">No systems are currently configured for monitoring.</p>}
+      </Card>
+
+      <Card style={{ padding: "18px", marginBottom: "16px" }}>
+        <div className="card-head"><div><h3>Alert channels</h3><p>Choose where new monitoring findings notify your team.</p></div></div>
+        <ul className="monitor-list" style={{ marginBottom: "14px" }}>
+          <li><span className="ml-body"><strong>In-app notifications</strong><span className="ml-meta"><Pill tone="green">Always on</Pill><span>Workspace operators receive every finding in ComplianceHub.</span></span></span></li>
+          {liveAlertChannels.map((channel) => <li key={channel.id} style={{ flexWrap: "wrap" }}>
+            <span className="ml-body"><strong>{channel.label}</strong><span className="ml-meta"><Pill tone="neutral">Slack</Pill><Pill tone={channel.enabled ? "green" : "neutral"}>{channel.enabled ? "Enabled" : "Disabled"}</Pill><span>{channel.min_severity} and above</span></span></span>
+            <span style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+              <ToggleForm id={channel.id} enabled={channel.enabled} label={channel.label} action={setAlertChannelEnabledAction} />
+              <form action={revokeAlertChannelAction}><input type="hidden" name="id" value={channel.id} /><button className="button secondary">Remove</button></form>
+            </span>
+          </li>)}
+        </ul>
+        <form action={addAlertChannelAction} className="app-form">
+          <div className="form-grid">
+            <label>Slack destination URL<input name="endpoint" type="url" placeholder="Paste the Slack HTTPS endpoint" required /></label>
+            <label>Alert at<select name="minSeverity" defaultValue="high"><option value="low">Low and above</option><option value="medium">Medium and above</option><option value="high">High and above</option><option value="critical">Critical only</option></select></label>
+            <label>Label<input name="label" maxLength={160} placeholder="#compliance-alerts" /></label>
+          </div>
+          <button className="button primary">Add Slack channel</button>
+          <p className="field-hint">The destination is encrypted and never displayed again.</p>
+        </form>
+      </Card>
+
+      <details className="card" style={{ padding: "18px", marginBottom: "16px" }}>
+        <summary style={{ cursor: "pointer", fontWeight: 800 }}>Local sandbox / developer setup</summary>
+        <p style={{ fontSize: "13px", color: "#596273" }}>
+          These manual forms keep local demos and deterministic tests working. Production workspaces should use the OAuth buttons above.
+        </p>
+        <h3 style={{ fontSize: "15px" }}>Sandbox task tracker</h3>
         <form action={addConnectionAction} className="app-form">
           <div className="form-grid">
             <label>Provider<select name="provider" defaultValue="jira"><option value="jira">Jira</option><option value="github">GitHub Issues</option></select></label>
             <label>Label<input name="label" maxLength={160} placeholder="Engineering Jira" /></label>
-            <label>Jira base URL<input name="baseUrl" maxLength={300} placeholder="https://acme.atlassian.net" /></label>
+            <label>Jira Cloud URL<input name="baseUrl" maxLength={300} placeholder="https://acme.atlassian.net" /></label>
             <label>Jira project key<input name="projectKey" maxLength={80} placeholder="ENG" /></label>
             <label>GitHub owner<input name="owner" maxLength={120} placeholder="acme" /></label>
             <label>GitHub repo<input name="repo" maxLength={120} placeholder="isms" /></label>
           </div>
-          <label>Access token (optional in sandbox)<input name="accessToken" maxLength={4000} type="password" autoComplete="off" /></label>
-          <button className="button primary">Add connection</button>
+          <label>Developer token (optional)<input name="accessToken" maxLength={4000} type="password" autoComplete="off" /></label>
+          <button className="button secondary">Add sandbox tracker</button>
         </form>
-      </Card>
+        <h3 style={{ fontSize: "15px", marginTop: "20px" }}>Sandbox monitoring source</h3>
+        <form action={addMonitorSourceAction} className="app-form">
+          <div className="form-grid">
+            <label>GitHub owner<input name="owner" maxLength={120} placeholder="acme" required /></label>
+            <label>Repository<input name="repo" maxLength={120} placeholder="isms" required /></label>
+            <label>Label<input name="label" maxLength={160} placeholder="Production repository" /></label>
+          </div>
+          <label>Developer token (optional)<input name="accessToken" maxLength={4000} type="password" autoComplete="off" /></label>
+          <button className="button secondary">Add sandbox monitoring source</button>
+        </form>
+      </details>
+
       <Card style={{ padding: "18px" }}>
-        <h2 style={{ fontSize: "15px", margin: "0 0 10px" }}>Connections</h2>
-        <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "8px" }}>
-          {(connections ?? []).map((c) => <li key={c.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "13px" }}>
-            <span><b>{c.label || c.provider}</b> · {c.provider} {c.revoked_at ? <Pill tone="neutral">Revoked</Pill> : <Pill tone="green">Active</Pill>}</span>
-            {!c.revoked_at && <form action={revokeConnectionAction}><input type="hidden" name="id" value={c.id} /><button style={{ color: "var(--red)", border: 0, background: "none", fontWeight: 700 }}>Revoke</button></form>}
-          </li>)}
-          {!connections?.length && <li style={{ color: "#596273" }}>No connections yet. Add one above to start pushing tasks as tickets.</li>}
-        </ul>
-      </Card>
-      <Card style={{ padding: "18px", marginTop: "28px", marginBottom: "16px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px" }}>
-          <h2 style={{ fontSize: "15px", margin: 0 }}>Evidence sources</h2>
-          <Pill tone="amber">Sandbox mode</Pill>
-        </div>
-        <p style={{ fontSize: "13px", color: "#4a5163", margin: "0 0 8px" }}>Connect a system so ComplianceHub collects proof automatically — access-control reports, config exports and more land in your evidence vault, and stale items automatically raise a task.</p>
-        <p style={{ fontSize: "13px", color: "#596273", margin: 0 }}>You&rsquo;re in <b>sandbox mode</b>: new sources use a built-in collector that returns sample evidence, so you can trial the collect flow safely without touching a real Google Workspace, GitHub or AWS account. When you&rsquo;re ready, your workspace administrator can enable live collection.</p>
-        <details style={{ marginTop: "14px", borderTop: "1px solid #edf0f4", paddingTop: "12px" }}>
-          <summary style={{ cursor: "pointer", fontSize: "13px", fontWeight: 700, color: "var(--blue)", width: "fit-content" }}>For your administrator: going live</summary>
-          <p style={{ fontSize: "12px", color: "#596273", margin: "10px 0 6px" }}>Live evidence collection needs a one-off setup by whoever manages your hosting: register an OAuth app or service credentials with the provider, add them to the source, enable the background collector, and secure the stored access tokens. Share this page with your administrator when you&rsquo;re ready.</p>
-        </details>
-      </Card>
-      <Card style={{ padding: "18px", marginBottom: "16px" }}>
-        <h2 style={{ fontSize: "15px", margin: "0 0 10px" }}>Add an evidence source</h2>
-        <form action={addEvidenceSourceAction} className="app-form">
+        <div className="card-head"><div><h3>Evidence sources</h3><p>Keep the existing automated evidence collection workflow.</p></div></div>
+        <form action={addEvidenceSourceAction} className="app-form" style={{ marginBottom: "14px" }}>
           <div className="form-grid">
             <label>Provider<select name="provider" defaultValue="google_workspace"><option value="google_workspace">Google Workspace</option><option value="github">GitHub</option><option value="aws">AWS</option></select></label>
             <label>Label<input name="label" maxLength={160} placeholder="Corporate Google Workspace" /></label>
@@ -99,18 +273,14 @@ export default async function IntegrationsPage() {
             <label>AWS account<input name="account" maxLength={120} placeholder="123456789012" /></label>
             <label>AWS region<input name="region" maxLength={60} placeholder="eu-west-2" /></label>
           </div>
-          <label>Access token (optional in sandbox)<input name="accessToken" maxLength={4000} type="password" autoComplete="off" /></label>
-          <button className="button primary">Add evidence source</button>
+          <label>Developer credential (optional)<input name="accessToken" maxLength={4000} type="password" autoComplete="off" /></label>
+          <button className="button secondary">Add evidence source</button>
         </form>
-      </Card>
-      <Card style={{ padding: "18px" }}>
-        <h2 style={{ fontSize: "15px", margin: "0 0 10px" }}>Sources</h2>
-        <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "8px" }}>
-          {(sources ?? []).map((s) => <li key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "13px" }}>
-            <span><b>{s.label || EVIDENCE_PROVIDER_LABELS[s.provider] || s.provider}</b> · {EVIDENCE_PROVIDER_LABELS[s.provider] || s.provider} {s.revoked_at ? <Pill tone="neutral">Revoked</Pill> : <Pill tone="green">Active</Pill>}</span>
-            {!s.revoked_at && <form action={revokeEvidenceSourceAction}><input type="hidden" name="id" value={s.id} /><button style={{ color: "var(--red)", border: 0, background: "none", fontWeight: 700 }}>Revoke</button></form>}
+        <ul className="monitor-list">
+          {evidenceSources.filter((source) => !source.revoked_at).map((source) => <li key={source.id}>
+            <span className="ml-body"><strong>{source.label || EVIDENCE_PROVIDER_LABELS[source.provider] || source.provider}</strong><span className="ml-meta"><Pill tone="neutral">{EVIDENCE_PROVIDER_LABELS[source.provider] || source.provider}</Pill></span></span>
+            <form action={revokeEvidenceSourceAction}><input type="hidden" name="id" value={source.id} /><button className="button secondary">Revoke</button></form>
           </li>)}
-          {!sources?.length && <li style={{ color: "#596273" }}>No evidence sources yet. Add one above to start collecting proof automatically.</li>}
         </ul>
       </Card>
     </>}

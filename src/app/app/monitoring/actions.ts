@@ -3,28 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireAppContext } from "@/lib/app-context";
-import { enforceRateLimit } from "@/lib/security/rate-limit";
-import { encryptSecret } from "@/lib/security/secrets";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { buildMonitorDependencies } from "@/features/monitoring/application/monitor-deps";
 import { runMonitoring } from "@/features/monitoring/application/monitor-run";
 import { hasCapability } from "@/features/organisations/domain/access";
-
-const sourceSchema = z.object({
-  owner: z.string().trim().min(1, "GitHub owner is required").max(120),
-  repo: z.string().trim().min(1, "Repository is required").max(120),
-  label: z.string().trim().max(160).optional(),
-  accessToken: z.string().trim().max(400).optional(),
-});
-
-// The webhook is treated like a credential (stored in config, never read back to
-// the client). Restrict the host to Slack's incoming-webhook endpoint so a
-// compromised form can't turn the hourly cron into an open POST relay (SSRF).
-const channelSchema = z.object({
-  webhookUrl: z.string().trim().url().refine((u) => u.startsWith("https://hooks.slack.com/"), "Must be a Slack incoming-webhook URL (https://hooks.slack.com/…)"),
-  minSeverity: z.enum(["low", "medium", "high", "critical"]),
-  label: z.string().trim().max(160).optional(),
-});
 
 async function requireOperator() {
   const ctx = await requireAppContext();
@@ -38,69 +20,33 @@ async function requireMonitoringManager() {
   return ctx;
 }
 
-export async function addMonitorSourceAction(formData: FormData) {
-  const { supabase, user, organisation } = await requireMonitoringManager();
-  await enforceRateLimit(`monitor-source:${user.id}`, { limit: 10, windowMs: 60_000 });
-  const parsed = sourceSchema.parse(Object.fromEntries(formData));
-  const { error } = await supabase.from("monitor_sources").insert({
-    organisation_id: organisation.id, provider: "github",
-    label: parsed.label || `${parsed.owner}/${parsed.repo}`,
-    config: { owner: parsed.owner, repo: parsed.repo },
-    access_token: encryptSecret(parsed.accessToken || null), connected_by: user.id,
-  });
-  if (error) throw new Error("Could not add the monitoring source");
-  revalidatePath("/app/monitoring");
-}
-
-export async function revokeMonitorSourceAction(formData: FormData) {
-  const { supabase } = await requireMonitoringManager();
-  const { error } = await supabase.from("monitor_sources")
-    .update({ revoked_at: new Date().toISOString() }).eq("id", String(formData.get("id")));
-  if (error) throw new Error("Could not disconnect the monitoring source");
-  revalidatePath("/app/monitoring");
-}
-
-export async function addAlertChannelAction(formData: FormData) {
-  const { supabase, user, organisation } = await requireMonitoringManager();
-  await enforceRateLimit(`alert-channel:${user.id}`, { limit: 10, windowMs: 60_000 });
-  const parsed = channelSchema.parse(Object.fromEntries(formData));
-  const { error } = await supabase.from("alert_channels").insert({
-    organisation_id: organisation.id, type: "slack", label: parsed.label || "Slack",
-    config: { webhookUrl: encryptSecret(parsed.webhookUrl) }, min_severity: parsed.minSeverity, connected_by: user.id,
-  });
-  if (error) throw new Error("Could not add the alert channel");
-  revalidatePath("/app/monitoring");
-}
-
-export async function revokeAlertChannelAction(formData: FormData) {
-  const { supabase } = await requireMonitoringManager();
-  const { error } = await supabase.from("alert_channels")
-    .update({ revoked_at: new Date().toISOString() }).eq("id", String(formData.get("id")));
-  if (error) throw new Error("Could not remove the alert channel");
-  revalidatePath("/app/monitoring");
-}
-
 export async function acknowledgeFindingAction(formData: FormData) {
-  const { supabase } = await requireMonitoringManager();
-  const { error } = await supabase.from("monitoring_findings")
-    .update({ status: "acknowledged" }).eq("id", String(formData.get("id")));
-  if (error) throw new Error("Could not acknowledge the finding");
+  const { supabase, organisation } = await requireMonitoringManager();
+  const id = z.uuid().parse(String(formData.get("id")));
+  const { data, error } = await supabase.from("monitoring_findings")
+    .update({ status: "acknowledged" }).eq("id", id).eq("organisation_id", organisation.id)
+    .eq("status", "open").select("id").maybeSingle();
+  if (error || !data) throw new Error("Finding was not found in this workspace");
   revalidatePath("/app/monitoring");
 }
 
 export async function resolveFindingAction(formData: FormData) {
-  const { supabase } = await requireMonitoringManager();
-  const { error } = await supabase.from("monitoring_findings")
-    .update({ status: "resolved", resolved_at: new Date().toISOString() }).eq("id", String(formData.get("id")));
-  if (error) throw new Error("Could not resolve the finding");
+  const { supabase, organisation } = await requireMonitoringManager();
+  const id = z.uuid().parse(String(formData.get("id")));
+  const { data, error } = await supabase.from("monitoring_findings")
+    .update({ status: "resolved", resolved_at: new Date().toISOString() })
+    .eq("id", id).eq("organisation_id", organisation.id)
+    .in("status", ["open", "acknowledged"]).select("id").maybeSingle();
+  if (error || !data) throw new Error("Finding was not found in this workspace");
   revalidatePath("/app/monitoring");
 }
 
 export async function raiseTaskFromFindingAction(formData: FormData) {
   const { supabase, user, organisation } = await requireMonitoringManager();
-  const id = String(formData.get("id"));
+  const id = z.uuid().parse(String(formData.get("id")));
   const { data: finding, error: readError } = await supabase.from("monitoring_findings")
-    .select("id,title,detail,control_ref,subject_id,task_id").eq("id", id).maybeSingle();
+    .select("id,title,detail,control_ref,subject_id,task_id").eq("id", id)
+    .eq("organisation_id", organisation.id).in("status", ["open", "acknowledged"]).maybeSingle();
   if (readError || !finding) throw new Error("Could not find the finding");
   if (finding.task_id) { revalidatePath("/app/monitoring"); return; } // already has a task
   const { data: task, error: taskError } = await supabase.from("tasks").insert({
@@ -111,7 +57,7 @@ export async function raiseTaskFromFindingAction(formData: FormData) {
   }).select("id").single();
   if (taskError || !task) throw new Error("Could not raise the remediation task");
   const { error: linkError } = await supabase.from("monitoring_findings")
-    .update({ task_id: task.id, status: "acknowledged" }).eq("id", id);
+    .update({ task_id: task.id, status: "acknowledged" }).eq("id", id).eq("organisation_id", organisation.id);
   if (linkError) throw new Error("Raised the task but could not link it to the finding");
   revalidatePath("/app/monitoring");
 }

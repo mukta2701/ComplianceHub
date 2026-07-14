@@ -5,6 +5,9 @@ export type TicketConnection = {
   provider: IntegrationProvider;
   config: Record<string, unknown>;
   accessToken: string;
+  connectionMode?: "sandbox" | "oauth";
+  brokerConnectionId?: string | null;
+  brokerProviderConfigKey?: string | null;
 };
 export type CreateTicketInput = { title: string; body: string };
 export type CreatedTicket = { externalId: string; url: string; status: string };

@@ -2,7 +2,8 @@
 
 This document is the reviewed database contract for the Owner, Admin, and Member
 portals. It reflects the schema after
-`20260714043000_policy_feedback_and_leadership_snapshots.sql`.
+`20260714043000_policy_feedback_and_leadership_snapshots.sql`, including the
+connection enablement/broker-reference migration applied earlier in the chain.
 
 - **Operator** means an organisation membership with role `owner` or `admin`.
 - **Member** means the ordinary `member` role.
@@ -21,7 +22,7 @@ policies are reviewed.
 
 | Table | Operator | Member | Notes |
 |---|---:|---:|---|
-| `alert_channels` | R/W | — | Delivery configuration and secrets are operator-only. |
+| `alert_channels` | R/W | — | Delivery configuration and secrets are operator-only. Disabled channels are excluded from delivery. |
 | `assessment_responses` | R/W | R | Writes normally go through `save_assessment_response`. |
 | `assessment_sessions` | R/W | R | Member cannot create, complete, or revise an assessment. |
 | `asset_categories` | R/W | R | Curated asset-register reference data. |
@@ -37,13 +38,13 @@ policies are reviewed.
 | `evidence` | R/W | R | Member can read metadata but cannot add/supersede evidence. |
 | `evidence_links` | R/W | R | Member cannot change evidence/control relationships. |
 | `evidence_sources` | R/W | — | Provider configuration and tokens are operator-only. |
-| `integration_connections` | R/W | — | GitHub/Jira connection configuration and tokens are operator-only. |
+| `integration_connections` | R/W | — | GitHub/Jira configuration is operator-only. OAuth rows store only Nango broker references, remain disabled until a valid repo/project target is configured, and never store provider OAuth tokens. |
 | `invitations` | R/W* | — | Owner manages Admin/Member invites; Admin manages Member invites only. Writes use invitation RPCs. |
 | `kpi_measurements` | R/W | R | Member receives read-only measurements. |
 | `kpis` | R/W | R | Member receives read-only KPI definitions and results. |
 | `leadership_report_snapshots` | R | R | Immutable, exact published report payloads; only operators publish through `publish_leadership_report`. |
 | `memberships` | R/W* | R | Owner manages elevated roles; Admin may update/remove ordinary Members only. Member has no write. |
-| `monitor_sources` | R/W | — | Monitoring configuration and credentials are operator-only. |
+| `monitor_sources` | R/W | — | Monitoring configuration and credentials are operator-only. Disabled sources neither run nor appear in Member summaries. |
 | `monitoring_findings` | R/U | R | Monitoring worker inserts; operators resolve/update; Members read active findings. |
 | `notifications` | own R/U | own R/U | Every role may read its own notifications and update its own read state only. |
 | `policies` | R/W | approved R | Members cannot see draft, in-review, or archived policies. |

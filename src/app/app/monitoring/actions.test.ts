@@ -24,7 +24,7 @@ vi.mock("@/lib/security/rate-limit", () => ({ enforceRateLimit: hoisted.enforceR
 vi.mock("@/lib/security/secrets", () => ({ encryptSecret: hoisted.encryptSecret }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
-import { addMonitorSourceAction, fetchRecentAlertsAction, runMonitoringNowAction } from "./actions";
+import { acknowledgeFindingAction, fetchRecentAlertsAction, runMonitoringNowAction } from "./actions";
 
 describe("runMonitoringNowAction", () => {
   beforeEach(() => {
@@ -56,40 +56,23 @@ describe("runMonitoringNowAction", () => {
   }
 });
 
-describe("monitoring configuration access", () => {
-  beforeEach(() => vi.clearAllMocks());
-
-  function sourceForm() {
-    const form = new FormData();
-    form.set("owner", "compliancehub");
-    form.set("repo", "app");
-    form.set("label", "Production repository");
-    return form;
-  }
-
-  it("rejects members before writing source configuration", async () => {
-    const from = vi.fn();
+describe("monitoring finding mutations", () => {
+  it("scopes acknowledgement to the active organisation and fails closed on no match", async () => {
+    const builder: Record<string, ReturnType<typeof vi.fn>> = {};
+    builder.update = vi.fn(() => builder);
+    builder.eq = vi.fn(() => builder);
+    builder.select = vi.fn(() => builder);
+    builder.maybeSingle = vi.fn().mockResolvedValue({ data: null, error: null });
     hoisted.ctx = {
-      supabase: { from }, user: { id: "user-1" }, organisation: { id: "org-1" },
-      membership: { role: "member" },
+      supabase: { from: vi.fn(() => builder) }, user: { id: "user-1" }, organisation: { id: "org-1" },
+      membership: { role: "admin" },
     };
+    const form = new FormData();
+    form.set("id", "10000000-0000-4000-8000-000000000099");
 
-    await expect(addMonitorSourceAction(sourceForm())).rejects.toThrow("Only workspace operators can manage monitoring configuration");
-    expect(from).not.toHaveBeenCalled();
+    await expect(acknowledgeFindingAction(form)).rejects.toThrow("Finding was not found in this workspace");
+    expect(builder.eq).toHaveBeenCalledWith("organisation_id", "org-1");
   });
-
-  for (const role of ["owner", "admin"] as const) {
-    it(`allows ${role}s to add a monitoring source`, async () => {
-      const insert = vi.fn().mockResolvedValue({ error: null });
-      hoisted.ctx = {
-        supabase: { from: vi.fn(() => ({ insert })) }, user: { id: "user-1" },
-        organisation: { id: "org-1" }, membership: { role },
-      };
-
-      await expect(addMonitorSourceAction(sourceForm())).resolves.toBeUndefined();
-      expect(insert).toHaveBeenCalledOnce();
-    });
-  }
 });
 
 describe("recent monitoring alerts active workspace scope", () => {

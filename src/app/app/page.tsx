@@ -129,7 +129,7 @@ export default async function AppHome() {
     supabase.from("soa_registers").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id),
     supabase.from("memberships").select("user_id", { count: "exact", head: true }).eq("organisation_id", organisation.id),
     supabase.from("invitations").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id),
-    supabase.from("integration_connections").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).is("revoked_at", null),
+    supabase.from("integration_connections").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).eq("enabled", true).is("revoked_at", null),
   ]);
 
   const actionInputs: DashboardActionInput[] = [

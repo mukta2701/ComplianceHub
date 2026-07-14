@@ -1,5 +1,16 @@
 import { z } from "zod";
 
+function isAtlassianCloudUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && url.username === "" && url.password === ""
+      && url.port === "" && url.pathname === "/" && url.search === "" && url.hash === ""
+      && url.hostname.endsWith(".atlassian.net");
+  } catch {
+    return false;
+  }
+}
+
 export const connectionInputSchema = z.object({
   provider: z.enum(["jira", "github"]),
   label: z.string().trim().max(160).default(""),
@@ -15,9 +26,22 @@ export const connectionInputSchema = z.object({
   // this an owner could point it at an internal host / link-local IP and turn the
   // sync into a server-side request forge (SSRF). GitHub uses a fixed host already.
   if (v.provider !== "jira" || !v.baseUrl) return true;
-  try {
-    const u = new URL(v.baseUrl);
-    return u.protocol === "https:" && (u.hostname === "atlassian.net" || u.hostname.endsWith(".atlassian.net"));
-  } catch { return false; }
+  return isAtlassianCloudUrl(v.baseUrl);
 }, { message: "Jira base URL must be an https://<your-domain>.atlassian.net address", path: ["baseUrl"] });
 export type ConnectionInput = z.infer<typeof connectionInputSchema>;
+
+export const connectionTargetInputSchema = z.discriminatedUnion("provider", [
+  z.object({
+    provider: z.literal("github"),
+    owner: z.string().trim().min(1, "GitHub owner is required").max(120),
+    repo: z.string().trim().min(1, "GitHub repository is required").max(120),
+  }),
+  z.object({
+    provider: z.literal("jira"),
+    baseUrl: z.string().trim().min(1, "Jira base URL is required").max(300)
+      .refine(isAtlassianCloudUrl, "Jira base URL must be an Atlassian Cloud HTTPS URL"),
+    projectKey: z.string().trim().min(1, "Jira project key is required").max(80)
+      .regex(/^[A-Z][A-Z0-9_]*$/, "Jira project key must use uppercase letters, numbers, or underscores"),
+  }),
+]);
+export type ConnectionTargetInput = z.infer<typeof connectionTargetInputSchema>;

@@ -1,4 +1,5 @@
 import type { TicketProvider, TicketConnection, CreateTicketInput } from "@/features/integrations/domain/provider";
+import { nangoProxyFetch } from "./nango";
 
 // Thin Jira Cloud adapter. config = { baseUrl, projectKey }. Requires a real
 // OAuth access token in connection.accessToken (user go-live step). Not network-
@@ -7,10 +8,25 @@ function baseUrl(conn: TicketConnection): string {
   return String((conn.config as { baseUrl?: string }).baseUrl ?? "").replace(/\/+$/, "");
 }
 
+function jiraFetch(conn: TicketConnection, path: string, init: RequestInit = {}) {
+  if (conn.connectionMode === "oauth") {
+    const headers = new Headers(init.headers);
+    headers.set("Base-Url-Override", baseUrl(conn));
+    return nangoProxyFetch({
+      provider: "jira",
+      connectionId: conn.brokerConnectionId,
+      providerConfigKey: conn.brokerProviderConfigKey,
+      path,
+      init: { ...init, headers },
+    });
+  }
+  return fetch(`${baseUrl(conn)}/${path}`, init);
+}
+
 export const jiraProvider: TicketProvider = {
   async createTicket(conn: TicketConnection, input: CreateTicketInput) {
     const projectKey = String((conn.config as { projectKey?: string }).projectKey ?? "");
-    const res = await fetch(`${baseUrl(conn)}/rest/api/3/issue`, {
+    const res = await jiraFetch(conn, "rest/api/3/issue", {
       method: "POST",
       headers: { authorization: `Bearer ${conn.accessToken}`, "content-type": "application/json", accept: "application/json" },
       body: JSON.stringify({
@@ -25,7 +41,7 @@ export const jiraProvider: TicketProvider = {
     return { externalId: data.key, url: `${baseUrl(conn)}/browse/${data.key}`, status: "To Do" };
   },
   async fetchTicket(conn: TicketConnection, externalId: string) {
-    const res = await fetch(`${baseUrl(conn)}/rest/api/3/issue/${encodeURIComponent(externalId)}?fields=status,assignee`, {
+    const res = await jiraFetch(conn, `rest/api/3/issue/${encodeURIComponent(externalId)}?fields=status,assignee`, {
       headers: { authorization: `Bearer ${conn.accessToken}`, accept: "application/json" },
     });
     if (!res.ok) throw new Error(`Jira fetchTicket failed: ${res.status}`);

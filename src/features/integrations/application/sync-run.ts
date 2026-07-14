@@ -8,7 +8,7 @@ import { one } from "@/lib/supabase/one";
 export async function syncTickets(supabase: SupabaseClient): Promise<{ synced: number; failed: number; tasksClosed: number }> {
   const nowIso = new Date().toISOString();
   const { data: tickets, error } = await supabase.from("task_tickets")
-    .select("id,organisation_id,task_id,connection_id,provider,external_id,last_synced_at,integration_connections(config,access_token,revoked_at)");
+    .select("id,organisation_id,task_id,connection_id,provider,external_id,last_synced_at,integration_connections(config,access_token,revoked_at,enabled,connection_mode,broker_connection_id,broker_provider_config_key)");
   if (error) throw error;
   let synced = 0;
   let failed = 0;
@@ -16,13 +16,21 @@ export async function syncTickets(supabase: SupabaseClient): Promise<{ synced: n
   for (const ticket of tickets ?? []) {
     if (!isTicketSyncDue({ lastSyncedAt: ticket.last_synced_at }, nowIso)) continue;
     const conn = one(ticket.integration_connections);
-    if (!conn || conn.revoked_at) continue;
+    if (!conn || conn.revoked_at || !conn.enabled) continue;
     // One provider error must not starve the rest of the sweep across other orgs:
     // isolate each ticket, count failures, and keep going.
     try {
       const provider = resolveTicketProvider(ticket.provider as IntegrationProvider);
       const fetched = await provider.fetchTicket(
-        { id: ticket.connection_id, provider: ticket.provider as IntegrationProvider, config: (conn.config ?? {}) as Record<string, unknown>, accessToken: decryptSecret(conn.access_token) ?? "" },
+        {
+          id: ticket.connection_id,
+          provider: ticket.provider as IntegrationProvider,
+          config: (conn.config ?? {}) as Record<string, unknown>,
+          accessToken: decryptSecret(conn.access_token) ?? "",
+          connectionMode: conn.connection_mode as "sandbox" | "oauth",
+          brokerConnectionId: conn.broker_connection_id,
+          brokerProviderConfigKey: conn.broker_provider_config_key,
+        },
         ticket.external_id,
       );
       // Tenant-scoped update: filtered by this row's organisation_id.
