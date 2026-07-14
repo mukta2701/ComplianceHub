@@ -1021,9 +1021,9 @@ test("a task is pushed to a sandbox tracker, polled to In Progress, then the con
   await expect(jiraCard).toContainText("Not connected");
   await expect(slackCard).toBeVisible();
   await expect(page.getByRole("searchbox", { name: "Search connections" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "All" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Development" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Alerts" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "All", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Development", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Alerts", exact: true })).toHaveCount(0);
   await expect(jiraCard).toContainText("Not configured");
   await expect(page.getByRole("heading", { name: "Monitoring sources" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Evidence sources" })).toHaveCount(0);
