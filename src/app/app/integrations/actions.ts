@@ -5,6 +5,7 @@ import { z } from "zod";
 import { requireAppContext } from "@/lib/app-context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { encryptSecret } from "@/lib/security/secrets";
+import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { connectionInputSchema, connectionTargetInputSchema } from "@/features/integrations/application/connection";
 import { evidenceSourceInputSchema } from "@/features/integrations/application/evidence-source";
 import { hasCapability } from "@/features/organisations/domain/access";
@@ -82,7 +83,7 @@ export async function startProviderAuthorizationAction(providerInput: unknown) {
 }
 
 export async function confirmProviderAuthorizationAction(input: unknown) {
-  const { supabase, user, organisation } = await requireConnectionManager();
+  const { user, organisation } = await requireConnectionManager();
   await enforceRateLimit(`provider-confirm:${user.id}`, { limit: 10, windowMs: 60_000 });
   const parsed = brokerReferenceSchema.parse(input);
   await verifyNangoConnection({
@@ -92,7 +93,8 @@ export async function confirmProviderAuthorizationAction(input: unknown) {
     organisationId: organisation.id,
   });
 
-  const { error } = await supabase.from("integration_connections").insert({
+  const service = createSupabaseServiceClient();
+  const { error } = await service.from("integration_connections").insert({
     organisation_id: organisation.id,
     provider: parsed.provider,
     label: parsed.provider === "github" ? "GitHub" : "Jira",
@@ -114,12 +116,40 @@ export async function confirmProviderAuthorizationAction(input: unknown) {
 export async function setIntegrationConnectionEnabledAction(formData: FormData) {
   const { supabase, organisation } = await requireConnectionManager();
   const parsed = toggleSchema.parse(Object.fromEntries(formData));
-  const { data, error } = await supabase.from("integration_connections")
+  const { data: connection, error: lookupError } = await supabase.from("integration_connections")
+    .select("id,provider,connection_mode,broker_connection_id,broker_provider_config_key")
+    .eq("id", parsed.id)
+    .eq("organisation_id", organisation.id)
+    .is("revoked_at", null)
+    .maybeSingle();
+  if (lookupError || !connection) throw new Error("Connection was not found in this workspace");
+
+  let mutationClient = supabase;
+  let brokerReference: z.infer<typeof brokerReferenceSchema> | null = null;
+  if (connection.connection_mode === "oauth") {
+    brokerReference = brokerReferenceSchema.parse({
+      provider: connection.provider,
+      connectionId: connection.broker_connection_id,
+      providerConfigKey: connection.broker_provider_config_key,
+    });
+    mutationClient = createSupabaseServiceClient();
+  } else if (connection.connection_mode !== "sandbox") {
+    throw new Error("Connection was not found in this workspace");
+  }
+
+  let mutation = mutationClient.from("integration_connections")
     .update({ enabled: parsed.enabled })
     .eq("id", parsed.id)
     .eq("organisation_id", organisation.id)
-    .select("id")
-    .maybeSingle();
+    .eq("provider", connection.provider)
+    .eq("connection_mode", connection.connection_mode)
+    .is("revoked_at", null);
+  if (brokerReference) {
+    mutation = mutation
+      .eq("broker_connection_id", brokerReference.connectionId)
+      .eq("broker_provider_config_key", brokerReference.providerConfigKey);
+  }
+  const { data, error } = await mutation.select("id").maybeSingle();
   if (error || !data) throw new Error("Connection was not found in this workspace");
   revalidatePath("/app/integrations");
   revalidatePath("/app/monitoring");
@@ -159,7 +189,8 @@ export async function configureOAuthConnectionAction(formData: FormData) {
     });
     config = { baseUrl: target.baseUrl, projectKey: target.projectKey, cloudId };
   }
-  const { data, error } = await supabase.from("integration_connections")
+  const service = createSupabaseServiceClient();
+  const { data, error } = await service.from("integration_connections")
     .update({ config, enabled: true })
     .eq("id", id)
     .eq("organisation_id", organisation.id)
@@ -265,25 +296,29 @@ export async function revokeConnectionAction(formData: FormData) {
     .select("id,provider,connection_mode,broker_connection_id,broker_provider_config_key")
     .eq("id", id).eq("organisation_id", organisation.id).is("revoked_at", null).maybeSingle();
   if (lookupError || !connection) throw new Error("Connection was not found in this workspace");
+  let brokerReference: z.infer<typeof brokerReferenceSchema> | null = null;
   if (connection.connection_mode === "oauth") {
-    const parsed = brokerReferenceSchema.parse({
+    brokerReference = brokerReferenceSchema.parse({
       provider: connection.provider,
       connectionId: connection.broker_connection_id,
       providerConfigKey: connection.broker_provider_config_key,
     });
-    await deleteNangoConnection(parsed);
+    await deleteNangoConnection(brokerReference);
+  } else if (connection.connection_mode !== "sandbox") {
+    throw new Error("Connection was not found in this workspace");
   }
-  let revokeQuery = supabase.from("integration_connections")
+  const mutationClient = brokerReference ? createSupabaseServiceClient() : supabase;
+  let revokeQuery = mutationClient.from("integration_connections")
     .update({ revoked_at: new Date().toISOString(), enabled: false })
     .eq("id", id)
     .eq("organisation_id", organisation.id)
     .eq("provider", connection.provider)
     .eq("connection_mode", connection.connection_mode)
     .is("revoked_at", null);
-  if (connection.connection_mode === "oauth") {
+  if (brokerReference) {
     revokeQuery = revokeQuery
-      .eq("broker_connection_id", connection.broker_connection_id)
-      .eq("broker_provider_config_key", connection.broker_provider_config_key);
+      .eq("broker_connection_id", brokerReference.connectionId)
+      .eq("broker_provider_config_key", brokerReference.providerConfigKey);
   }
   const { data, error } = await revokeQuery.select("id").maybeSingle();
   if (error || !data) throw new Error("Could not revoke the connection");

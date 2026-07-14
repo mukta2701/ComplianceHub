@@ -132,7 +132,10 @@ create provider apps, accept consent, or enter deployment secrets for you.
    broker identity become immutable, and deployment-wide tombstone uniqueness
    prevents the reference being replayed even after revocation. Provider OAuth
    access/refresh tokens remain in Nango and are not stored locally. Revocation
-   uses `DELETE /connections/{connectionId}` before local retirement.
+   uses `DELETE /connections/{connectionId}` before local retirement. All local
+   OAuth insert, target configuration, enable/disable, and soft-revoke writes
+   use the verified server boundary; authenticated browser sessions can mutate
+   sandbox rows only and cannot hard-delete OAuth tombstones.
 5. The new record remains **Authorized · setup required**. Enter a GitHub
    owner/repository or an Atlassian Cloud URL/project key. ComplianceHub verifies
    GitHub repository access. For Jira it matches the submitted tenant against
@@ -158,6 +161,12 @@ create provider apps, accept consent, or enter deployment secrets for you.
 8. Repeat the flow in production only after staging succeeds. Record who approved
    the provider scopes and schedule rotation/review of the Nango secret and OAuth
    applications.
+
+OAuth tombstones are removed only as part of an explicit database-level deletion
+of the entire workspace through the `organisations` cascade. ComplianceHub does
+not expose workspace deletion to authenticated portal sessions. Treat any future
+workspace-destruction workflow as a privileged retention decision because it
+also releases the workspace's retired broker identities.
 
 OAuth here is **provider authorization**: it grants ComplianceHub access to a
 GitHub/Jira API. It is separate from Google/Microsoft SSO in section 4a, which

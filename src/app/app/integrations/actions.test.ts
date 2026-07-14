@@ -13,11 +13,15 @@ const hoisted = vi.hoisted(() => ({
   resolveJiraOAuthTarget: vi.fn(),
   verifyNangoConnection: vi.fn(),
   verifyGitHubOAuthTarget: vi.fn(),
+  createServiceClient: vi.fn(),
 }));
 
 vi.mock("@/lib/app-context", () => ({ requireAppContext: () => Promise.resolve(hoisted.ctx) }));
 vi.mock("@/lib/security/rate-limit", () => ({ enforceRateLimit: hoisted.enforceRateLimit }));
 vi.mock("@/lib/security/secrets", () => ({ encryptSecret: hoisted.encryptSecret }));
+vi.mock("@/lib/supabase/service", () => ({
+  createSupabaseServiceClient: hoisted.createServiceClient,
+}));
 vi.mock("@/features/integrations/application/nango", () => ({
   createNangoConnectSession: hoisted.createNangoConnectSession,
   deleteNangoConnection: hoisted.deleteNangoConnection,
@@ -127,13 +131,29 @@ describe("integration connection access", () => {
       provider: "github", connectionId: "connection-1", providerConfigKey: "wrong-key",
     })).rejects.toThrow("Provider authorization does not match this deployment");
     expect(from).not.toHaveBeenCalled();
+    expect(hoisted.createServiceClient).not.toHaveBeenCalled();
+  });
+
+  it("rejects Members before broker verification or service-client construction", async () => {
+    hoisted.ctx = {
+      supabase: { from: vi.fn() }, user: { id: USER_ID, email: "member@example.test" },
+      organisation: { id: ORGANISATION_ID, name: "Example Ltd" }, membership: { role: "member" },
+    };
+
+    await expect(confirmProviderAuthorizationAction({
+      provider: "github", connectionId: "connection-1", providerConfigKey: "github-prod",
+    })).rejects.toThrow("Only workspace operators can manage integrations");
+    expect(hoisted.verifyNangoConnection).not.toHaveBeenCalled();
+    expect(hoisted.createServiceClient).not.toHaveBeenCalled();
   });
 
   it("persists only a verified broker reference for the active organisation", async () => {
     const insert = vi.fn().mockResolvedValue({ error: null });
-    const from = vi.fn(() => ({ insert }));
+    const serviceFrom = vi.fn(() => ({ insert }));
+    const sessionFrom = vi.fn();
+    hoisted.createServiceClient.mockReturnValue({ from: serviceFrom });
     hoisted.ctx = {
-      supabase: { from }, user: { id: USER_ID, email: "admin@example.test" },
+      supabase: { from: sessionFrom }, user: { id: USER_ID, email: "admin@example.test" },
       organisation: { id: ORGANISATION_ID, name: "Example Ltd" }, membership: { role: "admin" },
     };
 
@@ -160,12 +180,32 @@ describe("integration connection access", () => {
       refresh_token: null,
       connected_by: USER_ID,
     });
+    expect(sessionFrom).not.toHaveBeenCalled();
+    expect(hoisted.verifyNangoConnection.mock.invocationCallOrder[0])
+      .toBeLessThan(hoisted.createServiceClient.mock.invocationCallOrder[0]);
+    expect(hoisted.createServiceClient.mock.invocationCallOrder[0])
+      .toBeLessThan(insert.mock.invocationCallOrder[0]);
+  });
+
+  it("fails closed when the service-role OAuth insert fails", async () => {
+    const insert = vi.fn().mockResolvedValue({ error: new Error("database detail") });
+    hoisted.createServiceClient.mockReturnValue({ from: vi.fn(() => ({ insert })) });
+    hoisted.ctx = {
+      supabase: { from: vi.fn() }, user: { id: USER_ID, email: "owner@example.test" },
+      organisation: { id: ORGANISATION_ID, name: "Example Ltd" }, membership: { role: "owner" },
+    };
+
+    await expect(confirmProviderAuthorizationAction({
+      provider: "github", connectionId: "connection-1", providerConfigKey: "github-prod",
+    })).rejects.toThrow("Could not save the verified provider connection");
+    expect(insert).toHaveBeenCalledOnce();
+    expect(hoisted.revalidatePath).not.toHaveBeenCalled();
   });
 
   it("scopes enable-disable mutations to the active organisation and fails closed on no match", async () => {
     const builder: Record<string, ReturnType<typeof vi.fn>> = {};
-    builder.update = vi.fn(() => builder);
     builder.eq = vi.fn(() => builder);
+    builder.is = vi.fn(() => builder);
     builder.select = vi.fn(() => builder);
     builder.maybeSingle = vi.fn().mockResolvedValue({ data: null, error: null });
     hoisted.ctx = {
@@ -177,28 +217,104 @@ describe("integration connection access", () => {
     form.set("enabled", "false");
 
     await expect(setIntegrationConnectionEnabledAction(form)).rejects.toThrow("Connection was not found in this workspace");
-    expect(builder.update).toHaveBeenCalledWith({ enabled: false });
     expect(builder.eq).toHaveBeenCalledWith("organisation_id", ORGANISATION_ID);
+    expect(hoisted.createServiceClient).not.toHaveBeenCalled();
   });
 
-  it("validates and configures an OAuth GitHub target before enabling it", async () => {
+  it("routes an OAuth enable-disable mutation through an exact service-role update", async () => {
+    const lookup: Record<string, ReturnType<typeof vi.fn>> = {};
+    lookup.select = vi.fn(() => lookup);
+    lookup.eq = vi.fn(() => lookup);
+    lookup.is = vi.fn(() => lookup);
+    lookup.maybeSingle = vi.fn().mockResolvedValue({
+      data: {
+        id: "10000000-0000-4000-8000-000000000099", provider: "github", connection_mode: "oauth",
+        broker_connection_id: "connection-1", broker_provider_config_key: "github-prod",
+      },
+      error: null,
+    });
+    const mutation: Record<string, ReturnType<typeof vi.fn>> = {};
+    mutation.update = vi.fn(() => mutation);
+    mutation.eq = vi.fn(() => mutation);
+    mutation.is = vi.fn(() => mutation);
+    mutation.select = vi.fn(() => mutation);
+    mutation.maybeSingle = vi.fn().mockResolvedValue({
+      data: { id: "10000000-0000-4000-8000-000000000099" }, error: null,
+    });
+    hoisted.createServiceClient.mockReturnValue({ from: vi.fn(() => mutation) });
+    hoisted.ctx = {
+      supabase: { from: vi.fn(() => lookup) }, user: { id: USER_ID },
+      organisation: { id: ORGANISATION_ID }, membership: { role: "admin" },
+    };
+    const form = new FormData();
+    form.set("id", "10000000-0000-4000-8000-000000000099");
+    form.set("enabled", "false");
+
+    await setIntegrationConnectionEnabledAction(form);
+
+    expect(mutation.update).toHaveBeenCalledWith({ enabled: false });
+    expect(mutation.eq).toHaveBeenCalledWith("organisation_id", ORGANISATION_ID);
+    expect(mutation.eq).toHaveBeenCalledWith("provider", "github");
+    expect(mutation.eq).toHaveBeenCalledWith("connection_mode", "oauth");
+    expect(mutation.eq).toHaveBeenCalledWith("broker_connection_id", "connection-1");
+    expect(mutation.eq).toHaveBeenCalledWith("broker_provider_config_key", "github-prod");
+    expect(hoisted.createServiceClient).toHaveBeenCalledOnce();
+  });
+
+  it("keeps sandbox enable-disable on the authenticated RLS client", async () => {
     const builder: Record<string, ReturnType<typeof vi.fn>> = {};
+    builder.select = vi.fn(() => builder);
     builder.update = vi.fn(() => builder);
     builder.eq = vi.fn(() => builder);
-    builder.select = vi.fn(() => builder);
     builder.is = vi.fn(() => builder);
     builder.maybeSingle = vi.fn()
       .mockResolvedValueOnce({
         data: {
-          id: "10000000-0000-4000-8000-000000000099",
-          broker_connection_id: "connection-1",
-          broker_provider_config_key: "github-prod",
+          id: "10000000-0000-4000-8000-000000000099", provider: "github", connection_mode: "sandbox",
+          broker_connection_id: null, broker_provider_config_key: null,
         },
         error: null,
       })
       .mockResolvedValueOnce({ data: { id: "10000000-0000-4000-8000-000000000099" }, error: null });
     hoisted.ctx = {
       supabase: { from: vi.fn(() => builder) }, user: { id: USER_ID },
+      organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
+    };
+    const form = new FormData();
+    form.set("id", "10000000-0000-4000-8000-000000000099");
+    form.set("enabled", "false");
+
+    await setIntegrationConnectionEnabledAction(form);
+
+    expect(builder.update).toHaveBeenCalledWith({ enabled: false });
+    expect(builder.eq).toHaveBeenCalledWith("connection_mode", "sandbox");
+    expect(hoisted.createServiceClient).not.toHaveBeenCalled();
+  });
+
+  it("validates and configures an OAuth GitHub target before enabling it", async () => {
+    const lookup: Record<string, ReturnType<typeof vi.fn>> = {};
+    lookup.eq = vi.fn(() => lookup);
+    lookup.select = vi.fn(() => lookup);
+    lookup.is = vi.fn(() => lookup);
+    lookup.maybeSingle = vi.fn().mockResolvedValue({
+      data: {
+        id: "10000000-0000-4000-8000-000000000099",
+        broker_connection_id: "connection-1",
+        broker_provider_config_key: "github-prod",
+      },
+      error: null,
+    });
+    const mutation: Record<string, ReturnType<typeof vi.fn>> = {};
+    mutation.update = vi.fn(() => mutation);
+    mutation.eq = vi.fn(() => mutation);
+    mutation.select = vi.fn(() => mutation);
+    mutation.is = vi.fn(() => mutation);
+    mutation.maybeSingle = vi.fn().mockResolvedValue({
+      data: { id: "10000000-0000-4000-8000-000000000099" }, error: null,
+    });
+    hoisted.createServiceClient.mockReturnValue({ from: vi.fn(() => mutation) });
+    hoisted.ctx = {
+      supabase: { from: vi.fn(() => lookup) }, user: { id: USER_ID },
       organisation: { id: ORGANISATION_ID, name: "Example Ltd" }, membership: { role: "owner" },
     };
     const form = new FormData();
@@ -211,33 +327,41 @@ describe("integration connection access", () => {
     expect(hoisted.verifyGitHubOAuthTarget).toHaveBeenCalledWith({
       connectionId: "connection-1", providerConfigKey: "github-prod", owner: "compliancehub", repo: "app",
     });
-    expect(builder.update).toHaveBeenCalledWith({ config: { owner: "compliancehub", repo: "app" }, enabled: true });
-    expect(builder.eq).toHaveBeenCalledWith("organisation_id", ORGANISATION_ID);
-    expect(builder.eq).toHaveBeenCalledWith("connection_mode", "oauth");
-    expect(builder.eq).toHaveBeenCalledWith("provider", "github");
-    expect(builder.eq).toHaveBeenCalledWith("broker_connection_id", "connection-1");
-    expect(builder.eq).toHaveBeenCalledWith("broker_provider_config_key", "github-prod");
-    expect(builder.is).toHaveBeenCalledTimes(2);
+    expect(mutation.update).toHaveBeenCalledWith({ config: { owner: "compliancehub", repo: "app" }, enabled: true });
+    expect(mutation.eq).toHaveBeenCalledWith("organisation_id", ORGANISATION_ID);
+    expect(mutation.eq).toHaveBeenCalledWith("connection_mode", "oauth");
+    expect(mutation.eq).toHaveBeenCalledWith("provider", "github");
+    expect(mutation.eq).toHaveBeenCalledWith("broker_connection_id", "connection-1");
+    expect(mutation.eq).toHaveBeenCalledWith("broker_provider_config_key", "github-prod");
+    expect(mutation.is).toHaveBeenCalledWith("revoked_at", null);
+    expect(hoisted.verifyGitHubOAuthTarget.mock.invocationCallOrder[0])
+      .toBeLessThan(hoisted.createServiceClient.mock.invocationCallOrder[0]);
   });
 
   it("stores a verified Jira cloud ID from accessible resources before enabling", async () => {
-    const builder: Record<string, ReturnType<typeof vi.fn>> = {};
-    builder.update = vi.fn(() => builder);
-    builder.eq = vi.fn(() => builder);
-    builder.is = vi.fn(() => builder);
-    builder.select = vi.fn(() => builder);
-    builder.maybeSingle = vi.fn()
-      .mockResolvedValueOnce({
-        data: {
-          id: "10000000-0000-4000-8000-000000000099",
-          broker_connection_id: "connection-1",
-          broker_provider_config_key: "jira-prod",
-        },
-        error: null,
-      })
-      .mockResolvedValueOnce({ data: { id: "10000000-0000-4000-8000-000000000099" }, error: null });
+    const lookup: Record<string, ReturnType<typeof vi.fn>> = {};
+    lookup.eq = vi.fn(() => lookup);
+    lookup.is = vi.fn(() => lookup);
+    lookup.select = vi.fn(() => lookup);
+    lookup.maybeSingle = vi.fn().mockResolvedValue({
+      data: {
+        id: "10000000-0000-4000-8000-000000000099",
+        broker_connection_id: "connection-1",
+        broker_provider_config_key: "jira-prod",
+      },
+      error: null,
+    });
+    const mutation: Record<string, ReturnType<typeof vi.fn>> = {};
+    mutation.update = vi.fn(() => mutation);
+    mutation.eq = vi.fn(() => mutation);
+    mutation.is = vi.fn(() => mutation);
+    mutation.select = vi.fn(() => mutation);
+    mutation.maybeSingle = vi.fn().mockResolvedValue({
+      data: { id: "10000000-0000-4000-8000-000000000099" }, error: null,
+    });
+    hoisted.createServiceClient.mockReturnValue({ from: vi.fn(() => mutation) });
     hoisted.ctx = {
-      supabase: { from: vi.fn(() => builder) }, user: { id: USER_ID },
+      supabase: { from: vi.fn(() => lookup) }, user: { id: USER_ID },
       organisation: { id: ORGANISATION_ID, name: "Example Ltd" }, membership: { role: "admin" },
     };
     const form = new FormData();
@@ -252,32 +376,40 @@ describe("integration connection access", () => {
       connectionId: "connection-1", providerConfigKey: "jira-prod",
       baseUrl: "https://acme.atlassian.net", projectKey: "SEC",
     });
-    expect(builder.update).toHaveBeenCalledWith({
+    expect(mutation.update).toHaveBeenCalledWith({
       config: {
         baseUrl: "https://acme.atlassian.net", projectKey: "SEC",
         cloudId: "1324a887-45db-4bf4-8e99-ef0ff456d421",
       },
       enabled: true,
     });
+    expect(hoisted.resolveJiraOAuthTarget.mock.invocationCallOrder[0])
+      .toBeLessThan(hoisted.createServiceClient.mock.invocationCallOrder[0]);
   });
 
   it("retires the remote broker connection before locally revoking it", async () => {
-    const builder: Record<string, ReturnType<typeof vi.fn>> = {};
-    builder.update = vi.fn(() => builder);
-    builder.eq = vi.fn(() => builder);
-    builder.is = vi.fn(() => builder);
-    builder.select = vi.fn(() => builder);
-    builder.maybeSingle = vi.fn()
-      .mockResolvedValueOnce({
-        data: {
-          id: "10000000-0000-4000-8000-000000000099", provider: "github", connection_mode: "oauth",
-          broker_connection_id: "connection-1", broker_provider_config_key: "github-prod",
-        },
-        error: null,
-      })
-      .mockResolvedValueOnce({ data: { id: "10000000-0000-4000-8000-000000000099" }, error: null });
+    const lookup: Record<string, ReturnType<typeof vi.fn>> = {};
+    lookup.eq = vi.fn(() => lookup);
+    lookup.is = vi.fn(() => lookup);
+    lookup.select = vi.fn(() => lookup);
+    lookup.maybeSingle = vi.fn().mockResolvedValue({
+      data: {
+        id: "10000000-0000-4000-8000-000000000099", provider: "github", connection_mode: "oauth",
+        broker_connection_id: "connection-1", broker_provider_config_key: "github-prod",
+      },
+      error: null,
+    });
+    const mutation: Record<string, ReturnType<typeof vi.fn>> = {};
+    mutation.update = vi.fn(() => mutation);
+    mutation.eq = vi.fn(() => mutation);
+    mutation.is = vi.fn(() => mutation);
+    mutation.select = vi.fn(() => mutation);
+    mutation.maybeSingle = vi.fn().mockResolvedValue({
+      data: { id: "10000000-0000-4000-8000-000000000099" }, error: null,
+    });
+    hoisted.createServiceClient.mockReturnValue({ from: vi.fn(() => mutation) });
     hoisted.ctx = {
-      supabase: { from: vi.fn(() => builder) }, user: { id: USER_ID },
+      supabase: { from: vi.fn(() => lookup) }, user: { id: USER_ID },
       organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
     };
     const form = new FormData();
@@ -289,10 +421,12 @@ describe("integration connection access", () => {
       provider: "github", connectionId: "connection-1", providerConfigKey: "github-prod",
     });
     expect(hoisted.deleteNangoConnection.mock.invocationCallOrder[0])
-      .toBeLessThan(builder.update.mock.invocationCallOrder[0]);
-    expect(builder.eq).toHaveBeenCalledWith("broker_connection_id", "connection-1");
-    expect(builder.eq).toHaveBeenCalledWith("broker_provider_config_key", "github-prod");
-    expect(builder.is).toHaveBeenCalledTimes(2);
+      .toBeLessThan(hoisted.createServiceClient.mock.invocationCallOrder[0]);
+    expect(hoisted.createServiceClient.mock.invocationCallOrder[0])
+      .toBeLessThan(mutation.update.mock.invocationCallOrder[0]);
+    expect(mutation.eq).toHaveBeenCalledWith("broker_connection_id", "connection-1");
+    expect(mutation.eq).toHaveBeenCalledWith("broker_provider_config_key", "github-prod");
+    expect(mutation.is).toHaveBeenCalledWith("revoked_at", null);
   });
 
   it("does not locally revoke when retiring the remote broker fails", async () => {
@@ -318,6 +452,37 @@ describe("integration connection access", () => {
 
     await expect(revokeConnectionAction(form)).rejects.toThrow("Provider connection could not be retired");
     expect(builder.update).not.toHaveBeenCalled();
+    expect(hoisted.createServiceClient).not.toHaveBeenCalled();
+  });
+
+  it("keeps sandbox soft-revoke on the authenticated RLS client", async () => {
+    const builder: Record<string, ReturnType<typeof vi.fn>> = {};
+    builder.update = vi.fn(() => builder);
+    builder.eq = vi.fn(() => builder);
+    builder.is = vi.fn(() => builder);
+    builder.select = vi.fn(() => builder);
+    builder.maybeSingle = vi.fn()
+      .mockResolvedValueOnce({
+        data: {
+          id: "10000000-0000-4000-8000-000000000099", provider: "github", connection_mode: "sandbox",
+          broker_connection_id: null, broker_provider_config_key: null,
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({ data: { id: "10000000-0000-4000-8000-000000000099" }, error: null });
+    hoisted.ctx = {
+      supabase: { from: vi.fn(() => builder) }, user: { id: USER_ID },
+      organisation: { id: ORGANISATION_ID }, membership: { role: "admin" },
+    };
+    const form = new FormData();
+    form.set("id", "10000000-0000-4000-8000-000000000099");
+
+    await revokeConnectionAction(form);
+
+    expect(hoisted.deleteNangoConnection).not.toHaveBeenCalled();
+    expect(hoisted.createServiceClient).not.toHaveBeenCalled();
+    expect(builder.update).toHaveBeenCalledWith({ revoked_at: expect.any(String), enabled: false });
+    expect(builder.eq).toHaveBeenCalledWith("connection_mode", "sandbox");
   });
 
   it("rejects an unsafe Jira target before updating the database", async () => {
@@ -334,6 +499,7 @@ describe("integration connection access", () => {
 
     await expect(configureOAuthConnectionAction(form)).rejects.toThrow("Jira base URL must be an Atlassian Cloud HTTPS URL");
     expect(from).not.toHaveBeenCalled();
+    expect(hoisted.createServiceClient).not.toHaveBeenCalled();
   });
 
   it("rejects Members before writing monitoring or alert configuration", async () => {

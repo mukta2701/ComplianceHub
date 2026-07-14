@@ -39,7 +39,7 @@ policies are reviewed.
 | `evidence` | R/W | R | Member can read metadata but cannot add/supersede evidence. |
 | `evidence_links` | R/W | R | Member cannot change evidence/control relationships. |
 | `evidence_sources` | R/W | — | Provider configuration and tokens are operator-only. |
-| `integration_connections` | R/W | — | GitHub/Jira configuration is operator-only. OAuth rows store only deployment-unique Nango broker references, are bound to the active user/email/workspace tags, remain disabled until a verified strict repo/project target is configured, and never store provider OAuth tokens. Provider/mode/broker identity is immutable; broker uniqueness remains tombstoned after revoke. Removing the configuring user clears provenance without deleting shared configuration. |
+| `integration_connections` | R/W* | — | Operators read all rows and mutate sandbox rows through RLS. OAuth insert, target configuration, enable/disable, and soft revoke are server-only after operator authorization and applicable Nango/provider verification; authenticated sessions cannot update or hard-delete OAuth rows. OAuth rows never store provider tokens, provider/mode/broker identity is immutable, and broker uniqueness remains tombstoned after revoke. Removing the configuring user clears provenance without deleting shared configuration. Only explicit database-level workspace deletion cascades tombstones. |
 | `invitations` | R/W* | — | Owner manages Admin/Member invites; Admin manages Member invites only. Writes use invitation RPCs. |
 | `kpi_measurements` | R/W | R | Member receives read-only measurements. |
 | `kpis` | R/W | R | Member receives read-only KPI definitions and results. |

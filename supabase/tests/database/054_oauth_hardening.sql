@@ -14,6 +14,7 @@ set local role authenticated;
 select set_config('request.jwt.claims','{"sub":"83000000-0000-4000-8000-000000000001","email":"oauth-hardening-a@example.test","role":"authenticated"}',true);
 select set_config('app.oauth_org_a',public.create_organisation_with_owner('OAuth Hardening A','oauth-hardening-a')::text,true);
 
+set local role service_role;
 select throws_ok(
   $$ insert into public.integration_connections(organisation_id,provider,config,connected_by,connection_mode,broker_connection_id,broker_provider_config_key,enabled)
      values(current_setting('app.oauth_org_a')::uuid,'github','{"owner":123,"repo":"isms"}',
@@ -101,6 +102,7 @@ select is(
   're-enabling the connection re-enables its linked monitor source'
 );
 
+set local role authenticated;
 select throws_ok(
   $$ insert into public.monitor_sources(organisation_id,provider,connected_by,connection_mode,integration_connection_id,broker_connection_id,broker_provider_config_key,access_token,enabled)
      values(current_setting('app.oauth_org_a')::uuid,'github','83000000-0000-4000-8000-000000000001','oauth',
@@ -108,6 +110,7 @@ select throws_ok(
   '23514', null, 'OAuth monitor sources cannot store provider tokens'
 );
 
+set local role service_role;
 select lives_ok(
   $$ insert into public.integration_connections(organisation_id,provider,config,connected_by,connection_mode,broker_connection_id,broker_provider_config_key,enabled)
      values(current_setting('app.oauth_org_a')::uuid,'jira',
@@ -122,14 +125,17 @@ select lives_ok(
   'a disabled pending OAuth connection can wait for strict target configuration'
 );
 
+set local role authenticated;
 select set_config('request.jwt.claims','{"sub":"83000000-0000-4000-8000-000000000002","email":"oauth-hardening-b@example.test","role":"authenticated"}',true);
 select set_config('app.oauth_org_b',public.create_organisation_with_owner('OAuth Hardening B','oauth-hardening-b')::text,true);
+set local role service_role;
 select throws_ok(
   $$ insert into public.integration_connections(organisation_id,provider,config,connected_by,connection_mode,broker_connection_id,broker_provider_config_key,enabled)
      values(current_setting('app.oauth_org_b')::uuid,'github','{}',
        '83000000-0000-4000-8000-000000000002','oauth','deployment-global-ref','github-prod',false) $$,
   '23505', null, 'a broker reference cannot be replayed into another workspace'
 );
+set local role authenticated;
 select throws_ok(
   $$ insert into public.monitor_sources(organisation_id,provider,connected_by,connection_mode,integration_connection_id,broker_connection_id,broker_provider_config_key,enabled)
      values(current_setting('app.oauth_org_b')::uuid,'github','83000000-0000-4000-8000-000000000002','oauth',
@@ -138,6 +144,7 @@ select throws_ok(
 );
 
 select set_config('request.jwt.claims','{"sub":"83000000-0000-4000-8000-000000000001","email":"oauth-hardening-a@example.test","role":"authenticated"}',true);
+set local role service_role;
 update public.integration_connections set revoked_at=now(),enabled=false where id='83000000-0000-4000-8000-000000000101';
 select is(
   (select enabled from public.monitor_sources where integration_connection_id='83000000-0000-4000-8000-000000000101'),

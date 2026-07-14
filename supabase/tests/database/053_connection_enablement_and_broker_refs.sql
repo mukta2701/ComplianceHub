@@ -24,6 +24,7 @@ insert into public.memberships(organisation_id,user_id,role) values
  (current_setting('app.conn_org_a')::uuid,'82000000-0000-4000-8000-000000000002','admin'),
  (current_setting('app.conn_org_a')::uuid,'82000000-0000-4000-8000-000000000003','member');
 
+set local role service_role;
 select lives_ok(
   $$ insert into public.integration_connections(
        id,organisation_id,provider,label,config,access_token,refresh_token,connected_by,
@@ -32,7 +33,7 @@ select lives_ok(
        '82000000-0000-4000-8000-000000000101',current_setting('app.conn_org_a')::uuid,'github','Authorized GitHub','{}',null,null,
        '82000000-0000-4000-8000-000000000001','oauth','github-connection-1','github-prod',false
      ) $$,
-  'an operator can persist a disabled OAuth broker reference without provider tokens'
+  'the verified server path can persist a disabled OAuth broker reference without provider tokens'
 );
 select is(
   (select pg_catalog.jsonb_build_object(
@@ -62,6 +63,7 @@ select throws_ok(
   '23514', null, 'an OAuth connection cannot enable before a target repository or project is configured'
 );
 
+set local role authenticated;
 select lives_ok(
   $$ insert into public.monitor_sources(id,organisation_id,provider,label,connected_by,enabled)
      values('82000000-0000-4000-8000-000000000102',current_setting('app.conn_org_a')::uuid,'github','Production GitHub','82000000-0000-4000-8000-000000000001',true) $$,
@@ -87,10 +89,12 @@ select is((select count(*) from public.monitor_sources),0::bigint,'a Member stil
 select is((select count(*) from public.integration_connections),0::bigint,'a Member still cannot read connection configuration');
 
 select set_config('request.jwt.claims','{"sub":"82000000-0000-4000-8000-000000000002","email":"conn-admin-a@example.test","role":"authenticated"}',true);
+set local role service_role;
 select results_eq(
   $$ update public.integration_connections set config='{"owner":"acme","repo":"isms"}',enabled=true where id='82000000-0000-4000-8000-000000000101' returning enabled $$,
-  $$ values(true) $$, 'an Admin can finish OAuth target setup and enable its workspace connection'
+  $$ values(true) $$, 'the verified server path can finish OAuth target setup and enable the workspace connection'
 );
+set local role authenticated;
 select results_eq(
   $$ update public.monitor_sources set enabled=false where id='82000000-0000-4000-8000-000000000102' returning enabled $$,
   $$ values(false) $$, 'an Admin can disable its workspace monitor source'
