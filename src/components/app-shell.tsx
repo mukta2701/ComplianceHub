@@ -31,11 +31,16 @@ const navGroups = [
   ] },
 ] as const;
 
-const memberNavItems = [
-  ["/app", "home", "Overview"],
-  ["/app/policies", "file", "Policies"],
-  ["/app/monitoring", "activity", "Monitoring"],
-  ["/app/reports/readiness", "file", "Leadership report"],
+const memberNavGroups = [
+  { label: null, items: [["/app", "home", "Overview"]] },
+  { label: "Compliance", items: [
+    ["/app/policies", "file", "Policies"],
+    ["/app/frameworks", "file", "Framework coverage"],
+  ] },
+  { label: null, items: [
+    ["/app/monitoring", "activity", "Monitoring"],
+    ["/app/reports/readiness", "file", "Leadership report"],
+  ] },
 ] as const;
 
 // Routes not in the sidebar still need a header title.
@@ -88,13 +93,16 @@ export function AppShell({ organisationId, orgName, orgInitials, userInitials, u
       <Link className="brand" href="/app" onClick={() => setOpen(false)}><span className="brand-mark"><Icon name="shield" /></span><span>ComplianceHub</span></Link>
       <div className="workspace"><span className="avatar">{orgInitials}</span><span><b>{orgName}</b><small>{workspaceSubtitle}</small></span><Icon name="arrow" /></div>
       {isMember && <nav aria-label="Workspace">
-        <div className="nav-group">
-          {memberNavItems.map(([href, icon, label], index) => (
-            <Link ref={index === 0 ? firstNav : undefined} key={href} href={href} className={isActive(path, href) ? "active" : ""} aria-current={isActive(path, href) ? "page" : undefined} onClick={() => setOpen(false)}>
-              <Icon name={icon} />{label}
-            </Link>
-          ))}
-        </div>
+        {memberNavGroups.map((group, groupIndex) => (
+          <div className="nav-group" key={group.label ?? `member-${groupIndex}`}>
+            {group.label && <p className="nav-section-label">{group.label}</p>}
+            {group.items.map(([href, icon, label]) => (
+              <Link ref={href === "/app" ? firstNav : undefined} key={href} href={href} className={isActive(path, href) ? "active" : ""} aria-current={isActive(path, href) ? "page" : undefined} onClick={() => setOpen(false)}>
+                <Icon name={icon} />{label}
+              </Link>
+            ))}
+          </div>
+        ))}
       </nav>}
       {isOperator && <nav aria-label="Workspace">
         <div className="nav-group">

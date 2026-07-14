@@ -15,6 +15,7 @@ describe("workspace portal route access", () => {
     "/app/policies",
     `/app/policies/${POLICY_ID}`,
     "/app/monitoring",
+    "/app/frameworks",
     "/app/reports/readiness",
     "/app/notifications",
   ])("allows a Member to open the curated route %s", (pathname) => {
@@ -39,6 +40,13 @@ describe("workspace portal route access", () => {
     expect(workspaceRequestAccess("/api/app/reports/readiness/pdf", { authenticated: true, role: "member" })).toBe("allow");
     expect(workspaceRequestAccess("/api/app/tasks/export", { authenticated: true, role: "member" })).toBe("forbidden");
     expect(workspaceRequestAccess("/api/app/reports/readiness/pdf-extra", { authenticated: true, role: "member" })).toBe("forbidden");
+  });
+
+  it("does not broaden Member access beyond the Framework Coverage read page", () => {
+    expect(workspaceRequestAccess("/app/frameworks", { authenticated: true, role: "member" })).toBe("allow");
+    expect(workspaceRequestAccess("/app/soa", { authenticated: true, role: "member" })).toBe("redirect-member-home");
+    expect(workspaceRequestAccess("/app/settings", { authenticated: true, role: "member" })).toBe("redirect-member-home");
+    expect(workspaceRequestAccess("/app/integrations", { authenticated: true, role: "member" })).toBe("redirect-member-home");
   });
 
   it("reserves onboarding for authenticated users without a membership", () => {

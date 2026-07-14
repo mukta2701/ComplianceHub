@@ -19,6 +19,7 @@ const MEMBER_APP_PATHS = new Set([
   "/app",
   "/app/policies",
   "/app/monitoring",
+  "/app/frameworks",
   "/app/reports/readiness",
   "/app/notifications",
 ]);

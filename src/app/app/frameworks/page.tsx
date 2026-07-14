@@ -18,18 +18,44 @@ import { addControlCrosswalkAction, deleteControlCrosswalkAction } from "./actio
 const IMPLEMENTED_SOA_STATUSES = new Set(["established", "operational", "advanced"]);
 
 export default async function FrameworksPage() {
-  const { supabase, membership } = await requireAppContext();
+  const { supabase, organisation, membership } = await requireAppContext();
   const canManage = hasCapability(membership.role, "manage_frameworks");
-  const [{ data: controls }, { data: crosswalks }, { data: soaItems }, { data: mappings }] = await Promise.all([
+
+  // Coverage is a view of the active workspace's current SoA, not a lifetime
+  // history. Version ordering matches the readiness-report loader semantics.
+  const registerResult = await supabase
+    .from("soa_registers")
+    .select("id")
+    .eq("organisation_id", organisation.id)
+    .order("version", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (registerResult.error) throw new Error("Could not load framework coverage");
+  const latestRegister = registerResult.data;
+
+  const [controlsResult, crosswalksResult, soaItemsResult, mappingsResult] = await Promise.all([
     supabase.from("controls").select("id,code,title").order("position"),
-    supabase.from("control_crosswalks").select("id,control_id,framework,external_ref,note,created_at").order("created_at"),
-    // RLS scopes SoA items to the organisation. A catalogue control is treated
-    // as implemented if any of the org's SoA items for it is in the mature tier.
-    supabase.from("soa_items").select("control_id,status"),
+    supabase.from("control_crosswalks")
+      .select("id,control_id,framework,external_ref,note,created_at")
+      .eq("organisation_id", organisation.id)
+      .order("created_at"),
+    latestRegister
+      ? supabase.from("soa_items")
+          .select("control_id,status")
+          .eq("organisation_id", organisation.id)
+          .eq("soa_register_id", latestRegister.id)
+      : Promise.resolve({ data: [] as Array<{ control_id: string; status: string }>, error: null }),
     // Global 1:1 bridge from the SoA catalogue control (requirement_id) to the
     // shared control library id used by the crosswalk.
     supabase.from("requirement_control_mappings").select("requirement_id,control_id"),
   ]);
+  if ([controlsResult, crosswalksResult, soaItemsResult, mappingsResult].some((result) => result.error)) {
+    throw new Error("Could not load framework coverage");
+  }
+  const controls = controlsResult.data;
+  const crosswalks = crosswalksResult.data;
+  const soaItems = soaItemsResult.data;
+  const mappings = mappingsResult.data;
 
   const controlById = new Map((controls ?? []).map((c) => [c.id, c]));
   // requirement (catalogue) id -> shared control library id.
@@ -57,7 +83,9 @@ export default async function FrameworksPage() {
       title="Framework coverage from your Statement of Applicability"
       body="A mapping links one shared ISO 27001 control to one published requirement reference in another framework. It lets your organisation reuse recorded work and evidence; the ISO control's current SoA implementation status determines whether that recorded requirement is shown as covered."
     />
-    <SubTabs tabs={[{ href: "/app/soa", label: "Statement of Applicability" }, { href: "/app/frameworks", label: "Framework coverage" }]} />
+    <SubTabs tabs={canManage
+      ? [{ href: "/app/soa", label: "Statement of Applicability" }, { href: "/app/frameworks", label: "Framework coverage" }]
+      : [{ href: "/app/frameworks", label: "Framework coverage" }]} />
 
     <Card style={{ padding: "18px", marginBottom: "16px" }}>
       <h2 style={{ fontSize: "15px", margin: "0 0 12px" }}>How recorded coverage works</h2>
