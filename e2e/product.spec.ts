@@ -1020,6 +1020,11 @@ test("a task is pushed to a sandbox tracker, polled to In Progress, then the con
   await expect(githubCard).toBeVisible();
   await expect(jiraCard).toContainText("Not connected");
   await expect(slackCard).toBeVisible();
+  await expect(page.getByRole("searchbox", { name: "Search connections" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "All" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Development" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Alerts" })).toHaveCount(0);
+  await expect(jiraCard).toContainText("Not configured");
   await expect(page.getByRole("heading", { name: "Monitoring sources" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Evidence sources" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Alert channels" })).toHaveCount(0);
@@ -1029,6 +1034,7 @@ test("a task is pushed to a sandbox tracker, polled to In Progress, then the con
   await connectionForm.getByLabel("Label", { exact: true }).fill("Sandbox Jira");
   await submitServerAction(page, connectionForm.getByRole("button", { name: "Add sandbox tracker" }), "/app/integrations");
   await expect(jiraCard).toContainText("Connected");
+  await expect(jiraCard).toContainText("Sandbox Jira");
   await expect(jiraCard.getByRole("button", { name: "Manage" })).toBeVisible();
 
   // Add a local GitHub monitoring source from the same Settings tab, then prove
