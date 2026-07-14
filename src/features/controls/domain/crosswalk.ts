@@ -28,6 +28,10 @@ export interface CrosswalkMapping {
   externalRef: string;
 }
 
+export interface CrosswalkMappingCoverage extends CrosswalkMapping {
+  covered: boolean;
+}
+
 export interface FrameworkCoverage {
   framework: ComplianceFramework;
   // distinct requirements (external_ref) the organisation has recorded a
@@ -37,6 +41,27 @@ export interface FrameworkCoverage {
   // the organisation has marked implemented.
   coveredByImplementedControl: number;
   percent: number;
+}
+
+function requirementKey(mapping: Pick<CrosswalkMapping, "framework" | "externalRef">): string {
+  return `${mapping.framework}\u0000${mapping.externalRef}`;
+}
+
+// Every mapping row for one external requirement shares its requirement-level
+// status. If any mapped ISO control is implemented, OR semantics mark each row
+// Covered while the roll-up still counts that requirement only once.
+export function annotateCrosswalkCoverage(
+  mappings: readonly CrosswalkMapping[],
+  implementedControlIds: Iterable<string>,
+): CrosswalkMappingCoverage[] {
+  const implemented = new Set(implementedControlIds);
+  const coveredRequirements = new Set(
+    mappings.filter((mapping) => implemented.has(mapping.controlId)).map(requirementKey),
+  );
+  return mappings.map((mapping) => ({
+    ...mapping,
+    covered: coveredRequirements.has(requirementKey(mapping)),
+  }));
 }
 
 // Pure coverage roll-up. A framework requirement (external_ref) is "covered"

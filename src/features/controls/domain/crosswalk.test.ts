@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  annotateCrosswalkCoverage,
   COMPLIANCE_FRAMEWORK_LABEL,
   COMPLIANCE_FRAMEWORKS,
   summariseFrameworkCoverage,
@@ -67,5 +68,21 @@ describe("summariseFrameworkCoverage", () => {
     expect(coverage.find((c) => c.framework === "hipaa")!.percent).toBe(100);
     expect(coverage.find((c) => c.framework === "nist_csf")!.percent).toBe(0);
     expect(coverage.find((c) => c.framework === "iso_27017")!.mappedRequirements).toBe(0);
+  });
+});
+
+describe("annotateCrosswalkCoverage", () => {
+  it("gives every row for one recorded requirement the same OR-derived coverage status", () => {
+    const mappings: CrosswalkMapping[] = [
+      { framework: "gdpr", controlId: "c1", externalRef: "Art.32" },
+      { framework: "gdpr", controlId: "c2", externalRef: "Art.32" },
+      { framework: "gdpr", controlId: "c3", externalRef: "Art.33" },
+    ];
+
+    expect(annotateCrosswalkCoverage(mappings, ["c2"])).toEqual([
+      { ...mappings[0], covered: true },
+      { ...mappings[1], covered: true },
+      { ...mappings[2], covered: false },
+    ]);
   });
 });

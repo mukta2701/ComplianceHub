@@ -8,7 +8,7 @@ describe("workspace access policy", () => {
     expect(hasCapability("member", "run_monitoring")).toBe(false);
     expect(hasCapability("owner", "manage_monitoring")).toBe(true);
     expect(hasCapability("admin", "manage_monitoring")).toBe(true);
-    for (const capability of ["manage_policies", "manage_connections", "manage_trust_center"] as const) {
+    for (const capability of ["manage_policies", "manage_connections", "manage_frameworks", "manage_trust_center"] as const) {
       expect(hasCapability("owner", capability)).toBe(true);
       expect(hasCapability("admin", capability)).toBe(true);
       expect(hasCapability("member", capability)).toBe(false);

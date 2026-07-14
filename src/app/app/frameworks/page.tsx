@@ -2,12 +2,14 @@ import { requireAppContext } from "@/lib/app-context";
 import { Card, PageIntro, Pill, Progress } from "@/components/ui";
 import { SubTabs } from "@/components/sub-tabs";
 import {
+  annotateCrosswalkCoverage,
   COMPLIANCE_FRAMEWORKS,
   COMPLIANCE_FRAMEWORK_LABEL,
   summariseFrameworkCoverage,
   type ComplianceFramework,
   type CrosswalkMapping,
 } from "@/features/controls/domain/crosswalk";
+import { hasCapability } from "@/features/organisations/domain/access";
 import { addControlCrosswalkAction, deleteControlCrosswalkAction } from "./actions";
 
 // A control counts as "implemented" when its Statement of Applicability status
@@ -16,7 +18,8 @@ import { addControlCrosswalkAction, deleteControlCrosswalkAction } from "./actio
 const IMPLEMENTED_SOA_STATUSES = new Set(["established", "operational", "advanced"]);
 
 export default async function FrameworksPage() {
-  const { supabase } = await requireAppContext();
+  const { supabase, membership } = await requireAppContext();
+  const canManage = hasCapability(membership.role, "manage_frameworks");
   const [{ data: controls }, { data: crosswalks }, { data: soaItems }, { data: mappings }] = await Promise.all([
     supabase.from("controls").select("id,code,title").order("position"),
     supabase.from("control_crosswalks").select("id,control_id,framework,external_ref,note,created_at").order("created_at"),
@@ -46,72 +49,93 @@ export default async function FrameworksPage() {
     externalRef: row.external_ref,
   }));
   const coverage = summariseFrameworkCoverage(coverageInput, implementedControlIds);
+  const mappingCoverage = annotateCrosswalkCoverage(coverageInput, implementedControlIds);
 
   return <>
     <PageIntro
       eyebrow="FRAMEWORKS"
-      title="Framework crosswalk"
-      body="Record how your ISO 27001 controls map to other frameworks' requirements. These are your organisation's own mappings — a requirement counts as covered once a mapped control is marked implemented in your Statement of Applicability, so overlapping requirements reuse the evidence you have already attached."
+      title="Framework coverage from your Statement of Applicability"
+      body="A mapping links one shared ISO 27001 control to one published requirement reference in another framework. It lets your organisation reuse recorded work and evidence; the ISO control's current SoA implementation status determines whether that recorded requirement is shown as covered."
     />
     <SubTabs tabs={[{ href: "/app/soa", label: "Statement of Applicability" }, { href: "/app/frameworks", label: "Framework coverage" }]} />
+
+    <Card style={{ padding: "18px", marginBottom: "16px" }}>
+      <h2 style={{ fontSize: "15px", margin: "0 0 12px" }}>How recorded coverage works</h2>
+      <ol aria-label="How recorded coverage works" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: "12px", margin: 0, padding: 0, listStyle: "none" }}>
+        <li style={{ background: "#f7f9fc", borderRadius: "10px", padding: "13px" }}><b>1. Record a mapping</b><span style={{ display: "block", marginTop: "5px", color: "#596273", fontSize: "12px" }}>Choose an ISO control, a target framework and published requirement reference, then record your rationale.</span></li>
+        <li style={{ background: "#f7f9fc", borderRadius: "10px", padding: "13px" }}><b>2. Implement the ISO control</b><span style={{ display: "block", marginTop: "5px", color: "#596273", fontSize: "12px" }}>Established, Operational and Advanced SoA statuses count as mature implementation.</span></li>
+        <li style={{ background: "#f7f9fc", borderRadius: "10px", padding: "13px" }}><b>3. Reuse recorded work</b><span style={{ display: "block", marginTop: "5px", color: "#596273", fontSize: "12px" }}>If any ISO control mapped to the same requirement is mature, that recorded requirement shows Covered.</span></li>
+      </ol>
+    </Card>
+
+    <p role="note" style={{ background: "#fff8e8", border: "1px solid #f0ddb0", borderRadius: "10px", color: "#66552e", fontSize: "12px", lineHeight: 1.55, margin: "0 0 16px", padding: "12px 14px" }}>
+      These figures measure only the requirements your organisation has recorded below. They are not total framework compliance, certification, legal advice, or audit assurance. Verify each published reference and interpretation with your own qualified reviewers.
+    </p>
 
     <section aria-label="Per-framework coverage" style={{ display: "grid", gap: "12px", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", marginBottom: "24px" }}>
       {coverage.map((row) => (
         <Card key={row.framework} style={{ padding: "16px" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
             <b style={{ fontSize: "14px" }}>{COMPLIANCE_FRAMEWORK_LABEL[row.framework]}</b>
-            <Pill tone={row.mappedRequirements === 0 ? "blue" : row.percent === 100 ? "green" : row.percent > 0 ? "amber" : "red"}>{row.percent}%</Pill>
+            <Pill tone="neutral">{row.mappedRequirements === 0 ? "No data" : `${row.coveredByImplementedControl}/${row.mappedRequirements} recorded`}</Pill>
           </div>
-          <div style={{ margin: "10px 0 8px" }}><Progress value={row.percent} tone={row.percent === 100 ? "green" : row.percent > 0 ? "amber" : "blue"} /></div>
+          {row.mappedRequirements > 0 && <div style={{ margin: "10px 0 8px" }}><Progress value={row.percent} tone="blue" label={`${COMPLIANCE_FRAMEWORK_LABEL[row.framework]} recorded mapping coverage`} /></div>}
           <small style={{ color: "#596273" }}>
             {row.mappedRequirements === 0
-              ? "No requirements mapped yet"
-              : `${row.coveredByImplementedControl} of ${row.mappedRequirements} mapped requirement${row.mappedRequirements === 1 ? "" : "s"} covered by an implemented control`}
+              ? "No recorded mappings yet"
+              : row.coveredByImplementedControl === row.mappedRequirements
+                ? `All ${row.mappedRequirements} recorded requirement${row.mappedRequirements === 1 ? "" : "s"} covered`
+                : `${row.coveredByImplementedControl} of ${row.mappedRequirements} recorded requirement${row.mappedRequirements === 1 ? "" : "s"} covered`}
           </small>
         </Card>
       ))}
     </section>
 
-    {crosswalkRows.length > 0 && <>
-      <h2 style={{ fontSize: "16px", margin: "0 0 12px" }}>Your mappings</h2>
-      <Card style={{ padding: 0, marginBottom: "24px" }}><div className="data-table-wrap" role="region" aria-label="Control crosswalk mappings" tabIndex={0}><table>
-        <thead><tr><th>ISO 27001 control</th><th>Framework</th><th>Requirement</th><th>Note</th><th><span className="sr-only">Actions</span></th></tr></thead>
+    <h2 style={{ fontSize: "16px", margin: "0 0 12px" }}>Recorded mappings</h2>
+    {crosswalkRows.length > 0 ?
+      <Card style={{ padding: 0, marginBottom: "24px" }}><div className="data-table-wrap" role="region" aria-label="Recorded framework mappings" tabIndex={0}><table aria-label="Recorded framework mappings">
+        <thead><tr><th>Source ISO control</th><th>Target framework</th><th>Published requirement</th><th>Rationale / interpretation</th><th>Recorded coverage</th>{canManage && <th><span className="sr-only">Actions</span></th>}</tr></thead>
         <tbody>
-          {crosswalkRows.map((row) => {
+          {crosswalkRows.map((row, index) => {
             const control = controlById.get(row.control_id);
+            const covered = mappingCoverage[index]?.covered ?? false;
             return <tr key={row.id}>
               <td><b>{control?.code ?? "—"}</b>{control ? `: ${control.title}` : ""}</td>
               <td><Pill tone="blue">{COMPLIANCE_FRAMEWORK_LABEL[row.framework as ComplianceFramework]}</Pill></td>
               <td>{row.external_ref}</td>
-              <td>{row.note || "—"}</td>
-              <td style={{ textAlign: "right" }}>
+              <td>{row.note || <span style={{ color: "#596273", fontStyle: "italic" }}>No rationale recorded (legacy mapping)</span>}</td>
+              <td><Pill tone={covered ? "green" : "amber"}>{covered ? "Covered" : "Not yet covered"}</Pill><small>{covered
+                ? "At least one ISO control mapped to this requirement has an Established, Operational or Advanced SoA status."
+                : "This changes to Covered when any ISO control mapped to this requirement reaches Established, Operational or Advanced in the SoA."}</small></td>
+              {canManage && <td style={{ textAlign: "right" }}>
                 <form action={deleteControlCrosswalkAction}>
                   <input type="hidden" name="id" value={row.id} />
                   <button className="button secondary" aria-label={`Remove mapping of ${control?.code ?? "control"} to ${COMPLIANCE_FRAMEWORK_LABEL[row.framework as ComplianceFramework]} ${row.external_ref}`}>Remove</button>
                 </form>
-              </td>
+              </td>}
             </tr>;
           })}
         </tbody>
       </table></div></Card>
-    </>}
+      : <Card style={{ padding: "18px", marginBottom: "24px" }}><p style={{ margin: 0, color: "#596273", fontSize: "13px" }}>No mappings have been recorded for this workspace. Coverage will appear only after an operator records and reviews a mapping.</p></Card>}
 
-    <Card id="add-mapping" style={{ padding: "18px" }}>
+    {canManage && <Card id="add-mapping" style={{ padding: "18px" }}>
       <h2 style={{ fontSize: "15px", margin: "0 0 10px" }}>Add a mapping</h2>
-      <form action={addControlCrosswalkAction} className="app-form">
+      <p style={{ color: "#596273", fontSize: "12px", margin: "0 0 4px" }}>Record your organisation&apos;s reviewed interpretation. ComplianceHub does not supply or endorse authoritative cross-framework mappings.</p>
+      <form action={addControlCrosswalkAction} className="app-form" aria-label="Add a framework mapping">
         <div className="form-grid">
-          <label>ISO 27001 control<select name="controlId" required defaultValue="">
+          <label>Source ISO control<select name="controlId" required defaultValue="">
             <option value="" disabled>Select a control</option>
             {(controls ?? []).map((c) => <option key={c.id} value={c.id}>{c.code}: {c.title}</option>)}
           </select></label>
-          <label>Framework<select name="framework" defaultValue="soc_2">
+          <label>Target framework<select name="framework" required defaultValue="soc_2">
             {COMPLIANCE_FRAMEWORKS.map((f) => <option key={f} value={f}>{COMPLIANCE_FRAMEWORK_LABEL[f]}</option>)}
           </select></label>
-          <label>Requirement reference<input name="externalRef" required maxLength={80} placeholder="e.g. CC6.1" /></label>
+          <label>Published requirement reference<input name="externalRef" required maxLength={80} placeholder="e.g. CC6.1" /></label>
         </div>
-        <label>Note<textarea name="note" maxLength={500} placeholder="How your control satisfies this requirement (your own interpretation)." /></label>
+        <label>Required rationale / interpretation<textarea name="note" required maxLength={500} placeholder="Explain why your organisation believes this ISO control supports the published requirement." /></label>
         <button className="button primary">Add mapping</button>
       </form>
-    </Card>
+    </Card>}
   </>;
 }
