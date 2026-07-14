@@ -128,11 +128,12 @@ export async function runMonitoringNowAction() {
 }
 
 // Polled by the in-app <AlertToaster/> to pop a toast when monitoring raises a
-// new alert while you're in the app. RLS scopes notifications to the caller.
+// new alert while you're in the app. RLS scopes notifications to the caller;
+// the explicit organisation filter keeps multi-workspace users in the active one.
 export async function fetchRecentAlertsAction(): Promise<Array<{ id: number; message: string; kind: string; createdAt: string }>> {
-  const { supabase } = await requireAppContext();
+  const { supabase, organisation } = await requireAppContext();
   const { data } = await supabase.from("notifications")
-    .select("id,kind,message,created_at").is("read_at", null)
+    .select("id,kind,message,created_at").eq("organisation_id", organisation.id).is("read_at", null)
     .in("kind", ["policy_violation", "control_drift"]).order("created_at", { ascending: false }).limit(5);
   return (data ?? []).map((n) => ({ id: n.id as number, message: n.message as string, kind: n.kind as string, createdAt: n.created_at as string }));
 }

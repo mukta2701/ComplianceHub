@@ -24,7 +24,7 @@ vi.mock("@/lib/security/rate-limit", () => ({ enforceRateLimit: hoisted.enforceR
 vi.mock("@/lib/security/secrets", () => ({ encryptSecret: hoisted.encryptSecret }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
-import { addMonitorSourceAction, runMonitoringNowAction } from "./actions";
+import { addMonitorSourceAction, fetchRecentAlertsAction, runMonitoringNowAction } from "./actions";
 
 describe("runMonitoringNowAction", () => {
   beforeEach(() => {
@@ -90,4 +90,41 @@ describe("monitoring configuration access", () => {
       expect(insert).toHaveBeenCalledOnce();
     });
   }
+});
+
+describe("recent monitoring alerts active workspace scope", () => {
+  it("filters the signed-in user's alerts to the active organisation", async () => {
+    const result = {
+      data: [{
+        id: 42,
+        message: "Branch protection changed",
+        kind: "control_drift",
+        created_at: "2026-07-14T08:00:00.000Z",
+      }],
+    };
+    const builder: Record<string, ReturnType<typeof vi.fn>> = {};
+    for (const method of ["select", "eq", "is", "in", "order"]) {
+      builder[method] = vi.fn(() => builder);
+    }
+    builder.limit = vi.fn().mockResolvedValue(result);
+    const from = vi.fn(() => builder);
+    hoisted.ctx = {
+      supabase: { from },
+      organisation: { id: "20000000-0000-4000-8000-000000000001" },
+      membership: { role: "member" },
+    };
+
+    await expect(fetchRecentAlertsAction()).resolves.toEqual([{
+      id: 42,
+      message: "Branch protection changed",
+      kind: "control_drift",
+      createdAt: "2026-07-14T08:00:00.000Z",
+    }]);
+
+    expect(from).toHaveBeenCalledWith("notifications");
+    expect(builder.eq).toHaveBeenCalledWith(
+      "organisation_id",
+      "20000000-0000-4000-8000-000000000001",
+    );
+  });
 });
