@@ -74,16 +74,10 @@ export async function setPolicyStatusAction(formData: FormData) {
 }
 
 export async function acceptPolicyAction(formData: FormData) {
-  const { supabase, user, organisation } = await requireAppContext();
+  const { supabase, user } = await requireAppContext();
   await enforceRateLimit(`policy:${user.id}`, { limit: 30, windowMs: 60_000 });
   const id = String(formData.get("id"));
-  // The accepted version is read server-side from the policy row — never trusted
-  // from the client — so a member cannot pre-accept a version they have not seen.
-  const { data: policy, error: readError } = await supabase.from("policies").select("version").eq("id", id).single();
-  if (readError || !policy) throw new Error("Policy not found");
-  const { error } = await supabase.from("policy_acceptances").upsert({
-    organisation_id: organisation.id, policy_id: id, user_id: user.id, accepted_version: policy.version, accepted_at: new Date().toISOString(),
-  }, { onConflict: "policy_id,user_id" });
+  const { error } = await supabase.rpc("accept_policy", { target_policy_id: id });
   if (error) throw new Error("Could not record your acceptance");
   revalidatePath(`/app/policies/${id}`);
 }

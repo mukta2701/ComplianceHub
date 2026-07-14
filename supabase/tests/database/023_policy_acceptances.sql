@@ -12,34 +12,32 @@ insert into public.memberships (organisation_id, user_id, role) values
   ('20000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', 'owner'),
   ('20000000-0000-4000-8000-000000000002', '10000000-0000-4000-8000-000000000002', 'owner');
 
-insert into public.policies (id, organisation_id, reference, title, body, created_by) values
-  ('50000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000001', 'POL-001', 'Policy A', 'body', '10000000-0000-4000-8000-000000000001'),
-  ('50000000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000002', 'POL-001', 'Policy B', 'body', '10000000-0000-4000-8000-000000000002');
+insert into public.policies (id, organisation_id, reference, title, body, status, created_by) values
+  ('50000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000001', 'POL-001', 'Policy A', 'body', 'approved', '10000000-0000-4000-8000-000000000001'),
+  ('50000000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000002', 'POL-001', 'Policy B', 'body', 'approved', '10000000-0000-4000-8000-000000000002');
 
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated"}', true);
 select lives_ok(
-  $$ insert into public.policy_acceptances (organisation_id, policy_id, user_id, accepted_version)
-     values ('20000000-0000-4000-8000-000000000001', '50000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', 1) $$,
-  'members record their own acceptance of a policy in their tenant');
+  $$ select public.accept_policy('50000000-0000-4000-8000-000000000001') $$,
+  'members record their own acceptance through the narrow RPC');
 select throws_ok(
   $$ insert into public.policy_acceptances (organisation_id, policy_id, user_id, accepted_version)
      values ('20000000-0000-4000-8000-000000000001', '50000000-0000-4000-8000-000000000002', '10000000-0000-4000-8000-000000000001', 1) $$,
-  '23503', null, 'a member cannot accept another tenant''s policy');
+  '42501', null, 'a member cannot write acceptance rows directly');
 select throws_ok(
-  $$ insert into public.policy_acceptances (organisation_id, policy_id, user_id, accepted_version)
-     values ('20000000-0000-4000-8000-000000000002', '50000000-0000-4000-8000-000000000002', '10000000-0000-4000-8000-000000000001', 1) $$,
-  '42501', null, 'members cannot record acceptances in another tenant');
+  $$ select public.accept_policy('50000000-0000-4000-8000-000000000002') $$,
+  '42501', 'policy is not available for acceptance', 'members cannot accept another tenant''s policy');
 
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub":"10000000-0000-4000-8000-000000000002","role":"authenticated"}', true);
 select is((select count(*) from public.policy_acceptances where organisation_id = '20000000-0000-4000-8000-000000000001'), 0::bigint, 'acceptances are read-isolated per tenant');
-select results_eq(
-  $$ update public.policy_acceptances set accepted_version = 99 where organisation_id = '20000000-0000-4000-8000-000000000001' returning id $$,
-  $$ select null::uuid where false $$, 'cross-tenant acceptance update affects no rows');
-select results_eq(
-  $$ delete from public.policy_acceptances where organisation_id = '20000000-0000-4000-8000-000000000001' returning id $$,
-  $$ select null::uuid where false $$, 'cross-tenant acceptance delete affects no rows');
+select throws_ok(
+  $$ update public.policy_acceptances set accepted_version = 99 where organisation_id = '20000000-0000-4000-8000-000000000001' $$,
+  '42501', null, 'authenticated callers cannot directly update acceptance rows');
+select throws_ok(
+  $$ delete from public.policy_acceptances where organisation_id = '20000000-0000-4000-8000-000000000001' $$,
+  '42501', null, 'authenticated callers cannot directly delete acceptance rows');
 
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated"}', true);

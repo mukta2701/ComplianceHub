@@ -1,11 +1,9 @@
 begin;
 select plan(5);
 
--- Regression proof for the pre-launch CRITICAL fix (202607020040): a non-owner,
--- non-policy-owner member must NOT be able to reassign a policy's owner_id — the
--- escalation that would otherwise let them grab ownership and then edit the body
--- of any policy (bypassing the version bump + re-accept). Workspace owner: 0001;
--- ordinary member: 0003; the policy's own owner (a member): 0004.
+-- Regression proof that assigning a Member as policy owner does not elevate
+-- their capability. Workspace owner: 0001; ordinary Member: 0003; Member assigned
+-- as policy owner: 0004.
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data)
 values
   ('10000000-0000-4000-8000-000000000001', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'owner-a@example.test', '', now(), '{}', '{}'),
@@ -23,23 +21,22 @@ insert into public.policies (id, organisation_id, reference, title, body, owner_
 -- An ordinary member cannot grab ownership (the first step of the escalation).
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub":"10000000-0000-4000-8000-000000000003","role":"authenticated"}', true);
-select throws_ok(
-  $$ update public.policies set owner_id = '10000000-0000-4000-8000-000000000003' where id = '50000000-0000-4000-8000-000000000001' $$,
-  '42501', null, 'a non-owner member cannot reassign the policy owner to themselves');
-select throws_ok(
-  $$ update public.policies set owner_id = '10000000-0000-4000-8000-000000000001' where id = '50000000-0000-4000-8000-000000000001' $$,
-  '42501', null, 'a non-owner member cannot reassign the policy owner at all');
--- ...and (reaffirming 028) still cannot edit the body directly.
-select throws_ok(
-  $$ update public.policies set body = 'tampered' where id = '50000000-0000-4000-8000-000000000001' $$,
-  '42501', null, 'a non-owner, non-policy-owner member still cannot edit the body');
+select results_eq(
+  $$ update public.policies set owner_id = '10000000-0000-4000-8000-000000000003' where id = '50000000-0000-4000-8000-000000000001' returning id $$,
+  $$ select null::uuid where false $$, 'a Member cannot reassign the policy owner to themselves');
+select results_eq(
+  $$ update public.policies set owner_id = '10000000-0000-4000-8000-000000000001' where id = '50000000-0000-4000-8000-000000000001' returning id $$,
+  $$ select null::uuid where false $$, 'a Member cannot reassign the policy owner at all');
+select results_eq(
+  $$ update public.policies set body = 'tampered' where id = '50000000-0000-4000-8000-000000000001' returning id $$,
+  $$ select null::uuid where false $$, 'a Member cannot edit the body');
 
--- The policy's own owner may hand off ownership.
+-- Assignment as policy owner is not a mutation capability.
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub":"10000000-0000-4000-8000-000000000004","role":"authenticated"}', true);
-select lives_ok(
-  $$ update public.policies set owner_id = '10000000-0000-4000-8000-000000000001' where id = '50000000-0000-4000-8000-000000000001' $$,
-  'the policy owner may reassign ownership');
+select results_eq(
+  $$ update public.policies set owner_id = '10000000-0000-4000-8000-000000000001' where id = '50000000-0000-4000-8000-000000000001' returning id $$,
+  $$ select null::uuid where false $$, 'a Member assigned as policy owner cannot reassign ownership');
 
 -- A workspace owner may reassign ownership.
 set local role authenticated;
