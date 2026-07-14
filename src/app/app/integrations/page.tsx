@@ -42,6 +42,8 @@ type MonitorSource = {
   label: string;
   config: { owner?: string; repo?: string };
   enabled: boolean;
+  connection_mode: "sandbox" | "oauth";
+  integration_connection_id: string | null;
   created_at: string;
   revoked_at: string | null;
 };
@@ -111,7 +113,7 @@ export default async function IntegrationsPage() {
           .order("created_at", { ascending: false }).then((result) => (result.data ?? []) as Connection[]),
         // Tokens are deliberately excluded. Only the target label is rendered.
         supabase.from("monitor_sources")
-          .select("id,provider,label,config,enabled,created_at,revoked_at")
+          .select("id,provider,label,config,enabled,connection_mode,integration_connection_id,created_at,revoked_at")
           .order("created_at", { ascending: false }).then((result) => (result.data ?? []) as MonitorSource[]),
         // config contains the encrypted webhook and must never be selected here.
         supabase.from("alert_channels")
@@ -202,11 +204,12 @@ export default async function IntegrationsPage() {
             <span className="ml-body"><strong>{source.label}</strong><span className="ml-meta">
               <Pill tone="neutral">GitHub</Pill><Pill tone={source.enabled ? "green" : "neutral"}>{source.enabled ? "Enabled" : "Disabled"}</Pill>
               <span>{source.config?.owner}/{source.config?.repo}</span>
+              {source.integration_connection_id && <span>Managed by its GitHub connection</span>}
             </span></span>
-            <span style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+            {!source.integration_connection_id && <span style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
               <ToggleForm id={source.id} enabled={source.enabled} label={source.label} action={setMonitorSourceEnabledAction} />
               <form action={revokeMonitorSourceAction}><input type="hidden" name="id" value={source.id} /><button className="button secondary">Disconnect</button></form>
-            </span>
+            </span>}
           </li>)}
         </ul> : <p className="empty-note">No systems are currently configured for monitoring.</p>}
       </Card>

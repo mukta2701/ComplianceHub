@@ -103,4 +103,35 @@ describe("GitHub OAuth compliance monitor", () => {
       detail: expect.stringContaining("cannot distinguish"),
     }));
   });
+
+  it("continues repository checks when a personal repository owner has no organisation endpoint", async () => {
+    vi.stubEnv("NANGO_SECRET_KEY", "server-secret");
+    vi.stubEnv("NANGO_GITHUB_INTEGRATION_ID", "github-prod");
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        default_branch: "main",
+        security_and_analysis: { secret_scanning: { status: "enabled" } },
+      }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        required_pull_request_reviews: { required_approving_review_count: 2 },
+      }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response("not found", { status: 404 }));
+    vi.stubGlobal("fetch", fetchImpl);
+
+    const checks = await githubMonitorProvider.runChecks({
+      ...connection,
+      config: { owner: "octocat", repo: "personal-isms" },
+    });
+
+    expect(checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ checkId: "github.branch_protection", passed: true }),
+      expect.objectContaining({ checkId: "github.required_reviews", passed: true }),
+      expect.objectContaining({ checkId: "github.secret_scanning", passed: true }),
+      expect.objectContaining({
+        checkId: "github.org_mfa",
+        passed: false,
+        title: "Organisation MFA is not applicable or unavailable",
+      }),
+    ]));
+  });
 });

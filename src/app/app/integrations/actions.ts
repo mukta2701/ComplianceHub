@@ -88,6 +88,7 @@ export async function confirmProviderAuthorizationAction(input: unknown) {
   await verifyNangoConnection({
     ...parsed,
     endUserId: user.id,
+    endUserEmail: user.email ?? "",
     organisationId: organisation.id,
   });
 
@@ -164,6 +165,9 @@ export async function configureOAuthConnectionAction(formData: FormData) {
     .eq("organisation_id", organisation.id)
     .eq("connection_mode", "oauth")
     .eq("provider", target.provider)
+    .eq("broker_connection_id", connection.broker_connection_id)
+    .eq("broker_provider_config_key", connection.broker_provider_config_key)
+    .is("revoked_at", null)
     .select("id")
     .maybeSingle();
   if (error || !data) throw new Error("OAuth connection was not found in this workspace");
@@ -195,6 +199,7 @@ export async function setMonitorSourceEnabledAction(formData: FormData) {
   const { data, error } = await supabase.from("monitor_sources")
     .update({ enabled: parsed.enabled })
     .eq("id", parsed.id).eq("organisation_id", organisation.id)
+    .is("integration_connection_id", null)
     .select("id").maybeSingle();
   if (error || !data) throw new Error("Monitoring source was not found in this workspace");
   revalidatePath("/app/integrations");
@@ -207,6 +212,7 @@ export async function revokeMonitorSourceAction(formData: FormData) {
   const { data, error } = await supabase.from("monitor_sources")
     .update({ revoked_at: new Date().toISOString(), enabled: false })
     .eq("id", id).eq("organisation_id", organisation.id)
+    .is("integration_connection_id", null)
     .select("id").maybeSingle();
   if (error || !data) throw new Error("Could not disconnect the monitoring source");
   revalidatePath("/app/integrations");
@@ -267,9 +273,19 @@ export async function revokeConnectionAction(formData: FormData) {
     });
     await deleteNangoConnection(parsed);
   }
-  const { data, error } = await supabase.from("integration_connections")
+  let revokeQuery = supabase.from("integration_connections")
     .update({ revoked_at: new Date().toISOString(), enabled: false })
-    .eq("id", id).eq("organisation_id", organisation.id).select("id").maybeSingle();
+    .eq("id", id)
+    .eq("organisation_id", organisation.id)
+    .eq("provider", connection.provider)
+    .eq("connection_mode", connection.connection_mode)
+    .is("revoked_at", null);
+  if (connection.connection_mode === "oauth") {
+    revokeQuery = revokeQuery
+      .eq("broker_connection_id", connection.broker_connection_id)
+      .eq("broker_provider_config_key", connection.broker_provider_config_key);
+  }
+  const { data, error } = await revokeQuery.select("id").maybeSingle();
   if (error || !data) throw new Error("Could not revoke the connection");
   revalidatePath("/app/integrations");
   revalidatePath("/app/monitoring");

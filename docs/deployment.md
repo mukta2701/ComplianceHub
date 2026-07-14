@@ -123,14 +123,16 @@ create provider apps, accept consent, or enter deployment secrets for you.
    deployment is intentionally used.
 3. In staging, sign in as an Owner or Admin and open **Settings → Connections**.
    Authorize one provider through its OAuth button. ComplianceHub creates a
-   short-lived Connect session bound to the signed-in user and workspace; the
-   browser never receives `NANGO_SECRET_KEY`.
+   short-lived Connect session tagged with the signed-in user ID, verified email,
+   and workspace ID; the browser never receives `NANGO_SECRET_KEY`.
 4. After Nango reports success, ComplianceHub reads Nango's credential-free
-   connection metadata and requires an exact connection ID, integration ID,
-   provider, signed-in user ID, and workspace ID match. Only then is the opaque
-   reference stored. A deployment-wide uniqueness constraint prevents the same
-   broker reference being replayed into another workspace. Provider OAuth
-   access/refresh tokens remain in Nango and are not stored locally.
+   connection metadata from `GET /connections` and requires an exact connection
+   ID, integration ID, provider, user ID, verified email, and workspace tag
+   match. Only then is the opaque reference stored. Its provider, mode, and
+   broker identity become immutable, and deployment-wide tombstone uniqueness
+   prevents the reference being replayed even after revocation. Provider OAuth
+   access/refresh tokens remain in Nango and are not stored locally. Revocation
+   uses `DELETE /connections/{connectionId}` before local retirement.
 5. The new record remains **Authorized · setup required**. Enter a GitHub
    owner/repository or an Atlassian Cloud URL/project key. ComplianceHub verifies
    GitHub repository access. For Jira it matches the submitted tenant against
@@ -140,11 +142,20 @@ create provider apps, accept consent, or enter deployment secrets for you.
    the ticket URL/status and Nango request logs. Jira 3LO calls must appear under
    `api.atlassian.com/ex/jira/{cloudId}`. Enabling GitHub also creates a linked
    OAuth monitoring source for branch protection, required reviews, secret
-   scanning, and organisation MFA. Checks that GitHub hides for the granted
-   scopes are reported unavailable and are never fabricated as passing.
+   scanning, and organisation MFA. That source is controlled only through its
+   parent connection: it cannot be toggled or disconnected independently, and
+   the worker resolves its configuration and broker references from the active
+   parent at run time. For personal/user-owned repositories, organisation MFA is
+   reported not applicable/unavailable while repository checks continue. Checks
+   that GitHub hides for the granted scopes are unavailable and never fabricated
+   as passing.
    Disabled and revoked connections must remain no-ops; revocation must retire
    the Nango connection before local cleanup succeeds.
-7. Repeat the flow in production only after staging succeeds. Record who approved
+7. Remove the configuring user in staging and verify that the GitHub/Jira
+   connection, linked monitor source, and alert channels remain available to a
+   remaining Owner/Admin. Offboarding clears the departed user's provenance; it
+   does not delete shared workspace configuration.
+8. Repeat the flow in production only after staging succeeds. Record who approved
    the provider scopes and schedule rotation/review of the Nango secret and OAuth
    applications.
 

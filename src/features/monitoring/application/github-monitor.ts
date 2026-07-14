@@ -58,7 +58,9 @@ export const githubMonitorProvider: MonitorProvider = {
 
     const organisationResponse = await githubRequest(connection, ["orgs", target.owner]);
     let organisation: z.infer<typeof organisationSchema> | null = null;
+    let organisationNotFound = false;
     if (organisationResponse.ok) organisation = organisationSchema.parse(await organisationResponse.json());
+    else if (organisationResponse.status === 404) organisationNotFound = true;
     else if (organisationResponse.status !== 401 && organisationResponse.status !== 403) {
       throw new Error(`GitHub organisation check failed: ${organisationResponse.status}`);
     }
@@ -105,9 +107,12 @@ export const githubMonitorProvider: MonitorProvider = {
       check({
         checkId: "github.org_mfa", controlRef: "A.5.17", subjectType: "github_org", subjectId: target.owner,
         passed: mfa === true, severity: "high",
-        title: mfa === undefined ? "Organisation MFA status is unavailable" : mfa
+        title: organisationNotFound ? "Organisation MFA is not applicable or unavailable"
+          : mfa === undefined ? "Organisation MFA status is unavailable" : mfa
           ? "Organisation requires two-factor authentication" : "Organisation does not require two-factor authentication",
-        detail: mfa === undefined
+        detail: organisationNotFound
+          ? "GitHub did not find an organisation for this repository owner; repository checks continue, but organisation MFA cannot be marked as passing."
+          : mfa === undefined
           ? "GitHub exposes organisation MFA enforcement only with sufficient owner/admin permission; this check cannot be marked as passing."
           : `GitHub reports organisation MFA enforcement as ${mfa ? "enabled" : "disabled"}.`,
       }),

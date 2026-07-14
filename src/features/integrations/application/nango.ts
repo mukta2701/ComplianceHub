@@ -16,13 +16,13 @@ const connectSessionResponseSchema = z.object({
 
 const publicEndUserSchema = z.object({
   id: z.string().min(1).max(255),
-  display_name: z.string().max(255).nullable(),
-  email: z.string().email().max(320).nullable(),
-  tags: z.record(z.string(), z.string()).nullable(),
+  display_name: z.string().max(255).nullable().optional(),
+  email: z.string().email().max(320).nullable().optional(),
+  tags: z.record(z.string(), z.string()).nullable().optional(),
   organization: z.object({
     id: z.string().min(1).max(255),
-    display_name: z.string().max(255).nullable(),
-  }).strict().nullable(),
+    display_name: z.string().max(255).nullable().optional(),
+  }).strict().nullable().optional(),
 }).strict();
 
 const publicConnectionsResponseSchema = z.object({
@@ -34,8 +34,11 @@ const publicConnectionsResponseSchema = z.object({
     metadata: z.record(z.string(), z.unknown()).nullable(),
     provider: z.string().min(1).max(100),
     errors: z.array(z.object({ type: z.string(), log_id: z.string() }).strict()),
-    end_user: publicEndUserSchema.nullable(),
-    tags: z.record(z.string(), z.string()),
+    end_user: publicEndUserSchema.nullable().optional(),
+    tags: z.record(z.string(), z.string().max(255)).refine(
+      (tags) => Object.keys(tags).length <= 10,
+      "Connection tags exceed the documented limit",
+    ),
   }).strict()).max(100),
 }).strict();
 
@@ -102,14 +105,10 @@ export async function createNangoConnectSession(input: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      end_user: {
-        id: input.endUser.id,
-        email: input.endUser.email,
-        display_name: input.endUser.displayName,
-      },
-      organization: {
-        id: input.organisation.id,
-        display_name: input.organisation.displayName,
+      tags: {
+        end_user_id: input.endUser.id,
+        end_user_email: input.endUser.email,
+        organization_id: input.organisation.id,
       },
       allowed_integrations: [config.integrationId],
     }),
@@ -136,6 +135,7 @@ export async function verifyNangoConnection(input: {
   connectionId: string;
   providerConfigKey: string;
   endUserId: string;
+  endUserEmail: string;
   organisationId: string;
   fetchImpl?: FetchLike;
 }): Promise<void> {
@@ -147,11 +147,11 @@ export async function verifyNangoConnection(input: {
     throw new Error("Provider authorization does not match this deployment");
   }
 
-  const url = new URL("/connection", `${config.baseUrl}/`);
+  const url = new URL("/connections", `${config.baseUrl}/`);
   url.searchParams.set("connectionId", input.connectionId);
-  url.searchParams.set("integrationId", input.providerConfigKey);
-  url.searchParams.set("endUserId", input.endUserId);
-  url.searchParams.set("endUserOrganizationId", input.organisationId);
+  url.searchParams.set("tags[end_user_id]", input.endUserId);
+  url.searchParams.set("tags[end_user_email]", input.endUserEmail);
+  url.searchParams.set("tags[organization_id]", input.organisationId);
   const response = await (input.fetchImpl ?? fetch)(url.toString(), {
     method: "GET",
     headers: { Authorization: `Bearer ${config.secretKey}` },
@@ -170,8 +170,9 @@ export async function verifyNangoConnection(input: {
     connection.connection_id === input.connectionId
     && connection.provider_config_key === input.providerConfigKey
     && connection.provider === input.provider
-    && connection.end_user?.id === input.endUserId
-    && connection.end_user.organization?.id === input.organisationId
+    && connection.tags.end_user_id === input.endUserId
+    && connection.tags.end_user_email === input.endUserEmail
+    && connection.tags.organization_id === input.organisationId
   );
   if (!exact) {
     throw new Error("Provider authorization is not bound to the active workspace operator");
@@ -307,7 +308,7 @@ export async function deleteNangoConnection(input: {
   if (input.providerConfigKey !== config.integrationId) {
     throw new Error("Provider connection does not match this deployment");
   }
-  const url = new URL(`/connection/${encodeURIComponent(input.connectionId)}`, `${config.baseUrl}/`);
+  const url = new URL(`/connections/${encodeURIComponent(input.connectionId)}`, `${config.baseUrl}/`);
   url.searchParams.set("provider_config_key", input.providerConfigKey);
   const response = await (input.fetchImpl ?? fetch)(url.toString(), {
     method: "DELETE",

@@ -55,8 +55,11 @@ describe("Nango OAuth brokerage boundary", () => {
       method: "POST",
       headers: expect.objectContaining({ Authorization: "Bearer nango-secret-value" }),
       body: JSON.stringify({
-        end_user: { id: "user-1", email: "owner@example.test", display_name: "Owner" },
-        organization: { id: "org-1", display_name: "Example Ltd" },
+        tags: {
+          end_user_id: "user-1",
+          end_user_email: "owner@example.test",
+          organization_id: "org-1",
+        },
         allowed_integrations: ["github-prod"],
       }),
     }));
@@ -87,14 +90,12 @@ describe("Nango OAuth brokerage boundary", () => {
         metadata: null,
         provider: "github",
         errors: [],
-        end_user: {
-          id: "user-1",
-          display_name: "Owner",
-          email: "owner@example.test",
-          tags: null,
-          organization: { id: "org-1", display_name: "Example Ltd" },
+        end_user: { id: "deprecated-display-only" },
+        tags: {
+          end_user_id: "user-1",
+          end_user_email: "owner@example.test",
+          organization_id: "org-1",
         },
-        tags: {},
       }],
     }), { status: 200, headers: { "content-type": "application/json" } }));
 
@@ -103,12 +104,13 @@ describe("Nango OAuth brokerage boundary", () => {
       connectionId: "connection-1",
       providerConfigKey: "github-prod",
       endUserId: "user-1",
+      endUserEmail: "owner@example.test",
       organisationId: "org-1",
       fetchImpl,
     })).resolves.toBeUndefined();
 
     expect(fetchImpl).toHaveBeenCalledWith(
-      "https://api.nango.dev/connection?connectionId=connection-1&integrationId=github-prod&endUserId=user-1&endUserOrganizationId=org-1",
+      "https://api.nango.dev/connections?connectionId=connection-1&tags%5Bend_user_id%5D=user-1&tags%5Bend_user_email%5D=owner%40example.test&tags%5Borganization_id%5D=org-1",
       expect.objectContaining({
       method: "GET",
       headers: { Authorization: "Bearer nango-secret-value" },
@@ -121,17 +123,18 @@ describe("Nango OAuth brokerage boundary", () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       connections: [{
         id: 42, connection_id: "connection-1", provider_config_key: "github-prod",
-        created: "2026-07-14T12:00:00Z", metadata: null, provider: "github", errors: [], tags: {},
-        end_user: {
-          id: "other-user", display_name: null, email: null, tags: null,
-          organization: { id: "org-1", display_name: null },
+        created: "2026-07-14T12:00:00Z", metadata: null, provider: "github", errors: [],
+        tags: {
+          end_user_id: "other-user",
+          end_user_email: "owner@example.test",
+          organization_id: "org-1",
         },
       }],
     }), { status: 200, headers: { "content-type": "application/json" } }));
 
     await expect(verifyNangoConnection({
       provider: "github", connectionId: "connection-1", providerConfigKey: "github-prod",
-      endUserId: "user-1", organisationId: "org-1", fetchImpl,
+      endUserId: "user-1", endUserEmail: "owner@example.test", organisationId: "org-1", fetchImpl,
     })).rejects.toThrow("Provider authorization is not bound to the active workspace operator");
   });
 
@@ -196,7 +199,7 @@ describe("Nango OAuth brokerage boundary", () => {
 
     await expect(verifyNangoConnection({
       provider: "github", connectionId: "connection-1", providerConfigKey: "jira-prod",
-      endUserId: "user-1", organisationId: "org-1", fetchImpl,
+      endUserId: "user-1", endUserEmail: "owner@example.test", organisationId: "org-1", fetchImpl,
     })).rejects.toThrow("Provider authorization does not match this deployment");
     expect(fetchImpl).not.toHaveBeenCalled();
   });
@@ -307,7 +310,7 @@ describe("Nango OAuth brokerage boundary", () => {
     })).resolves.toBeUndefined();
 
     expect(fetchImpl).toHaveBeenNthCalledWith(1,
-      "https://api.nango.dev/connection/connection-1?provider_config_key=github-prod",
+      "https://api.nango.dev/connections/connection-1?provider_config_key=github-prod",
       expect.objectContaining({ method: "DELETE", headers: { Authorization: "Bearer nango-secret-value" } }),
     );
   });

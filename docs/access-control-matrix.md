@@ -2,8 +2,9 @@
 
 This document is the reviewed database contract for the Owner, Admin, and Member
 portals. It reflects the schema after
-`20260714043000_policy_feedback_and_leadership_snapshots.sql`, including the
-connection enablement/broker-reference migration applied earlier in the chain.
+`20260714055739_harden_oauth_lifecycle_and_connector_provenance.sql`, including
+the connection enablement, broker-reference, and offboarding hardening applied
+earlier in the chain.
 
 - **Operator** means an organisation membership with role `owner` or `admin`.
 - **Member** means the ordinary `member` role.
@@ -22,7 +23,7 @@ policies are reviewed.
 
 | Table | Operator | Member | Notes |
 |---|---:|---:|---|
-| `alert_channels` | R/W | — | Delivery configuration and secrets are operator-only. Disabled channels are excluded from delivery. |
+| `alert_channels` | R/W | — | Delivery configuration and secrets are operator-only. Disabled channels are excluded from delivery. Removing the configuring user clears provenance but preserves the shared channel for remaining operators. |
 | `assessment_responses` | R/W | R | Writes normally go through `save_assessment_response`. |
 | `assessment_sessions` | R/W | R | Member cannot create, complete, or revise an assessment. |
 | `asset_categories` | R/W | R | Curated asset-register reference data. |
@@ -38,13 +39,13 @@ policies are reviewed.
 | `evidence` | R/W | R | Member can read metadata but cannot add/supersede evidence. |
 | `evidence_links` | R/W | R | Member cannot change evidence/control relationships. |
 | `evidence_sources` | R/W | — | Provider configuration and tokens are operator-only. |
-| `integration_connections` | R/W | — | GitHub/Jira configuration is operator-only. OAuth rows store only deployment-unique Nango broker references, are bound to the active user/workspace, remain disabled until a verified strict repo/project target is configured, and never store provider OAuth tokens. |
+| `integration_connections` | R/W | — | GitHub/Jira configuration is operator-only. OAuth rows store only deployment-unique Nango broker references, are bound to the active user/email/workspace tags, remain disabled until a verified strict repo/project target is configured, and never store provider OAuth tokens. Provider/mode/broker identity is immutable; broker uniqueness remains tombstoned after revoke. Removing the configuring user clears provenance without deleting shared configuration. |
 | `invitations` | R/W* | — | Owner manages Admin/Member invites; Admin manages Member invites only. Writes use invitation RPCs. |
 | `kpi_measurements` | R/W | R | Member receives read-only measurements. |
 | `kpis` | R/W | R | Member receives read-only KPI definitions and results. |
 | `leadership_report_snapshots` | R | R | Immutable, exact published report payloads; only operators publish through `publish_leadership_report`. |
 | `memberships` | R/W* | R | Owner manages elevated roles; Admin may update/remove ordinary Members only. Member has no write. |
-| `monitor_sources` | R/W | — | Monitoring configuration is operator-only. An enabled GitHub OAuth connection owns a linked OAuth monitor source with broker references and no provider token; disable/revoke cascades to it. Sandbox sources remain fake. Disabled sources neither run nor appear in Member summaries. |
+| `monitor_sources` | R/W | — | Monitoring configuration is operator-only. An enabled GitHub OAuth connection owns a linked OAuth monitor source with no provider token; only the parent can enable, disable, or revoke it, and workers resolve configuration/broker references from that active same-tenant parent. Sandbox sources remain independently manageable and fake. Removing a configuring user clears provenance without deleting sources. Disabled sources neither run nor appear in Member summaries. |
 | `monitoring_findings` | R/U | R | Monitoring worker inserts; operators resolve/update; Members read active findings. |
 | `notifications` | own R/U | own R/U | Every role may read its own notifications and update its own read state only. |
 | `policies` | R/W | approved R | Members cannot see draft, in-review, or archived policies. |

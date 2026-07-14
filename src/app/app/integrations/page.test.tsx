@@ -11,6 +11,12 @@ const hoisted = vi.hoisted(() => ({
     monitor_sources: [{
       id: "source-1", provider: "github", label: "Production repository",
       config: { owner: "acme", repo: "isms" }, enabled: true,
+      connection_mode: "oauth", integration_connection_id: "connection-1",
+      created_at: "2026-07-14T00:00:00Z", revoked_at: null,
+    }, {
+      id: "source-2", provider: "github", label: "Sandbox repository",
+      config: { owner: "acme", repo: "sandbox" }, enabled: true,
+      connection_mode: "sandbox", integration_connection_id: null,
       created_at: "2026-07-14T00:00:00Z", revoked_at: null,
     }],
     alert_channels: [{
@@ -59,7 +65,9 @@ describe("Settings Connections page", () => {
 
     expect(screen.getByRole("heading", { name: "Monitoring sources" })).toBeInTheDocument();
     expect(screen.getByText("Production repository")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Disable Production repository" })).toBeInTheDocument();
+    expect(screen.getByText("Managed by its GitHub connection")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Disable Production repository" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Disable Sandbox repository" })).toBeInTheDocument();
 
     expect(screen.getByRole("heading", { name: "Alert channels" })).toBeInTheDocument();
     expect(screen.getByText("In-app notifications")).toBeInTheDocument();
@@ -69,7 +77,7 @@ describe("Settings Connections page", () => {
 
     const expectedColumns: Record<string, string> = {
       integration_connections: "id,provider,label,config,connection_mode,enabled,created_at,revoked_at",
-      monitor_sources: "id,provider,label,config,enabled,created_at,revoked_at",
+      monitor_sources: "id,provider,label,config,enabled,connection_mode,integration_connection_id,created_at,revoked_at",
       alert_channels: "id,type,label,min_severity,enabled,created_at,revoked_at",
       evidence_sources: "id,provider,label,config,created_at,revoked_at",
     };

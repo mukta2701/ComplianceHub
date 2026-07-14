@@ -34,6 +34,7 @@ import {
   confirmProviderAuthorizationAction,
   configureOAuthConnectionAction,
   revokeConnectionAction,
+  revokeMonitorSourceAction,
   setIntegrationConnectionEnabledAction,
   setAlertChannelEnabledAction,
   setMonitorSourceEnabledAction,
@@ -143,6 +144,7 @@ describe("integration connection access", () => {
     expect(hoisted.verifyNangoConnection).toHaveBeenCalledWith({
       provider: "github", connectionId: "connection-1", providerConfigKey: "github-prod",
       endUserId: USER_ID,
+      endUserEmail: "admin@example.test",
       organisationId: ORGANISATION_ID,
     });
     expect(insert).toHaveBeenCalledWith({
@@ -213,6 +215,9 @@ describe("integration connection access", () => {
     expect(builder.eq).toHaveBeenCalledWith("organisation_id", ORGANISATION_ID);
     expect(builder.eq).toHaveBeenCalledWith("connection_mode", "oauth");
     expect(builder.eq).toHaveBeenCalledWith("provider", "github");
+    expect(builder.eq).toHaveBeenCalledWith("broker_connection_id", "connection-1");
+    expect(builder.eq).toHaveBeenCalledWith("broker_provider_config_key", "github-prod");
+    expect(builder.is).toHaveBeenCalledTimes(2);
   });
 
   it("stores a verified Jira cloud ID from accessible resources before enabling", async () => {
@@ -285,6 +290,9 @@ describe("integration connection access", () => {
     });
     expect(hoisted.deleteNangoConnection.mock.invocationCallOrder[0])
       .toBeLessThan(builder.update.mock.invocationCallOrder[0]);
+    expect(builder.eq).toHaveBeenCalledWith("broker_connection_id", "connection-1");
+    expect(builder.eq).toHaveBeenCalledWith("broker_provider_config_key", "github-prod");
+    expect(builder.is).toHaveBeenCalledTimes(2);
   });
 
   it("does not locally revoke when retiring the remote broker fails", async () => {
@@ -369,6 +377,7 @@ describe("integration connection access", () => {
     const builder: Record<string, ReturnType<typeof vi.fn>> = {};
     builder.update = vi.fn(() => builder);
     builder.eq = vi.fn(() => builder);
+    builder.is = vi.fn(() => builder);
     builder.select = vi.fn(() => builder);
     builder.maybeSingle = vi.fn().mockResolvedValue({ data: { id: "10000000-0000-4000-8000-000000000099" }, error: null });
     const from = vi.fn(() => builder);
@@ -382,5 +391,25 @@ describe("integration connection access", () => {
 
     expect(from).toHaveBeenCalledWith(table);
     expect(builder.eq).toHaveBeenCalledWith("organisation_id", ORGANISATION_ID);
+  });
+
+  it.each([
+    ["enable or disable", setMonitorSourceEnabledAction, true],
+    ["revoke", revokeMonitorSourceAction, false],
+  ] as const)("rejects a forged attempt to %s a linked OAuth monitor source", async (_label, action, needsEnabled) => {
+    const builder: Record<string, ReturnType<typeof vi.fn>> = {};
+    for (const method of ["update", "eq", "is", "select"]) builder[method] = vi.fn(() => builder);
+    builder.maybeSingle = vi.fn().mockResolvedValue({ data: null, error: null });
+    hoisted.ctx = {
+      supabase: { from: vi.fn(() => builder) }, user: { id: USER_ID },
+      organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
+    };
+    const form = new FormData();
+    form.set("id", "10000000-0000-4000-8000-000000000099");
+    if (needsEnabled) form.set("enabled", "false");
+
+    await expect(action(form)).rejects.toThrow();
+
+    expect(builder.is).toHaveBeenCalledWith("integration_connection_id", null);
   });
 });

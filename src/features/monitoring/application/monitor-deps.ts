@@ -61,18 +61,42 @@ export function buildMonitorDependencies(
   return {
     listActiveSources: async () => {
       let query = supabase.from("monitor_sources")
-        .select("id,organisation_id,provider,config,access_token,connection_mode,broker_connection_id,broker_provider_config_key")
+        .select("id,organisation_id,provider,config,access_token,connection_mode,integration_connection_id,broker_connection_id,broker_provider_config_key,integration_connection:integration_connections(id,organisation_id,provider,connection_mode,config,enabled,revoked_at,broker_connection_id,broker_provider_config_key)")
         .is("revoked_at", null).eq("enabled", true);
       if (opts.organisationId) query = query.eq("organisation_id", opts.organisationId);
       const { data, error } = await query;
       if (error) throw error;
-      return (data ?? []).map((row): MonitorSource => ({
-        id: row.id, organisationId: row.organisation_id, provider: row.provider as MonitorProviderKind,
-        config: (row.config ?? {}) as Record<string, unknown>, accessToken: decryptSecret(row.access_token) ?? "",
-        connectionMode: row.connection_mode as "sandbox" | "oauth",
-        brokerConnectionId: row.broker_connection_id,
-        brokerProviderConfigKey: row.broker_provider_config_key,
-      }));
+      return (data ?? []).flatMap((row): MonitorSource[] => {
+        if (row.connection_mode === "sandbox" && row.integration_connection_id === null) {
+          return [{
+            id: row.id, organisationId: row.organisation_id, provider: row.provider as MonitorProviderKind,
+            config: (row.config ?? {}) as Record<string, unknown>, accessToken: decryptSecret(row.access_token) ?? "",
+            connectionMode: "sandbox", brokerConnectionId: null, brokerProviderConfigKey: null,
+          }];
+        }
+        const parentJoin = row.integration_connection;
+        const parent = Array.isArray(parentJoin)
+          ? (parentJoin.length === 1 ? parentJoin[0] : null)
+          : parentJoin;
+        if (
+          row.connection_mode !== "oauth"
+          || !parent
+          || parent.id !== row.integration_connection_id
+          || parent.organisation_id !== row.organisation_id
+          || parent.provider !== "github"
+          || parent.connection_mode !== "oauth"
+          || parent.enabled !== true
+          || parent.revoked_at !== null
+          || typeof parent.broker_connection_id !== "string"
+          || typeof parent.broker_provider_config_key !== "string"
+        ) return [];
+        return [{
+          id: row.id, organisationId: parent.organisation_id, provider: parent.provider as MonitorProviderKind,
+          config: (parent.config ?? {}) as Record<string, unknown>, accessToken: "", connectionMode: "oauth",
+          brokerConnectionId: parent.broker_connection_id,
+          brokerProviderConfigKey: parent.broker_provider_config_key,
+        }];
+      });
     },
     runChecks: (source) => resolveMonitorProvider(source).runChecks(source),
     listOpenFindingKeys: async (organisationId) => {
