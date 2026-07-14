@@ -1,4 +1,5 @@
 import { Card, PageIntro } from "@/components/ui";
+import { SubTabs } from "@/components/sub-tabs";
 import { hasCapability } from "@/features/organisations/domain/access";
 import { requireAppContext } from "@/lib/app-context";
 import {
@@ -110,7 +111,14 @@ export default async function IntegrationsPage() {
     .filter((channel) => !channel.revoked_at);
 
   return <>
-    <ConnectionsCatalog connections={connections} alertChannels={alertChannels} />
+    <ConnectionsCatalog
+      connections={connections}
+      alertChannels={alertChannels}
+      navigation={<SubTabs tabs={[
+        { href: "/app/settings", label: "Settings" },
+        { href: "/app/integrations", label: "Connections" },
+      ]} />}
+    />
     {process.env.NODE_ENV === "development" && <DeveloperConnectionTools />}
   </>;
 }

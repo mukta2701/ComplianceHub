@@ -41,6 +41,20 @@ const alertChannels = [{
 }];
 
 describe("ConnectionsCatalog", () => {
+  it("places supplied Settings navigation between the page heading and catalogue controls", () => {
+    render(<ConnectionsCatalog
+      connections={connections}
+      alertChannels={alertChannels}
+      navigation={<nav aria-label="Settings tabs"><a href="/app/settings">Settings</a></nav>}
+    />);
+
+    const heading = screen.getByRole("heading", { name: "Connections" });
+    const navigation = screen.getByRole("navigation", { name: "Settings tabs" });
+    const search = screen.getByRole("searchbox", { name: "Search connections" });
+    expect(heading.compareDocumentPosition(navigation) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(navigation.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("presents GitHub, Jira, and Slack as a clean provider catalogue", () => {
     render(<ConnectionsCatalog connections={connections} alertChannels={alertChannels} />);
 

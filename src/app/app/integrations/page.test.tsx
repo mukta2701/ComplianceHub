@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const hoisted = vi.hoisted(() => ({
@@ -70,7 +70,9 @@ describe("Settings Connections page", () => {
     expect(screen.queryByRole("heading", { name: "Alert channels" })).not.toBeInTheDocument();
     expect(screen.queryByText("Local preview tools")).not.toBeInTheDocument();
     expect(screen.queryByText(/OAuth|SSO|Nango/i)).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument();
+    const tabs = screen.getByRole("navigation", { name: "Section" });
+    expect(within(tabs).getByRole("link", { name: "Settings" })).toHaveAttribute("href", "/app/settings");
+    expect(within(tabs).getByRole("link", { name: "Connections" })).toHaveAttribute("aria-current", "page");
     expect(screen.queryByText("Old Jira")).not.toBeInTheDocument();
     expect(screen.queryByText("#old-alerts")).not.toBeInTheDocument();
 

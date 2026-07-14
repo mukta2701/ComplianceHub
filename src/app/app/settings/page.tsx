@@ -1,6 +1,7 @@
 import { requireAppContext } from "@/lib/app-context";
 import { Card, PageIntro, Pill } from "@/components/ui";
 import { Icon } from "@/components/icons";
+import { SubTabs } from "@/components/sub-tabs";
 import { one } from "@/lib/supabase/one";
 import { inviteMemberAction, changeMemberRoleAction, removeMemberAction, resendInvitationAction, revokeInvitationAction, updateMemberJobTitleAction } from "../actions";
 import { canInviteRole, canManageMembership, hasCapability, roleLabel, type MembershipRole } from "@/features/organisations/domain/access";
@@ -48,6 +49,10 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
 
   return <>
     <PageIntro eyebrow="SETTINGS" title="Organisation settings" body={`Manage ${organisation.name}, your team and workspace security. Your role: ${roleLabel(membership.role)}.`} />
+    <SubTabs tabs={[
+      { href: "/app/settings", label: "Settings" },
+      { href: "/app/integrations", label: "Connections" },
+    ]} />
 
     {statusMessage && <Card style={{ padding: "16px", background: "#eef7f0", borderColor: "#cfe6d5", marginBottom: "16px" }} role="status">
       <b>{statusMessage}</b>

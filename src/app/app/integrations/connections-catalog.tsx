@@ -245,9 +245,10 @@ function SlackPanel({ alertChannels }: { alertChannels: AlertChannelSummary[] })
   </div>;
 }
 
-export function ConnectionsCatalog({ connections, alertChannels }: {
+export function ConnectionsCatalog({ connections, alertChannels, navigation }: {
   connections: ConnectionSummary[];
   alertChannels: AlertChannelSummary[];
+  navigation?: React.ReactNode;
 }) {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<Category>("all");
@@ -284,6 +285,8 @@ export function ConnectionsCatalog({ connections, alertChannels }: {
         <p>Connect the tools your compliance workspace relies on.</p>
       </div>
     </header>
+
+    {navigation}
 
     <div className="connections-toolbar">
       <label className="connections-search-wrap">
