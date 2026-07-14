@@ -27,6 +27,7 @@ const navGroups = [
     ["/app/trust", "shield", "Trust Center"],
   ] },
   { label: "Admin", items: [
+    ["/app/integrations", "activity", "Connections"],
     ["/app/settings", "settings", "Settings"],
   ] },
 ] as const;
@@ -50,7 +51,6 @@ const EXTRA_TITLES: Array<[string, string]> = [
   ["/app/assets", "Asset inventory"],
   ["/app/frameworks", "Framework coverage"],
   ["/app/activity", "Audit trail"],
-  ["/app/integrations", "Connections"],
   ["/app/notifications", "Notifications"],
   ["/app/risks/import", "Import risk register"],
   ["/app/soa/import", "Import Statement of Applicability"],

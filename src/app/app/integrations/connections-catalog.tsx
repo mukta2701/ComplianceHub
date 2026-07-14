@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Pill } from "@/components/ui";
 import { OAuthConnectButton } from "./oauth-connect-button";
 import {
@@ -116,18 +116,27 @@ function ProviderPanel({
   connections,
   alertChannels,
   onClose,
+  panelRef,
 }: {
   provider: ProviderId;
   connections: ConnectionSummary[];
   alertChannels: AlertChannelSummary[];
   onClose: () => void;
+  panelRef: React.RefObject<HTMLElement | null>;
 }) {
   const metadata = PROVIDERS.find((candidate) => candidate.id === provider)!;
   const providerConnections = connections.filter((connection) => connection.provider === provider);
   const isConnected = provider === "slack" ? alertChannels.length > 0 : providerConnections.length > 0;
   const panelVerb = isConnected ? "Manage" : "Connect";
 
-  return <section className="connections-panel connection-management" role="region" aria-label={`${panelVerb} ${metadata.label}`}>
+  return <section
+    className="connections-panel connection-management"
+    id="connection-management-panel"
+    ref={panelRef}
+    role="region"
+    tabIndex={-1}
+    aria-label={`${panelVerb} ${metadata.label}`}
+  >
     <div className="connections-panel-head">
       <div className="connections-provider-heading">
         <span className={`connections-provider-mark connection-icon ${provider}`} aria-hidden="true">{metadata.mark}</span>
@@ -243,6 +252,8 @@ export function ConnectionsCatalog({ connections, alertChannels }: {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<Category>("all");
   const [selectedProvider, setSelectedProvider] = useState<ProviderId | null>(null);
+  const panelRef = useRef<HTMLElement>(null);
+  const triggerRefs = useRef<Record<ProviderId, HTMLButtonElement | null>>({ github: null, jira: null, slack: null });
   const liveSlackChannels = alertChannels.filter((channel) => channel.type === "slack");
 
   const filteredProviders = useMemo(() => {
@@ -253,6 +264,17 @@ export function ConnectionsCatalog({ connections, alertChannels }: {
       return matchesCategory && matchesQuery;
     });
   }, [category, query]);
+
+  useEffect(() => {
+    if (!selectedProvider || !panelRef.current) return;
+    panelRef.current.focus({ preventScroll: true });
+    panelRef.current.scrollIntoView?.({ behavior: "smooth", block: "start" });
+  }, [selectedProvider]);
+
+  function closeProviderPanel() {
+    if (selectedProvider) triggerRefs.current[selectedProvider]?.focus();
+    setSelectedProvider(null);
+  }
 
   return <div className="connections-catalog">
     <header className="connections-catalog-head">
@@ -307,7 +329,14 @@ export function ConnectionsCatalog({ connections, alertChannels }: {
           </div>
           <p>{provider.description}</p>
           <div className="connection-actions">
-            <button className="button secondary" type="button" onClick={() => setSelectedProvider(provider.id)}>{action}</button>
+            <button
+              className="button secondary"
+              type="button"
+              ref={(element) => { triggerRefs.current[provider.id] = element; }}
+              aria-controls="connection-management-panel"
+              aria-expanded={selectedProvider === provider.id}
+              onClick={() => setSelectedProvider(provider.id)}
+            >{action}</button>
           </div>
         </article>;
       })}
@@ -319,7 +348,8 @@ export function ConnectionsCatalog({ connections, alertChannels }: {
       provider={selectedProvider}
       connections={connections}
       alertChannels={liveSlackChannels}
-      onClose={() => setSelectedProvider(null)}
+      panelRef={panelRef}
+      onClose={closeProviderPanel}
     />}
   </div>;
 }

@@ -78,15 +78,27 @@ describe("ConnectionsCatalog", () => {
     render(<ConnectionsCatalog connections={connections} alertChannels={alertChannels} />);
 
     const githubCard = screen.getByRole("article", { name: "GitHub connection" });
-    await user.click(within(githubCard).getByRole("button", { name: "Manage" }));
-    expect(screen.getByRole("region", { name: "Manage GitHub" })).toBeVisible();
+    const githubManage = within(githubCard).getByRole("button", { name: "Manage" });
+    expect(githubManage).toHaveAttribute("aria-expanded", "false");
+    expect(githubManage).toHaveAttribute("aria-controls", "connection-management-panel");
+    await user.click(githubManage);
+    expect(githubManage).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("region", { name: "Manage GitHub" })).toHaveFocus();
     expect(screen.getByText("acme/isms")).toBeVisible();
 
     const slackCard = screen.getByRole("article", { name: "Slack connection" });
-    await user.click(within(slackCard).getByRole("button", { name: "Manage" }));
+    const slackManage = within(slackCard).getByRole("button", { name: "Manage" });
+    await user.click(slackManage);
+    expect(githubManage).toHaveAttribute("aria-expanded", "false");
+    expect(slackManage).toHaveAttribute("aria-expanded", "true");
     expect(screen.queryByRole("region", { name: "Manage GitHub" })).not.toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Manage Slack" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "Manage Slack" })).toHaveFocus();
     expect(screen.getByRole("button", { name: "Add Slack channel" })).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Close Slack panel" }));
+    expect(screen.queryByRole("region", { name: "Manage Slack" })).not.toBeInTheDocument();
+    expect(slackManage).toHaveFocus();
+    expect(slackManage).toHaveAttribute("aria-expanded", "false");
   });
 
   it("opens a focused connection panel for a provider that is not connected", async () => {

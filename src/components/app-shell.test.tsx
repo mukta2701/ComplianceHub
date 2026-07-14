@@ -49,8 +49,17 @@ describe("AppShell role-specific navigation", () => {
     expect(screen.getByRole("link", { name: "Dashboard" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Gap assessment" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Tasks" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Connections" })).toHaveAttribute("href", "/app/integrations");
     expect(screen.getByRole("link", { name: "Settings" })).toBeInTheDocument();
     expect(screen.getByText(role === "owner" ? "Owner" : "Admin", { selector: "span" })).toBeInTheDocument();
+  });
+
+  it("marks Connections as the active Admin destination", () => {
+    hoisted.pathname = "/app/integrations";
+    renderShell("owner");
+
+    expect(screen.getByRole("link", { name: "Connections" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Settings" })).not.toHaveAttribute("aria-current");
   });
 
   it("shows workspace setup without operational navigation before membership exists", () => {

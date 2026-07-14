@@ -1094,6 +1094,11 @@ test("a task is pushed to a sandbox tracker, polled to In Progress, then the con
   const jiraConnectionCard = page.getByRole("article", { name: "Jira connection" });
   await jiraConnectionCard.getByRole("button", { name: "Manage" }).click();
   const jiraPanel = page.getByRole("region", { name: "Manage Jira" });
+  await expect(jiraPanel).toBeFocused();
+  await expect.poll(() => jiraPanel.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    return bounds.top < window.innerHeight && bounds.bottom > 0;
+  })).toBe(true);
   await expect(jiraPanel.getByText("Sandbox Jira")).toBeVisible();
   await submitServerAction(page, jiraPanel.getByRole("button", { name: "Disconnect" }), "/app/integrations");
   await expect(jiraConnectionCard).toContainText("Not connected");
