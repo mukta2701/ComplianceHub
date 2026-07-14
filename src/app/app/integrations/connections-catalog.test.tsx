@@ -41,7 +41,7 @@ const alertChannels = [{
 }];
 
 describe("ConnectionsCatalog", () => {
-  it("places supplied Settings navigation between the page heading and catalogue controls", () => {
+  it("places supplied Settings navigation between the page heading and provider grid", () => {
     render(<ConnectionsCatalog
       connections={connections}
       alertChannels={alertChannels}
@@ -50,41 +50,58 @@ describe("ConnectionsCatalog", () => {
 
     const heading = screen.getByRole("heading", { name: "Connections" });
     const navigation = screen.getByRole("navigation", { name: "Settings tabs" });
-    const search = screen.getByRole("searchbox", { name: "Search connections" });
+    const grid = screen.getByTestId("connections-grid");
     expect(heading.compareDocumentPosition(navigation) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(navigation.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(navigation.compareDocumentPosition(grid) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("presents GitHub, Jira, and Slack as a clean provider catalogue", () => {
     render(<ConnectionsCatalog connections={connections} alertChannels={alertChannels} />);
 
     expect(screen.getByRole("heading", { name: "Connections" })).toBeVisible();
-    expect(screen.getByRole("searchbox", { name: "Search connections" })).toHaveClass("connections-search");
+    expect(screen.queryByRole("searchbox", { name: "Search connections" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "All" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Development" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Alerts" })).not.toBeInTheDocument();
     expect(screen.getByTestId("connections-grid")).toHaveClass("connections-grid");
-    expect(screen.getByRole("article", { name: "GitHub connection" })).toHaveClass("connection-card");
-    expect(screen.getByRole("article", { name: "GitHub connection" })).toHaveTextContent("Connected");
-    expect(screen.getByRole("article", { name: "Jira connection" })).toHaveTextContent("Setup required");
-    expect(screen.getByRole("article", { name: "Slack connection" })).toHaveTextContent("Connected");
+    const githubCard = screen.getByRole("article", { name: "GitHub connection" });
+    const jiraCard = screen.getByRole("article", { name: "Jira connection" });
+    const slackCard = screen.getByRole("article", { name: "Slack connection" });
+    expect(githubCard).toHaveClass("connection-card");
+    expect(githubCard).toHaveTextContent("Connected");
+    expect(githubCard).toHaveTextContent("acme/isms");
+    expect(jiraCard).toHaveTextContent("Setup required");
+    expect(jiraCard).toHaveTextContent("Project not selected");
+    expect(slackCard).toHaveTextContent("Connected");
+    expect(slackCard).toHaveTextContent("#compliance-alerts");
     expect(screen.queryByRole("heading", { name: "Monitoring sources" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Evidence sources" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Alert channels" })).not.toBeInTheDocument();
     expect(screen.queryByText(/OAuth|SSO|Nango/i)).not.toBeInTheDocument();
   });
 
-  it("filters the catalogue by search text and category", async () => {
-    const user = userEvent.setup();
-    render(<ConnectionsCatalog connections={connections} alertChannels={alertChannels} />);
+  it("summarizes providers with multiple configured targets", () => {
+    render(<ConnectionsCatalog
+      connections={[...connections, {
+        id: "github-2",
+        provider: "github",
+        label: "Internal GitHub",
+        config: { owner: "acme", repo: "internal" },
+        connection_mode: "oauth",
+        enabled: true,
+      }]}
+      alertChannels={[...alertChannels, {
+        id: "slack-2",
+        type: "slack",
+        label: "#security-alerts",
+        min_severity: "critical",
+        enabled: true,
+      }]}
+    />);
 
-    await user.type(screen.getByRole("searchbox", { name: "Search connections" }), "jira");
-    expect(screen.getByRole("article", { name: "Jira connection" })).toBeVisible();
-    expect(screen.queryByRole("article", { name: "GitHub connection" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("article", { name: "Slack connection" })).not.toBeInTheDocument();
-
-    await user.clear(screen.getByRole("searchbox", { name: "Search connections" }));
-    await user.click(screen.getByRole("button", { name: "Alerts" }));
-    expect(screen.getByRole("article", { name: "Slack connection" })).toBeVisible();
-    expect(screen.queryByRole("article", { name: "Jira connection" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Alerts" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("article", { name: "GitHub connection" })).toHaveTextContent("2 connections");
+    expect(screen.getByRole("article", { name: "Slack connection" })).toHaveTextContent("2 channels");
+    expect(screen.queryByRole("searchbox", { name: "Search connections" })).not.toBeInTheDocument();
   });
 
   it("opens only the selected provider management panel", async () => {
@@ -97,8 +114,9 @@ describe("ConnectionsCatalog", () => {
     expect(githubManage).toHaveAttribute("aria-controls", "connection-management-panel");
     await user.click(githubManage);
     expect(githubManage).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("region", { name: "Manage GitHub" })).toHaveFocus();
-    expect(screen.getByText("acme/isms")).toBeVisible();
+    const githubPanel = screen.getByRole("region", { name: "Manage GitHub" });
+    expect(githubPanel).toHaveFocus();
+    expect(within(githubPanel).getByText("acme/isms")).toBeVisible();
 
     const slackCard = screen.getByRole("article", { name: "Slack connection" });
     const slackManage = within(slackCard).getByRole("button", { name: "Manage" });

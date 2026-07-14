@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Pill } from "@/components/ui";
 import { OAuthConnectButton } from "./oauth-connect-button";
 import {
@@ -30,34 +30,29 @@ export type AlertChannelSummary = {
 };
 
 type ProviderId = "github" | "jira" | "slack";
-type Category = "all" | "development" | "alerts";
 
 const PROVIDERS: Array<{
   id: ProviderId;
   label: string;
   mark: string;
-  category: Exclude<Category, "all">;
   description: string;
 }> = [
   {
     id: "github",
     label: "GitHub",
     mark: "GH",
-    category: "development",
     description: "Monitor repositories and security controls.",
   },
   {
     id: "jira",
     label: "Jira",
     mark: "JI",
-    category: "development",
     description: "Track remediation work in your Jira projects.",
   },
   {
     id: "slack",
     label: "Slack",
     mark: "SL",
-    category: "alerts",
     description: "Send new finding alerts to your team.",
   },
 ];
@@ -68,6 +63,34 @@ function connectionNeedsSetup(connection: ConnectionSummary) {
     return !(connection.config.owner && connection.config.repo);
   }
   return !connection.config.cloudId;
+}
+
+function providerTargetSummary(
+  provider: ProviderId,
+  connections: ConnectionSummary[],
+  alertChannels: AlertChannelSummary[],
+) {
+  if (provider === "slack") {
+    if (alertChannels.length === 0) return "Not configured";
+    if (alertChannels.length > 1) return `${alertChannels.length} channels`;
+    return alertChannels[0].label || "Slack channel";
+  }
+  const providerConnections = connections.filter((connection) => connection.provider === provider);
+  if (providerConnections.length === 0) return "Not configured";
+  if (providerConnections.length > 1) return `${providerConnections.length} connections`;
+  const connection = providerConnections[0];
+  if (connectionNeedsSetup(connection)) {
+    return provider === "github" ? "Repository not selected" : "Project not selected";
+  }
+  if (provider === "github") {
+    return [connection.config.owner, connection.config.repo].filter(Boolean).join("/")
+      || connection.label
+      || "GitHub connection";
+  }
+  return connection.config.projectKey
+    || connection.label
+    || connection.config.baseUrl
+    || "Jira connection";
 }
 
 function ToggleForm({
@@ -250,21 +273,10 @@ export function ConnectionsCatalog({ connections, alertChannels, navigation }: {
   alertChannels: AlertChannelSummary[];
   navigation?: React.ReactNode;
 }) {
-  const [query, setQuery] = useState("");
-  const [category, setCategory] = useState<Category>("all");
   const [selectedProvider, setSelectedProvider] = useState<ProviderId | null>(null);
   const panelRef = useRef<HTMLElement>(null);
   const triggerRefs = useRef<Record<ProviderId, HTMLButtonElement | null>>({ github: null, jira: null, slack: null });
   const liveSlackChannels = alertChannels.filter((channel) => channel.type === "slack");
-
-  const filteredProviders = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
-    return PROVIDERS.filter((provider) => {
-      const matchesCategory = category === "all" || provider.category === category;
-      const matchesQuery = !normalizedQuery || `${provider.label} ${provider.description}`.toLowerCase().includes(normalizedQuery);
-      return matchesCategory && matchesQuery;
-    });
-  }, [category, query]);
 
   useEffect(() => {
     if (!selectedProvider || !panelRef.current) return;
@@ -288,40 +300,14 @@ export function ConnectionsCatalog({ connections, alertChannels, navigation }: {
 
     {navigation}
 
-    <div className="connections-toolbar">
-      <label className="connections-search-wrap">
-        <span className="sr-only">Search connections</span>
-        <span aria-hidden="true">⌕</span>
-        <input
-          className="connections-search"
-          type="search"
-          aria-label="Search connections"
-          placeholder="Search connections"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-      </label>
-      <div className="connections-categories connections-filters" aria-label="Connection categories">
-        {([[
-          "all",
-          "All",
-        ], ["development", "Development"], ["alerts", "Alerts"]] as Array<[Category, string]>).map(([value, label]) => <button
-          className={category === value ? "active" : ""}
-          type="button"
-          key={value}
-          aria-pressed={category === value}
-          onClick={() => setCategory(value)}
-        >{label}</button>)}
-      </div>
-    </div>
-
     <div className="connections-provider-grid connections-grid" data-testid="connections-grid">
-      {filteredProviders.map((provider) => {
+      {PROVIDERS.map((provider) => {
         const providerConnections = connections.filter((connection) => connection.provider === provider.id);
         const records = provider.id === "slack" ? liveSlackChannels : providerConnections;
         const needsSetup = providerConnections.some(connectionNeedsSetup);
         const status = records.length === 0 ? "Not connected" : needsSetup ? "Setup required" : "Connected";
         const action = records.length === 0 ? "Connect" : needsSetup ? "Continue setup" : "Manage";
+        const targetSummary = providerTargetSummary(provider.id, connections, liveSlackChannels);
         return <article className="connections-provider-card connection-card" aria-label={`${provider.label} connection`} key={provider.id}>
           <div className="connections-provider-heading connection-card-head">
             <span className={`connections-provider-mark connection-icon ${provider.id}`} aria-hidden="true">{provider.mark}</span>
@@ -332,6 +318,7 @@ export function ConnectionsCatalog({ connections, alertChannels, navigation }: {
           </div>
           <p>{provider.description}</p>
           <div className="connection-actions">
+            <span>{targetSummary}</span>
             <button
               className="button secondary"
               type="button"
@@ -344,8 +331,6 @@ export function ConnectionsCatalog({ connections, alertChannels, navigation }: {
         </article>;
       })}
     </div>
-
-    {filteredProviders.length === 0 && <p className="connections-empty">No connections match your search.</p>}
 
     {selectedProvider && <ProviderPanel
       provider={selectedProvider}
