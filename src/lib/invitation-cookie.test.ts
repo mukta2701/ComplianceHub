@@ -72,4 +72,14 @@ describe("invitation token cookie", () => {
       maxAge: 0,
     });
   });
+
+  it("expires an existing response cookie with the same production attributes", () => {
+    const response = new NextResponse(null, { status: 303 });
+
+    invitationCookie.clearInvitationTokenResponseCookie(response, "production");
+
+    expect(response.headers.get("set-cookie")).toMatch(
+      /^compliancehub_invitation_token=; Path=\/invite; Max-Age=0; Secure; HttpOnly; SameSite=lax$/,
+    );
+  });
 });

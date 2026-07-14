@@ -16,8 +16,9 @@ export function safePostAuthPath(
     const destination = new URL(candidate, VALIDATION_ORIGIN);
     if (destination.origin !== VALIDATION_ORIGIN) return fallback;
 
-    const allowed = destination.pathname === "/invite"
-      || destination.pathname === "/app"
+    if (destination.pathname === "/invite") return "/invite";
+
+    const allowed = destination.pathname === "/app"
       || destination.pathname.startsWith("/app/")
       || (options.allowResetPassword === true && destination.pathname === "/reset-password");
     return allowed ? `${destination.pathname}${destination.search}${destination.hash}` : fallback;

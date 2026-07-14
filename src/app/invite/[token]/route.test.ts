@@ -39,11 +39,15 @@ describe("GET /invite/[token]", () => {
     ["non-base64url", `${"A".repeat(42)}=`],
     ["encoded control", `${"A".repeat(42)}\n`],
   ])("does not set a secret cookie for a %s token", async (_label, token) => {
+    vi.stubEnv("NODE_ENV", "production");
     const response = await invoke(token);
 
     expect(response.status).toBe(303);
     expect(response.headers.get("location")).toBe("https://app.example.com/invite?status=unavailable");
-    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(response.headers.get("set-cookie")).toMatch(
+      /^compliancehub_invitation_token=; Path=\/invite; Max-Age=0; Secure; HttpOnly; SameSite=lax$/,
+    );
+    expect(response.headers.get("set-cookie")).not.toContain(token);
   });
 
   it("applies no-store, no-referrer, and no-index headers to both outcomes", async () => {

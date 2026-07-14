@@ -10,6 +10,8 @@ vi.mock("./actions", () => ({
 import SignInPage from "./sign-in/page";
 import SignUpPage from "./sign-up/page";
 
+const RAW_INVITATION_VALUE = "R".repeat(43);
+
 describe("auth continuation pages", () => {
   afterEach(() => vi.unstubAllEnvs());
 
@@ -27,6 +29,17 @@ describe("auth continuation pages", () => {
 
     expect(document.querySelector('input[name="next"]')).toHaveValue("/app");
     expect(document.body.innerHTML).not.toContain("raw-token");
+  });
+
+  it.each([
+    `/invite?token=${RAW_INVITATION_VALUE}`,
+    `/invite#${RAW_INVITATION_VALUE}`,
+  ])("renders only literal /invite for a continuation containing query/hash data", async (next) => {
+    render(await SignInPage({ searchParams: Promise.resolve({ next }) }));
+
+    expect(document.querySelector('input[name="next"]')).toHaveValue("/invite");
+    expect(screen.getByRole("link", { name: "Create an account" })).toHaveAttribute("href", "/sign-up?next=%2Finvite");
+    expect(document.body.innerHTML).not.toContain(RAW_INVITATION_VALUE);
   });
 
   it("hides unconfigured social providers", async () => {

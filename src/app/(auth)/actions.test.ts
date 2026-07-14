@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const hoisted = vi.hoisted(() => ({ serverClient: null as unknown }));
 const TEST_PASSWORD = Array.from({ length: 12 }, (_value, index) => String(index % 10)).join("");
+const RAW_INVITATION_VALUE = "R".repeat(43);
 
 vi.mock("@/lib/supabase/server", () => ({
   createSupabaseServerClient: () => Promise.resolve(hoisted.serverClient),
@@ -106,6 +107,23 @@ describe("post-auth continuation", () => {
     }));
   });
 
+  it("strips invite query/hash data from password and confirmation continuations", async () => {
+    const auth = authClient();
+    hoisted.serverClient = auth.value;
+
+    const signInError = await signInAction(signInForm(`/invite?token=${RAW_INVITATION_VALUE}`)).then(
+      () => new Error("sign-in action unexpectedly resolved"),
+      (error: unknown) => error as Error,
+    );
+    expect(signInError.message).toBe("REDIRECT:/invite");
+    expect(signInError.message).not.toContain(RAW_INVITATION_VALUE);
+
+    await signUpAction(signUpForm(`/invite#${RAW_INVITATION_VALUE}`)).catch(() => undefined);
+    const signUpPayload = auth.signUp.mock.calls.at(-1)?.[0];
+    expect(signUpPayload.options.emailRedirectTo).toBe("https://app.example.com/auth/callback?next=%2Finvite");
+    expect(JSON.stringify(signUpPayload)).not.toContain(RAW_INVITATION_VALUE);
+  });
+
   it("never includes an unsafe sign-up continuation in the confirmation callback", async () => {
     const auth = authClient();
     hoisted.serverClient = auth.value;
@@ -159,6 +177,18 @@ describe("gated Supabase social sign-in", () => {
       provider: "google",
       options: { redirectTo: "https://app.example.com/auth/callback?next=%2Finvite" },
     });
+  });
+
+  it("strips invite query data from the OAuth callback continuation", async () => {
+    vi.stubEnv("GOOGLE_AUTH_ENABLED", "1");
+    const auth = authClient();
+    hoisted.serverClient = auth.value;
+
+    await signInWithOAuthAction(oauthForm("google", `/invite?token=${RAW_INVITATION_VALUE}`)).catch(() => undefined);
+
+    const oauthPayload = auth.signInWithOAuth.mock.calls[0]?.[0];
+    expect(oauthPayload.options.redirectTo).toBe("https://app.example.com/auth/callback?next=%2Finvite");
+    expect(JSON.stringify(oauthPayload)).not.toContain(RAW_INVITATION_VALUE);
   });
 
   it("requests the required email scope for Microsoft Azure", async () => {

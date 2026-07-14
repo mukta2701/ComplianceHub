@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { isInvitationToken, setInvitationTokenCookie } from "@/lib/invitation-cookie";
+import { clearInvitationTokenResponseCookie, isInvitationToken, setInvitationTokenCookie } from "@/lib/invitation-cookie";
 import { siteUrl } from "@/lib/site-url";
 
 const INVITATION_RESPONSE_HEADERS = {
@@ -17,5 +17,6 @@ export async function GET(
   const response = NextResponse.redirect(destination, { status: 303, headers: INVITATION_RESPONSE_HEADERS });
 
   if (isInvitationToken(token)) setInvitationTokenCookie(response, token);
+  else clearInvitationTokenResponseCookie(response);
   return response;
 }
