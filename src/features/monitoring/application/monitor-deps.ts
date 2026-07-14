@@ -30,9 +30,9 @@ export function buildMonitorDependencies(
 ): MonitorDependencies {
   const today = new Date().toISOString().slice(0, 10);
 
-  const resolveOwners = memoizeOwners(async (organisationId) => {
+  const resolveOperators = memoizeOwners(async (organisationId) => {
     const { data, error } = await supabase.from("memberships")
-      .select("user_id").eq("organisation_id", organisationId).eq("role", "owner");
+      .select("user_id").eq("organisation_id", organisationId).in("role", ["owner", "admin"]);
     if (error) throw error;
     return (data ?? []).map((row) => row.user_id as string);
   });
@@ -46,8 +46,8 @@ export function buildMonitorDependencies(
     },
     postWhatsApp: createTwilioWhatsAppPort(),
     notifyInApp: async (finding: AlertFinding) => {
-      const owners = await resolveOwners(finding.organisationId);
-      for (const userId of owners) {
+      const operators = await resolveOperators(finding.organisationId);
+      for (const userId of operators) {
         const { error } = await supabase.from("notifications").upsert({
           organisation_id: finding.organisationId, user_id: userId, kind: notificationKind(finding.severity),
           subject_type: "monitoring_finding", subject_id: findingKey(finding.checkId, finding.subjectId),
@@ -61,18 +61,20 @@ export function buildMonitorDependencies(
   return {
     listActiveSources: async () => {
       let query = supabase.from("monitor_sources")
-        .select("id,organisation_id,provider,config,access_token").is("revoked_at", null).eq("enabled", true);
+        .select("id,organisation_id,provider,config,access_token,connection_mode,broker_connection_id,broker_provider_config_key")
+        .is("revoked_at", null).eq("enabled", true);
       if (opts.organisationId) query = query.eq("organisation_id", opts.organisationId);
       const { data, error } = await query;
       if (error) throw error;
       return (data ?? []).map((row): MonitorSource => ({
         id: row.id, organisationId: row.organisation_id, provider: row.provider as MonitorProviderKind,
         config: (row.config ?? {}) as Record<string, unknown>, accessToken: decryptSecret(row.access_token) ?? "",
+        connectionMode: row.connection_mode as "sandbox" | "oauth",
+        brokerConnectionId: row.broker_connection_id,
+        brokerProviderConfigKey: row.broker_provider_config_key,
       }));
     },
-    runChecks: (source) => resolveMonitorProvider(source.provider).runChecks({
-      id: source.id, provider: source.provider, config: source.config, accessToken: source.accessToken,
-    }),
+    runChecks: (source) => resolveMonitorProvider(source).runChecks(source),
     listOpenFindingKeys: async (organisationId) => {
       const { data, error } = await supabase.from("monitoring_findings")
         .select("check_id,subject_id").eq("organisation_id", organisationId).in("status", ["open", "acknowledged"]);

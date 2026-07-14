@@ -1,15 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const hoisted = vi.hoisted(() => ({ fetchTicket: vi.fn() }));
+const hoisted = vi.hoisted(() => ({ fetchTicket: vi.fn(), resolve: vi.fn() }));
 vi.mock("./registry", () => ({
-  resolveTicketProvider: () => ({ fetchTicket: hoisted.fetchTicket }),
+  resolveTicketProvider: hoisted.resolve,
 }));
 vi.mock("@/lib/security/secrets", () => ({ decryptSecret: (value: string | null) => value }));
 
 import { syncTickets } from "./sync-run";
 
 describe("syncTickets connection enablement", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    hoisted.resolve.mockReturnValue({ fetchTicket: hoisted.fetchTicket });
+  });
 
   it("does not sync tickets whose connection is disabled", async () => {
     const ticketRows = [{
@@ -60,6 +63,9 @@ describe("syncTickets connection enablement", () => {
     const supabase = { from: vi.fn(() => taskTicketsTable) };
 
     await expect(syncTickets(supabase as never)).resolves.toEqual({ synced: 1, failed: 0, tasksClosed: 0 });
+    expect(hoisted.resolve).toHaveBeenCalledWith(expect.objectContaining({
+      provider: "jira", connectionMode: "oauth",
+    }));
     expect(hoisted.fetchTicket).toHaveBeenCalledWith(expect.objectContaining({
       connectionMode: "oauth",
       brokerConnectionId: "nango-1",

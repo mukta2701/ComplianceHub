@@ -62,4 +62,26 @@ describe("buildMonitorDependencies WhatsApp delivery", () => {
     expect(builder.eq).toHaveBeenCalledWith("enabled", true);
     expect(builder.is).toHaveBeenCalledWith("revoked_at", null);
   });
+
+  it("delivers in-app findings to both Owner and Admin operators", async () => {
+    const membershipBuilder: Record<string, ReturnType<typeof vi.fn>> = {};
+    membershipBuilder.select = vi.fn(() => membershipBuilder);
+    membershipBuilder.eq = vi.fn(() => membershipBuilder);
+    membershipBuilder.in = vi.fn(() => membershipBuilder);
+    membershipBuilder.then = vi.fn((resolve) => Promise.resolve({
+      data: [{ user_id: "owner-1" }, { user_id: "admin-1" }], error: null,
+    }).then(resolve));
+    const upsert = vi.fn().mockResolvedValue({ error: null });
+    const supabase = {
+      from: vi.fn((table: string) => table === "memberships" ? membershipBuilder : { upsert }),
+    } as unknown as SupabaseClient;
+
+    const deps = buildMonitorDependencies(supabase);
+    await deps.notifyInApp(finding);
+
+    expect(membershipBuilder.in).toHaveBeenCalledWith("role", ["owner", "admin"]);
+    expect(upsert).toHaveBeenCalledTimes(2);
+    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({ user_id: "owner-1" }), expect.anything());
+    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({ user_id: "admin-1" }), expect.anything());
+  });
 });

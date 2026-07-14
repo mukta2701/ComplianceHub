@@ -11,6 +11,12 @@ function isAtlassianCloudUrl(value: string): boolean {
   }
 }
 
+const githubOwnerSchema = z.string().trim().min(1, "GitHub owner is required").max(39)
+  .regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/, "GitHub owner contains unsupported characters");
+const githubRepoSchema = z.string().trim().min(1, "GitHub repository is required").max(100)
+  .regex(/^[A-Za-z0-9._-]+$/, "GitHub repository contains unsupported characters")
+  .refine((value) => value !== "." && value !== "..", "GitHub repository must not be a dot path");
+
 export const connectionInputSchema = z.object({
   provider: z.enum(["jira", "github"]),
   label: z.string().trim().max(160).default(""),
@@ -30,18 +36,20 @@ export const connectionInputSchema = z.object({
 }, { message: "Jira base URL must be an https://<your-domain>.atlassian.net address", path: ["baseUrl"] });
 export type ConnectionInput = z.infer<typeof connectionInputSchema>;
 
-export const connectionTargetInputSchema = z.discriminatedUnion("provider", [
-  z.object({
+export const githubConnectionTargetSchema = z.object({
     provider: z.literal("github"),
-    owner: z.string().trim().min(1, "GitHub owner is required").max(120),
-    repo: z.string().trim().min(1, "GitHub repository is required").max(120),
-  }),
-  z.object({
+    owner: githubOwnerSchema,
+    repo: githubRepoSchema,
+  });
+export const jiraConnectionTargetSchema = z.object({
     provider: z.literal("jira"),
     baseUrl: z.string().trim().min(1, "Jira base URL is required").max(300)
       .refine(isAtlassianCloudUrl, "Jira base URL must be an Atlassian Cloud HTTPS URL"),
     projectKey: z.string().trim().min(1, "Jira project key is required").max(80)
       .regex(/^[A-Z][A-Z0-9_]*$/, "Jira project key must use uppercase letters, numbers, or underscores"),
-  }),
+  });
+export const connectionTargetInputSchema = z.discriminatedUnion("provider", [
+  githubConnectionTargetSchema,
+  jiraConnectionTargetSchema,
 ]);
 export type ConnectionTargetInput = z.infer<typeof connectionTargetInputSchema>;

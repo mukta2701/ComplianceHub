@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createNangoConnectSession,
+  deleteNangoConnection,
+  nangoProxyFetch,
   nangoProviderConfig,
+  resolveJiraOAuthTarget,
+  verifyGitHubOAuthTarget,
   verifyNangoConnection,
 } from "./nango";
 
@@ -26,7 +30,11 @@ describe("Nango OAuth brokerage boundary", () => {
     vi.stubEnv("NANGO_SECRET_KEY", "nango-secret-value");
     vi.stubEnv("NANGO_GITHUB_INTEGRATION_ID", "github-prod");
     const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      data: { token: connectSessionToken, expires_at: "2026-07-14T12:00:00Z" },
+      data: {
+        token: connectSessionToken,
+        connect_link: "https://api.nango.dev/connect/session-fixture",
+        expires_at: "2026-07-14T12:00:00Z",
+      },
     }), { status: 201, headers: { "content-type": "application/json" } }));
 
     const result = await createNangoConnectSession({
@@ -67,23 +75,118 @@ describe("Nango OAuth brokerage boundary", () => {
     })).rejects.toThrow("Could not start provider authorization");
   });
 
-  it("verifies the broker reference with a safe provider identity request", async () => {
+  it("binds a broker reference to the exact active end user and organisation", async () => {
+    vi.stubEnv("NANGO_SECRET_KEY", "nango-secret-value");
+    vi.stubEnv("NANGO_GITHUB_INTEGRATION_ID", "github-prod");
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      connections: [{
+        id: 42,
+        connection_id: "connection-1",
+        provider_config_key: "github-prod",
+        created: "2026-07-14T12:00:00Z",
+        metadata: null,
+        provider: "github",
+        errors: [],
+        end_user: {
+          id: "user-1",
+          display_name: "Owner",
+          email: "owner@example.test",
+          tags: null,
+          organization: { id: "org-1", display_name: "Example Ltd" },
+        },
+        tags: {},
+      }],
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+
+    await expect(verifyNangoConnection({
+      provider: "github",
+      connectionId: "connection-1",
+      providerConfigKey: "github-prod",
+      endUserId: "user-1",
+      organisationId: "org-1",
+      fetchImpl,
+    })).resolves.toBeUndefined();
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://api.nango.dev/connection?connectionId=connection-1&integrationId=github-prod&endUserId=user-1&endUserOrganizationId=org-1",
+      expect.objectContaining({
+      method: "GET",
+      headers: { Authorization: "Bearer nango-secret-value" },
+    }));
+  });
+
+  it("rejects a broker reference returned for another active user", async () => {
+    vi.stubEnv("NANGO_SECRET_KEY", "nango-secret-value");
+    vi.stubEnv("NANGO_GITHUB_INTEGRATION_ID", "github-prod");
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      connections: [{
+        id: 42, connection_id: "connection-1", provider_config_key: "github-prod",
+        created: "2026-07-14T12:00:00Z", metadata: null, provider: "github", errors: [], tags: {},
+        end_user: {
+          id: "other-user", display_name: null, email: null, tags: null,
+          organization: { id: "org-1", display_name: null },
+        },
+      }],
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+
+    await expect(verifyNangoConnection({
+      provider: "github", connectionId: "connection-1", providerConfigKey: "github-prod",
+      endUserId: "user-1", organisationId: "org-1", fetchImpl,
+    })).rejects.toThrow("Provider authorization is not bound to the active workspace operator");
+  });
+
+  it.each(["%2e%2e", "%2Fadmin", "repos?admin=true", "repos#admin"])(
+    "rejects unsafe proxy segment %s before fetch",
+    async (unsafeSegment) => {
+      vi.stubEnv("NANGO_SECRET_KEY", "nango-secret-value");
+      vi.stubEnv("NANGO_GITHUB_INTEGRATION_ID", "github-prod");
+      const fetchImpl = vi.fn();
+
+      await expect(nangoProxyFetch({
+        provider: "github",
+        connectionId: "connection-1",
+        providerConfigKey: "github-prod",
+        pathSegments: [unsafeSegment],
+        fetchImpl,
+      })).rejects.toThrow("Invalid provider proxy path segment");
+      expect(fetchImpl).not.toHaveBeenCalled();
+    },
+  );
+
+  it("encodes safe proxy segments, preserves the proxy root, and strips protected headers", async () => {
     vi.stubEnv("NANGO_SECRET_KEY", "nango-secret-value");
     vi.stubEnv("NANGO_GITHUB_INTEGRATION_ID", "github-prod");
     const fetchImpl = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
 
-    await expect(verifyNangoConnection({
-      provider: "github", connectionId: "connection-1", providerConfigKey: "github-prod", fetchImpl,
-    })).resolves.toBeUndefined();
+    await nangoProxyFetch({
+      provider: "github",
+      connectionId: "connection-1",
+      providerConfigKey: "github-prod",
+      pathSegments: ["repos", "acme", "isms", "issues"],
+      query: { state: "open" },
+      init: {
+        headers: {
+          Authorization: "caller-secret",
+          "Connection-Id": "wrong-connection",
+          "Provider-Config-Key": "wrong-provider",
+          "Base-Url-Override": "http://169.254.169.254",
+          Accept: "application/json",
+        },
+      },
+      fetchImpl,
+    });
 
-    expect(fetchImpl).toHaveBeenCalledWith("https://api.nango.dev/proxy/user", expect.objectContaining({
-      method: "GET",
-      headers: expect.objectContaining({
-        Authorization: "Bearer nango-secret-value",
-        "Connection-Id": "connection-1",
-        "Provider-Config-Key": "github-prod",
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://api.nango.dev/proxy/repos/acme/isms/issues?state=open",
+      expect.objectContaining({
+        headers: {
+          accept: "application/json",
+          Authorization: "Bearer nango-secret-value",
+          "Connection-Id": "connection-1",
+          "Provider-Config-Key": "github-prod",
+        },
       }),
-    }));
+    );
   });
 
   it("rejects a client-reported provider key outside the configured allowlist", async () => {
@@ -92,7 +195,8 @@ describe("Nango OAuth brokerage boundary", () => {
     const fetchImpl = vi.fn();
 
     await expect(verifyNangoConnection({
-      provider: "github", connectionId: "connection-1", providerConfigKey: "jira-prod", fetchImpl,
+      provider: "github", connectionId: "connection-1", providerConfigKey: "jira-prod",
+      endUserId: "user-1", organisationId: "org-1", fetchImpl,
     })).rejects.toThrow("Provider authorization does not match this deployment");
     expect(fetchImpl).not.toHaveBeenCalled();
   });
@@ -104,8 +208,130 @@ describe("Nango OAuth brokerage boundary", () => {
     expect(nangoProviderConfig("jira")).toEqual({
       baseUrl: "https://nango.example.test",
       integrationId: "jira-prod",
-      verificationPath: "rest/api/3/myself",
       secretKey: null,
     });
+  });
+
+  it("rejects a Nango base URL with credentials, query, fragment, or path", () => {
+    for (const unsafe of [
+      "https://user@example.test",
+      "https://nango.example.test/evil",
+      "https://nango.example.test?target=evil",
+      "https://nango.example.test#evil",
+    ]) {
+      vi.stubEnv("NANGO_BASE_URL", unsafe);
+      expect(() => nangoProviderConfig("github")).toThrow("NANGO_BASE_URL must be an origin");
+    }
+  });
+
+  it("matches a Jira tenant to accessible resources and verifies the selected project", async () => {
+    vi.stubEnv("NANGO_SECRET_KEY", "nango-secret-value");
+    vi.stubEnv("NANGO_JIRA_INTEGRATION_ID", "jira-prod");
+    const cloudId = "1324a887-45db-4bf4-8e99-ef0ff456d421";
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify([{
+        id: cloudId,
+        name: "Example Jira",
+        url: "https://acme.atlassian.net",
+        scopes: ["read:jira-work", "write:jira-work"],
+        avatarUrl: "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/jira.png",
+      }]), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "10000", key: "SEC", name: "Security" }), {
+        status: 200, headers: { "content-type": "application/json" },
+      }));
+
+    await expect(resolveJiraOAuthTarget({
+      connectionId: "connection-1", providerConfigKey: "jira-prod",
+      baseUrl: "https://acme.atlassian.net", projectKey: "SEC", fetchImpl,
+    })).resolves.toEqual({ cloudId });
+
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe("https://api.nango.dev/proxy/oauth/token/accessible-resources");
+    expect(fetchImpl.mock.calls[1]?.[0]).toBe(
+      `https://api.nango.dev/proxy/ex/jira/${cloudId}/rest/api/3/project/SEC`,
+    );
+  });
+
+  it("rejects a Jira tenant that is not in the connection's accessible resources", async () => {
+    vi.stubEnv("NANGO_SECRET_KEY", "nango-secret-value");
+    vi.stubEnv("NANGO_JIRA_INTEGRATION_ID", "jira-prod");
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify([{
+      id: "1324a887-45db-4bf4-8e99-ef0ff456d421", name: "Other Jira",
+      url: "https://other.atlassian.net", scopes: ["read:jira-work"],
+    }]), { status: 200, headers: { "content-type": "application/json" } }));
+
+    await expect(resolveJiraOAuthTarget({
+      connectionId: "connection-1", providerConfigKey: "jira-prod",
+      baseUrl: "https://acme.atlassian.net", projectKey: "SEC", fetchImpl,
+    })).rejects.toThrow("Jira site is not accessible through this authorization");
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it("requires an exact root Jira tenant URL match, not only the same origin", async () => {
+    vi.stubEnv("NANGO_SECRET_KEY", "nango-secret-value");
+    vi.stubEnv("NANGO_JIRA_INTEGRATION_ID", "jira-prod");
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify([{
+      id: "1324a887-45db-4bf4-8e99-ef0ff456d421", name: "Malformed Jira",
+      url: "https://acme.atlassian.net/other", scopes: ["read:jira-work"],
+    }]), { status: 200, headers: { "content-type": "application/json" } }));
+
+    await expect(resolveJiraOAuthTarget({
+      connectionId: "connection-1", providerConfigKey: "jira-prod",
+      baseUrl: "https://acme.atlassian.net", projectKey: "SEC", fetchImpl,
+    })).rejects.toThrow("Jira site is not accessible through this authorization");
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it("verifies a GitHub OAuth repository target through the broker", async () => {
+    vi.stubEnv("NANGO_SECRET_KEY", "nango-secret-value");
+    vi.stubEnv("NANGO_GITHUB_INTEGRATION_ID", "github-prod");
+    const fetchImpl = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+
+    await expect(verifyGitHubOAuthTarget({
+      connectionId: "connection-1", providerConfigKey: "github-prod", owner: "acme", repo: "isms", fetchImpl,
+    })).resolves.toBeUndefined();
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe("https://api.nango.dev/proxy/repos/acme/isms");
+  });
+
+  it("deletes a broker connection before local revoke and treats missing as idempotent", async () => {
+    vi.stubEnv("NANGO_SECRET_KEY", "nango-secret-value");
+    vi.stubEnv("NANGO_GITHUB_INTEGRATION_ID", "github-prod");
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true }), { status: 200 }))
+      .mockResolvedValueOnce(new Response("", { status: 404 }));
+
+    await expect(deleteNangoConnection({
+      provider: "github", connectionId: "connection-1", providerConfigKey: "github-prod", fetchImpl,
+    })).resolves.toBeUndefined();
+    await expect(deleteNangoConnection({
+      provider: "github", connectionId: "connection-1", providerConfigKey: "github-prod", fetchImpl,
+    })).resolves.toBeUndefined();
+
+    expect(fetchImpl).toHaveBeenNthCalledWith(1,
+      "https://api.nango.dev/connection/connection-1?provider_config_key=github-prod",
+      expect.objectContaining({ method: "DELETE", headers: { Authorization: "Bearer nango-secret-value" } }),
+    );
+  });
+
+  it("fails closed when broker connection deletion fails", async () => {
+    vi.stubEnv("NANGO_SECRET_KEY", "nango-secret-value");
+    vi.stubEnv("NANGO_GITHUB_INTEGRATION_ID", "github-prod");
+    const fetchImpl = vi.fn().mockResolvedValue(new Response("provider unavailable", { status: 503 }));
+
+    await expect(deleteNangoConnection({
+      provider: "github", connectionId: "connection-1", providerConfigKey: "github-prod", fetchImpl,
+    })).rejects.toThrow("Provider connection could not be retired");
+  });
+
+  it("fails closed when broker deletion reports an unsuccessful result", async () => {
+    vi.stubEnv("NANGO_SECRET_KEY", "nango-secret-value");
+    vi.stubEnv("NANGO_GITHUB_INTEGRATION_ID", "github-prod");
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ success: false }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }));
+
+    await expect(deleteNangoConnection({
+      provider: "github", connectionId: "connection-1", providerConfigKey: "github-prod", fetchImpl,
+    })).rejects.toThrow("Provider connection could not be retired");
   });
 });

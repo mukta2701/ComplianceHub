@@ -30,7 +30,7 @@ type Connection = {
   id: string;
   provider: "github" | "jira";
   label: string;
-  config: { owner?: string; repo?: string; baseUrl?: string; projectKey?: string };
+  config: { owner?: string; repo?: string; baseUrl?: string; projectKey?: string; cloudId?: string };
   connection_mode: "sandbox" | "oauth";
   enabled: boolean;
   created_at: string;
@@ -90,8 +90,8 @@ function OAuthTargetForm({ connection }: { connection: Connection }) {
     <input type="hidden" name="provider" value={connection.provider} />
     <div className="form-grid">
       {connection.provider === "github" ? <>
-        <label>GitHub owner<input name="owner" maxLength={120} placeholder="acme" required /></label>
-        <label>Repository<input name="repo" maxLength={120} placeholder="isms" required /></label>
+        <label>GitHub owner<input name="owner" maxLength={39} placeholder="acme" required /></label>
+        <label>Repository<input name="repo" maxLength={100} placeholder="isms" required /></label>
       </> : <>
         <label>Jira Cloud URL<input name="baseUrl" type="url" maxLength={300} placeholder="https://acme.atlassian.net" required /></label>
         <label>Project key<input name="projectKey" maxLength={80} placeholder="SEC" required /></label>
@@ -153,7 +153,7 @@ export default async function IntegrationsPage() {
         <div className="form-grid" style={{ marginBottom: "16px" }}>
           <div className="soft-panel" style={{ padding: "14px" }}>
             <strong>GitHub</strong>
-            <p style={{ fontSize: "12px", color: "#596273" }}>GitHub Issues and authorized provider API access.</p>
+            <p style={{ fontSize: "12px", color: "#596273" }}>GitHub Issues plus branch, review, secret-scanning and organisation MFA checks.</p>
             <OAuthConnectButton provider="github" />
           </div>
           <div className="soft-panel" style={{ padding: "14px" }}>
@@ -169,8 +169,11 @@ export default async function IntegrationsPage() {
         {liveConnections.length > 0 ? <ul className="monitor-list">
           {liveConnections.map((connection) => {
             const label = connection.label || PROVIDER_LABELS[connection.provider];
-            const pendingTarget = connection.connection_mode === "oauth" && !connection.enabled
-              && Object.keys(connection.config ?? {}).length === 0;
+            const pendingTarget = connection.connection_mode === "oauth" && !connection.enabled && (
+              connection.provider === "github"
+                ? !(connection.config?.owner && connection.config?.repo)
+                : !connection.config?.cloudId
+            );
             return <li key={connection.id} style={{ alignItems: "flex-start", flexWrap: "wrap" }}>
               <span className="ml-body" style={{ flex: "1 1 260px" }}>
                 <strong>{label}</strong>
@@ -193,7 +196,7 @@ export default async function IntegrationsPage() {
       </Card>
 
       <Card style={{ padding: "18px", marginBottom: "16px" }}>
-        <div className="card-head"><div><h3>Monitoring sources</h3><p>Enabled sources are checked and shown to Members.</p></div></div>
+        <div className="card-head"><div><h3>Monitoring sources</h3><p>Enabling an OAuth GitHub target automatically adds its fixed compliance checks here. Enabled sources are shown to Members.</p></div></div>
         {liveMonitorSources.length > 0 ? <ul className="monitor-list">
           {liveMonitorSources.map((source) => <li key={source.id} style={{ flexWrap: "wrap" }}>
             <span className="ml-body"><strong>{source.label}</strong><span className="ml-meta">
@@ -243,8 +246,8 @@ export default async function IntegrationsPage() {
             <label>Label<input name="label" maxLength={160} placeholder="Engineering Jira" /></label>
             <label>Jira Cloud URL<input name="baseUrl" maxLength={300} placeholder="https://acme.atlassian.net" /></label>
             <label>Jira project key<input name="projectKey" maxLength={80} placeholder="ENG" /></label>
-            <label>GitHub owner<input name="owner" maxLength={120} placeholder="acme" /></label>
-            <label>GitHub repo<input name="repo" maxLength={120} placeholder="isms" /></label>
+            <label>GitHub owner<input name="owner" maxLength={39} placeholder="acme" /></label>
+            <label>GitHub repo<input name="repo" maxLength={100} placeholder="isms" /></label>
           </div>
           <label>Developer token (optional)<input name="accessToken" maxLength={4000} type="password" autoComplete="off" /></label>
           <button className="button secondary">Add sandbox tracker</button>
@@ -252,8 +255,8 @@ export default async function IntegrationsPage() {
         <h3 style={{ fontSize: "15px", marginTop: "20px" }}>Sandbox monitoring source</h3>
         <form action={addMonitorSourceAction} className="app-form">
           <div className="form-grid">
-            <label>GitHub owner<input name="owner" maxLength={120} placeholder="acme" required /></label>
-            <label>Repository<input name="repo" maxLength={120} placeholder="isms" required /></label>
+            <label>GitHub owner<input name="owner" maxLength={39} placeholder="acme" required /></label>
+            <label>Repository<input name="repo" maxLength={100} placeholder="isms" required /></label>
             <label>Label<input name="label" maxLength={160} placeholder="Production repository" /></label>
           </div>
           <label>Developer token (optional)<input name="accessToken" maxLength={4000} type="password" autoComplete="off" /></label>

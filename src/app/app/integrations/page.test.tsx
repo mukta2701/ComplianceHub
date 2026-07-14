@@ -52,6 +52,7 @@ describe("Settings Connections page", () => {
 
     expect(screen.getByRole("heading", { name: "Systems" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Connect GitHub with OAuth" })).toBeInTheDocument();
+    expect(screen.getByText("GitHub Issues plus branch, review, secret-scanning and organisation MFA checks.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Connect Jira with OAuth" })).toBeInTheDocument();
     expect(screen.getByText("Authorized · setup required")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save target and enable GitHub connection" })).toBeInTheDocument();

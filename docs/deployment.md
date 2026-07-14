@@ -31,7 +31,6 @@ Create a Vercel project from this repo and set these environment variables (name
 | `INVITATION_FROM_EMAIL` | for invitation delivery | **Server-only.** Verified sender, e.g. `ComplianceHub <invites@notify.example.com>`. |
 | `GOOGLE_AUTH_ENABLED` | after Google setup | Server-side flag. Leave unset until the Google + Supabase checkpoints below are complete, then set to `1`. |
 | `MICROSOFT_AUTH_ENABLED` | after Microsoft setup | Server-side flag. Leave unset until the Entra + Supabase checkpoints below are complete, then set to `1`. |
-| `INTEGRATIONS_LIVE` | no | Leave **unset** to use the built-in sandbox tracker. Set to `1` only after step 5. |
 | `NANGO_BASE_URL` | for provider OAuth | **Server-only.** Defaults to `https://api.nango.dev`; set only when using another reviewed Nango deployment. |
 | `NANGO_SECRET_KEY` | for provider OAuth | **Server-only. Never `NEXT_PUBLIC_*`.** Creates short-lived Connect sessions and authorizes Nango Proxy calls. |
 | `NANGO_GITHUB_INTEGRATION_ID` | for GitHub OAuth | Nango integration ID/unique key configured for the reviewed GitHub OAuth app. |
@@ -42,7 +41,7 @@ Create a Vercel project from this repo and set these environment variables (name
 `vercel.json` declares two Vercel Cron entries; you only need `CRON_SECRET` set for them to work:
 
 - `GET /api/cron/daily` — `0 6 * * *` (daily). The evidence-freshness + policy-review sweep: raises tasks and notifications when evidence goes stale or a policy's review date passes. Idempotent (notifications deduped per day; a new task is opened only when none is already open for that item), so retries and manual runs are safe.
-- `GET /api/cron/integrations-sync` — `0 * * * *` (hourly). Polls external ticket status back for connected trackers. A no-op while there are no due tickets, and uses the sandbox provider unless `INTEGRATIONS_LIVE=1`.
+- `GET /api/cron/integrations-sync` — `0 * * * *` (hourly). Polls external ticket status back for connected trackers. Sandbox rows always use the network-free fake provider; verified OAuth rows use their Nango-backed provider automatically.
 
 Vercel Cron sends `Authorization: Bearer <CRON_SECRET>`; each route rejects any request whose bearer token does not match. Manual invocation in development:
 
@@ -112,8 +111,7 @@ scripts, referrer overrides, or raw-token query/form handling to invitation page
 ## 5. Real Jira / GitHub integrations through Nango (optional) **(you — external authorization checkpoint)**
 
 ComplianceHub contains the tested server boundary and Connect UI, but it cannot
-create provider apps, accept consent, or enter deployment secrets for you. Keep
-`INTEGRATIONS_LIVE` unset until every staging checkpoint below passes.
+create provider apps, accept consent, or enter deployment secrets for you.
 
 1. Create a Nango environment. Register a GitHub OAuth app and Jira OAuth app with
    the callback URLs and least-privilege scopes shown by Nango. Complete any
@@ -127,17 +125,25 @@ create provider apps, accept consent, or enter deployment secrets for you. Keep
    Authorize one provider through its OAuth button. ComplianceHub creates a
    short-lived Connect session bound to the signed-in user and workspace; the
    browser never receives `NANGO_SECRET_KEY`.
-4. After Nango reports success, ComplianceHub verifies the opaque connection
-   reference by making a safe provider identity call through Nango Proxy. Only
-   then is the reference stored. Provider OAuth access/refresh tokens remain in
-   Nango and are not stored in `integration_connections`.
+4. After Nango reports success, ComplianceHub reads Nango's credential-free
+   connection metadata and requires an exact connection ID, integration ID,
+   provider, signed-in user ID, and workspace ID match. Only then is the opaque
+   reference stored. A deployment-wide uniqueness constraint prevents the same
+   broker reference being replayed into another workspace. Provider OAuth
+   access/refresh tokens remain in Nango and are not stored locally.
 5. The new record remains **Authorized · setup required**. Enter a GitHub
-   owner/repository or an Atlassian Cloud URL/project key. Database constraints
-   prevent a forged request from enabling an OAuth row before this target is
-   valid.
-6. Set `INTEGRATIONS_LIVE=1` in staging. Create a remediation ticket and run the
-   integration sync; verify the ticket URL/status and Nango request logs. Disabled
-   and revoked connections must remain no-ops.
+   owner/repository or an Atlassian Cloud URL/project key. ComplianceHub verifies
+   GitHub repository access. For Jira it matches the submitted tenant against
+   Atlassian `accessible-resources`, stores the verified cloud ID, and verifies
+   project access. Database constraints reject unverified or malformed targets.
+6. In staging, create a remediation ticket and run the integration sync; verify
+   the ticket URL/status and Nango request logs. Jira 3LO calls must appear under
+   `api.atlassian.com/ex/jira/{cloudId}`. Enabling GitHub also creates a linked
+   OAuth monitoring source for branch protection, required reviews, secret
+   scanning, and organisation MFA. Checks that GitHub hides for the granted
+   scopes are reported unavailable and are never fabricated as passing.
+   Disabled and revoked connections must remain no-ops; revocation must retire
+   the Nango connection before local cleanup succeeds.
 7. Repeat the flow in production only after staging succeeds. Record who approved
    the provider scopes and schedule rotation/review of the Nango secret and OAuth
    applications.

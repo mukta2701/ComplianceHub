@@ -1,29 +1,32 @@
 import type { TicketProvider, TicketConnection, CreateTicketInput } from "@/features/integrations/domain/provider";
 import { nangoProxyFetch } from "./nango";
+import { githubConnectionTargetSchema } from "./connection";
 
 // Thin GitHub Issues adapter. config = { owner, repo }. Requires a real token in
 // connection.accessToken (user go-live step). Not network-tested.
-function repoPath(conn: TicketConnection): string {
+function repository(conn: TicketConnection): { owner: string; repo: string } {
   const c = conn.config as { owner?: string; repo?: string };
-  return `${String(c.owner ?? "")}/${String(c.repo ?? "")}`;
+  const parsed = githubConnectionTargetSchema.parse({ provider: "github", owner: c.owner, repo: c.repo });
+  return { owner: parsed.owner, repo: parsed.repo };
 }
 
-function githubFetch(conn: TicketConnection, path: string, init: RequestInit = {}) {
+function githubFetch(conn: TicketConnection, pathSegments: string[], init: RequestInit = {}) {
   if (conn.connectionMode === "oauth") {
     return nangoProxyFetch({
       provider: "github",
       connectionId: conn.brokerConnectionId,
       providerConfigKey: conn.brokerProviderConfigKey,
-      path,
+      pathSegments,
       init,
     });
   }
-  return fetch(`https://api.github.com/${path}`, init);
+  return fetch(`https://api.github.com/${pathSegments.map((segment) => encodeURIComponent(segment)).join("/")}`, init);
 }
 
 export const githubProvider: TicketProvider = {
   async createTicket(conn: TicketConnection, input: CreateTicketInput) {
-    const res = await githubFetch(conn, `repos/${repoPath(conn)}/issues`, {
+    const { owner, repo } = repository(conn);
+    const res = await githubFetch(conn, ["repos", owner, repo, "issues"], {
       method: "POST",
       headers: { authorization: `Bearer ${conn.accessToken}`, accept: "application/vnd.github+json", "content-type": "application/json" },
       body: JSON.stringify({ title: input.title, body: input.body }),
@@ -33,7 +36,8 @@ export const githubProvider: TicketProvider = {
     return { externalId: String(data.number), url: data.html_url, status: data.state === "open" ? "To Do" : "Done" };
   },
   async fetchTicket(conn: TicketConnection, externalId: string) {
-    const res = await githubFetch(conn, `repos/${repoPath(conn)}/issues/${encodeURIComponent(externalId)}`, {
+    const { owner, repo } = repository(conn);
+    const res = await githubFetch(conn, ["repos", owner, repo, "issues", externalId], {
       headers: { authorization: `Bearer ${conn.accessToken}`, accept: "application/vnd.github+json" },
     });
     if (!res.ok) throw new Error(`GitHub fetchTicket failed: ${res.status}`);

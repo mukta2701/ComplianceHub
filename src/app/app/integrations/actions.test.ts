@@ -9,7 +9,10 @@ const hoisted = vi.hoisted(() => ({
   encryptSecret: vi.fn((value: string | null) => value),
   revalidatePath: vi.fn(),
   createNangoConnectSession: vi.fn(),
+  deleteNangoConnection: vi.fn(),
+  resolveJiraOAuthTarget: vi.fn(),
   verifyNangoConnection: vi.fn(),
+  verifyGitHubOAuthTarget: vi.fn(),
 }));
 
 vi.mock("@/lib/app-context", () => ({ requireAppContext: () => Promise.resolve(hoisted.ctx) }));
@@ -17,7 +20,10 @@ vi.mock("@/lib/security/rate-limit", () => ({ enforceRateLimit: hoisted.enforceR
 vi.mock("@/lib/security/secrets", () => ({ encryptSecret: hoisted.encryptSecret }));
 vi.mock("@/features/integrations/application/nango", () => ({
   createNangoConnectSession: hoisted.createNangoConnectSession,
+  deleteNangoConnection: hoisted.deleteNangoConnection,
+  resolveJiraOAuthTarget: hoisted.resolveJiraOAuthTarget,
   verifyNangoConnection: hoisted.verifyNangoConnection,
+  verifyGitHubOAuthTarget: hoisted.verifyGitHubOAuthTarget,
 }));
 vi.mock("next/cache", () => ({ revalidatePath: hoisted.revalidatePath }));
 
@@ -27,6 +33,7 @@ import {
   addMonitorSourceAction,
   confirmProviderAuthorizationAction,
   configureOAuthConnectionAction,
+  revokeConnectionAction,
   setIntegrationConnectionEnabledAction,
   setAlertChannelEnabledAction,
   setMonitorSourceEnabledAction,
@@ -47,7 +54,10 @@ describe("integration connection access", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     hoisted.createNangoConnectSession.mockResolvedValue({ configured: false });
+    hoisted.deleteNangoConnection.mockResolvedValue(undefined);
+    hoisted.resolveJiraOAuthTarget.mockResolvedValue({ cloudId: "1324a887-45db-4bf4-8e99-ef0ff456d421" });
     hoisted.verifyNangoConnection.mockResolvedValue(undefined);
+    hoisted.verifyGitHubOAuthTarget.mockResolvedValue(undefined);
   });
 
   it("rejects members before writing connection credentials", async () => {
@@ -132,6 +142,8 @@ describe("integration connection access", () => {
 
     expect(hoisted.verifyNangoConnection).toHaveBeenCalledWith({
       provider: "github", connectionId: "connection-1", providerConfigKey: "github-prod",
+      endUserId: USER_ID,
+      organisationId: ORGANISATION_ID,
     });
     expect(insert).toHaveBeenCalledWith({
       organisation_id: ORGANISATION_ID,
@@ -172,7 +184,17 @@ describe("integration connection access", () => {
     builder.update = vi.fn(() => builder);
     builder.eq = vi.fn(() => builder);
     builder.select = vi.fn(() => builder);
-    builder.maybeSingle = vi.fn().mockResolvedValue({ data: { id: "10000000-0000-4000-8000-000000000099" }, error: null });
+    builder.is = vi.fn(() => builder);
+    builder.maybeSingle = vi.fn()
+      .mockResolvedValueOnce({
+        data: {
+          id: "10000000-0000-4000-8000-000000000099",
+          broker_connection_id: "connection-1",
+          broker_provider_config_key: "github-prod",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({ data: { id: "10000000-0000-4000-8000-000000000099" }, error: null });
     hoisted.ctx = {
       supabase: { from: vi.fn(() => builder) }, user: { id: USER_ID },
       organisation: { id: ORGANISATION_ID, name: "Example Ltd" }, membership: { role: "owner" },
@@ -184,10 +206,110 @@ describe("integration connection access", () => {
     form.set("repo", "app");
 
     await expect(configureOAuthConnectionAction(form)).resolves.toBeUndefined();
+    expect(hoisted.verifyGitHubOAuthTarget).toHaveBeenCalledWith({
+      connectionId: "connection-1", providerConfigKey: "github-prod", owner: "compliancehub", repo: "app",
+    });
     expect(builder.update).toHaveBeenCalledWith({ config: { owner: "compliancehub", repo: "app" }, enabled: true });
     expect(builder.eq).toHaveBeenCalledWith("organisation_id", ORGANISATION_ID);
     expect(builder.eq).toHaveBeenCalledWith("connection_mode", "oauth");
     expect(builder.eq).toHaveBeenCalledWith("provider", "github");
+  });
+
+  it("stores a verified Jira cloud ID from accessible resources before enabling", async () => {
+    const builder: Record<string, ReturnType<typeof vi.fn>> = {};
+    builder.update = vi.fn(() => builder);
+    builder.eq = vi.fn(() => builder);
+    builder.is = vi.fn(() => builder);
+    builder.select = vi.fn(() => builder);
+    builder.maybeSingle = vi.fn()
+      .mockResolvedValueOnce({
+        data: {
+          id: "10000000-0000-4000-8000-000000000099",
+          broker_connection_id: "connection-1",
+          broker_provider_config_key: "jira-prod",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({ data: { id: "10000000-0000-4000-8000-000000000099" }, error: null });
+    hoisted.ctx = {
+      supabase: { from: vi.fn(() => builder) }, user: { id: USER_ID },
+      organisation: { id: ORGANISATION_ID, name: "Example Ltd" }, membership: { role: "admin" },
+    };
+    const form = new FormData();
+    form.set("id", "10000000-0000-4000-8000-000000000099");
+    form.set("provider", "jira");
+    form.set("baseUrl", "https://acme.atlassian.net");
+    form.set("projectKey", "SEC");
+
+    await configureOAuthConnectionAction(form);
+
+    expect(hoisted.resolveJiraOAuthTarget).toHaveBeenCalledWith({
+      connectionId: "connection-1", providerConfigKey: "jira-prod",
+      baseUrl: "https://acme.atlassian.net", projectKey: "SEC",
+    });
+    expect(builder.update).toHaveBeenCalledWith({
+      config: {
+        baseUrl: "https://acme.atlassian.net", projectKey: "SEC",
+        cloudId: "1324a887-45db-4bf4-8e99-ef0ff456d421",
+      },
+      enabled: true,
+    });
+  });
+
+  it("retires the remote broker connection before locally revoking it", async () => {
+    const builder: Record<string, ReturnType<typeof vi.fn>> = {};
+    builder.update = vi.fn(() => builder);
+    builder.eq = vi.fn(() => builder);
+    builder.is = vi.fn(() => builder);
+    builder.select = vi.fn(() => builder);
+    builder.maybeSingle = vi.fn()
+      .mockResolvedValueOnce({
+        data: {
+          id: "10000000-0000-4000-8000-000000000099", provider: "github", connection_mode: "oauth",
+          broker_connection_id: "connection-1", broker_provider_config_key: "github-prod",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({ data: { id: "10000000-0000-4000-8000-000000000099" }, error: null });
+    hoisted.ctx = {
+      supabase: { from: vi.fn(() => builder) }, user: { id: USER_ID },
+      organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
+    };
+    const form = new FormData();
+    form.set("id", "10000000-0000-4000-8000-000000000099");
+
+    await revokeConnectionAction(form);
+
+    expect(hoisted.deleteNangoConnection).toHaveBeenCalledWith({
+      provider: "github", connectionId: "connection-1", providerConfigKey: "github-prod",
+    });
+    expect(hoisted.deleteNangoConnection.mock.invocationCallOrder[0])
+      .toBeLessThan(builder.update.mock.invocationCallOrder[0]);
+  });
+
+  it("does not locally revoke when retiring the remote broker fails", async () => {
+    hoisted.deleteNangoConnection.mockRejectedValue(new Error("Provider connection could not be retired"));
+    const builder: Record<string, ReturnType<typeof vi.fn>> = {};
+    builder.update = vi.fn(() => builder);
+    builder.eq = vi.fn(() => builder);
+    builder.is = vi.fn(() => builder);
+    builder.select = vi.fn(() => builder);
+    builder.maybeSingle = vi.fn().mockResolvedValue({
+      data: {
+        id: "10000000-0000-4000-8000-000000000099", provider: "github", connection_mode: "oauth",
+        broker_connection_id: "connection-1", broker_provider_config_key: "github-prod",
+      },
+      error: null,
+    });
+    hoisted.ctx = {
+      supabase: { from: vi.fn(() => builder) }, user: { id: USER_ID },
+      organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
+    };
+    const form = new FormData();
+    form.set("id", "10000000-0000-4000-8000-000000000099");
+
+    await expect(revokeConnectionAction(form)).rejects.toThrow("Provider connection could not be retired");
+    expect(builder.update).not.toHaveBeenCalled();
   });
 
   it("rejects an unsafe Jira target before updating the database", async () => {

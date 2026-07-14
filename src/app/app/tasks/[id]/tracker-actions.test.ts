@@ -10,13 +10,14 @@ const hoisted = vi.hoisted(() => ({
   createTicket: vi.fn(),
   enforceRateLimit: vi.fn(),
   revalidatePath: vi.fn(),
+  resolve: vi.fn(),
 }));
 
 vi.mock("@/lib/app-context", () => ({ requireAppContext: () => Promise.resolve(hoisted.ctx) }));
 vi.mock("@/lib/security/rate-limit", () => ({ enforceRateLimit: hoisted.enforceRateLimit }));
 vi.mock("@/lib/security/secrets", () => ({ decryptSecret: (value: string | null) => value }));
 vi.mock("@/features/integrations/application/registry", () => ({
-  resolveTicketProvider: () => ({ createTicket: hoisted.createTicket }),
+  resolveTicketProvider: hoisted.resolve,
 }));
 vi.mock("next/cache", () => ({ revalidatePath: hoisted.revalidatePath }));
 
@@ -41,6 +42,7 @@ function readableRow(row: unknown) {
 describe("pushTaskToTrackerAction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    hoisted.resolve.mockReturnValue({ createTicket: hoisted.createTicket });
     hoisted.createTicket.mockResolvedValue({ externalId: "42", url: "https://example.test/42", status: "To Do" });
   });
 
@@ -78,6 +80,9 @@ describe("pushTaskToTrackerAction", () => {
     );
     expect(connectionQuery.eq).toHaveBeenCalledWith("organisation_id", ORG_ID);
     expect(connectionQuery.eq).toHaveBeenCalledWith("enabled", true);
+    expect(hoisted.resolve).toHaveBeenCalledWith(expect.objectContaining({
+      provider: "github", connectionMode: "oauth",
+    }));
     expect(hoisted.createTicket).toHaveBeenCalledWith(expect.objectContaining({
       connectionMode: "oauth", brokerConnectionId: "nango-1", brokerProviderConfigKey: "github-prod",
     }), expect.anything());

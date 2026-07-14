@@ -10,7 +10,10 @@ import { evidenceSourceInputSchema } from "@/features/integrations/application/e
 import { hasCapability } from "@/features/organisations/domain/access";
 import {
   createNangoConnectSession,
+  deleteNangoConnection,
+  resolveJiraOAuthTarget,
   verifyNangoConnection,
+  verifyGitHubOAuthTarget,
 } from "@/features/integrations/application/nango";
 
 const providerSchema = z.enum(["github", "jira"]);
@@ -82,7 +85,11 @@ export async function confirmProviderAuthorizationAction(input: unknown) {
   const { supabase, user, organisation } = await requireConnectionManager();
   await enforceRateLimit(`provider-confirm:${user.id}`, { limit: 10, windowMs: 60_000 });
   const parsed = brokerReferenceSchema.parse(input);
-  await verifyNangoConnection(parsed);
+  await verifyNangoConnection({
+    ...parsed,
+    endUserId: user.id,
+    organisationId: organisation.id,
+  });
 
   const { error } = await supabase.from("integration_connections").insert({
     organisation_id: organisation.id,
@@ -121,9 +128,36 @@ export async function configureOAuthConnectionAction(formData: FormData) {
   const { supabase, organisation } = await requireConnectionManager();
   const id = z.uuid().parse(String(formData.get("id")));
   const target = connectionTargetInputSchema.parse(Object.fromEntries(formData));
-  const config = target.provider === "github"
-    ? { owner: target.owner, repo: target.repo }
-    : { baseUrl: target.baseUrl, projectKey: target.projectKey };
+  const { data: connection, error: lookupError } = await supabase.from("integration_connections")
+    .select("id,broker_connection_id,broker_provider_config_key")
+    .eq("id", id)
+    .eq("organisation_id", organisation.id)
+    .eq("connection_mode", "oauth")
+    .eq("provider", target.provider)
+    .is("revoked_at", null)
+    .maybeSingle();
+  if (lookupError || !connection?.broker_connection_id || !connection.broker_provider_config_key) {
+    throw new Error("OAuth connection was not found in this workspace");
+  }
+
+  let config: Record<string, string>;
+  if (target.provider === "github") {
+    await verifyGitHubOAuthTarget({
+      connectionId: connection.broker_connection_id,
+      providerConfigKey: connection.broker_provider_config_key,
+      owner: target.owner,
+      repo: target.repo,
+    });
+    config = { owner: target.owner, repo: target.repo };
+  } else {
+    const { cloudId } = await resolveJiraOAuthTarget({
+      connectionId: connection.broker_connection_id,
+      providerConfigKey: connection.broker_provider_config_key,
+      baseUrl: target.baseUrl,
+      projectKey: target.projectKey,
+    });
+    config = { baseUrl: target.baseUrl, projectKey: target.projectKey, cloudId };
+  }
   const { data, error } = await supabase.from("integration_connections")
     .update({ config, enabled: true })
     .eq("id", id)
@@ -134,6 +168,7 @@ export async function configureOAuthConnectionAction(formData: FormData) {
     .maybeSingle();
   if (error || !data) throw new Error("OAuth connection was not found in this workspace");
   revalidatePath("/app/integrations");
+  revalidatePath("/app/monitoring");
 }
 
 export async function addMonitorSourceAction(formData: FormData) {
@@ -220,11 +255,24 @@ export async function revokeAlertChannelAction(formData: FormData) {
 export async function revokeConnectionAction(formData: FormData) {
   const { supabase, organisation } = await requireConnectionManager();
   const id = z.uuid().parse(String(formData.get("id")));
+  const { data: connection, error: lookupError } = await supabase.from("integration_connections")
+    .select("id,provider,connection_mode,broker_connection_id,broker_provider_config_key")
+    .eq("id", id).eq("organisation_id", organisation.id).is("revoked_at", null).maybeSingle();
+  if (lookupError || !connection) throw new Error("Connection was not found in this workspace");
+  if (connection.connection_mode === "oauth") {
+    const parsed = brokerReferenceSchema.parse({
+      provider: connection.provider,
+      connectionId: connection.broker_connection_id,
+      providerConfigKey: connection.broker_provider_config_key,
+    });
+    await deleteNangoConnection(parsed);
+  }
   const { data, error } = await supabase.from("integration_connections")
     .update({ revoked_at: new Date().toISOString(), enabled: false })
     .eq("id", id).eq("organisation_id", organisation.id).select("id").maybeSingle();
   if (error || !data) throw new Error("Could not revoke the connection");
   revalidatePath("/app/integrations");
+  revalidatePath("/app/monitoring");
 }
 
 export async function addEvidenceSourceAction(formData: FormData) {

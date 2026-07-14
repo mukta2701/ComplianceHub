@@ -100,13 +100,13 @@ select results_eq(
   $$ values(false) $$, 'an Admin can disable its workspace alert channel'
 );
 select is((select count(*) from public.integration_connections),1::bigint,'an Admin can list its workspace connection configuration');
-select is((select count(*) from public.monitor_sources),1::bigint,'an Admin can list its workspace monitor source configuration');
+select is((select count(*) from public.monitor_sources),2::bigint,'an Admin can list manual and OAuth-linked workspace monitor source configuration');
 
 select set_config('request.jwt.claims','{"sub":"82000000-0000-4000-8000-000000000003","email":"conn-member-a@example.test","role":"authenticated"}',true);
 select is(
   (select count(*) from public.list_connected_monitor_sources(current_setting('app.conn_org_a')::uuid)),
-  0::bigint,
-  'disabled monitor sources are hidden from Members'
+  1::bigint,
+  'disabled monitor sources are hidden while the enabled OAuth-linked source remains visible to Members'
 );
 
 select set_config('request.jwt.claims','{"sub":"82000000-0000-4000-8000-000000000004","email":"conn-owner-b@example.test","role":"authenticated"}',true);

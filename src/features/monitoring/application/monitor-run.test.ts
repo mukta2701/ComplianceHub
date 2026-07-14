@@ -3,7 +3,10 @@ import { runMonitoring, findingKey, type MonitorDependencies, type MonitorSource
 import type { CheckResult } from "../domain/monitor-provider";
 import type { AlertChannel } from "./deliver";
 
-const source: MonitorSource = { id: "src1", organisationId: "org1", provider: "github", config: {}, accessToken: "" };
+const source: MonitorSource = {
+  id: "src1", organisationId: "org1", provider: "github", config: {}, accessToken: "",
+  connectionMode: "sandbox", brokerConnectionId: null, brokerProviderConfigKey: null,
+};
 
 function check(over: Partial<CheckResult> & { checkId: string; passed: boolean }): CheckResult {
   return { controlRef: "A.8.32", subjectType: "github_repo", subjectId: "acme/isms", severity: "critical", title: "t", detail: "d", ...over };

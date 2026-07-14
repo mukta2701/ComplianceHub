@@ -30,9 +30,7 @@ export async function pushTaskToTrackerAction(formData: FormData) {
   if (taskError || !task) throw new Error("Task not found");
   const control = one(task.controls);
   const payload = buildTicketPayload({ title: task.title, detail: task.detail, source: task.source, controlCode: control?.code ?? null });
-  const provider = resolveTicketProvider(connection.provider as IntegrationProvider);
-  const created = await provider.createTicket(
-    {
+  const ticketConnection = {
       id: connection.id,
       provider: connection.provider as IntegrationProvider,
       config: connection.config as Record<string, unknown>,
@@ -40,9 +38,9 @@ export async function pushTaskToTrackerAction(formData: FormData) {
       connectionMode: connection.connection_mode as "sandbox" | "oauth",
       brokerConnectionId: connection.broker_connection_id,
       brokerProviderConfigKey: connection.broker_provider_config_key,
-    },
-    payload,
-  );
+    };
+  const provider = resolveTicketProvider(ticketConnection);
+  const created = await provider.createTicket(ticketConnection, payload);
   const { error } = await supabase.from("task_tickets").insert({
     organisation_id: organisation.id, task_id: taskId, connection_id: connectionId, provider: connection.provider,
     external_id: created.externalId, external_url: created.url, external_status: created.status,

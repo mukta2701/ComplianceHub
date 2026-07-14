@@ -12,7 +12,7 @@ ComplianceHub supports readiness work. It does **not** provide certification, le
 - **Internal audit** — plan audits, populate the checklist from the Annex A control library in one click, raise findings that become owned corrective-action tasks, and produce a leadership readiness report + an evidence pack. Time-boxed read-only auditor links.
 - **Policies** — a policy library with an approval lifecycle, per-employee version-stamped acceptance, material-edit re-accept, scheduled review reminders, and 10 original, editable starter policies for ISO 27001 readiness.
 - **KPIs & management review** — a KPI register with measurement trends for management review.
-- **Integrations** — Owner/Admin-managed GitHub and Jira OAuth authorization through a server-only Nango boundary, with enable/disable controls, ticket push/status sync, and a built-in local sandbox path.
+- **Integrations** — Owner/Admin-managed GitHub and Jira OAuth authorization through a server-only Nango boundary, with mode-bound ticket push/status sync, linked GitHub compliance monitoring, enable/disable controls, and a network-free local sandbox path.
 - **Multi-framework** — record how your ISO 27001 controls map to SOC 2 / GDPR / HIPAA / NIST CSF / ISO 27017, with per-framework coverage.
 - **Public Trust Center** — an owner-opt-in public page that shares only a safe security-posture summary with prospects.
 - **Multi-tenant & audited** — every table is org-isolated via Postgres Row-Level Security with cross-tenant attack tests, and every change is captured to an audit trail.

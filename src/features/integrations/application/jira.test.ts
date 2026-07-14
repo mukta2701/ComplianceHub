@@ -5,7 +5,11 @@ import type { TicketConnection } from "@/features/integrations/domain/provider";
 const oauthConnection: TicketConnection = {
   id: "connection-row-1",
   provider: "jira",
-  config: { baseUrl: "https://acme.atlassian.net", projectKey: "SEC" },
+  config: {
+    baseUrl: "https://acme.atlassian.net",
+    projectKey: "SEC",
+    cloudId: "1324a887-45db-4bf4-8e99-ef0ff456d421",
+  },
   accessToken: "",
   connectionMode: "oauth",
   brokerConnectionId: "nango-connection-1",
@@ -31,13 +35,12 @@ describe("Jira ticket adapter", () => {
     });
 
     expect(fetchImpl).toHaveBeenCalledWith(
-      "https://api.nango.dev/proxy/rest/api/3/issue/SEC-42?fields=status,assignee",
+      "https://api.nango.dev/proxy/ex/jira/1324a887-45db-4bf4-8e99-ef0ff456d421/rest/api/3/issue/SEC-42?fields=status%2Cassignee",
       expect.objectContaining({
         headers: expect.objectContaining({
           Authorization: "Bearer server-secret",
           "Connection-Id": "nango-connection-1",
           "Provider-Config-Key": "jira-prod",
-          "base-url-override": "https://acme.atlassian.net",
         }),
       }),
     );

@@ -20,9 +20,7 @@ export async function syncTickets(supabase: SupabaseClient): Promise<{ synced: n
     // One provider error must not starve the rest of the sweep across other orgs:
     // isolate each ticket, count failures, and keep going.
     try {
-      const provider = resolveTicketProvider(ticket.provider as IntegrationProvider);
-      const fetched = await provider.fetchTicket(
-        {
+      const connection = {
           id: ticket.connection_id,
           provider: ticket.provider as IntegrationProvider,
           config: (conn.config ?? {}) as Record<string, unknown>,
@@ -30,9 +28,9 @@ export async function syncTickets(supabase: SupabaseClient): Promise<{ synced: n
           connectionMode: conn.connection_mode as "sandbox" | "oauth",
           brokerConnectionId: conn.broker_connection_id,
           brokerProviderConfigKey: conn.broker_provider_config_key,
-        },
-        ticket.external_id,
-      );
+        };
+      const provider = resolveTicketProvider(connection);
+      const fetched = await provider.fetchTicket(connection, ticket.external_id);
       // Tenant-scoped update: filtered by this row's organisation_id.
       const { error: updateError } = await supabase.from("task_tickets").update({
         external_status: fetched.status, external_assignee: fetched.assignee, external_url: fetched.url,

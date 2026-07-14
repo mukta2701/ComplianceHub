@@ -16,6 +16,9 @@ export type MonitorConnection = {
   provider: MonitorProviderKind;
   config: Record<string, unknown>;
   accessToken: string;
+  connectionMode?: "sandbox" | "oauth";
+  brokerConnectionId?: string | null;
+  brokerProviderConfigKey?: string | null;
 };
 
 export type CheckResult = {
