@@ -992,6 +992,18 @@ test("a task is pushed to a sandbox tracker, polled to In Progress, then the con
   const workspaceNavigation = page.getByRole("navigation", { name: "Workspace" });
   await expect(workspaceNavigation.getByRole("link", { name: "Settings" })).toHaveAttribute("aria-current", "page");
   await expect(workspaceNavigation.getByRole("link", { name: "Connections" })).toHaveCount(0);
+  if (testInfo.project.name === "mobile") {
+    const appHeader = page.getByRole("banner");
+    const openNavigation = appHeader.getByRole("button", { name: "Open navigation" });
+    await expect(openNavigation).toHaveAttribute("aria-expanded", "false");
+    await openNavigation.click();
+    const closeNavigation = appHeader.getByRole("button", { name: "Close navigation" });
+    await expect(closeNavigation).toHaveAttribute("aria-expanded", "true");
+    const visibleSettingsLink = workspaceNavigation.getByRole("link", { name: "Settings" });
+    await expect(visibleSettingsLink).toBeVisible();
+    await visibleSettingsLink.click();
+    await expect(openNavigation).toHaveAttribute("aria-expanded", "false");
+  }
   const settingsTabs = page.getByRole("navigation", { name: "Section" });
   await expect(settingsTabs.getByRole("link", { name: "Settings" })).toHaveAttribute("aria-current", "page");
   await settingsTabs.getByRole("link", { name: "Connections" }).click();
