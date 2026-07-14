@@ -317,7 +317,7 @@ export function ConnectionsCatalog({ connections, alertChannels, navigation }: {
             </div>
           </div>
           <p>{provider.description}</p>
-          <div className="connection-actions connection-card-footer">
+          <div className="connection-card-footer">
             <span className="connection-card-target">{targetSummary}</span>
             <button
               className="button secondary"

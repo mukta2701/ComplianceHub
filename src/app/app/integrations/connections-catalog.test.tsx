@@ -71,8 +71,9 @@ describe("ConnectionsCatalog", () => {
     expect(githubCard).toHaveTextContent("Connected");
     expect(githubCard).toHaveTextContent("acme/isms");
     expect(within(githubCard).getByText("acme/isms")).toHaveClass("connection-card-target");
-    expect(within(githubCard).getByRole("button", { name: "Manage" }).parentElement)
-      .toHaveClass("connection-card-footer");
+    const githubCardFooter = within(githubCard).getByRole("button", { name: "Manage" }).parentElement;
+    expect(githubCardFooter).toHaveClass("connection-card-footer");
+    expect(githubCardFooter).not.toHaveClass("connection-actions");
     expect(jiraCard).toHaveTextContent("Setup required");
     expect(jiraCard).toHaveTextContent("Project not selected");
     expect(slackCard).toHaveTextContent("Connected");
