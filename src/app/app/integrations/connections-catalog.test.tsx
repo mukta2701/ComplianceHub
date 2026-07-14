@@ -45,6 +45,9 @@ describe("ConnectionsCatalog", () => {
     render(<ConnectionsCatalog connections={connections} alertChannels={alertChannels} />);
 
     expect(screen.getByRole("heading", { name: "Connections" })).toBeVisible();
+    expect(screen.getByRole("searchbox", { name: "Search connections" })).toHaveClass("connections-search");
+    expect(screen.getByTestId("connections-grid")).toHaveClass("connections-grid");
+    expect(screen.getByRole("article", { name: "GitHub connection" })).toHaveClass("connection-card");
     expect(screen.getByRole("article", { name: "GitHub connection" })).toHaveTextContent("Connected");
     expect(screen.getByRole("article", { name: "Jira connection" })).toHaveTextContent("Setup required");
     expect(screen.getByRole("article", { name: "Slack connection" })).toHaveTextContent("Connected");

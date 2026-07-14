@@ -127,10 +127,10 @@ function ProviderPanel({
   const isConnected = provider === "slack" ? alertChannels.length > 0 : providerConnections.length > 0;
   const panelVerb = isConnected ? "Manage" : "Connect";
 
-  return <section className="connections-panel" role="region" aria-label={`${panelVerb} ${metadata.label}`}>
+  return <section className="connections-panel connection-management" role="region" aria-label={`${panelVerb} ${metadata.label}`}>
     <div className="connections-panel-head">
       <div className="connections-provider-heading">
-        <span className={`connections-provider-mark ${provider}`} aria-hidden="true">{metadata.mark}</span>
+        <span className={`connections-provider-mark connection-icon ${provider}`} aria-hidden="true">{metadata.mark}</span>
         <div>
           <h3>{panelVerb} {metadata.label}</h3>
           <p>{metadata.description}</p>
@@ -264,10 +264,11 @@ export function ConnectionsCatalog({ connections, alertChannels }: {
     </header>
 
     <div className="connections-toolbar">
-      <label className="connections-search">
+      <label className="connections-search-wrap">
         <span className="sr-only">Search connections</span>
         <span aria-hidden="true">⌕</span>
         <input
+          className="connections-search"
           type="search"
           aria-label="Search connections"
           placeholder="Search connections"
@@ -275,7 +276,7 @@ export function ConnectionsCatalog({ connections, alertChannels }: {
           onChange={(event) => setQuery(event.target.value)}
         />
       </label>
-      <div className="connections-categories" aria-label="Connection categories">
+      <div className="connections-categories connections-filters" aria-label="Connection categories">
         {([[
           "all",
           "All",
@@ -289,23 +290,25 @@ export function ConnectionsCatalog({ connections, alertChannels }: {
       </div>
     </div>
 
-    <div className="connections-provider-grid">
+    <div className="connections-provider-grid connections-grid" data-testid="connections-grid">
       {filteredProviders.map((provider) => {
         const providerConnections = connections.filter((connection) => connection.provider === provider.id);
         const records = provider.id === "slack" ? liveSlackChannels : providerConnections;
         const needsSetup = providerConnections.some(connectionNeedsSetup);
         const status = records.length === 0 ? "Not connected" : needsSetup ? "Setup required" : "Connected";
         const action = records.length === 0 ? "Connect" : needsSetup ? "Continue setup" : "Manage";
-        return <article className="connections-provider-card" aria-label={`${provider.label} connection`} key={provider.id}>
-          <div className="connections-provider-heading">
-            <span className={`connections-provider-mark ${provider.id}`} aria-hidden="true">{provider.mark}</span>
+        return <article className="connections-provider-card connection-card" aria-label={`${provider.label} connection`} key={provider.id}>
+          <div className="connections-provider-heading connection-card-head">
+            <span className={`connections-provider-mark connection-icon ${provider.id}`} aria-hidden="true">{provider.mark}</span>
             <div>
               <h3>{provider.label}</h3>
-              <Pill tone={status === "Connected" ? "green" : status === "Setup required" ? "amber" : "neutral"}>{status}</Pill>
+              <span className="connection-status"><Pill tone={status === "Connected" ? "green" : status === "Setup required" ? "amber" : "neutral"}>{status}</Pill></span>
             </div>
           </div>
           <p>{provider.description}</p>
-          <button className="button secondary" type="button" onClick={() => setSelectedProvider(provider.id)}>{action}</button>
+          <div className="connection-actions">
+            <button className="button secondary" type="button" onClick={() => setSelectedProvider(provider.id)}>{action}</button>
+          </div>
         </article>;
       })}
     </div>
