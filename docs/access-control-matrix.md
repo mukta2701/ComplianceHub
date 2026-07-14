@@ -2,7 +2,7 @@
 
 This document is the reviewed database contract for the Owner, Admin, and Member
 portals. It reflects the schema after
-`20260714015507_harden_operator_policy_access.sql`.
+`20260714043000_policy_feedback_and_leadership_snapshots.sql`.
 
 - **Operator** means an organisation membership with role `owner` or `admin`.
 - **Member** means the ordinary `member` role.
@@ -15,7 +15,7 @@ portals. It reflects the schema after
 
 ## Organisation-scoped public tables
 
-The pgTAP inventory test enumerates these 36 tables from the catalog. A new
+The pgTAP inventory test enumerates these 39 tables from the catalog. A new
 public table with `organisation_id` makes the test fail until this matrix and its
 policies are reviewed.
 
@@ -41,12 +41,15 @@ policies are reviewed.
 | `invitations` | R/W* | — | Owner manages Admin/Member invites; Admin manages Member invites only. Writes use invitation RPCs. |
 | `kpi_measurements` | R/W | R | Member receives read-only measurements. |
 | `kpis` | R/W | R | Member receives read-only KPI definitions and results. |
+| `leadership_report_snapshots` | R | R | Immutable, exact published report payloads; only operators publish through `publish_leadership_report`. |
 | `memberships` | R/W* | R | Owner manages elevated roles; Admin may update/remove ordinary Members only. Member has no write. |
 | `monitor_sources` | R/W | — | Monitoring configuration and credentials are operator-only. |
 | `monitoring_findings` | R/U | R | Monitoring worker inserts; operators resolve/update; Members read active findings. |
 | `notifications` | own R/U | own R/U | Every role may read its own notifications and update its own read state only. |
 | `policies` | R/W | approved R | Members cannot see draft, in-review, or archived policies. |
 | `policy_acceptances` | organisation R | own R | No direct writes for any authenticated role; `accept_policy` is the only write path. Pre-upgrade rows remain hidden until securely re-accepted and stamped `trusted_at`. |
+| `policy_feedback_comments` | R | R | Immutable comments; creation is limited to the guarded create/reply RPCs. |
+| `policy_feedback_threads` | R | approved-policy R | Members collaborate only on approved policies; operators can also read draft-policy feedback. Status changes use the operator-only RPC. |
 | `risk_categories` | R/W | R | Member receives read-only risk reference data. |
 | `risk_matrix_config` | R/W | R | Member receives the current matrix but cannot reconfigure it. |
 | `risk_treatment_plans` | R/W | R | Member receives read-only treatment progress. |
@@ -93,13 +96,17 @@ depth for security-invoker functions.
 | Function | Who may mutate | Security rule |
 |---|---|---|
 | `accept_policy(uuid)` | Any verified current member | Locks an approved policy and current membership, derives user/org/version/time, stamps `trusted_at`, and upserts one authoritative acceptance. |
+| `create_policy_feedback(uuid,text,text)` | Any current member with policy read access | Derives the organisation, policy version, author, and time; Members are limited to approved policies. Creates the thread and first immutable comment atomically. |
 | `complete_recurring_task(uuid)` | Operator | Checks the operator before locking/completing and creating the successor. |
 | `create_evidence_record(jsonb)` | Operator | Derives the target organisation from the validated payload and checks operator before insert/supersession. |
 | `create_soa_draft(uuid,text)` | Operator | Target assessment must belong to an operated organisation. |
 | `create_soa_successor(uuid,text)` | Operator | Source snapshot must belong to an operated organisation. |
 | `finalise_soa(uuid)` | Operator | Register must belong to an operated organisation; existing completeness/concurrency checks remain. |
 | `notify_policy_reaccept(uuid,text)` | Operator | Policy must belong to an operated organisation. |
+| `publish_leadership_report(uuid,jsonb)` | Operator | Derives organisation name, publisher, and time; rejects any payload outside the exact bounded `ReadinessReport` shape and inserts an immutable snapshot. |
+| `reply_policy_feedback(uuid,text)` | Any current member with policy read access | Locks an open thread, rechecks policy visibility, derives author/time, and appends an immutable comment. |
 | `save_assessment_response(uuid,uuid,assessment_answer,text,bigint)` | Operator | Assessment must belong to an operated organisation; revision conflict protection remains. |
+| `set_policy_feedback_status(uuid,boolean)` | Operator | Locks the thread and atomically resolves or reopens it with trusted resolver metadata. |
 
 ### Lifecycle/self-service exceptions
 

@@ -29,13 +29,14 @@ export type MemberOverviewData = {
     active: number;
     highOrCritical: number;
   };
+  leadershipReport: { publishedAt: string } | null;
 };
 
 export async function loadMemberOverview(
   supabase: SupabaseClient,
   context: { organisationId: string; organisationName: string; jobTitle: string | null },
 ): Promise<MemberOverviewData> {
-  const [policyResult, acceptanceResult, sourceResult, findingResult] = await Promise.all([
+  const [policyResult, acceptanceResult, sourceResult, findingResult, reportResult] = await Promise.all([
     supabase
       .from("policies")
       .select("id,version")
@@ -53,9 +54,17 @@ export async function loadMemberOverview(
       .select("severity,status")
       .eq("organisation_id", context.organisationId)
       .in("status", ["open", "acknowledged"]),
+    supabase
+      .from("leadership_report_snapshots")
+      .select("published_at")
+      .eq("organisation_id", context.organisationId)
+      .order("published_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ]);
 
-  if (policyResult.error || acceptanceResult.error || sourceResult.error || findingResult.error) {
+  if (policyResult.error || acceptanceResult.error || sourceResult.error || findingResult.error || reportResult.error) {
     throw new Error("Could not load the member overview");
   }
 
@@ -82,5 +91,6 @@ export async function loadMemberOverview(
       active: findings.length,
       highOrCritical: findings.filter((finding) => finding.severity === "high" || finding.severity === "critical").length,
     },
+    leadershipReport: reportResult.data ? { publishedAt: reportResult.data.published_at } : null,
   };
 }

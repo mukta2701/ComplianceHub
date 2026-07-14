@@ -48,6 +48,15 @@ function contextFor(role: "owner" | "admin" | "member") {
       error: null,
     }),
     evidence: query({ data: [{ id: "evidence-1", title: "SOC 2 report" }], error: null }),
+    policy_feedback_threads: query({
+      data: [{
+        id: "feedback-1", subject: "Clarify contractors", status: "open", policy_version: 3,
+        created_at: "2026-07-14T08:00:00Z", resolved_at: null,
+        author: { display_name: "Alex Member" }, resolver: null,
+        comments: [{ id: "comment-1", body: "Does this include contractors?", created_at: "2026-07-14T08:00:00Z", author: { display_name: "Alex Member" } }],
+      }],
+      error: null,
+    }),
   };
   const from = vi.fn((table: keyof typeof results) => results[table]);
   hoisted.ctx = {
@@ -74,11 +83,17 @@ describe("policy detail role presentation", () => {
     expect(screen.queryByText("Acceptance roster")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Remove evidence link" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Link" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Policy feedback" })).toBeInTheDocument();
+    expect(screen.getByText("Does this include contractors?")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start feedback" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reply" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Resolve" })).not.toBeInTheDocument();
     expect(from).not.toHaveBeenCalledWith("memberships");
     expect(from).not.toHaveBeenCalledWith("evidence");
     expect(results.policies.eq).toHaveBeenCalledWith("organisation_id", "78000000-0000-4000-8000-000000000003");
     expect(results.policy_acceptances.eq).toHaveBeenCalledWith("organisation_id", "78000000-0000-4000-8000-000000000003");
     expect(results.evidence_links.eq).toHaveBeenCalledWith("organisation_id", "78000000-0000-4000-8000-000000000003");
+    expect(results.policy_feedback_threads.eq).toHaveBeenCalledWith("organisation_id", "78000000-0000-4000-8000-000000000003");
   });
 
   it("shows Admins organisation reporting and policy management controls", async () => {
@@ -92,5 +107,6 @@ describe("policy detail role presentation", () => {
     expect(screen.getByText("Acceptance roster")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Remove evidence link" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Link" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Resolve" })).toBeInTheDocument();
   });
 });

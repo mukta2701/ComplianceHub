@@ -13,6 +13,7 @@ describe("MemberOverview", () => {
         { id: "source-2", provider: "jira", label: "Delivery Jira", connectedAt: "2026-01-02T00:00:00Z" },
       ],
       findings: { active: 2, highOrCritical: 1 },
+      leadershipReport: { publishedAt: "2026-07-14T07:30:00Z" },
     }} />);
 
     expect(screen.getByRole("heading", { name: "Welcome to Example Ltd" })).toBeInTheDocument();
@@ -23,6 +24,7 @@ describe("MemberOverview", () => {
     expect(screen.getByRole("link", { name: "Review policies" })).toHaveAttribute("href", "/app/policies");
     expect(screen.getByRole("link", { name: "View monitoring" })).toHaveAttribute("href", "/app/monitoring");
     expect(screen.getByRole("link", { name: "Open leadership report" })).toHaveAttribute("href", "/app/reports/readiness");
+    expect(screen.getByText(/Published 14 Jul 2026/i)).toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
     expect(screen.getAllByRole("link").map((link) => link.textContent)).toEqual([
       "Review policies",
@@ -38,10 +40,13 @@ describe("MemberOverview", () => {
       policies: { approved: 0, acceptedCurrent: 0 },
       connectedSystems: [],
       findings: { active: 0, highOrCritical: 0 },
+      leadershipReport: null,
     }} />);
 
     expect(screen.getByText("No approved policies are available yet.")).toBeInTheDocument();
     expect(screen.getByText("No connected systems are currently visible.")).toBeInTheDocument();
     expect(screen.getByText("No active findings.")).toBeInTheDocument();
+    expect(screen.getByText("No leadership report has been published for members yet.")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Open leadership report" })).not.toBeInTheDocument();
   });
 });

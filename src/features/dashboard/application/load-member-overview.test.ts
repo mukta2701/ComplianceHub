@@ -5,7 +5,7 @@ const ORGANISATION_ID = "72000000-0000-4000-8000-000000000001";
 
 function query(result: { data: unknown; error: unknown }) {
   const chain: Record<string, unknown> = {};
-  for (const method of ["select", "eq", "in", "order"]) {
+  for (const method of ["select", "eq", "in", "order", "limit", "maybeSingle"]) {
     chain[method] = vi.fn(() => chain);
   }
   chain.then = (resolve: (value: typeof result) => unknown) => Promise.resolve(result).then(resolve);
@@ -26,6 +26,10 @@ describe("loadMemberOverview", () => {
       }),
       monitoring_findings: query({
         data: [{ severity: "critical", status: "open" }, { severity: "low", status: "acknowledged" }],
+        error: null,
+      }),
+      leadership_report_snapshots: query({
+        data: { published_at: "2026-07-14T07:30:00Z" },
         error: null,
       }),
     };
@@ -52,9 +56,10 @@ describe("loadMemberOverview", () => {
       policies: { approved: 2, acceptedCurrent: 1 },
       connectedSystems: [{ id: "source-1", provider: "github", label: "Production GitHub", connectedAt: "2026-01-01T00:00:00Z" }],
       findings: { active: 2, highOrCritical: 1 },
+      leadershipReport: { publishedAt: "2026-07-14T07:30:00Z" },
     });
 
-    expect(tables).toEqual(["policies", "policy_acceptances", "monitoring_findings"]);
+    expect(tables).toEqual(["policies", "policy_acceptances", "monitoring_findings", "leadership_report_snapshots"]);
     expect(rpc).toHaveBeenCalledWith("list_connected_monitor_sources", { target_organisation_id: ORGANISATION_ID });
     expect(JSON.stringify(queries)).not.toMatch(/config|token|alert_channels|monitor_sources/);
   });

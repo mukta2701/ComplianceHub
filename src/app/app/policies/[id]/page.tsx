@@ -8,6 +8,7 @@ import { Icon } from "@/components/icons";
 import { one } from "@/lib/supabase/one";
 import { updatePolicyAction, approvePolicyAction, setPolicyStatusAction, acceptPolicyAction } from "../actions";
 import { linkPolicyEvidenceAction, unlinkPolicyEvidenceAction } from "./evidence-actions";
+import { PolicyFeedback, type PolicyFeedbackThread } from "@/features/policies/components/policy-feedback";
 
 export default async function PolicyDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -15,7 +16,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
   const access = policyPortalAccess(membership.role);
   const { data: policy } = await supabase.from("policies").select("id,reference,title,body,version,status,review_due,owner_id").eq("id", id).eq("organisation_id", organisation.id).maybeSingle();
   if (!policy) notFound();
-  const [{ data: acceptances }, { data: members }, { data: links }, { data: evidenceOptions }] = await Promise.all([
+  const [{ data: acceptances }, { data: members }, { data: links }, { data: evidenceOptions }, feedbackResult] = await Promise.all([
     supabase.from("policy_acceptances").select("user_id,accepted_version").eq("policy_id", id).eq("organisation_id", organisation.id),
     access.loadRoster
       ? supabase.from("memberships").select("user_id,profiles(display_name)").eq("organisation_id", organisation.id)
@@ -24,6 +25,10 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
     access.canManage
       ? supabase.from("evidence").select("id,title").eq("organisation_id", organisation.id).order("title")
       : Promise.resolve({ data: [] }),
+    supabase.from("policy_feedback_threads")
+      .select("id,subject,status,policy_version,created_at,resolved_at,author:profiles!policy_feedback_threads_author_id_fkey(display_name),resolver:profiles!policy_feedback_threads_resolved_by_fkey(display_name),comments:policy_feedback_comments(id,body,created_at,author:profiles!policy_feedback_comments_author_id_fkey(display_name))")
+      .eq("policy_id", id).eq("organisation_id", organisation.id)
+      .order("created_at", { ascending: false }).order("id", { ascending: false }),
   ]);
   const roster = members ?? [];
   const acceptance = policyAcceptancePresentation(membership.role, user.id, policy.version, acceptances ?? [], roster.length);
@@ -31,6 +36,23 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
   const myAcceptance = (acceptances ?? []).find((a) => a.user_id === user.id);
   const acceptedCurrent = myAcceptance?.accepted_version === policy.version;
   const acceptedByUser = new Map((acceptances ?? []).map((a) => [a.user_id, a.accepted_version]));
+  const feedbackThreads: PolicyFeedbackThread[] = ((feedbackResult.data ?? []) as Array<Record<string, unknown>>).map((thread) => {
+    const author = one(thread.author as { display_name: string | null } | Array<{ display_name: string | null }> | null);
+    const resolver = one(thread.resolver as { display_name: string | null } | Array<{ display_name: string | null }> | null);
+    const comments = [...((thread.comments ?? []) as Array<Record<string, unknown>>)].sort((left, right) => {
+      const time = String(left.created_at).localeCompare(String(right.created_at));
+      return time || String(left.id).localeCompare(String(right.id));
+    });
+    return {
+      id: String(thread.id), subject: String(thread.subject), status: thread.status === "resolved" ? "resolved" : "open",
+      policyVersion: Number(thread.policy_version), createdAt: String(thread.created_at), resolvedAt: thread.resolved_at ? String(thread.resolved_at) : null,
+      authorName: author?.display_name?.trim() || "Workspace member", resolverName: resolver?.display_name?.trim() || null,
+      comments: comments.map((comment) => {
+        const commentAuthor = one(comment.author as { display_name: string | null } | Array<{ display_name: string | null }> | null);
+        return { id: String(comment.id), body: String(comment.body), createdAt: String(comment.created_at), authorName: commentAuthor?.display_name?.trim() || "Workspace member" };
+      }),
+    };
+  });
   return <>
     <Link href="/app/policies" style={{ color: "var(--blue)", fontSize: "13px", fontWeight: 700 }}>← Back to policies</Link>
     <PageIntro eyebrow={`POLICY ${policy.reference} · v${policy.version}`} title={policy.title} body={policy.review_due ? `Next review due ${policy.review_due}.` : "No review date set."} action={<Pill tone={POLICY_STATUS_TONE[status]}>{POLICY_STATUS_LABEL[status]}</Pill>} />
@@ -110,5 +132,6 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
         <button className="button secondary">Link</button>
       </form>}
     </Card>
+    <PolicyFeedback policyId={id} threads={feedbackThreads} canManage={access.canManage} loadError={Boolean(feedbackResult.error)} />
   </>;
 }

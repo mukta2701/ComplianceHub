@@ -17,7 +17,7 @@ select is(
       and a.attnum > 0
       and not a.attisdropped
   ),
-  'alert_channels,assessment_responses,assessment_sessions,asset_categories,asset_risks,assets,audit_checklist_items,audit_events,audit_findings,auditor_access_log,auditor_access_tokens,audits,control_crosswalks,evidence,evidence_links,evidence_sources,integration_connections,invitations,kpi_measurements,kpis,memberships,monitor_sources,monitoring_findings,notifications,policies,policy_acceptances,risk_categories,risk_matrix_config,risk_treatment_plans,risks,soa_items,soa_registers,soa_snapshots,task_tickets,tasks,trust_center_settings',
+  'alert_channels,assessment_responses,assessment_sessions,asset_categories,asset_risks,assets,audit_checklist_items,audit_events,audit_findings,auditor_access_log,auditor_access_tokens,audits,control_crosswalks,evidence,evidence_links,evidence_sources,integration_connections,invitations,kpi_measurements,kpis,leadership_report_snapshots,memberships,monitor_sources,monitoring_findings,notifications,policies,policy_acceptances,policy_feedback_comments,policy_feedback_threads,risk_categories,risk_matrix_config,risk_treatment_plans,risks,soa_items,soa_registers,soa_snapshots,task_tickets,tasks,trust_center_settings',
   'every organisation-scoped public table is present in the reviewed access inventory'
 );
 

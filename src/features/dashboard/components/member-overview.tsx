@@ -9,6 +9,9 @@ export function MemberOverview({ data }: { data: MemberOverviewData }) {
   const findingStatus = data.findings.active === 0
     ? "No active findings."
     : `${data.findings.active} active finding${data.findings.active === 1 ? "" : "s"} · ${data.findings.highOrCritical} high or critical`;
+  const reportDate = data.leadershipReport
+    ? new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeZone: "UTC" }).format(new Date(data.leadershipReport.publishedAt))
+    : null;
 
   return <>
     <PageIntro
@@ -43,8 +46,8 @@ export function MemberOverview({ data }: { data: MemberOverviewData }) {
 
       <Card style={{ padding: "20px" }}>
         <h3 style={{ margin: "0 0 8px" }}>Leadership report</h3>
-        <p style={{ color: "#596273", fontSize: "13px" }}>Read the latest readiness summary shared with your workspace.</p>
-        <Link className="button secondary" href="/app/reports/readiness">Open leadership report</Link>
+        <p style={{ color: "#596273", fontSize: "13px" }}>{reportDate ? `Published ${reportDate}.` : "No leadership report has been published for members yet."}</p>
+        {reportDate && <Link className="button secondary" href="/app/reports/readiness">Open leadership report</Link>}
       </Card>
     </div>
   </>;
