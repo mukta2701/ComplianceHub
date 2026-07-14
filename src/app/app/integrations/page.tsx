@@ -104,27 +104,42 @@ function OAuthTargetForm({ connection }: { connection: Connection }) {
 }
 
 export default async function IntegrationsPage() {
-  const { supabase, membership } = await requireAppContext();
+  const { supabase, membership, organisation } = await requireAppContext();
   const canManageConnections = hasCapability(membership.role, "manage_connections");
-  const [connections, monitorSources, alertChannels, evidenceSources] = canManageConnections
-    ? await Promise.all([
-        supabase.from("integration_connections")
-          .select("id,provider,label,config,connection_mode,enabled,created_at,revoked_at")
-          .order("created_at", { ascending: false }).then((result) => (result.data ?? []) as Connection[]),
-        // Tokens are deliberately excluded. Only the target label is rendered.
-        supabase.from("monitor_sources")
-          .select("id,provider,label,config,enabled,connection_mode,integration_connection_id,created_at,revoked_at")
-          .order("created_at", { ascending: false }).then((result) => (result.data ?? []) as MonitorSource[]),
-        // config contains the encrypted webhook and must never be selected here.
-        supabase.from("alert_channels")
-          .select("id,type,label,min_severity,enabled,created_at,revoked_at")
-          .order("created_at", { ascending: false }).then((result) => (result.data ?? []) as AlertChannel[]),
-        // access_token / refresh_token are deliberately excluded.
-        supabase.from("evidence_sources")
-          .select("id,provider,label,config,created_at,revoked_at")
-          .order("created_at", { ascending: false }).then((result) => (result.data ?? []) as EvidenceSource[]),
-      ])
-    : [[], [], [], []];
+  let connections: Connection[] = [];
+  let monitorSources: MonitorSource[] = [];
+  let alertChannels: AlertChannel[] = [];
+  let evidenceSources: EvidenceSource[] = [];
+  if (canManageConnections) {
+    const [connectionsResult, monitorSourcesResult, alertChannelsResult, evidenceSourcesResult] = await Promise.all([
+      supabase.from("integration_connections")
+        .select("id,provider,label,config,connection_mode,enabled,created_at,revoked_at")
+        .eq("organisation_id", organisation.id)
+        .order("created_at", { ascending: false }),
+      // Tokens are deliberately excluded. Only the target label is rendered.
+      supabase.from("monitor_sources")
+        .select("id,provider,label,config,enabled,connection_mode,integration_connection_id,created_at,revoked_at")
+        .eq("organisation_id", organisation.id)
+        .order("created_at", { ascending: false }),
+      // config contains the encrypted webhook and must never be selected here.
+      supabase.from("alert_channels")
+        .select("id,type,label,min_severity,enabled,created_at,revoked_at")
+        .eq("organisation_id", organisation.id)
+        .order("created_at", { ascending: false }),
+      // access_token / refresh_token are deliberately excluded.
+      supabase.from("evidence_sources")
+        .select("id,provider,label,config,created_at,revoked_at")
+        .eq("organisation_id", organisation.id)
+        .order("created_at", { ascending: false }),
+    ]);
+    if (connectionsResult.error || monitorSourcesResult.error || alertChannelsResult.error || evidenceSourcesResult.error) {
+      throw new Error("Could not load connection settings");
+    }
+    connections = (connectionsResult.data ?? []) as Connection[];
+    monitorSources = (monitorSourcesResult.data ?? []) as MonitorSource[];
+    alertChannels = (alertChannelsResult.data ?? []) as AlertChannel[];
+    evidenceSources = (evidenceSourcesResult.data ?? []) as EvidenceSource[];
+  }
 
   const liveConnections = connections.filter((connection) => !connection.revoked_at);
   const liveMonitorSources = monitorSources.filter((source) => !source.revoked_at);

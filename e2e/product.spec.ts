@@ -4,8 +4,13 @@ import { readFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
-import { expect, request, test } from "@playwright/test";
+import { expect, request, test, type Locator, type Page, type TestInfo } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
+
+function createTestPassword(seed: string): string {
+  const digest = createHash("sha256").update(`playwright:${seed}`).digest("hex").slice(0, 24);
+  return `E2e-${digest}-Aa1!`;
+}
 
 // Reads a value from the process env, falling back to .env.local (Playwright's
 // test process does not load Next's env file). Used only by test infrastructure.
@@ -16,6 +21,131 @@ function localEnvironment(name: string): string {
     .find((candidate) => candidate.startsWith(`${name}=`));
   if (!line) throw new Error(`${name} is required for this end-to-end test`);
   return line.slice(name.length + 1);
+}
+
+async function createWorkspaceOwner(
+  page: Page,
+  testInfo: TestInfo,
+  options: { emailPrefix: string; ownerName: string; organisationPrefix: string },
+) {
+  const suffix = `${Date.now()}-${testInfo.project.name}`;
+  const email = `${options.emailPrefix}-${suffix}@example.test`;
+  const organisationName = `${options.organisationPrefix} ${suffix}`;
+  const password = createTestPassword(suffix);
+
+  await page.goto("/sign-up");
+  await page.getByLabel("Name").fill(options.ownerName);
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page.getByLabel("Confirm password").fill(password);
+  await Promise.all([
+    page.waitForURL(/\/sign-in/),
+    page.getByRole("button", { name: "Create account" }).click(),
+  ]);
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
+  await page.getByLabel("Organisation name").fill(organisationName);
+  await submitServerAction(page, page.getByRole("button", { name: "Create workspace" }), "/app");
+  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
+
+  return { suffix, email, password, organisationName };
+}
+
+async function submitServerAction(page: Page, button: Locator, pathname: string) {
+  const responsePromise = page.waitForResponse((response) =>
+    response.request().method() === "POST" && new URL(response.url()).pathname === pathname,
+  );
+  const [response] = await Promise.all([responsePromise, button.click()]);
+  expect(response.status()).toBeLessThan(400);
+}
+
+async function createAssessmentSession(page: Page) {
+  await page.goto("/app/assessment");
+  const start = page.getByRole("button", { name: "New assessment", exact: true });
+  await Promise.all([
+    page.waitForURL(/\/app\/assessment\/[0-9a-f-]+$/),
+    start.click(),
+  ]);
+  return page.url();
+}
+
+async function createSoaDraft(page: Page) {
+  await page.goto("/app/soa");
+  const assessmentSelect = page.locator('select[name="assessmentId"]');
+  await expect(assessmentSelect).toBeVisible();
+  await expect(assessmentSelect.locator("option")).not.toHaveCount(1);
+  await assessmentSelect.selectOption({ index: 1 });
+  await Promise.all([
+    page.waitForURL(/\/app\/soa\/[0-9a-f-]+$/),
+    page.getByRole("button", { name: "Generate draft" }).click(),
+  ]);
+  return page.url();
+}
+
+async function createInvitedLocalMember(input: {
+  ownerEmail: string;
+  ownerPassword: string;
+  organisationName: string;
+  memberEmail: string;
+  memberPassword: string;
+  suffix: string;
+}) {
+  const owner = createClient(
+    localEnvironment("NEXT_PUBLIC_SUPABASE_URL"),
+    localEnvironment("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
+    { auth: { persistSession: false, autoRefreshToken: false } },
+  );
+  const { error: signInError } = await owner.auth.signInWithPassword({
+    email: input.ownerEmail,
+    password: input.ownerPassword,
+  });
+  expect(signInError, "the owner should sign in to issue the local invitation").toBeNull();
+  const { data: organisation, error: organisationError } = await owner
+    .from("organisations")
+    .select("id")
+    .eq("name", input.organisationName)
+    .single();
+  expect(organisationError).toBeNull();
+  expect(organisation).not.toBeNull();
+
+  const rawToken = createHash("sha256").update(`member-invite-${input.suffix}`).digest("base64url");
+  expect(rawToken).toHaveLength(43);
+  const tokenHash = createHash("sha256").update(rawToken, "utf8").digest("hex");
+  const { error: invitationError } = await owner.rpc("issue_invitation", {
+    target_organisation_id: organisation!.id,
+    target_email: input.memberEmail,
+    target_role: "member",
+    target_job_title: "Developer",
+    new_token_hash: tokenHash,
+    new_expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+  });
+  expect(invitationError, "the Owner RLS path should issue the local Member invitation").toBeNull();
+  await owner.auth.signOut();
+
+  const member = createClient(
+    localEnvironment("NEXT_PUBLIC_SUPABASE_URL"),
+    localEnvironment("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
+    { auth: { persistSession: false, autoRefreshToken: false } },
+  );
+  const { error: memberSignUpError } = await member.auth.signUp({
+    email: input.memberEmail,
+    password: input.memberPassword,
+    options: { data: { display_name: "Framework Member" } },
+  });
+  expect(memberSignUpError, "the local invited Member account should be created").toBeNull();
+  const { error: memberSignInError } = await member.auth.signInWithPassword({
+    email: input.memberEmail,
+    password: input.memberPassword,
+  });
+  expect(memberSignInError, "the invited Member should sign in before accepting").toBeNull();
+  const { data: acceptedOrganisationId, error: acceptanceError } = await member.rpc("accept_invitation", {
+    raw_token: rawToken,
+  });
+  expect(acceptanceError, "the invited Member should accept through the guarded RPC").toBeNull();
+  expect(acceptedOrganisationId).toBe(organisation!.id);
+  await member.auth.signOut();
 }
 
 test("landing page explains the product and opens the demo", async ({ page }) => {
@@ -55,33 +185,18 @@ test("SoA exports produce real PDF and DOCX downloads", async ({ page }) => {
 });
 
 test("a new user creates an isolated workspace and starts an assessment", async ({ page }, testInfo) => {
-  const suffix = `${Date.now()}-${testInfo.project.name}`;
-  const email = `beta-${suffix}@example.test`;
-  const password = "Test-only-passphrase-2026";
+  await createWorkspaceOwner(page, testInfo, {
+    emailPrefix: "beta",
+    ownerName: "Beta Owner",
+    organisationPrefix: "Beta Workspace",
+  });
 
-  await page.goto("/sign-up");
-  await page.getByLabel("Name").fill("Beta Owner");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password", { exact: true }).fill(password);
-  await page.getByLabel("Confirm password").fill(password);
-  await page.getByRole("button", { name: "Create account" }).click();
-
-  await page.waitForURL(/\/sign-in/);
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
-
-  await page.getByLabel("Organisation name").fill(`Beta Workspace ${suffix}`);
-  await page.getByRole("button", { name: "Create workspace" }).click();
-  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
-
-  // A brand-new workspace sees the first-run onboarding checklist: "Create your
-  // workspace" is already done, and at least one actionable step is offered.
+  // Completed steps disappear from the first-run checklist. Workspace creation
+  // is counted as done, while the first actionable assessment step remains.
   const checklist = page.locator(".onboarding-card");
   await expect(checklist.getByRole("heading", { name: "Get certification-ready" })).toBeVisible();
-  const workspaceStep = checklist.locator("li", { hasText: "Create your workspace" });
-  await expect(workspaceStep.getByText("Done")).toBeVisible();
+  await expect(checklist.getByText("1 of 8 done")).toBeVisible();
+  await expect(checklist.locator("li", { hasText: "Create your workspace" })).toHaveCount(0);
   const assessmentStep = checklist.locator("li", { hasText: "Run your first readiness assessment" });
   await expect(assessmentStep.getByRole("link", { name: /Start assessment/ })).toBeVisible();
 
@@ -93,8 +208,10 @@ test("a new user creates an isolated workspace and starts an assessment", async 
   const navToggle = page.getByRole("button", { name: "Open navigation" });
   if (await navToggle.isVisible()) await navToggle.click();
   await page.getByRole("link", { name: "Gap assessment", exact: true }).click();
-  await page.getByRole("button", { name: "New assessment" }).click();
-  await expect(page.getByRole("heading", { name: /readiness assessment/i })).toBeVisible();
+  await Promise.all([
+    page.waitForURL(/\/app\/assessment\/[0-9a-f-]+$/),
+    page.getByRole("button", { name: "New assessment" }).click(),
+  ]);
   const firstSave = page.waitForResponse((response) => response.url().includes("/api/app/assessment/response"));
   await page.getByRole("radio", { name: "Partially" }).click();
   expect((await firstSave).status()).toBe(200);
@@ -126,25 +243,11 @@ test("a new user creates an isolated workspace and starts an assessment", async 
 });
 
 test("an asset is added to the inventory and the list is accessible", async ({ page }, testInfo) => {
-  const suffix = `${Date.now()}-${testInfo.project.name}`;
-  const email = `ast-${suffix}@example.test`;
-  const password = "Test-only-passphrase-2026";
-
-  await page.goto("/sign-up");
-  await page.getByLabel("Name").fill("Beta Owner");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password", { exact: true }).fill(password);
-  await page.getByLabel("Confirm password").fill(password);
-  await page.getByRole("button", { name: "Create account" }).click();
-
-  await page.waitForURL(/\/sign-in/);
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
-  await page.getByLabel("Organisation name").fill(`AST Workspace ${suffix}`);
-  await page.getByRole("button", { name: "Create workspace" }).click();
-  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
+  await createWorkspaceOwner(page, testInfo, {
+    emailPrefix: "ast",
+    ownerName: "Beta Owner",
+    organisationPrefix: "AST Workspace",
+  });
 
   // Reach the asset inventory through the workspace nav, via the Risks tab strip.
   const navToggle = page.getByRole("button", { name: "Open navigation" });
@@ -172,8 +275,11 @@ test("an asset is added to the inventory and the list is accessible", async ({ p
   await page.getByLabel("Title").fill("Unencrypted laptops");
   await page.getByLabel("Description").fill("Endpoints hold data at rest without disk encryption.");
   await page.locator("select[name=categoryId]").selectOption({ index: 1 });
-  await page.getByRole("button", { name: "Save risk" }).click();
-  await expect(page.getByRole("heading", { name: "Risk register" })).toBeVisible();
+  await Promise.all([
+    page.waitForURL((url) => url.pathname === "/app/risks"),
+    page.getByRole("button", { name: "Save risk" }).click(),
+  ]);
+  await expect(page.getByRole("link", { name: "Unencrypted laptops" })).toBeVisible();
 
   // Open the asset detail page and link the risk.
   await page.goto("/app/assets");
@@ -190,7 +296,7 @@ test("an asset is added to the inventory and the list is accessible", async ({ p
 test("a treatment plan spawns an owned, dated task", async ({ page }, testInfo) => {
   const suffix = `${Date.now()}-${testInfo.project.name}`;
   const email = `rtp-${suffix}@example.test`;
-  const password = "Test-only-passphrase-2026";
+  const password = createTestPassword(suffix);
 
   await page.goto("/sign-up");
   await page.getByLabel("Name").fill("Beta Owner");
@@ -237,7 +343,7 @@ test("a treatment plan spawns an owned, dated task", async ({ page }, testInfo) 
 test("an audit runs from plan through checklist to a corrective-action task", async ({ page, browser }, testInfo) => {
   const suffix = `${Date.now()}-${testInfo.project.name}`;
   const email = `aud-${suffix}@example.test`;
-  const password = "Test-only-passphrase-2026";
+  const password = createTestPassword(suffix);
 
   await page.goto("/sign-up");
   await page.getByLabel("Name").fill("Beta Owner");
@@ -387,25 +493,11 @@ test("an audit runs from plan through checklist to a corrective-action task", as
 });
 
 test("a KPI is logged and its next steps raise a follow-up task", async ({ page }, testInfo) => {
-  const suffix = `${Date.now()}-${testInfo.project.name}`;
-  const email = `kpi-${suffix}@example.test`;
-  const password = "Test-only-passphrase-2026";
-
-  await page.goto("/sign-up");
-  await page.getByLabel("Name").fill("Beta Owner");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password", { exact: true }).fill(password);
-  await page.getByLabel("Confirm password").fill(password);
-  await page.getByRole("button", { name: "Create account" }).click();
-
-  await page.waitForURL(/\/sign-in/);
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
-  await page.getByLabel("Organisation name").fill(`KPI Workspace ${suffix}`);
-  await page.getByRole("button", { name: "Create workspace" }).click();
-  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
+  await createWorkspaceOwner(page, testInfo, {
+    emailPrefix: "kpi",
+    ownerName: "Beta Owner",
+    organisationPrefix: "KPI Workspace",
+  });
 
   // Reach the KPI register through the workspace nav.
   const navToggle = page.getByRole("button", { name: "Open navigation" });
@@ -426,21 +518,25 @@ test("a KPI is logged and its next steps raise a follow-up task", async ({ page 
   const kpiRow = page.getByRole("row", { name: /Mean time to de-provision leavers/ });
   await kpiRow.getByLabel(/^Measurement value/).fill("12");
   await kpiRow.getByLabel(/^Measurement date/).fill("2026-07-01");
-  await kpiRow.getByRole("button", { name: "Record" }).click();
-  await expect(page.getByText("12 (1 Jul)")).toBeVisible();
+  await submitServerAction(page, kpiRow.getByRole("button", { name: "Record" }), "/app/kpis");
+  await expect(kpiRow.getByText("12", { exact: true })).toBeVisible();
 
   await kpiRow.getByLabel(/^Measurement value/).fill("20");
   await kpiRow.getByLabel(/^Measurement date/).fill("2026-07-02");
-  await kpiRow.getByRole("button", { name: "Record" }).click();
+  await submitServerAction(page, kpiRow.getByRole("button", { name: "Record" }), "/app/kpis");
   // Latest reading is 20, up +8 on the previous reading of 12.
-  await expect(kpiRow.getByText("20 (2 Jul)")).toBeVisible();
+  await expect(kpiRow.getByText("20", { exact: true })).toBeVisible();
   await expect(kpiRow.getByText("+8")).toBeVisible();
+  await page.reload();
+  await expect(kpiRow.getByText("20", { exact: true })).toBeVisible();
 
   const listAxe = await new AxeBuilder({ page }).analyze();
   expect(listAxe.violations).toEqual([]);
 
   // Raise a follow-up task from the KPI's next steps.
-  await page.getByRole("button", { name: "Raise task" }).click();
+  await submitServerAction(page, page.getByRole("button", { name: "Raise task" }), "/app/kpis");
+  await expect(page.getByText("Task raised.")).toBeVisible();
+  await page.reload();
   await expect(page.getByText("Task raised.")).toBeVisible();
 
   // The follow-up appears as a manual task in the tasks module.
@@ -449,25 +545,13 @@ test("a KPI is logged and its next steps raise a follow-up task", async ({ page 
 });
 
 test("the leadership readiness report aggregates the ISMS into one accessible view", async ({ page }, testInfo) => {
-  const suffix = `${Date.now()}-${testInfo.project.name}`;
-  const email = `rpt-${suffix}@example.test`;
-  const password = "Test-only-passphrase-2026";
-
-  await page.goto("/sign-up");
-  await page.getByLabel("Name").fill("Beta Owner");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password", { exact: true }).fill(password);
-  await page.getByLabel("Confirm password").fill(password);
-  await page.getByRole("button", { name: "Create account" }).click();
-
-  await page.waitForURL(/\/sign-in/);
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
-  await page.getByLabel("Organisation name").fill(`Report Workspace ${suffix}`);
-  await page.getByRole("button", { name: "Create workspace" }).click();
-  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
+  await createWorkspaceOwner(page, testInfo, {
+    emailPrefix: "rpt",
+    ownerName: "Beta Owner",
+    organisationPrefix: "Report Workspace",
+  });
+  await createAssessmentSession(page);
+  await createSoaDraft(page);
 
   // Reach the readiness report through the workspace nav.
   const navToggle = page.getByRole("button", { name: "Open navigation" });
@@ -478,8 +562,8 @@ test("the leadership readiness report aggregates the ISMS into one accessible vi
   await expect(page.getByRole("heading", { name: "Leadership readiness report" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Risk posture" })).toBeVisible();
   // The SoA readiness ring is present with its readiness label.
-  await expect(page.getByText("READY")).toBeVisible();
-  await expect(page.getByText("OPEN NON-CONFORMITIES")).toBeVisible();
+  await expect(page.getByText("READY", { exact: true })).toBeVisible();
+  await expect(page.getByText("OPEN NON-CONFORMITIES", { exact: true })).toBeVisible();
 
   const axe = await new AxeBuilder({ page }).analyze();
   expect(axe.violations).toEqual([]);
@@ -508,25 +592,11 @@ test("the leadership readiness report aggregates the ISMS into one accessible vi
 });
 
 test("a risk register workbook can be imported through the wizard", async ({ page }, testInfo) => {
-  const suffix = `${Date.now()}-${testInfo.project.name}`;
-  const email = `imp-${suffix}@example.test`;
-  const password = "Test-only-passphrase-2026";
-
-  await page.goto("/sign-up");
-  await page.getByLabel("Name").fill("Beta Owner");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password", { exact: true }).fill(password);
-  await page.getByLabel("Confirm password").fill(password);
-  await page.getByRole("button", { name: "Create account" }).click();
-
-  await page.waitForURL(/\/sign-in/);
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
-  await page.getByLabel("Organisation name").fill(`Import Workspace ${suffix}`);
-  await page.getByRole("button", { name: "Create workspace" }).click();
-  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
+  await createWorkspaceOwner(page, testInfo, {
+    emailPrefix: "imp",
+    ownerName: "Beta Owner",
+    organisationPrefix: "Import Workspace",
+  });
 
   await page.goto("/app/risks/import");
   await expect(page.getByRole("heading", { name: "Import risk register", level: 1 })).toBeVisible();
@@ -539,16 +609,17 @@ test("a risk register workbook can be imported through the wizard", async ({ pag
   await expect(page.getByText("1 row will be added")).toBeVisible();
   const axe = await new AxeBuilder({ page }).analyze();
   expect(axe.violations).toEqual([]);
-  await page.getByRole("button", { name: /Confirm import/ }).click();
-  await expect(page.getByText(/1 row added/)).toBeVisible();
-  await page.goto("/app/risks");
+  await submitServerAction(page, page.getByRole("button", { name: /Confirm import/ }), "/app/risks/import");
+  await expect(page.getByRole("heading", { name: "Import complete" })).toBeVisible();
+  await expect(page.getByText("1 row added.")).toBeVisible();
+  await page.getByRole("link", { name: "View risk register" }).click();
   await expect(page.getByRole("link", { name: "Imported laptop theft" })).toBeVisible();
 });
 
 test("an asset workbook can be imported through the wizard", async ({ page }, testInfo) => {
   const suffix = `${Date.now()}-${testInfo.project.name}`;
   const email = `assetimp-${suffix}@example.test`;
-  const password = "Test-only-passphrase-2026";
+  const password = createTestPassword(suffix);
 
   await page.goto("/sign-up");
   await page.getByLabel("Name").fill("Beta Owner");
@@ -585,45 +656,16 @@ test("an asset workbook can be imported through the wizard", async ({ page }, te
 });
 
 test("a SoA workbook import updates a matched control in the selected register", async ({ page }, testInfo) => {
-  const suffix = `${Date.now()}-${testInfo.project.name}`;
-  const email = `soaimp-${suffix}@example.test`;
-  const password = "Test-only-passphrase-2026";
-
-  await page.goto("/sign-up");
-  await page.getByLabel("Name").fill("Beta Owner");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password", { exact: true }).fill(password);
-  await page.getByLabel("Confirm password").fill(password);
-  await page.getByRole("button", { name: "Create account" }).click();
-
-  await page.waitForURL(/\/sign-in/);
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
-  await page.getByLabel("Organisation name").fill(`SoA Import Workspace ${suffix}`);
-  await page.getByRole("button", { name: "Create workspace" }).click();
-  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
+  await createWorkspaceOwner(page, testInfo, {
+    emailPrefix: "soaimp",
+    ownerName: "Beta Owner",
+    organisationPrefix: "SoA Import Workspace",
+  });
 
   // Seed an assessment session and generate a SoA draft so there is a real register + control to update.
-  await page.goto("/app/assessment");
-  await page.getByRole("button", { name: "New assessment" }).click();
-  await expect(page.getByRole("heading", { name: /readiness assessment/i })).toBeVisible();
-
-  const assessmentSelect = page.locator("select[name=assessmentId]");
-  await expect(async () => {
-    await page.goto("/app/soa");
-    // The SoA page shows an empty state (no select) until the seeded assessment is
-    // server-rendered — wait for the select itself, then for the seeded option, so
-    // the retry doesn't pass vacuously while the empty state is still showing.
-    await expect(assessmentSelect).toBeVisible();
-    await expect(assessmentSelect.locator("option")).not.toHaveCount(1);
-  }).toPass({ timeout: 15000 });
-  await assessmentSelect.selectOption({ index: 1 });
-  await page.getByRole("button", { name: "Generate draft" }).click();
-  await page.waitForURL(/\/app\/soa\/[0-9a-f-]+$/);
+  await createAssessmentSession(page);
+  const registerUrl = await createSoaDraft(page);
   await expect(page.getByRole("heading", { name: "Statement of Applicability", level: 1 })).toBeVisible();
-  const registerUrl = page.url();
 
   const firstHeading = await page.locator(".soa-detail-heading h2").textContent();
   const code = (firstHeading ?? "").split(" ")[0].trim();
@@ -638,8 +680,9 @@ test("a SoA workbook import updates a matched control in the selected register",
   await expect(page.getByText("1 matched control will be updated")).toBeVisible();
   const soaAxe = await new AxeBuilder({ page }).analyze();
   expect(soaAxe.violations).toEqual([]);
-  await page.getByRole("button", { name: /Confirm import/ }).click();
-  await expect(page.getByText(/1 control updated/)).toBeVisible();
+  await submitServerAction(page, page.getByRole("button", { name: /Confirm import/ }), "/app/soa/import");
+  await expect(page.getByRole("heading", { name: "Import complete" })).toBeVisible();
+  await expect(page.getByText("1 control updated.")).toBeVisible();
 
   // Confirm the matched control's status and justification in the focused workspace detail.
   await page.goto(registerUrl);
@@ -650,35 +693,13 @@ test("a SoA workbook import updates a matched control in the selected register",
 });
 
 test("the SoA review workspace supports focused review, persistence, accessibility, and mobile width", async ({ page }, testInfo) => {
-  const suffix = `${Date.now()}-${testInfo.project.name}`;
-  const email = `soareview-${suffix}@example.test`;
-  const password = "Test-only-passphrase-2026";
-
-  await page.goto("/sign-up");
-  await page.getByLabel("Name").fill("SoA Review Owner");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password", { exact: true }).fill(password);
-  await page.getByLabel("Confirm password").fill(password);
-  await page.getByRole("button", { name: "Create account" }).click();
-  await page.waitForURL(/\/sign-in/);
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await page.getByLabel("Organisation name").fill(`SoA Review Workspace ${suffix}`);
-  await page.getByRole("button", { name: "Create workspace" }).click();
-  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
-
-  await page.goto("/app/assessment");
-  await page.getByRole("button", { name: "New assessment" }).click();
-  const assessmentSelect = page.locator("select[name=assessmentId]");
-  await expect(async () => {
-    await page.goto("/app/soa");
-    await expect(assessmentSelect).toBeVisible();
-    await expect(assessmentSelect.locator("option")).not.toHaveCount(1);
-  }).toPass({ timeout: 15000 });
-  await assessmentSelect.selectOption({ index: 1 });
-  await page.getByRole("button", { name: "Generate draft" }).click();
-  await page.waitForURL(/\/app\/soa\/[0-9a-f-]+$/);
+  await createWorkspaceOwner(page, testInfo, {
+    emailPrefix: "soareview",
+    ownerName: "SoA Review Owner",
+    organisationPrefix: "SoA Review Workspace",
+  });
+  await createAssessmentSession(page);
+  await createSoaDraft(page);
 
   await expect(page.getByRole("textbox", { name: "Rationale" })).toHaveCount(1);
   for (const label of ["Needs attention", "Reviewed", "Missing rationale", "Evidence gaps", "Unassigned", "Undecided"]) {
@@ -718,45 +739,17 @@ test("the SoA review workspace supports focused review, persistence, accessibili
 });
 
 test("every register can be downloaded as an XLSX export", async ({ page }, testInfo) => {
-  const suffix = `${Date.now()}-${testInfo.project.name}`;
-  const email = `exp-${suffix}@example.test`;
-  const password = "Test-only-passphrase-2026";
-
-  await page.goto("/sign-up");
-  await page.getByLabel("Name").fill("Beta Owner");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password", { exact: true }).fill(password);
-  await page.getByLabel("Confirm password").fill(password);
-  await page.getByRole("button", { name: "Create account" }).click();
-
-  await page.waitForURL(/\/sign-in/);
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
-  await page.getByLabel("Organisation name").fill(`Export Workspace ${suffix}`);
-  await page.getByRole("button", { name: "Create workspace" }).click();
-  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
+  await createWorkspaceOwner(page, testInfo, {
+    emailPrefix: "exp",
+    ownerName: "Beta Owner",
+    organisationPrefix: "Export Workspace",
+  });
 
   // Seed an assessment session so the assessment export has a session to default to.
-  await page.goto("/app/assessment");
-  await page.getByRole("button", { name: "New assessment" }).click();
-  await expect(page.getByRole("heading", { name: /readiness assessment/i })).toBeVisible();
+  await createAssessmentSession(page);
 
   // Generate an SoA draft from that assessment so the SoA export finds a register.
-  // The dropdown is server-rendered, so re-navigate until the seeded assessment appears.
-  const assessmentSelect = page.locator("select[name=assessmentId]");
-  await expect(async () => {
-    await page.goto("/app/soa");
-    // The SoA page shows an empty state (no select) until the seeded assessment is
-    // server-rendered — wait for the select itself, then for the seeded option, so
-    // the retry doesn't pass vacuously while the empty state is still showing.
-    await expect(assessmentSelect).toBeVisible();
-    await expect(assessmentSelect.locator("option")).not.toHaveCount(1);
-  }).toPass({ timeout: 15000 });
-  await assessmentSelect.selectOption({ index: 1 });
-  await page.getByRole("button", { name: "Generate draft" }).click();
-  await page.waitForURL(/\/app\/soa\/[0-9a-f-]+$/);
+  await createSoaDraft(page);
   await expect(page.getByRole("heading", { name: "Statement of Applicability", level: 1 })).toBeVisible();
 
   for (const path of ["/api/app/risks/export?format=xlsx", "/api/app/soa/export?format=xlsx", "/api/app/assets/export?format=xlsx", "/api/app/tasks/export?format=xlsx", "/api/app/evidence/export?format=xlsx", "/api/app/assessment/export?format=xlsx"]) {
@@ -771,7 +764,7 @@ test("every register can be downloaded as an XLSX export", async ({ page }, test
 test("a minted auditor link exposes a read-only view to an unauthenticated visitor", async ({ page, browser }, testInfo) => {
   const suffix = `${Date.now()}-${testInfo.project.name}`;
   const email = `avw-${suffix}@example.test`;
-  const password = "Test-only-passphrase-2026";
+  const password = createTestPassword(suffix);
   const orgName = `Audit View Workspace ${suffix}`;
 
   await page.goto("/sign-up");
@@ -851,25 +844,11 @@ test("a minted auditor link exposes a read-only view to an unauthenticated visit
 });
 
 test("a policy is authored, approved, accepted, and re-accepted after a material edit", async ({ page }, testInfo) => {
-  const suffix = `${Date.now()}-${testInfo.project.name}`;
-  const email = `pol-${suffix}@example.test`;
-  const password = "Test-only-passphrase-2026";
-
-  await page.goto("/sign-up");
-  await page.getByLabel("Name").fill("Beta Owner");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password", { exact: true }).fill(password);
-  await page.getByLabel("Confirm password").fill(password);
-  await page.getByRole("button", { name: "Create account" }).click();
-
-  await page.waitForURL(/\/sign-in/);
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
-  await page.getByLabel("Organisation name").fill(`Policy Workspace ${suffix}`);
-  await page.getByRole("button", { name: "Create workspace" }).click();
-  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
+  await createWorkspaceOwner(page, testInfo, {
+    emailPrefix: "pol",
+    ownerName: "Beta Owner",
+    organisationPrefix: "Policy Workspace",
+  });
 
   // Reach the policy library through the workspace nav.
   const navToggle = page.getByRole("button", { name: "Open navigation" });
@@ -955,9 +934,27 @@ test("a policy is authored, approved, accepted, and re-accepted after a material
 });
 
 test("a task is pushed to a sandbox tracker, polled to In Progress, then the connection is revoked", async ({ page }, testInfo) => {
+  test.setTimeout(60_000);
+  const consoleErrors: string[] = [];
+  const failedRequests: string[] = [];
+  const serverErrors: string[] = [];
+  const requestUrls: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  page.on("requestfailed", (request) => {
+    const failure = request.failure()?.errorText ?? "unknown error";
+    // Next server-action POSTs can be cancelled by an immediate route change;
+    // Chromium reports those expected cancellations as net::ERR_ABORTED.
+    if (failure !== "net::ERR_ABORTED") failedRequests.push(`${request.method()} ${request.url()}: ${failure}`);
+  });
+  page.on("response", (response) => {
+    if (response.status() >= 500) serverErrors.push(`${response.status()} ${response.url()}`);
+  });
+  page.on("request", (request) => requestUrls.push(request.url()));
   const suffix = `${Date.now()}-${testInfo.project.name}`;
   const email = `int-${suffix}@example.test`;
-  const password = "Test-only-passphrase-2026";
+  const password = createTestPassword(suffix);
 
   await page.goto("/sign-up");
   await page.getByLabel("Name").fill("Beta Owner");
@@ -979,30 +976,66 @@ test("a task is pushed to a sandbox tracker, polled to In Progress, then the con
   // that gets pushed to the tracker further down.
   await page.goto("/app/tasks/new");
   await page.getByLabel("Title", { exact: true }).fill("Ship the tracker integration");
-  await page.getByRole("button", { name: "Create task" }).click();
-  await page.waitForURL(/\/app\/tasks$/);
+  await Promise.all([
+    page.waitForURL(/\/app\/tasks$/),
+    page.getByRole("button", { name: "Create task" }).click(),
+  ]);
   await page.getByRole("link", { name: "Ship the tracker integration" }).click();
   await page.waitForURL(/\/app\/tasks\/[0-9a-f-]+$/);
   const taskUrl = page.url();
   const taskId = new URL(taskUrl).pathname.split("/").pop() as string;
 
-  // 1. Open Integrations (FAKE provider is the dev default; INTEGRATIONS_LIVE is
-  //    not set). The nav link is the last of 15 items in a fixed 100vh sidebar
-  //    with no scroll, so it clips below the viewport — reach the page directly.
-  //    Provider defaults to Jira.
-  await page.goto("/app/integrations");
+  // 1. Open Settings, then its Connections tab. OAuth providers remain untouched:
+  //    this deterministic scenario uses only the explicitly local sandbox forms.
+  await page.goto("/app/settings");
+  await page.getByRole("navigation", { name: "Section" }).getByRole("link", { name: "Connections" }).click();
   await expect(page.getByRole("heading", { name: "Connections", level: 1 })).toBeVisible();
-  // The page carries a second "Label" input (the evidence-sources section), so
-  // scope this fill to the ticketing connection form.
-  const connectionForm = page.locator("form", { has: page.getByRole("button", { name: "Add connection" }) });
+  await expect(page.getByText("Owners and Admins connect workplace systems and choose where monitoring alerts are delivered.")).toBeVisible();
+  await page.getByText("Local sandbox / developer setup", { exact: true }).click();
+  const connectionForm = page.locator("form", { has: page.getByRole("button", { name: "Add sandbox tracker" }) });
   await connectionForm.getByLabel("Label", { exact: true }).fill("Sandbox Jira");
-  await page.getByRole("button", { name: "Add connection" }).click();
+  await connectionForm.getByRole("button", { name: "Add sandbox tracker" }).click();
   const connection = page.getByRole("listitem").filter({ hasText: "Sandbox Jira" });
-  await expect(connection.getByText("Active")).toBeVisible();
+  await expect(connection.getByText("Enabled")).toBeVisible();
+  await expect(connection.getByText("Sandbox", { exact: true })).toBeVisible();
+
+  // Add a local GitHub monitoring source from the same Settings tab, then prove
+  // Monitoring renders only connected systems and active findings.
+  const addMonitorSource = page.getByRole("button", { name: "Add sandbox monitoring source" });
+  if (!await addMonitorSource.isVisible()) {
+    await page.getByText("Local sandbox / developer setup", { exact: true }).click();
+  }
+  const monitorForm = page.locator("form", { has: addMonitorSource });
+  await monitorForm.getByLabel("GitHub owner").fill("acme");
+  await monitorForm.getByLabel("Repository").fill("compliance");
+  await monitorForm.getByLabel("Label", { exact: true }).fill("Sandbox GitHub monitoring");
+  const monitorSourcePost = page.waitForResponse((response) =>
+    response.request().method() === "POST"
+      && new URL(response.url()).pathname === "/app/integrations",
+  );
+  const [, response] = await Promise.all([
+    monitorForm.getByRole("button", { name: "Add sandbox monitoring source" }).click(),
+    monitorSourcePost,
+  ]);
+  expect(response.status()).toBeLessThan(400);
+  // Re-open the server-rendered view after the action has committed, then check
+  // durable persistence independently of a streamed RSC refresh frame.
+  await page.reload();
+  await expect(page.getByRole("listitem").filter({ hasText: "Sandbox GitHub monitoring" }).getByText("Enabled")).toBeVisible();
 
   // 2. Axe on the integrations page.
   const integrationsAxe = await new AxeBuilder({ page }).analyze();
   expect(integrationsAxe.violations).toEqual([]);
+
+  await page.goto("/app/monitoring");
+  await expect(page.getByRole("heading", { name: "Continuous monitoring", level: 2 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connected systems" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Active findings" })).toBeVisible();
+  await expect(page.getByText("Sandbox GitHub monitoring")).toBeVisible();
+  await expect(page.getByText("No active findings are currently visible.")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Manage connections and alerts" })).toHaveAttribute("href", "/app/integrations");
+  await expect(page.getByRole("button", { name: /Connect/ })).toHaveCount(0);
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 
   // 3. Push the existing task to the tracker; the FAKE provider mints a "To Do"
   //    ticket and the send-to-tracker form is replaced by the ticket chip.
@@ -1030,8 +1063,14 @@ test("a task is pushed to a sandbox tracker, polled to In Progress, then the con
     const { error: signInError } = await owner.auth.signInWithPassword({ email, password });
     expect(signInError, "the owner should sign in to age the ticket").toBeNull();
     const aged = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-    const { error: ageError } = await owner.from("task_tickets").update({ last_synced_at: aged }).eq("task_id", taskId);
-    expect(ageError, "the owner should age their own ticket into the sync window").toBeNull();
+    await expect.poll(async () => {
+      const { error } = await owner.from("task_tickets").update({ last_synced_at: aged }).eq("task_id", taskId);
+      return error?.message ?? null;
+    }, {
+      message: "the owner should age their own ticket into the sync window",
+      timeout: 5_000,
+      intervals: [250, 500, 1_000],
+    }).toBeNull();
 
     const res = await page.request.post("/api/cron/integrations-sync", { headers: { authorization: `Bearer ${cronSecret}` } });
     expect(res.ok()).toBeTruthy();
@@ -1050,29 +1089,20 @@ test("a task is pushed to a sandbox tracker, polled to In Progress, then the con
   await expect(page.getByRole("heading", { name: "Connections", level: 1 })).toBeVisible();
   const toRevoke = page.getByRole("listitem").filter({ hasText: "Sandbox Jira" });
   await toRevoke.getByRole("button", { name: "Revoke" }).click();
-  await expect(toRevoke.getByText("Revoked")).toBeVisible();
+  await expect(toRevoke).toHaveCount(0);
+  await expect(page.getByText("No GitHub or Jira systems are connected yet.")).toBeVisible();
+  expect(consoleErrors).toEqual([]);
+  expect(failedRequests).toEqual([]);
+  expect(serverErrors).toEqual([]);
+  expect(requestUrls.join("\n")).not.toMatch(/(?:access_token|refresh_token|client_secret|local-e2e-cron-secret)/i);
 });
 
 test("an owner adds an evidence source, the collector fills the vault, and re-collection does not duplicate", async ({ page }, testInfo) => {
-  const suffix = `${Date.now()}-${testInfo.project.name}`;
-  const email = `evs-${suffix}@example.test`;
-  const password = "Test-only-passphrase-2026";
-
-  await page.goto("/sign-up");
-  await page.getByLabel("Name").fill("Beta Owner");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password", { exact: true }).fill(password);
-  await page.getByLabel("Confirm password").fill(password);
-  await page.getByRole("button", { name: "Create account" }).click();
-
-  await page.waitForURL(/\/sign-in/);
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
-  await page.getByLabel("Organisation name").fill(`Evidence Sources Workspace ${suffix}`);
-  await page.getByRole("button", { name: "Create workspace" }).click();
-  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
+  await createWorkspaceOwner(page, testInfo, {
+    emailPrefix: "evs",
+    ownerName: "Beta Owner",
+    organisationPrefix: "Evidence Sources Workspace",
+  });
 
   // 1. Open Integrations and add an evidence source. FAKE collector is the dev
   //    default (EVIDENCE_LIVE is not set); provider defaults to Google Workspace.
@@ -1082,9 +1112,12 @@ test("an owner adds an evidence source, the collector fills the vault, and re-co
   await expect(page.getByRole("heading", { name: "Connections", level: 1 })).toBeVisible();
   const sourceForm = page.locator("form", { has: page.getByRole("button", { name: "Add evidence source" }) });
   await sourceForm.getByLabel("Label", { exact: true }).fill("Sandbox GWS");
-  await sourceForm.getByRole("button", { name: "Add evidence source" }).click();
+  await submitServerAction(page, sourceForm.getByRole("button", { name: "Add evidence source" }), "/app/integrations");
   const source = page.getByRole("listitem").filter({ hasText: "Sandbox GWS" });
-  await expect(source.getByText("Active")).toBeVisible();
+  await expect(source).toBeVisible();
+  await expect(source.getByText("Google Workspace")).toBeVisible();
+  await page.reload();
+  await expect(source).toBeVisible();
 
   // 2. Axe on the integrations page (now carrying both sections).
   const integrationsAxe = await new AxeBuilder({ page }).analyze();
@@ -1126,7 +1159,7 @@ test("an owner adds an evidence source, the collector fills the vault, and re-co
 test("an owner enables a public Trust Center that leaks nothing sensitive", async ({ page, browser }, testInfo) => {
   const suffix = `${Date.now()}-${testInfo.project.name}`;
   const email = `trust-${suffix}@example.test`;
-  const password = "Test-only-passphrase-2026";
+  const password = createTestPassword(suffix);
   const orgName = `Trust Workspace ${suffix}`;
   const slug = `trust-${suffix}`.toLowerCase().replace(/[^a-z0-9-]/g, "-");
   const headline = "We protect customer data with an audited ISMS.";
@@ -1196,53 +1229,118 @@ test("an owner enables a public Trust Center that leaks nothing sensitive", asyn
 });
 
 test("an ISO control is crosswalked to a framework requirement and drives coverage", async ({ page }, testInfo) => {
-  const suffix = `${Date.now()}-${testInfo.project.name}`;
-  const email = `crosswalk-${suffix}@example.test`;
-  const password = "Test-only-passphrase-2026";
+  await createWorkspaceOwner(page, testInfo, {
+    emailPrefix: "crosswalk",
+    ownerName: "Beta Owner",
+    organisationPrefix: "Crosswalk Workspace",
+  });
 
-  await page.goto("/sign-up");
-  await page.getByLabel("Name").fill("Beta Owner");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password", { exact: true }).fill(password);
-  await page.getByLabel("Confirm password").fill(password);
-  await page.getByRole("button", { name: "Create account" }).click();
-
-  await page.waitForURL(/\/sign-in/);
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
-  await page.getByLabel("Organisation name").fill(`Crosswalk Workspace ${suffix}`);
-  await page.getByRole("button", { name: "Create workspace" }).click();
-  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
-
-  // Framework coverage is no longer a sidebar door — it moves under SoA via
-  // a tab strip in a later task — so reach it directly for now.
+  // Operators reach Framework Coverage through the Statement of Applicability
+  // tab strip; direct navigation exercises the same authenticated route.
   await page.goto("/app/frameworks");
   await expect(page.getByRole("heading", { name: "Framework coverage", level: 1 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Framework coverage from your Statement of Applicability" })).toBeVisible();
 
-  // A fresh workspace has no mappings yet.
-  await expect(page.getByText("Record your first crosswalk mapping")).toBeVisible();
+  // A fresh workspace reports only recorded data and never implies zero
+  // compliance or certification.
+  await expect(page.getByText("No mappings have been recorded for this workspace. Coverage will appear only after an operator records and reviews a mapping.")).toBeVisible();
+  await expect(page.getByText("No recorded mappings yet")).toHaveCount(5);
+  await expect(page.getByRole("progressbar")).toHaveCount(0);
+  await expect(page.getByText(/not total framework compliance, certification, legal advice, or audit assurance/i)).toBeVisible();
 
-  // Record the organisation's own mapping: an ISO control -> SOC 2 CC6.1.
-  await page.locator('select[name="controlId"]').selectOption({ index: 1 });
-  await page.locator('select[name="framework"]').selectOption("soc_2");
-  await page.getByLabel("Requirement reference").fill("CC6.1");
-  await page.getByLabel("Note").fill("Our logical access control satisfies this criterion.");
+  const source = page.getByLabel("Source ISO control");
+  const target = page.getByLabel("Target framework");
+  const reference = page.getByLabel("Published requirement reference");
+  const rationale = page.getByLabel("Required rationale / interpretation");
+  await expect(source).toHaveAttribute("required", "");
+  await expect(target).toHaveAttribute("required", "");
+  await expect(reference).toHaveAttribute("required", "");
+  await expect(rationale).toHaveAttribute("required", "");
+
+  // The required rationale is enforced by the browser before the server action.
+  await source.selectOption({ index: 1 });
+  await target.selectOption("soc_2");
+  await reference.fill("CC6.1");
+  await page.getByRole("button", { name: "Add mapping" }).click();
+  await expect(rationale).toBeFocused();
+  await expect(page.getByRole("cell", { name: "CC6.1", exact: true })).toHaveCount(0);
+
+  // Record the organisation's reviewed mapping: an ISO control -> SOC 2 CC6.1.
+  await rationale.fill("Our logical access control supports this published criterion.");
   await page.getByRole("button", { name: "Add mapping" }).click();
 
-  // The mapping appears in the list and the SOC 2 coverage summary updates to
-  // reflect one mapped requirement.
+  // With no SoA register, the recorded requirement is honestly Not yet covered.
   await expect(page.getByRole("cell", { name: "CC6.1", exact: true })).toBeVisible();
-  await expect(page.getByText("Our logical access control satisfies this criterion.")).toBeVisible();
+  await expect(page.getByText("Our logical access control supports this published criterion.")).toBeVisible();
+  await expect(page.getByText("Not yet covered")).toBeVisible();
   const coverage = page.getByRole("region", { name: "Per-framework coverage" });
-  await expect(coverage.getByText(/of 1 mapped requirement/)).toBeVisible();
+  await expect(coverage.getByText("0/1 recorded")).toBeVisible();
+  await expect(coverage.getByText("0 of 1 recorded requirement covered")).toBeVisible();
+  await expect(page.getByRole("progressbar", { name: "SOC 2 recorded mapping coverage" })).toHaveAttribute("aria-valuenow", "0");
 
   // Accessibility: zero automatically detectable violations on the page.
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 
   // Remove the mapping and confirm it is gone.
-  await page.getByRole("button", { name: /Remove mapping of/ }).click();
-  await expect(page.getByText("Record your first crosswalk mapping")).toBeVisible();
+  await submitServerAction(page, page.getByRole("button", { name: /Remove mapping of/ }), "/app/frameworks");
+  await expect(page.getByText("No mappings have been recorded for this workspace. Coverage will appear only after an operator records and reviews a mapping.")).toBeVisible();
   await expect(page.getByRole("cell", { name: "CC6.1", exact: true })).toHaveCount(0);
+  await expect(page.getByText("No recorded mappings yet")).toHaveCount(5);
+});
+
+test("an invited Member opens Framework Coverage from read-only navigation", async ({ page }, testInfo) => {
+  const owner = await createWorkspaceOwner(page, testInfo, {
+    emailPrefix: "framework-member-owner",
+    ownerName: "Framework Owner",
+    organisationPrefix: "Member Framework Workspace",
+  });
+  const memberEmail = `framework-member-${owner.suffix}@example.test`;
+  const memberPassword = createTestPassword(`member-${owner.suffix}`);
+  await createInvitedLocalMember({
+    ownerEmail: owner.email,
+    ownerPassword: owner.password,
+    organisationName: owner.organisationName,
+    memberEmail,
+    memberPassword,
+    suffix: owner.suffix,
+  });
+
+  const appOrigin = new URL(page.url()).origin;
+  const consoleErrors: string[] = [];
+  const failedRequests: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  page.on("requestfailed", (request) => {
+    // Navigation can legitimately cancel speculative Next.js prefetches. Keep
+    // real transport failures visible without treating ERR_ABORTED as an app bug.
+    if (request.failure()?.errorText !== "net::ERR_ABORTED") {
+      failedRequests.push(`${new URL(request.url()).pathname}: ${request.failure()?.errorText ?? "unknown error"}`);
+    }
+  });
+  await page.context().clearCookies();
+
+  await page.goto(`${appOrigin}/sign-in`);
+  await page.getByLabel("Email").fill(memberEmail);
+  await page.getByLabel("Password", { exact: true }).fill(memberPassword);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.waitForURL(/\/app$/);
+  await expect(page.getByLabel("Portal access")).toHaveText("Member view");
+
+  const navigationToggle = page.getByRole("button", { name: "Open navigation" });
+  if (await navigationToggle.isVisible()) await navigationToggle.click();
+  const navigation = page.getByRole("navigation", { name: "Workspace" });
+  const frameworkLink = navigation.getByRole("link", { name: "Framework coverage", exact: true });
+  await expect(frameworkLink).toBeVisible();
+  await frameworkLink.click();
+  await page.waitForURL(/\/app\/frameworks$/);
+
+  await expect(page.getByRole("heading", { name: "Framework coverage", level: 1 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Add a mapping" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Remove mapping/ })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Statement of Applicability" })).toHaveCount(0);
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  expect(consoleErrors).toEqual([]);
+  expect(failedRequests).toEqual([]);
 });

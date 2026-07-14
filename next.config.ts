@@ -8,11 +8,14 @@ const scriptSrc = process.env.NODE_ENV === "production" ? "'self' 'unsafe-inline
 
 const hostedSupabaseConnectSrc = "'self' https://*.supabase.co wss://*.supabase.co";
 
-export function buildConnectSrc(nodeEnv = process.env.NODE_ENV, supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL): string {
-  if (nodeEnv === "production" || !supabaseUrl) return hostedSupabaseConnectSrc;
+export function buildConnectSrc(supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL): string {
+  if (!supabaseUrl) return hostedSupabaseConnectSrc;
 
   try {
     const url = new URL(supabaseUrl);
+    // A production-mode build can still be served against the local Supabase
+    // stack during release verification. Permit only the exact configured
+    // loopback origins; deployed hosted URLs keep the strict hosted policy.
     if (!["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)) return hostedSupabaseConnectSrc;
 
     const websocketUrl = new URL(url.origin);

@@ -1,8 +1,10 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const hoisted = vi.hoisted(() => ({
   selectCalls: [] as Array<{ table: string; columns: string }>,
+  filterCalls: [] as Array<{ table: string; column: string; value: string }>,
+  errors: {} as Record<string, { message: string } | undefined>,
   rows: {
     integration_connections: [{
       id: "connection-1", provider: "github", label: "GitHub", config: {},
@@ -33,9 +35,13 @@ function query(table: string) {
     hoisted.selectCalls.push({ table, columns });
     return chain;
   });
-  for (const method of ["eq", "is", "order", "limit"]) chain[method] = vi.fn(() => chain);
-  chain.then = (resolve: (value: { data: unknown[]; error: null }) => unknown) =>
-    Promise.resolve({ data: hoisted.rows[table] ?? [], error: null }).then(resolve);
+  chain.eq = vi.fn((column: string, value: string) => {
+    hoisted.filterCalls.push({ table, column, value });
+    return chain;
+  });
+  for (const method of ["is", "order", "limit"]) chain[method] = vi.fn(() => chain);
+  chain.then = (resolve: (value: { data: unknown[]; error: { message: string } | null }) => unknown) =>
+    Promise.resolve({ data: hoisted.rows[table] ?? [], error: hoisted.errors[table] ?? null }).then(resolve);
   return chain;
 }
 
@@ -52,8 +58,13 @@ vi.mock("next/navigation", () => ({ usePathname: () => "/app/integrations", useR
 import IntegrationsPage from "./page";
 
 describe("Settings Connections page", () => {
-  it("puts systems and alert-channel configuration in one operator workspace", async () => {
+  beforeEach(() => {
     hoisted.selectCalls = [];
+    hoisted.filterCalls = [];
+    hoisted.errors = {};
+  });
+
+  it("puts systems and alert-channel configuration in one operator workspace", async () => {
     render(await IntegrationsPage());
 
     expect(screen.getByRole("heading", { name: "Systems" })).toBeInTheDocument();
@@ -84,5 +95,22 @@ describe("Settings Connections page", () => {
     for (const call of hoisted.selectCalls) {
       expect(call.columns).toBe(expectedColumns[call.table]);
     }
+  });
+
+  it("scopes every connection dataset to the active workspace", async () => {
+    await IntegrationsPage();
+
+    expect(hoisted.filterCalls).toEqual([
+      { table: "integration_connections", column: "organisation_id", value: "org-1" },
+      { table: "monitor_sources", column: "organisation_id", value: "org-1" },
+      { table: "alert_channels", column: "organisation_id", value: "org-1" },
+      { table: "evidence_sources", column: "organisation_id", value: "org-1" },
+    ]);
+  });
+
+  it("fails closed instead of rendering a false empty state when a dataset cannot load", async () => {
+    hoisted.errors.monitor_sources = { message: "query unavailable" };
+
+    await expect(IntegrationsPage()).rejects.toThrow("Could not load connection settings");
   });
 });
