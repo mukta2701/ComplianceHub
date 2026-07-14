@@ -25,11 +25,13 @@ export function PolicyFeedback({
   policyId,
   threads,
   canManage,
+  canCollaborate,
   loadError = false,
 }: {
   policyId: string;
   threads: PolicyFeedbackThread[];
   canManage: boolean;
+  canCollaborate: boolean;
   loadError?: boolean;
 }) {
   return <Card style={{ padding: "18px", marginTop: "16px" }}>
@@ -55,7 +57,7 @@ export function PolicyFeedback({
                 <small style={{ color: "#737d8c" }}>{comment.authorName} · {formatDate(comment.createdAt)}</small>
               </li>)}
             </ol>
-            {thread.status === "open" && <form action={replyPolicyFeedbackAction} className="app-form" style={{ marginTop: "10px" }}>
+            {thread.status === "open" && canCollaborate && <form action={replyPolicyFeedbackAction} className="app-form" style={{ marginTop: "10px" }}>
               <input type="hidden" name="threadId" value={thread.id} />
               <label>Reply<textarea name="body" rows={3} required minLength={1} maxLength={4000} /></label>
               <button className="button secondary">Reply</button>
@@ -71,7 +73,7 @@ export function PolicyFeedback({
           </section>)}
         </div>}
 
-    <details>
+    {canCollaborate ? <details>
       <summary style={{ cursor: "pointer", fontSize: "13px", fontWeight: 700, color: "var(--blue)" }}>Add feedback</summary>
       <form action={createPolicyFeedbackAction} className="app-form" style={{ paddingTop: "14px" }}>
         <input type="hidden" name="policyId" value={policyId} />
@@ -79,6 +81,6 @@ export function PolicyFeedback({
         <label>Comment<textarea name="body" rows={4} required minLength={1} maxLength={4000} /></label>
         <button className="button primary">Start feedback</button>
       </form>
-    </details>
+    </details> : <p style={{ color: "#596273", fontSize: "13px", margin: 0 }}>Feedback opens after this policy is approved. Existing threads remain available for operator management.</p>}
   </Card>;
 }

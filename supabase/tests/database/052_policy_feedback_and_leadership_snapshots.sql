@@ -1,5 +1,5 @@
 begin;
-select plan(69);
+select plan(79);
 
 select has_table('public', 'policy_feedback_threads', 'policy feedback threads exist');
 select has_table('public', 'policy_feedback_comments', 'policy feedback comments exist');
@@ -8,6 +8,9 @@ select has_function('public', 'create_policy_feedback', array['uuid','text','tex
 select has_function('public', 'reply_policy_feedback', array['uuid','text'], 'feedback replies use a narrow RPC');
 select has_function('public', 'set_policy_feedback_status', array['uuid','boolean'], 'feedback status uses an operator RPC');
 select has_function('public', 'publish_leadership_report', array['uuid','jsonb'], 'leadership publication uses a narrow RPC');
+select ok(pg_catalog.lower(pg_catalog.pg_get_functiondef('public.reply_policy_feedback(uuid,text)'::regprocedure)) like '%for share of policy%', 'feedback replies lock policy status against concurrent lifecycle changes');
+select ok(pg_catalog.pg_get_functiondef('public.set_policy_feedback_status(uuid,boolean)'::regprocedure) like '%from public.memberships as membership%for share;%', 'feedback status changes lock the operator membership against concurrent demotion');
+select ok(pg_catalog.pg_get_functiondef('public.publish_leadership_report(uuid,jsonb)'::regprocedure) like '%from public.memberships as membership%for share;%', 'report publication locks the operator membership against concurrent demotion');
 select has_trigger('public','policy_feedback_threads','policy_feedback_threads_audit','feedback thread changes are audited');
 select has_trigger('public','policy_feedback_comments','policy_feedback_comments_audit','feedback comments are audited');
 select has_trigger('public','leadership_report_snapshots','leadership_report_snapshots_audit','leadership report publication is audited');
@@ -63,6 +66,8 @@ insert into public.policies(id,organisation_id,reference,title,body,version,stat
  ('7a000000-0000-4000-8000-000000000101',current_setting('app.feedback_org')::uuid,'FB-1','Approved feedback','body',4,'approved','7a000000-0000-4000-8000-000000000001'),
  ('7a000000-0000-4000-8000-000000000102',current_setting('app.feedback_org')::uuid,'FB-2','Draft feedback','body',2,'draft','7a000000-0000-4000-8000-000000000001');
 
+select throws_ok($$ select public.create_policy_feedback('7a000000-0000-4000-8000-000000000102','Owner draft comment','Even Owners collaborate only on approved policy versions') $$,'42501','policy is not available for feedback','Owner cannot create feedback on a draft policy');
+
 select set_config('request.jwt.claims','{"sub":"7a000000-0000-4000-8000-000000000003","email":"feedback-member@example.test","role":"authenticated"}',true);
 select lives_ok($$ select public.create_policy_feedback('7a000000-0000-4000-8000-000000000101','Please clarify','Could this control include contractors?') $$,'Member can create feedback on an approved policy');
 select set_config('app.feedback_thread',(select id::text from public.policy_feedback_threads limit 1),true);
@@ -85,6 +90,12 @@ select lives_ok($$ select public.set_policy_feedback_status(current_setting('app
 select throws_ok($$ select public.reply_policy_feedback(current_setting('app.feedback_thread')::uuid,'Late reply') $$,'22023','feedback thread is closed','closed feedback cannot receive replies');
 select lives_ok($$ select public.set_policy_feedback_status(current_setting('app.feedback_thread')::uuid,false) $$,'Admin can reopen feedback');
 select lives_ok($$ select public.reply_policy_feedback(current_setting('app.feedback_thread')::uuid,'Reply after reopening') $$,'Admin can reply after reopening feedback');
+select throws_ok($$ select public.create_policy_feedback('7a000000-0000-4000-8000-000000000102','Admin draft comment','Admins also wait for policy approval') $$,'42501','policy is not available for feedback','Admin cannot create feedback on a draft policy');
+update public.policies set status='draft' where id='7a000000-0000-4000-8000-000000000101';
+select throws_ok($$ select public.reply_policy_feedback(current_setting('app.feedback_thread')::uuid,'Draft policy reply') $$,'42501','feedback thread is not available','Admin cannot reply when the policy has returned to draft');
+update public.policies set status='archived' where id='7a000000-0000-4000-8000-000000000101';
+select throws_ok($$ select public.reply_policy_feedback(current_setting('app.feedback_thread')::uuid,'Archived policy reply') $$,'42501','feedback thread is not available','Admin cannot reply when the policy is archived');
+update public.policies set status='approved' where id='7a000000-0000-4000-8000-000000000101';
 
 select set_config('request.jwt.claims','{"sub":"7a000000-0000-4000-8000-000000000004","email":"feedback-outsider@example.test","role":"authenticated"}',true);
 select throws_ok($$ select public.create_policy_feedback('7a000000-0000-4000-8000-000000000101','Cross tenant','Outsiders cannot create feedback') $$,'42501','policy is not available for feedback','cross-tenant feedback creation is denied');
@@ -93,6 +104,9 @@ select is((select count(*) from public.policy_feedback_threads),0::bigint,'outsi
 select is((select count(*) from public.policy_feedback_comments),0::bigint,'outsider cannot read feedback comments');
 
 select set_config('request.jwt.claims','{"sub":"7a000000-0000-4000-8000-000000000001","email":"feedback-owner@example.test","role":"authenticated"}',true);
+select throws_ok($$ select public.publish_leadership_report(current_setting('app.feedback_org')::uuid,'{"soaPercent":"75","soaTotal":"20","riskBands":{"low":"2","moderate":"1","high":"0","very_high":"0"},"tasksOpen":"3","tasksOverdue":"1","evidence":{"total":"5","expiring":"1","expired":"0"},"openAudits":"1","openNonConformities":"0"}'::jsonb) $$,'22023','invalid readiness report payload','numeric strings cannot masquerade as a leadership report');
+select throws_ok($$ select public.publish_leadership_report(current_setting('app.feedback_org')::uuid,'{"soaPercent":75,"soaTotal":20,"riskBands":{"low":2,"moderate":1,"high":0,"very_high":0},"tasksOpen":"3","tasksOverdue":1,"evidence":{"total":5,"expiring":1,"expired":0},"openAudits":1,"openNonConformities":0}'::jsonb) $$,'22023','invalid readiness report payload','a partially string-valued leadership report is rejected');
+select throws_ok($$ select public.publish_leadership_report(current_setting('app.feedback_org')::uuid,'{"soaPercent":75,"soaTotal":20,"riskBands":{"low":2,"moderate":1,"high":0,"very_high":0},"tasksOpen":null,"tasksOverdue":1,"evidence":{"total":5,"expiring":1,"expired":0},"openAudits":1,"openNonConformities":0}'::jsonb) $$,'22023','invalid readiness report payload','a JSON null report leaf is rejected rather than accepted through SQL NULL semantics');
 select lives_ok($$ select public.publish_leadership_report(current_setting('app.feedback_org')::uuid,'{"soaPercent":75,"soaTotal":20,"riskBands":{"low":2,"moderate":1,"high":0,"very_high":0},"tasksOpen":3,"tasksOverdue":1,"evidence":{"total":5,"expiring":1,"expired":0},"openAudits":1,"openNonConformities":0}'::jsonb) $$,'Owner can publish a validated leadership snapshot');
 select throws_ok($$ select public.publish_leadership_report(current_setting('app.feedback_org')::uuid,'{"soaPercent":75}'::jsonb) $$,'22023','invalid readiness report payload','operator cannot publish a malformed payload');
 select results_eq(

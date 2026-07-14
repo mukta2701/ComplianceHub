@@ -35,4 +35,32 @@ describe("loadReadinessInput active workspace scope", () => {
       "tasks",
     ].sort());
   });
+
+  it("fails closed when the latest-register lookup fails", async () => {
+    const result = { data: null, count: null, error: { message: "register unavailable" } };
+    const chain: Record<string, unknown> = {};
+    for (const method of ["select", "eq", "order", "limit", "in", "neq", "not", "lt"]) chain[method] = vi.fn(() => chain);
+    chain.maybeSingle = vi.fn().mockResolvedValue(result);
+    chain.then = (resolve: (value: typeof result) => unknown) => Promise.resolve(result).then(resolve);
+    const supabase = { from: vi.fn(() => chain) };
+
+    await expect(loadReadinessInput(supabase as never, ORGANISATION_ID)).rejects.toThrow("Could not load the readiness report");
+  });
+
+  it("fails closed when any metric query fails instead of substituting zero", async () => {
+    const from = vi.fn((table: string) => {
+      const result = table === "risks"
+        ? { data: null, count: null, error: { message: "risk query failed" } }
+        : table === "soa_registers"
+          ? { data: null, count: null, error: null }
+          : { data: [], count: 0, error: null };
+      const chain: Record<string, unknown> = {};
+      for (const method of ["select", "eq", "order", "limit", "in", "neq", "not", "lt"]) chain[method] = vi.fn(() => chain);
+      chain.maybeSingle = vi.fn().mockResolvedValue(result);
+      chain.then = (resolve: (value: typeof result) => unknown) => Promise.resolve(result).then(resolve);
+      return chain;
+    });
+
+    await expect(loadReadinessInput({ from } as never, ORGANISATION_ID)).rejects.toThrow("Could not load the readiness report");
+  });
 });

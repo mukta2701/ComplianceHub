@@ -37,4 +37,14 @@ describe("publishLeadershipReportAction", () => {
     await expect(publishLeadershipReportAction(new FormData())).rejects.toThrow("Only workspace operators can publish leadership reports");
     expect(hoisted.loadReadinessInput).not.toHaveBeenCalled();
   });
+
+  it("does not publish when any live readiness source fails", async () => {
+    const rpc = vi.fn();
+    hoisted.ctx = { supabase: { rpc }, user: { id: "operator-1" }, organisation: { id: ORGANISATION_ID }, membership: { role: "owner" } };
+    hoisted.loadReadinessInput.mockRejectedValueOnce(new Error("Could not load the readiness report"));
+
+    await expect(publishLeadershipReportAction(new FormData())).rejects.toThrow("Could not load the readiness report");
+
+    expect(rpc).not.toHaveBeenCalled();
+  });
 });

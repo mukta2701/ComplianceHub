@@ -132,6 +132,6 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
         <button className="button secondary">Link</button>
       </form>}
     </Card>
-    <PolicyFeedback policyId={id} threads={feedbackThreads} canManage={access.canManage} loadError={Boolean(feedbackResult.error)} />
+    <PolicyFeedback policyId={id} threads={feedbackThreads} canManage={access.canManage} canCollaborate={status === "approved"} loadError={Boolean(feedbackResult.error)} />
   </>;
 }

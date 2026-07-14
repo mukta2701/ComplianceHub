@@ -9,9 +9,11 @@ import { DEFAULT_RISK_MATRIX_CONFIG, type RiskMatrixConfig } from "@/features/ri
 // RLS remains the underlying tenant-isolation boundary.
 export async function loadReadinessInput(supabase: SupabaseClient, organisationId: string): Promise<ReadinessReportInput> {
   const today = new Date().toISOString().slice(0, 10);
-  const { data: register } = await supabase.from("soa_registers").select("id").eq("organisation_id", organisationId).order("version", { ascending: false }).limit(1).maybeSingle();
+  const registerResult = await supabase.from("soa_registers").select("id").eq("organisation_id", organisationId).order("version", { ascending: false }).limit(1).maybeSingle();
+  if (registerResult.error) throw new Error("Could not load the readiness report");
+  const register = registerResult.data;
   const [soa, risks, evidence, audits, findings, openTasks, overdueTasks, cfg] = await Promise.all([
-    register ? supabase.from("soa_items").select("status").eq("organisation_id", organisationId).eq("soa_register_id", register.id) : Promise.resolve({ data: [] as { status: string }[] }),
+    register ? supabase.from("soa_items").select("status").eq("organisation_id", organisationId).eq("soa_register_id", register.id) : Promise.resolve({ data: [] as { status: string }[], error: null }),
     supabase.from("risks").select("likelihood,impact").eq("organisation_id", organisationId),
     supabase.from("evidence").select("status").eq("organisation_id", organisationId),
     supabase.from("audits").select("status").eq("organisation_id", organisationId),
@@ -20,6 +22,9 @@ export async function loadReadinessInput(supabase: SupabaseClient, organisationI
     supabase.from("tasks").select("id", { count: "exact", head: true }).eq("organisation_id", organisationId).in("status", ["open", "in_progress"]).not("due_on", "is", null).lt("due_on", today),
     supabase.from("risk_matrix_config").select("low_max,moderate_max,high_max,appetite_threshold").eq("organisation_id", organisationId).maybeSingle(),
   ]);
+  if ([soa, risks, evidence, audits, findings, openTasks, overdueTasks, cfg].some((result) => result.error)) {
+    throw new Error("Could not load the readiness report");
+  }
   const config: RiskMatrixConfig = cfg.data
     ? { lowMax: cfg.data.low_max, moderateMax: cfg.data.moderate_max, highMax: cfg.data.high_max, appetite: cfg.data.appetite_threshold }
     : DEFAULT_RISK_MATRIX_CONFIG;

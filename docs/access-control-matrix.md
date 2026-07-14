@@ -49,7 +49,7 @@ policies are reviewed.
 | `policies` | R/W | approved R | Members cannot see draft, in-review, or archived policies. |
 | `policy_acceptances` | organisation R | own R | No direct writes for any authenticated role; `accept_policy` is the only write path. Pre-upgrade rows remain hidden until securely re-accepted and stamped `trusted_at`. |
 | `policy_feedback_comments` | R | R | Immutable comments; creation is limited to the guarded create/reply RPCs. |
-| `policy_feedback_threads` | R | approved-policy R | Members collaborate only on approved policies; operators can also read draft-policy feedback. Status changes use the operator-only RPC. |
+| `policy_feedback_threads` | R | approved-policy R | Collaboration is limited to approved policies for every role. Operators retain historical read and resolve/reopen access after a policy leaves approved status. |
 | `risk_categories` | R/W | R | Member receives read-only risk reference data. |
 | `risk_matrix_config` | R/W | R | Member receives the current matrix but cannot reconfigure it. |
 | `risk_treatment_plans` | R/W | R | Member receives read-only treatment progress. |
@@ -96,7 +96,7 @@ depth for security-invoker functions.
 | Function | Who may mutate | Security rule |
 |---|---|---|
 | `accept_policy(uuid)` | Any verified current member | Locks an approved policy and current membership, derives user/org/version/time, stamps `trusted_at`, and upserts one authoritative acceptance. |
-| `create_policy_feedback(uuid,text,text)` | Any current member with policy read access | Derives the organisation, policy version, author, and time; Members are limited to approved policies. Creates the thread and first immutable comment atomically. |
+| `create_policy_feedback(uuid,text,text)` | Any current member on an approved policy | Derives the organisation, policy version, author, and time and creates the thread and first immutable comment atomically. |
 | `complete_recurring_task(uuid)` | Operator | Checks the operator before locking/completing and creating the successor. |
 | `create_evidence_record(jsonb)` | Operator | Derives the target organisation from the validated payload and checks operator before insert/supersession. |
 | `create_soa_draft(uuid,text)` | Operator | Target assessment must belong to an operated organisation. |
@@ -104,7 +104,7 @@ depth for security-invoker functions.
 | `finalise_soa(uuid)` | Operator | Register must belong to an operated organisation; existing completeness/concurrency checks remain. |
 | `notify_policy_reaccept(uuid,text)` | Operator | Policy must belong to an operated organisation. |
 | `publish_leadership_report(uuid,jsonb)` | Operator | Derives organisation name, publisher, and time; rejects any payload outside the exact bounded `ReadinessReport` shape and inserts an immutable snapshot. |
-| `reply_policy_feedback(uuid,text)` | Any current member with policy read access | Locks an open thread, rechecks policy visibility, derives author/time, and appends an immutable comment. |
+| `reply_policy_feedback(uuid,text)` | Any current member on an approved policy | Locks the open thread and policy lifecycle, derives author/time, and appends an immutable comment. |
 | `save_assessment_response(uuid,uuid,assessment_answer,text,bigint)` | Operator | Assessment must belong to an operated organisation; revision conflict protection remains. |
 | `set_policy_feedback_status(uuid,boolean)` | Operator | Locks the thread and atomically resolves or reopens it with trusted resolver metadata. |
 

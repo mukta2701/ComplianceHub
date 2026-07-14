@@ -89,7 +89,6 @@ declare
   target_organisation_id uuid;
   target_version integer;
   target_status public.policy_status;
-  actor_role public.membership_role;
   clean_subject text := pg_catalog.btrim(feedback_subject);
   clean_body text := pg_catalog.btrim(feedback_body);
   new_thread_id uuid;
@@ -115,13 +114,13 @@ begin
     raise exception 'policy is not available for feedback' using errcode = '42501';
   end if;
 
-  select membership.role into actor_role
+  perform 1
   from public.memberships as membership
   where membership.organisation_id = target_organisation_id
     and membership.user_id = actor_id
   for share;
 
-  if not found or (actor_role = 'member' and target_status <> 'approved') then
+  if not found or target_status <> 'approved' then
     raise exception 'policy is not available for feedback' using errcode = '42501';
   end if;
 
@@ -152,7 +151,6 @@ declare
   target_organisation_id uuid;
   thread_status text;
   policy_status public.policy_status;
-  actor_role public.membership_role;
   clean_body text := pg_catalog.btrim(feedback_body);
   new_comment_id uuid;
 begin
@@ -166,19 +164,20 @@ begin
   join public.policies as policy
     on policy.id = thread.policy_id and policy.organisation_id = thread.organisation_id
   where thread.id = target_thread_id
-  for update of thread;
+  for update of thread
+  for share of policy;
 
   if not found then
     raise exception 'feedback thread is not available' using errcode = '42501';
   end if;
 
-  select membership.role into actor_role
+  perform 1
   from public.memberships as membership
   where membership.organisation_id = target_organisation_id
     and membership.user_id = actor_id
   for share;
 
-  if not found or (actor_role = 'member' and policy_status <> 'approved') then
+  if not found or policy_status <> 'approved' then
     raise exception 'feedback thread is not available' using errcode = '42501';
   end if;
   if thread_status <> 'open' then
@@ -210,7 +209,14 @@ begin
   if not found then
     raise exception 'feedback thread is not available' using errcode = '42501';
   end if;
-  if actor_id is null or not public.is_organisation_operator(target_organisation_id) then
+
+  perform 1
+  from public.memberships as membership
+  where membership.organisation_id = target_organisation_id
+    and membership.user_id = actor_id
+    and membership.role in ('owner', 'admin')
+  for share;
+  if actor_id is null or not found then
     raise exception 'only workspace operators can change feedback status' using errcode = '42501';
   end if;
 
@@ -239,31 +245,60 @@ language sql
 immutable
 set search_path = ''
 as $$
-  select
-    pg_catalog.jsonb_typeof(payload) = 'object'
-    and pg_catalog.pg_column_size(payload) <= 8192
-    and payload ?& array['soaPercent','soaTotal','riskBands','tasksOpen','tasksOverdue','evidence','openAudits','openNonConformities']
-    and payload - array['soaPercent','soaTotal','riskBands','tasksOpen','tasksOverdue','evidence','openAudits','openNonConformities'] = '{}'::jsonb
-    and (payload->>'soaPercent') ~ '^[0-9]+$' and (payload->>'soaPercent')::numeric between 0 and 100
-    and (payload->>'soaTotal') ~ '^[0-9]+$' and (payload->>'soaTotal')::numeric <= 1000000
-    and (payload->>'tasksOpen') ~ '^[0-9]+$' and (payload->>'tasksOpen')::numeric <= 1000000
-    and (payload->>'tasksOverdue') ~ '^[0-9]+$' and (payload->>'tasksOverdue')::numeric <= (payload->>'tasksOpen')::numeric
-    and (payload->>'openAudits') ~ '^[0-9]+$' and (payload->>'openAudits')::numeric <= 1000000
-    and (payload->>'openNonConformities') ~ '^[0-9]+$' and (payload->>'openNonConformities')::numeric <= 1000000
-    and pg_catalog.jsonb_typeof(payload->'riskBands') = 'object'
-    and payload->'riskBands' ?& array['low','moderate','high','very_high']
-    and (payload->'riskBands') - array['low','moderate','high','very_high'] = '{}'::jsonb
-    and (payload#>>'{riskBands,low}') ~ '^[0-9]+$' and (payload#>>'{riskBands,low}')::numeric <= 1000000
-    and (payload#>>'{riskBands,moderate}') ~ '^[0-9]+$' and (payload#>>'{riskBands,moderate}')::numeric <= 1000000
-    and (payload#>>'{riskBands,high}') ~ '^[0-9]+$' and (payload#>>'{riskBands,high}')::numeric <= 1000000
-    and (payload#>>'{riskBands,very_high}') ~ '^[0-9]+$' and (payload#>>'{riskBands,very_high}')::numeric <= 1000000
-    and pg_catalog.jsonb_typeof(payload->'evidence') = 'object'
-    and payload->'evidence' ?& array['total','expiring','expired']
-    and (payload->'evidence') - array['total','expiring','expired'] = '{}'::jsonb
-    and (payload#>>'{evidence,total}') ~ '^[0-9]+$' and (payload#>>'{evidence,total}')::numeric <= 1000000
-    and (payload#>>'{evidence,expiring}') ~ '^[0-9]+$'
-    and (payload#>>'{evidence,expired}') ~ '^[0-9]+$'
-    and (payload#>>'{evidence,expiring}')::numeric + (payload#>>'{evidence,expired}')::numeric <= (payload#>>'{evidence,total}')::numeric;
+  select case
+    when pg_catalog.jsonb_typeof(payload) is distinct from 'object' then false
+    when not (payload ?& array['soaPercent','soaTotal','riskBands','tasksOpen','tasksOverdue','evidence','openAudits','openNonConformities']) then false
+    when payload - array['soaPercent','soaTotal','riskBands','tasksOpen','tasksOverdue','evidence','openAudits','openNonConformities'] <> '{}'::jsonb then false
+    when pg_catalog.jsonb_typeof(payload->'riskBands') is distinct from 'object' then false
+    when not (payload->'riskBands' ?& array['low','moderate','high','very_high']) then false
+    when (payload->'riskBands') - array['low','moderate','high','very_high'] <> '{}'::jsonb then false
+    when pg_catalog.jsonb_typeof(payload->'evidence') is distinct from 'object' then false
+    when not (payload->'evidence' ?& array['total','expiring','expired']) then false
+    when (payload->'evidence') - array['total','expiring','expired'] <> '{}'::jsonb then false
+    when pg_catalog.jsonb_typeof(payload->'soaPercent') is distinct from 'number'
+      or pg_catalog.jsonb_typeof(payload->'soaTotal') is distinct from 'number'
+      or pg_catalog.jsonb_typeof(payload->'tasksOpen') is distinct from 'number'
+      or pg_catalog.jsonb_typeof(payload->'tasksOverdue') is distinct from 'number'
+      or pg_catalog.jsonb_typeof(payload->'openAudits') is distinct from 'number'
+      or pg_catalog.jsonb_typeof(payload->'openNonConformities') is distinct from 'number'
+      or pg_catalog.jsonb_typeof(payload#>'{riskBands,low}') is distinct from 'number'
+      or pg_catalog.jsonb_typeof(payload#>'{riskBands,moderate}') is distinct from 'number'
+      or pg_catalog.jsonb_typeof(payload#>'{riskBands,high}') is distinct from 'number'
+      or pg_catalog.jsonb_typeof(payload#>'{riskBands,very_high}') is distinct from 'number'
+      or pg_catalog.jsonb_typeof(payload#>'{evidence,total}') is distinct from 'number'
+      or pg_catalog.jsonb_typeof(payload#>'{evidence,expiring}') is distinct from 'number'
+      or pg_catalog.jsonb_typeof(payload#>'{evidence,expired}') is distinct from 'number'
+    then false
+    else
+      pg_catalog.pg_column_size(payload) <= 8192
+      and (payload->>'soaPercent')::numeric = pg_catalog.trunc((payload->>'soaPercent')::numeric)
+      and (payload->>'soaPercent')::numeric between 0 and 100
+      and (payload->>'soaTotal')::numeric = pg_catalog.trunc((payload->>'soaTotal')::numeric)
+      and (payload->>'soaTotal')::numeric between 0 and 1000000
+      and (payload->>'tasksOpen')::numeric = pg_catalog.trunc((payload->>'tasksOpen')::numeric)
+      and (payload->>'tasksOpen')::numeric between 0 and 1000000
+      and (payload->>'tasksOverdue')::numeric = pg_catalog.trunc((payload->>'tasksOverdue')::numeric)
+      and (payload->>'tasksOverdue')::numeric between 0 and (payload->>'tasksOpen')::numeric
+      and (payload->>'openAudits')::numeric = pg_catalog.trunc((payload->>'openAudits')::numeric)
+      and (payload->>'openAudits')::numeric between 0 and 1000000
+      and (payload->>'openNonConformities')::numeric = pg_catalog.trunc((payload->>'openNonConformities')::numeric)
+      and (payload->>'openNonConformities')::numeric between 0 and 1000000
+      and (payload#>>'{riskBands,low}')::numeric = pg_catalog.trunc((payload#>>'{riskBands,low}')::numeric)
+      and (payload#>>'{riskBands,low}')::numeric between 0 and 1000000
+      and (payload#>>'{riskBands,moderate}')::numeric = pg_catalog.trunc((payload#>>'{riskBands,moderate}')::numeric)
+      and (payload#>>'{riskBands,moderate}')::numeric between 0 and 1000000
+      and (payload#>>'{riskBands,high}')::numeric = pg_catalog.trunc((payload#>>'{riskBands,high}')::numeric)
+      and (payload#>>'{riskBands,high}')::numeric between 0 and 1000000
+      and (payload#>>'{riskBands,very_high}')::numeric = pg_catalog.trunc((payload#>>'{riskBands,very_high}')::numeric)
+      and (payload#>>'{riskBands,very_high}')::numeric between 0 and 1000000
+      and (payload#>>'{evidence,total}')::numeric = pg_catalog.trunc((payload#>>'{evidence,total}')::numeric)
+      and (payload#>>'{evidence,total}')::numeric between 0 and 1000000
+      and (payload#>>'{evidence,expiring}')::numeric = pg_catalog.trunc((payload#>>'{evidence,expiring}')::numeric)
+      and (payload#>>'{evidence,expiring}')::numeric between 0 and 1000000
+      and (payload#>>'{evidence,expired}')::numeric = pg_catalog.trunc((payload#>>'{evidence,expired}')::numeric)
+      and (payload#>>'{evidence,expired}')::numeric between 0 and 1000000
+      and (payload#>>'{evidence,expiring}')::numeric + (payload#>>'{evidence,expired}')::numeric <= (payload#>>'{evidence,total}')::numeric
+  end;
 $$;
 
 revoke all on function public.is_valid_readiness_report(jsonb) from public, anon, authenticated;
@@ -306,7 +341,13 @@ declare
   name_snapshot text;
   new_snapshot_id uuid;
 begin
-  if actor_id is null or not public.is_organisation_operator(target_organisation_id) then
+  perform 1
+  from public.memberships as membership
+  where membership.organisation_id = target_organisation_id
+    and membership.user_id = actor_id
+    and membership.role in ('owner', 'admin')
+  for share;
+  if actor_id is null or not found then
     raise exception 'only workspace operators can publish leadership reports' using errcode = '42501';
   end if;
   if not public.is_valid_readiness_report(report_payload) then

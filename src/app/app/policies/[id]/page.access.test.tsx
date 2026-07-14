@@ -26,12 +26,12 @@ function query<T>(result: T) {
   return builder;
 }
 
-function contextFor(role: "owner" | "admin" | "member") {
+function contextFor(role: "owner" | "admin" | "member", policyStatus: "draft" | "in_review" | "approved" | "archived" = "approved") {
   const results = {
     policies: query({
       data: {
         id: POLICY_ID, reference: "POL-001", title: "Security policy", body: "Approved policy text",
-        version: 3, status: "approved", review_due: null, owner_id: null,
+        version: 3, status: policyStatus, review_due: null, owner_id: null,
       },
       error: null,
     }),
@@ -108,5 +108,18 @@ describe("policy detail role presentation", () => {
     expect(screen.getByRole("button", { name: "Remove evidence link" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Link" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Resolve" })).toBeInTheDocument();
+  });
+
+  it("keeps historical feedback management visible but disables collaboration on a non-approved policy", async () => {
+    contextFor("admin", "draft");
+
+    render(await PolicyDetailPage({ params: Promise.resolve({ id: POLICY_ID }) }));
+
+    expect(screen.getByRole("heading", { name: "Policy feedback" })).toBeInTheDocument();
+    expect(screen.getByText("Does this include contractors?")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Resolve" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Start feedback" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reply" })).not.toBeInTheDocument();
+    expect(screen.getByText(/Feedback opens after this policy is approved/i)).toBeInTheDocument();
   });
 });
