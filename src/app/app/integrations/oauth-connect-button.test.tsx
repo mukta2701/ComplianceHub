@@ -45,7 +45,7 @@ describe("OAuthConnectButton", () => {
     });
     render(<OAuthConnectButton provider="github" />);
 
-    await userEvent.click(screen.getByRole("button", { name: "Connect GitHub with OAuth" }));
+    await userEvent.click(screen.getByRole("button", { name: "Connect GitHub" }));
 
     expect(hoisted.start).toHaveBeenCalledWith("github");
     expect(hoisted.constructorConfig).toEqual({ connectSessionToken });
@@ -54,14 +54,15 @@ describe("OAuthConnectButton", () => {
       provider: "github", connectionId: "connection-1", providerConfigKey: "github-prod",
     });
     expect(hoisted.refresh).toHaveBeenCalledOnce();
-    expect(await screen.findByText("GitHub authorized. Choose its target below to enable it.")).toBeInTheDocument();
+    expect(await screen.findByText("GitHub connected. Choose what ComplianceHub may use below.")).toBeInTheDocument();
+    expect(screen.queryByText(/OAuth|authorization/i)).not.toBeInTheDocument();
   });
 
   it("explains the deployment checkpoint instead of pretending to connect", async () => {
     hoisted.start.mockResolvedValue({ configured: false });
     render(<OAuthConnectButton provider="jira" />);
 
-    await userEvent.click(screen.getByRole("button", { name: "Connect Jira with OAuth" }));
+    await userEvent.click(screen.getByRole("button", { name: "Connect Jira" }));
 
     expect(hoisted.openConnectUI).not.toHaveBeenCalled();
     expect(await screen.findByText("Provider setup is required before Jira can be connected.")).toBeInTheDocument();
@@ -74,10 +75,10 @@ describe("OAuthConnectButton", () => {
     hoisted.confirm.mockRejectedValue(new Error("connection belongs elsewhere"));
     render(<OAuthConnectButton provider="github" />);
 
-    await userEvent.click(screen.getByRole("button", { name: "Connect GitHub with OAuth" }));
+    await userEvent.click(screen.getByRole("button", { name: "Connect GitHub" }));
 
-    expect(await screen.findByText("GitHub authorization could not be verified. Nothing was saved.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Connect GitHub with OAuth" })).toBeEnabled();
+    expect(await screen.findByText("Could not complete the GitHub connection. Nothing was saved.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Connect GitHub" })).toBeEnabled();
   });
 
   it("does not persist a provider authorization that Nango still marks pending", async () => {
@@ -90,9 +91,9 @@ describe("OAuthConnectButton", () => {
     };
     render(<OAuthConnectButton provider="github" />);
 
-    await userEvent.click(screen.getByRole("button", { name: "Connect GitHub with OAuth" }));
+    await userEvent.click(screen.getByRole("button", { name: "Connect GitHub" }));
 
     expect(hoisted.confirm).not.toHaveBeenCalled();
-    expect(await screen.findByText("GitHub authorization is still pending. Nothing was saved yet.")).toBeInTheDocument();
+    expect(await screen.findByText("GitHub connection is still pending. Nothing was saved yet.")).toBeInTheDocument();
   });
 });

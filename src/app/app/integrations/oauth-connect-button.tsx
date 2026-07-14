@@ -37,7 +37,7 @@ export function OAuthConnectButton({ provider }: { provider: IntegrationProvider
         onEvent: async (event) => {
           if (event.type === "connect") {
             if (event.payload.isPending) {
-              setMessage(`${label} authorization is still pending. Nothing was saved yet.`);
+              setMessage(`${label} connection is still pending. Nothing was saved yet.`);
               setBusy(false);
               return;
             }
@@ -47,14 +47,14 @@ export function OAuthConnectButton({ provider }: { provider: IntegrationProvider
                 connectionId: event.payload.connectionId,
                 providerConfigKey: event.payload.providerConfigKey,
               });
-              setMessage(`${label} authorized. Choose its target below to enable it.`);
+              setMessage(`${label} connected. Choose what ComplianceHub may use below.`);
               router.refresh();
             } catch {
-              setMessage(`${label} authorization could not be verified. Nothing was saved.`);
+              setMessage(`Could not complete the ${label} connection. Nothing was saved.`);
             }
             setBusy(false);
           } else if (event.type === "error") {
-            setMessage(`${label} authorization did not complete. Please try again.`);
+            setMessage(`${label} did not connect. Please try again.`);
             setBusy(false);
           } else if (event.type === "close") {
             setBusy(false);
@@ -62,14 +62,14 @@ export function OAuthConnectButton({ provider }: { provider: IntegrationProvider
         },
       });
     } catch {
-      setMessage(`Could not start ${label} authorization. Please try again.`);
+      setMessage(`Could not start the ${label} connection. Please try again.`);
       setBusy(false);
     }
   }
 
   return <div style={{ display: "grid", gap: "8px" }}>
     <button type="button" className="button primary" onClick={connect} disabled={busy}>
-      {busy ? `Connecting ${label}…` : `Connect ${label} with OAuth`}
+      {busy ? `Connecting ${label}…` : `Connect ${label}`}
     </button>
     {message && <p role="status" style={{ margin: 0, fontSize: "12px", color: "#596273" }}>{message}</p>}
   </div>;
