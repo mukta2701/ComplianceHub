@@ -3,8 +3,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { safePostAuthPath } from "@/lib/auth-destination";
 import { oauthConsentAction } from "./actions";
 import { parseOAuthConsentSearchParams, safeClientRedirect } from "@/features/auth/application/oauth-redirect";
-
-const standardScopes = new Set(["openid", "email", "profile"]);
+import { validateRequestedIdentityScopes } from "@/features/auth/application/oauth-grants";
 
 export default async function OAuthConsentPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const parsed = parseOAuthConsentSearchParams(await searchParams);
@@ -24,14 +23,15 @@ export default async function OAuthConsentPage({ searchParams }: { searchParams:
   }
   if (data.user.id !== user.id) return <ConsentError message="That authorization request belongs to another signed-in account." />;
   const clientName = data.client.name.trim().slice(0, 120) || "Connected application";
-  const scopes = data.scope.split(/\s+/).filter((scope) => standardScopes.has(scope));
+  const scopes = validateRequestedIdentityScopes(data.scope);
+  if (!scopes) return <ConsentError message="That authorization request requests unsupported access." />;
   let redirectOrigin = "Registered application";
   try { redirectOrigin = new URL(data.redirect_uri).origin; } catch { /* Supabase validated it; display a safe fallback. */ }
   return <main style={{ maxWidth: "560px", margin: "64px auto", padding: "24px" }}>
     <section className="card" style={{ padding: "28px" }}>
       <p className="eyebrow">SECURE CONNECTION</p><h1>{clientName} wants to connect</h1>
       <p style={{ color: "#5b6473" }}>This application will act as your ComplianceHub account. Access remains limited by your workspace membership and can be revoked later.</p>
-      <dl className="fact-grid" style={{ margin: "20px 0" }}><div><dt>Identity information</dt><dd>{scopes.length ? scopes.join(", ") : "email"}</dd></div><div><dt>Return destination</dt><dd>{redirectOrigin}</dd></div></dl>
+      <dl className="fact-grid" style={{ margin: "20px 0" }}><div><dt>Identity information</dt><dd>{scopes.join(", ")}</dd></div><div><dt>Return destination</dt><dd>{redirectOrigin}</dd></div></dl>
       <form action={oauthConsentAction} style={{ display: "flex", gap: "10px" }}>
         <input type="hidden" name="authorizationId" value={authorizationId} />
         <button className="button primary" name="decision" value="approve">Approve connection</button>

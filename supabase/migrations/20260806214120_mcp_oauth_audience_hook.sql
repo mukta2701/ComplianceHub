@@ -13,13 +13,15 @@ revoke all on private.mcp_oauth_config from public, anon, authenticated;
 
 create or replace function private.mcp_access_token_hook(event jsonb)
 returns jsonb language plpgsql security invoker set search_path = '' as $$
-declare configured_audience text;
+declare configured_audience text; claims jsonb;
 begin
-  if nullif(event ->> 'client_id', '') is null then return event; end if;
-  if jsonb_typeof(event -> 'claims') <> 'object' then raise exception 'Invalid OAuth access-token event'; end if;
+  claims := event -> 'claims';
+  if jsonb_typeof(claims) is distinct from 'object' then raise exception 'Invalid access-token hook claims'; end if;
+  if nullif(claims ->> 'client_id', '') is null then return jsonb_build_object('claims', claims); end if;
   select config.audience into configured_audience from private.mcp_oauth_config as config where config.config_key = 'resource';
   if configured_audience is null then raise exception 'MCP OAuth audience is not configured'; end if;
-  return jsonb_set(event, '{claims,aud}', to_jsonb(configured_audience), true);
+  claims := jsonb_set(claims, '{aud}', to_jsonb(configured_audience), true);
+  return jsonb_build_object('claims', claims);
 end;
 $$;
 revoke all on function private.mcp_access_token_hook(jsonb) from public, anon, authenticated;

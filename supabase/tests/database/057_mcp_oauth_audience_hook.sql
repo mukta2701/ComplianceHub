@@ -1,5 +1,5 @@
 begin;
-select plan(13);
+select plan(15);
 
 select has_schema('private', 'private configuration schema exists');
 select has_table('private', 'mcp_oauth_config', 'MCP OAuth configuration is private');
@@ -14,21 +14,30 @@ select ok(not has_table_privilege('supabase_auth_admin','private.mcp_oauth_confi
 
 select is(
   private.mcp_access_token_hook('{"claims":{"aud":"authenticated","sub":"11111111-1111-4111-8111-111111111111"},"authentication_method":"password"}'::jsonb),
-  '{"claims":{"aud":"authenticated","sub":"11111111-1111-4111-8111-111111111111"},"authentication_method":"password"}'::jsonb,
-  'ordinary browser token events remain exactly unchanged'
+  '{"claims":{"aud":"authenticated","sub":"11111111-1111-4111-8111-111111111111"}}'::jsonb,
+  'ordinary browser token claims remain exactly unchanged in the documented output shape'
+);
+
+select throws_ok(
+  $$ select private.mcp_access_token_hook('{"authentication_method":"password"}'::jsonb) $$,
+  'P0001', 'Invalid access-token hook claims', 'missing claims fail closed'
+);
+select throws_ok(
+  $$ select private.mcp_access_token_hook('{"claims":"bad","authentication_method":"password"}'::jsonb) $$,
+  'P0001', 'Invalid access-token hook claims', 'malformed claims fail closed'
 );
 
 insert into private.mcp_oauth_config(config_key,audience) values ('resource','https://compliance.example/mcp')
 on conflict (config_key) do update set audience=excluded.audience;
 select is(
-  private.mcp_access_token_hook('{"claims":{"aud":"authenticated","sub":"11111111-1111-4111-8111-111111111111"},"client_id":"codex-client","authentication_method":"oauth_provider/authorization_code"}'::jsonb)->'claims',
-  '{"aud":"https://compliance.example/mcp","sub":"11111111-1111-4111-8111-111111111111"}'::jsonb,
+  private.mcp_access_token_hook('{"claims":{"aud":"authenticated","sub":"11111111-1111-4111-8111-111111111111","client_id":"codex-client"},"authentication_method":"oauth_provider/authorization_code"}'::jsonb)->'claims',
+  '{"aud":"https://compliance.example/mcp","sub":"11111111-1111-4111-8111-111111111111","client_id":"codex-client"}'::jsonb,
   'OAuth token audience is bound to the configured MCP resource'
 );
 
 delete from private.mcp_oauth_config where config_key='resource';
 select throws_ok(
-  $$ select private.mcp_access_token_hook('{"claims":{"aud":"authenticated"},"client_id":"codex-client"}'::jsonb) $$,
+  $$ select private.mcp_access_token_hook('{"claims":{"aud":"authenticated","client_id":"codex-client"}}'::jsonb) $$,
   'P0001', 'MCP OAuth audience is not configured', 'OAuth issuance fails closed without an audience'
 );
 

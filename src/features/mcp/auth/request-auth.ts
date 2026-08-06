@@ -19,9 +19,12 @@ export async function verifyMcpJwt(token: string, config: McpOAuthConfig, keySet
       issuer: config.authorizationServer,
       audience: config.resource,
       algorithms: config.algorithms,
+      requiredClaims: ["exp", "iat"],
       clockTolerance: 5,
     };
     const { payload } = await jwtVerify(token, keySet, options);
+    if (typeof payload.exp !== "number" || !Number.isFinite(payload.exp)) throw new Error("invalid expiry");
+    if (typeof payload.iat !== "number" || !Number.isFinite(payload.iat)) throw new Error("invalid issued-at");
     if (!payload.sub || !uuid.test(payload.sub)) throw new Error("invalid subject");
     if (typeof payload.client_id !== "string" || !clientId.test(payload.client_id)) throw new Error("invalid client");
     if (payload.role !== "authenticated") throw new Error("invalid role");

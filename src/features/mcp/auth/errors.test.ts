@@ -18,7 +18,13 @@ describe("MCP errors", () => {
   it("adds the RFC 9728 challenge to HTTP and MCP errors", () => {
     const challenge = oauthChallenge("https://compliance.example/mcp", "invalid_token");
     expect(challenge).toBe('Bearer resource_metadata="https://compliance.example/.well-known/oauth-protected-resource", error="invalid_token"');
-    expect(mcpErrorResult(new McpError("INVALID_TOKEN"), "https://compliance.example/mcp")._meta)
-      .toEqual({ "mcp/www_authenticate": [challenge] });
+    expect(mcpErrorResult(new McpError("INVALID_TOKEN"), "https://compliance.example/mcp"))
+      .toHaveProperty("_meta", { "mcp/www_authenticate": [challenge] });
   });
+
+  it.each(MCP_ERROR_CODES.filter((code) => code !== "AUTH_REQUIRED" && code !== "INVALID_TOKEN"))(
+    "does not attach an authentication challenge to business error %s", (code) => {
+      expect(mcpErrorResult(new McpError(code), "https://compliance.example/mcp")).not.toHaveProperty("_meta");
+    },
+  );
 });

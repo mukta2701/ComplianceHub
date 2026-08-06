@@ -3,6 +3,12 @@ import "server-only";
 const clientIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const standardScopes = new Set(["openid", "email", "profile"]);
 
+export function validateRequestedIdentityScopes(scope: string): string[] | null {
+  const scopes = [...new Set(scope.trim().split(/\s+/).filter(Boolean))];
+  if (!scopes.length || scopes.some((value) => !standardScopes.has(value))) return null;
+  return scopes;
+}
+
 type OAuthApi = {
   auth: { oauth: {
     listGrants: () => Promise<{ data: Array<{ client: { id: string; name: string }; scopes: string[]; granted_at: string }> | null; error: unknown }>;
@@ -13,12 +19,16 @@ type OAuthApi = {
 export async function listUserOAuthGrants(client: OAuthApi) {
   const { data, error } = await client.auth.oauth.listGrants();
   if (error || !data) return [];
-  return data.filter((grant) => clientIdPattern.test(grant.client.id)).slice(0, 50).map((grant) => ({
-    clientId: grant.client.id,
-    clientName: grant.client.name.trim().slice(0, 120) || "Connected application",
-    scopes: grant.scopes.filter((scope) => standardScopes.has(scope)).slice(0, 3),
-    grantedAt: grant.granted_at,
-  }));
+  return data.filter((grant) => clientIdPattern.test(grant.client.id)).slice(0, 50).map((grant) => {
+    const knownScopes = grant.scopes.filter((scope) => standardScopes.has(scope)).slice(0, 3);
+    if (grant.scopes.some((scope) => !standardScopes.has(scope))) knownScopes.push("Additional access");
+    return {
+      clientId: grant.client.id,
+      clientName: grant.client.name.trim().slice(0, 120) || "Connected application",
+      scopes: knownScopes,
+      grantedAt: grant.granted_at,
+    };
+  });
 }
 
 export async function revokeUserOAuthGrant(client: OAuthApi, clientId: string) {

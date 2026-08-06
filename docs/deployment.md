@@ -205,9 +205,10 @@ below passes from MCP Inspector, Codex, and Claude.
    no hosted default. `supabase/seed.sql` supplies localhost only for local resets.
 4. In **Authentication → Hooks**, enable the Custom Access Token hook
    `pg-functions://postgres/private/mcp_access_token_hook`. It is a security-
-   invoker function: ordinary browser events are returned exactly unchanged;
-   OAuth events get only the configured `aud` change and fail closed when the
-   private audience row is absent.
+   invoker function: ordinary browser claims are returned unchanged in
+   Supabase's documented `{ claims }` output shape; OAuth events are detected
+   from `claims.client_id`, get only the configured `aud` change, and fail closed
+   when claims are malformed or the private audience row is absent.
 5. Register exact redirect URIs for the test clients. Do not use wildcard or
    preview-deployment redirects. The consent screen displays the registered
    return origin and never approves automatically.

@@ -3,6 +3,7 @@ const consentMessages = new Set([
   "That authorization request is invalid or expired.",
   "Choose whether to approve or deny access.",
   "Could not complete that authorization request.",
+  "That authorization request requests unsupported access.",
 ]);
 
 export function parseOAuthConsentSearchParams(value: Record<string, string | string[] | undefined>) {

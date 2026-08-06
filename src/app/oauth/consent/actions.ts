@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { safeClientRedirect } from "@/features/auth/application/oauth-redirect";
+import { validateRequestedIdentityScopes } from "@/features/auth/application/oauth-grants";
 
 const authorizationIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -24,6 +25,9 @@ export async function oauthConsentAction(formData: FormData) {
   const detailsResult = await supabase.auth.oauth.getAuthorizationDetails(authorizationId);
   if (detailsResult.error || !detailsResult.data || !("authorization_id" in detailsResult.data) || detailsResult.data.user.id !== user.id) {
     redirect(consentMessage("That authorization request is invalid or expired."));
+  }
+  if (!validateRequestedIdentityScopes(detailsResult.data.scope)) {
+    redirect(consentMessage("That authorization request requests unsupported access."));
   }
   const result = decision === "approve"
     ? await supabase.auth.oauth.approveAuthorization(authorizationId, { skipBrowserRedirect: true })

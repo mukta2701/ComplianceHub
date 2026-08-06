@@ -52,6 +52,28 @@ describe("verifyMcpJwt", () => {
     await expect(verifyMcpJwt(await token(overrides), config, keySet)).rejects.toMatchObject({ code: "INVALID_TOKEN" });
   });
 
+  it.each([
+    ["missing exp", undefined], ["malformed exp", "not-a-number"],
+  ])("rejects %s", async (_label, exp) => {
+    const now = Math.floor(Date.now() / 1000);
+    const claims: Record<string, unknown> = { role: "authenticated", session_id: sessionId, client_id: "codex-client", iat: now };
+    if (exp !== undefined) claims.exp = exp;
+    const value = await new SignJWT(claims).setProtectedHeader({ alg: "RS256", kid: "test" }).setSubject(userId)
+      .setIssuer(config.authorizationServer).setAudience(config.resource).sign(privateKey);
+    await expect(verifyMcpJwt(value, config, keySet)).rejects.toMatchObject({ code: "INVALID_TOKEN" });
+  });
+
+  it.each([
+    ["missing iat", undefined], ["malformed iat", "not-a-number"],
+  ])("rejects %s", async (_label, iat) => {
+    const now = Math.floor(Date.now() / 1000);
+    const claims: Record<string, unknown> = { role: "authenticated", session_id: sessionId, client_id: "codex-client", exp: now + 300 };
+    if (iat !== undefined) claims.iat = iat;
+    const value = await new SignJWT(claims).setProtectedHeader({ alg: "RS256", kid: "test" }).setSubject(userId)
+      .setIssuer(config.authorizationServer).setAudience(config.resource).sign(privateKey);
+    await expect(verifyMcpJwt(value, config, keySet)).rejects.toMatchObject({ code: "INVALID_TOKEN" });
+  });
+
   it("rejects a not-yet-valid token", async () => {
     const value = await token({ nbf: Math.floor(Date.now() / 1000) + 300 });
     await expect(verifyMcpJwt(value, config, keySet)).rejects.toMatchObject({ code: "INVALID_TOKEN" });

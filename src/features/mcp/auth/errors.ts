@@ -46,13 +46,14 @@ export function oauthChallenge(resource: string, error?: "invalid_token") {
 }
 
 export function mcpErrorResult(error: McpError, resource: string) {
-  const challenge = oauthChallenge(resource, error.code === "INVALID_TOKEN" ? "invalid_token" : undefined);
-  return {
+  const result = {
     isError: true,
     content: [{ type: "text" as const, text: `${error.message} ${error.recovery}` }],
     structuredContent: error.toStructuredContent(),
-    _meta: { "mcp/www_authenticate": [challenge] },
   };
+  if (error.code !== "AUTH_REQUIRED" && error.code !== "INVALID_TOKEN") return result;
+  const challenge = oauthChallenge(resource, error.code === "INVALID_TOKEN" ? "invalid_token" : undefined);
+  return { ...result, _meta: { "mcp/www_authenticate": [challenge] } };
 }
 
 export function oauthErrorResponse(error: McpError, resource: string) {

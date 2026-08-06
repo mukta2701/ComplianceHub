@@ -36,6 +36,11 @@ describe("oauthConsentAction", () => {
     hoisted.client.auth.oauth.approveAuthorization.mockResolvedValue({ data: { redirect_url: "https://evil.example/steal" }, error: null });
     await expect(oauthConsentAction(form())).rejects.toThrow("REDIRECT:/oauth/consent?message=Could+not+complete+that+authorization+request.");
   });
+  it("fails closed without approving when an unsupported scope is requested", async () => {
+    hoisted.client.auth.oauth.getAuthorizationDetails.mockResolvedValue({ data: { ...details, scope: "openid admin:write" }, error: null });
+    await expect(oauthConsentAction(form())).rejects.toThrow("REDIRECT:/oauth/consent?message=That+authorization+request+requests+unsupported+access.");
+    expect(hoisted.client.auth.oauth.approveAuthorization).not.toHaveBeenCalled();
+  });
   it("rejects non-TLS and credentialed redirects", async () => {
     for (const redirect_url of ["http://client.example/callback", "https://user:pass@client.example/callback"]) {
       hoisted.client.auth.oauth.approveAuthorization.mockResolvedValueOnce({ data: { redirect_url }, error: null });
