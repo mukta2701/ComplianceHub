@@ -69,6 +69,10 @@ type ComplianceBundle = z.infer<typeof bundleSchema>;
 
 type Snapshot = z.infer<typeof snapshotRow>;
 
+// Supabase's hosted authenticated role defaults to an 8s statement timeout.
+// Keep the user-scoped HTTP request shorter so callers regain control first.
+export const MCP_BUNDLE_REQUEST_TIMEOUT_MS = 7_000;
+
 export function dateInLondon(now = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now);
   const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
@@ -82,12 +86,18 @@ async function loadComplianceBundle(
   workspace: AccessibleWorkspace,
   localDate: string,
 ): Promise<ComplianceBundle> {
-  const { data, error } = await supabase.rpc("get_mcp_compliance_bundle", {
-    target_organisation_id: workspace.id,
-    target_local_date: localDate,
-    attention_limit: 20,
-    monitoring_limit: 20,
-  });
+  let response: { data: unknown; error: unknown };
+  try {
+    response = await supabase.rpc("get_mcp_compliance_bundle", {
+      target_organisation_id: workspace.id,
+      target_local_date: localDate,
+      attention_limit: 20,
+      monitoring_limit: 20,
+    }).abortSignal(AbortSignal.timeout(MCP_BUNDLE_REQUEST_TIMEOUT_MS));
+  } catch {
+    queryFailure();
+  }
+  const { data, error } = response;
   if (error || !data) queryFailure();
   const parsed = bundleSchema.safeParse(data);
   if (!parsed.success

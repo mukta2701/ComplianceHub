@@ -111,4 +111,18 @@ describe("MCP attention aggregation", () => {
     expect(() => buildAttentionItems(empty, { localDate: "2026-08-06", config: { lowMax: 4, moderateMax: 9, highMax: 14, appetite: null }, limit: 51 }))
       .toThrowError(McpError);
   });
+
+  it("uses the same London priority-date cutoff as digest hashing", () => {
+    const items = buildAttentionItems({
+      ...empty,
+      tasks: [{ id: "same", title: "Same day", due_on: "2026-07-01", status: "open" }],
+      policies: [{ id: "same", reference: "POL", title: "Same day", review_due: "2026-07-01", status: "approved" }],
+      findings: [{ id: "same", audit_reference: "AUD", severity: "minor_nc", status: "open", created_at: "2026-06-30T23:30:00Z" }],
+    }, {
+      localDate: "2026-07-02",
+      config: { lowMax: 4, moderateMax: 9, highMax: 14, appetite: null },
+      limit: 1,
+    });
+    expect(items.map(({ id }) => id)).toEqual(["task:same", "policy:same"]);
+  });
 });

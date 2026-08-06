@@ -70,6 +70,37 @@ describe("daily digest facts", () => {
     expect(facts.monitoringFindings.map(({ id }) => id)).toEqual(["monitoring_finding:z", "monitoring_finding:a"]);
   });
 
+  it("uses London calendar dates at the bounded attention cutoff after severity", () => {
+    const facts = buildDailyDigestFacts({
+      workspace: { id: "00000000-0000-4000-8000-000000000001", name: "Internal ISMS" },
+      localDate: "2026-07-02", overview,
+      attentionItems: [
+        { id: "audit_finding:same-day", category: "unresolved_finding", severity: "high", summary: "Same day finding", source: "audit_finding", observedOn: "2026-06-30T23:30:00Z" },
+        { id: "task:same-day", category: "overdue_task", severity: "high", summary: "Same day task", source: "task", dueOn: "2026-07-01" },
+        { id: "policy:same-day", category: "policy_review", severity: "high", summary: "Same day policy", source: "policy", dueOn: "2026-07-01" },
+      ],
+      monitoringFindings: [], latestLeadershipReport: null,
+      limits: { attentionItems: 1 },
+    });
+    expect(facts.attentionItems.map(({ id }) => id)).toEqual(["task:same-day"]);
+    expect(facts.truncation.attentionItems).toBe(true);
+  });
+
+  it("treats a BST timestamp and due date on the same London day as a priority-date tie", () => {
+    const input = {
+      workspace: { id: "00000000-0000-4000-8000-000000000001", name: "Internal ISMS" },
+      localDate: "2026-07-02", overview, monitoringFindings: [], latestLeadershipReport: null,
+      attentionItems: [
+        { id: "audit_finding:observed", category: "unresolved_finding" as const, severity: "high" as const, summary: "Observed", source: "audit_finding" as const, observedOn: "2026-06-30T23:30:00Z" },
+        { id: "task:due", category: "overdue_task" as const, severity: "high" as const, summary: "Due", source: "task" as const, dueOn: "2026-07-01" },
+      ],
+    };
+    const first = buildDailyDigestFacts(input);
+    const reversed = buildDailyDigestFacts({ ...input, attentionItems: [...input.attentionItems].reverse() });
+    expect(first.attentionItems.map(({ id }) => id)).toEqual(["task:due", "audit_finding:observed"]);
+    expect(hashDailyDigestFacts(first)).toBe(hashDailyDigestFacts(reversed));
+  });
+
   it("produces the same hash for equivalent inputs and a new hash when a fact changes", () => {
     const facts = makeFacts();
     const equivalent = makeFacts(true);

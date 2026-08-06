@@ -39,6 +39,11 @@ The current web interface remains the administration and fallback surface.
   the fact hash immediately before posting and reject stale summaries.
 - Record the exact outgoing message and delivery outcome. Never automatically
   retry an ambiguous delivery.
+- Bound the user-scoped compliance-bundle Data API request to seven seconds
+  with an AbortSignal. Database cancellation ultimately relies on PostgREST
+  observing the disconnected client and the hosted `authenticated` role's
+  statement timeout; verify the hosted role remains at eight seconds in staging.
+  Do not alter that shared role globally because the existing web app uses it.
 
 ## Rollout
 

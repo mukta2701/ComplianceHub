@@ -11,7 +11,6 @@ language sql
 stable
 security invoker
 set search_path = ''
-set statement_timeout = '5s'
 as $$
 with
 caller as materialized (
@@ -148,7 +147,7 @@ attention_candidates as materialized (
 attention_top as (
   select candidate.* from attention_candidates candidate cross join bounds
   order by candidate.severity_rank desc,
-    coalesce(candidate.due_on::timestamp at time zone 'Europe/London', candidate.observed_at, 'infinity'::timestamptz),
+    coalesce(candidate.due_on, (candidate.observed_at at time zone 'Europe/London')::date, 'infinity'::date),
     candidate.category_rank, candidate.source, candidate.id
   limit (select attention_limit + 1 from bounds)
 ),
@@ -156,7 +155,7 @@ attention_json as (
   select coalesce(jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
     'id', id, 'source', source, 'category', category, 'severity', severity, 'summary', summary,
     'dueOn', due_on, 'observedOn', observed_at
-  )) order by severity_rank desc, coalesce(due_on::timestamp at time zone 'Europe/London', observed_at, 'infinity'::timestamptz), category_rank, source, id), '[]'::jsonb) as items
+  )) order by severity_rank desc, coalesce(due_on, (observed_at at time zone 'Europe/London')::date, 'infinity'::date), category_rank, source, id), '[]'::jsonb) as items
   from attention_top
 ),
 monitoring_top as (
@@ -199,3 +198,11 @@ $$;
 alter function public.get_mcp_compliance_bundle(uuid,date,integer,integer) owner to postgres;
 revoke all on function public.get_mcp_compliance_bundle(uuid,date,integer,integer) from public, anon, service_role;
 grant execute on function public.get_mcp_compliance_bundle(uuid,date,integer,integer) to authenticated;
+
+-- Both the exact open-nonconformity aggregate and the bounded attention scan
+-- filter unresolved findings by tenant. The partial index excludes immutable
+-- closed history while supporting their tenant/date lookup keys without
+-- duplicating the existing audit_id/status index.
+create index audit_findings_open_org_created_idx
+  on public.audit_findings(organisation_id, created_at, id)
+  where status <> 'closed';

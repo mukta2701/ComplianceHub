@@ -8,6 +8,7 @@ import { McpError } from "../auth/errors";
 import {
   DIGEST_ATTENTION_CATEGORIES,
   DIGEST_SEVERITIES,
+  compareDigestAttentionItems,
   type DigestAttentionCategory,
   type DigestAttentionItem,
   type DigestSeverity,
@@ -93,11 +94,6 @@ export type AttentionSourceRows = {
 
 export type AttentionItem = DigestAttentionItem & { source: string; observedOn?: string };
 
-const severityRank: Record<DigestSeverity, number> = { low: 1, medium: 2, high: 3, critical: 4 };
-const categoryRank: Record<DigestAttentionCategory, number> = {
-  overdue_task: 1, stale_evidence: 2, policy_review: 3, high_risk: 4, unresolved_finding: 5,
-};
-
 function attentionOptions(options: {
   localDate: string;
   config: RiskMatrixConfig;
@@ -176,11 +172,7 @@ export function buildAttentionItems(
   }
   return results
     .filter((entry) => !parsed.severity || entry.severity === parsed.severity)
-    .sort((left, right) => severityRank[right.severity] - severityRank[left.severity]
-      || (left.dueOn ?? left.observedOn ?? "9999-12-31").localeCompare(right.dueOn ?? right.observedOn ?? "9999-12-31")
-      || categoryRank[left.category] - categoryRank[right.category]
-      || left.source.localeCompare(right.source)
-      || left.id.localeCompare(right.id))
+    .sort(compareDigestAttentionItems)
     .slice(0, parsed.limit + 1);
 }
 

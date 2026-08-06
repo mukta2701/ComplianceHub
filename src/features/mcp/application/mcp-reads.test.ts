@@ -6,6 +6,7 @@ import {
   listAttentionItems,
   listMonitoringFindings,
   mapDeliveryStatus,
+  MCP_BUNDLE_REQUEST_TIMEOUT_MS,
   prepareDailyDigest,
 } from "./mcp-reads";
 
@@ -36,8 +37,18 @@ function fakeSupabase(resolvers: Record<string, Resolver>, rpcResolver?: RpcReso
     chain.then = (resolve: (value: ReturnType<typeof result>) => unknown) => Promise.resolve(result()).then(resolve);
     return chain;
   });
-  const rpc = vi.fn(async (name: string, args: Record<string, unknown>) => rpcResolver?.(name, args) ?? { data: null, error: { message: "unexpected RPC" } });
-  return { client: { from, rpc }, states, rpc };
+  const rpcSignals: AbortSignal[] = [];
+  const rpc = vi.fn((name: string, args: Record<string, unknown>) => {
+    const result = () => rpcResolver?.(name, args) ?? { data: null, error: { message: "unexpected RPC" } };
+    return {
+      abortSignal: vi.fn((signal: AbortSignal) => {
+        rpcSignals.push(signal);
+        return Promise.resolve().then(result);
+      }),
+      then: (resolve: (value: ReturnType<typeof result>) => unknown, reject: (reason: unknown) => unknown) => Promise.resolve().then(result).then(resolve, reject),
+    };
+  });
+  return { client: { from, rpc }, states, rpc, rpcSignals };
 }
 
 function membership(role: "owner" | "admin" | "member" = "owner"): Resolver {
@@ -139,12 +150,25 @@ describe("MCP public read services", () => {
     expect(exact.rpc).toHaveBeenCalledWith("get_mcp_compliance_bundle", {
       target_organisation_id: ORG, target_local_date: "2026-08-06", attention_limit: 20, monitoring_limit: 20,
     });
+    expect(exact.rpcSignals).toHaveLength(1);
+    expect(typeof exact.rpcSignals[0]?.addEventListener).toBe("function");
+    expect(MCP_BUNDLE_REQUEST_TIMEOUT_MS).toBeGreaterThan(0);
+    expect(MCP_BUNDLE_REQUEST_TIMEOUT_MS).toBeLessThanOrEqual(8_000);
     expect(exact.states.map(({ table }) => table)).toEqual(["memberships", "memberships"]);
 
     const malformed = fakeSupabase({ memberships: membership("owner") }, () => ({
       data: complianceBundle("owner", { overview: { ...readiness, tasksOpen: 1, tasksOverdue: 2 } }), error: null,
     }));
     await expect(getComplianceOverview(malformed.client as never, USER, { localDate: "2026-08-06" })).rejects.toMatchObject({ code: "INTERNAL_ERROR" });
+  });
+
+  it("maps a rejected bundle request to a safe internal error", async () => {
+    const failed = fakeSupabase({ memberships: membership("owner") }, () => {
+      throw new Error("request timeout exposed internal credential");
+    });
+    const error = await getComplianceOverview(failed.client as never, USER, { localDate: "2026-08-06" }).catch((caught) => caught);
+    expect(error).toMatchObject({ code: "INTERNAL_ERROR" });
+    expect(String(error)).not.toContain("credential");
   });
 
   it("selects only safe monitoring columns, hides task IDs, sanitises titles, and applies active defaults", async () => {

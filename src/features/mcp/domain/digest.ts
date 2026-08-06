@@ -109,6 +109,26 @@ type BuildDailyDigestFactsInput = {
 const severityRank: Record<DigestSeverity, number> = { low: 1, medium: 2, high: 3, critical: 4 };
 const categoryRank: Record<DigestAttentionCategory, number> = { overdue_task: 1, stale_evidence: 2, policy_review: 3, high_risk: 4, unresolved_finding: 5 };
 
+function londonCalendarDate(value: string): string {
+  const timestamp = normaliseDateTime(value);
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London", calendar: "gregory", numberingSystem: "latn",
+    year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(new Date(timestamp));
+  const fields = Object.fromEntries(parts.map(({ type, value: part }) => [type, part]));
+  return `${fields.year}-${fields.month}-${fields.day}`;
+}
+
+export function compareDigestAttentionItems(left: DigestAttentionItem, right: DigestAttentionItem): number {
+  const priorityDate = (item: DigestAttentionItem) => item.dueOn
+    ?? (item.observedOn ? londonCalendarDate(item.observedOn) : "9999-12-31");
+  return severityRank[right.severity] - severityRank[left.severity]
+    || priorityDate(left).localeCompare(priorityDate(right))
+    || categoryRank[left.category] - categoryRank[right.category]
+    || left.source.localeCompare(right.source)
+    || left.id.localeCompare(right.id);
+}
+
 function cleanFactText(value: string, max: number): string {
   return digestText(max).parse(value.replace(/\s+/g, " ").trim());
 }
@@ -143,11 +163,7 @@ export function buildDailyDigestFacts(input: BuildDailyDigestFactsInput): DailyD
       ...(item.dueOn ? { dueOn: localDateSchema.parse(item.dueOn) } : {}),
       ...(item.observedOn ? { observedOn: normaliseDateTime(item.observedOn) } : {}),
     };
-  }).sort((left, right) => severityRank[right.severity] - severityRank[left.severity]
-    || (left.dueOn ?? left.observedOn ?? "9999-12-31").localeCompare(right.dueOn ?? right.observedOn ?? "9999-12-31")
-    || categoryRank[left.category] - categoryRank[right.category]
-    || left.source.localeCompare(right.source)
-    || left.id.localeCompare(right.id));
+  }).sort(compareDigestAttentionItems);
   if (new Set(attentionItems.map(({ id }) => id)).size !== attentionItems.length) {
     throw new Error("Duplicate attention item ID");
   }
