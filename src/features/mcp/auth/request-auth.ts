@@ -6,6 +6,19 @@ import { getMcpOAuthConfig, type McpOAuthConfig } from "./oauth-config";
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const clientId = /^[A-Za-z0-9._~-]{1,200}$/;
+let cachedRemoteJwks: { url: string; resolver: JWTVerifyGetKey } | null = null;
+
+export function getCachedRemoteJwkSet(
+  config: McpOAuthConfig,
+  factory: (url: URL) => JWTVerifyGetKey = createRemoteJWKSet,
+): JWTVerifyGetKey {
+  if (cachedRemoteJwks?.url === config.jwksUrl) return cachedRemoteJwks.resolver;
+  const resolver = factory(new URL(config.jwksUrl));
+  cachedRemoteJwks = { url: config.jwksUrl, resolver };
+  return resolver;
+}
+
+export function resetRemoteJwkSetCacheForTests() { cachedRemoteJwks = null; }
 
 export function parseBearerToken(header: string | null): string {
   const match = header?.match(/^Bearer ([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/);
@@ -46,6 +59,7 @@ type AuthDependencies = {
   config?: McpOAuthConfig;
   keySet?: JWTVerifyGetKey;
   createUserClient?: (config: McpOAuthConfig, token: string) => SupabaseClient;
+  remoteJwksFactory?: (url: URL) => JWTVerifyGetKey;
 };
 
 export async function authenticateMcpRequest(request: Request, dependencies: AuthDependencies = {}): Promise<{
@@ -53,7 +67,7 @@ export async function authenticateMcpRequest(request: Request, dependencies: Aut
 }> {
   const config = dependencies.config ?? getMcpOAuthConfig();
   const token = parseBearerToken(request.headers.get("authorization"));
-  const keySet = dependencies.keySet ?? createRemoteJWKSet(new URL(config.jwksUrl));
+  const keySet = dependencies.keySet ?? getCachedRemoteJwkSet(config, dependencies.remoteJwksFactory ?? createRemoteJWKSet);
   const claims = await verifyMcpJwt(token, config, keySet);
   const supabase = (dependencies.createUserClient ?? createUserTokenSupabaseClient)(config, token);
   const { data, error } = await supabase.auth.getUser(token);

@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { parseBearerToken, verifyMcpJwt, authenticateMcpRequest } from "./request-auth";
+import { parseBearerToken, verifyMcpJwt, authenticateMcpRequest, getCachedRemoteJwkSet, resetRemoteJwkSetCacheForTests } from "./request-auth";
 import { parseMcpOAuthEnvironment } from "./oauth-config";
 
 const userId = "11111111-1111-4111-8111-111111111111";
@@ -119,5 +119,29 @@ describe("authenticateMcpRequest", () => {
         config, keySet, createUserClient: () => ({ auth: { getUser: vi.fn().mockResolvedValue(response) } }) as never,
       })).rejects.toMatchObject({ code: "INVALID_TOKEN" });
     }
+  });
+});
+
+describe("remote JWKS resolver cache", () => {
+  it("reuses one canonical resolver and keeps the cache bounded to one URL", () => {
+    resetRemoteJwkSetCacheForTests();
+    const factory = vi.fn(() => keySet);
+    expect(getCachedRemoteJwkSet(config, factory)).toBe(getCachedRemoteJwkSet(config, factory));
+    expect(factory).toHaveBeenCalledOnce();
+    const other = { ...config, jwksUrl: "https://other.supabase.co/auth/v1/.well-known/jwks.json" };
+    getCachedRemoteJwkSet(other, factory);
+    getCachedRemoteJwkSet(config, factory);
+    expect(factory).toHaveBeenCalledTimes(3);
+  });
+  it("reuses the resolver across repeated production-path authentication", async () => {
+    resetRemoteJwkSetCacheForTests();
+    const factory = vi.fn(() => keySet);
+    const getUser = vi.fn().mockResolvedValue({ data: { user: { id: userId } }, error: null });
+    const value = await token();
+    const dependencies = { config, remoteJwksFactory: factory, createUserClient: () => ({ auth: { getUser } }) as never };
+    await authenticateMcpRequest(new Request(config.resource, { headers: { authorization: `Bearer ${value}` } }), dependencies);
+    await authenticateMcpRequest(new Request(config.resource, { headers: { authorization: `Bearer ${value}` } }), dependencies);
+    expect(factory).toHaveBeenCalledOnce();
+    expect(getUser).toHaveBeenCalledTimes(2);
   });
 });

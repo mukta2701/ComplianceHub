@@ -4,7 +4,7 @@ import { displayOAuthGrantScopes, listUserOAuthGrants, revokeUserOAuthGrant, val
 describe("user OAuth grants", () => {
   it("lists bounded safe grant fields for the authenticated user", async () => {
     const listGrants = vi.fn().mockResolvedValue({ data: [{ client: { id: "11111111-1111-4111-8111-111111111111", name: "Codex", uri: "https://codex.example", logo_uri: "" }, scopes: ["openid", "email"], granted_at: "2026-08-06T09:00:00Z" }], error: null });
-    await expect(listUserOAuthGrants({ auth: { oauth: { listGrants } } } as never)).resolves.toEqual([{ clientId: "11111111-1111-4111-8111-111111111111", clientName: "Codex", scopes: ["openid", "email"], grantedAt: "2026-08-06T09:00:00Z" }]);
+    await expect(listUserOAuthGrants({ auth: { oauth: { listGrants } } } as never)).resolves.toEqual({ status: "loaded", grants: [{ clientId: "11111111-1111-4111-8111-111111111111", clientName: "Codex", scopes: ["openid", "email"], grantedAt: "2026-08-06T09:00:00Z" }] });
   });
   it("revokes only a bounded UUID client id", async () => {
     const revokeGrant = vi.fn().mockResolvedValue({ data: {}, error: null });
@@ -13,7 +13,7 @@ describe("user OAuth grants", () => {
     expect(revokeGrant).toHaveBeenCalledOnce();
   });
   it("returns safe empty/failure states without surfacing provider errors", async () => {
-    await expect(listUserOAuthGrants({ auth: { oauth: { listGrants: vi.fn().mockResolvedValue({ data: null, error: { message: "secret" } }) } } } as never)).resolves.toEqual([]);
+    await expect(listUserOAuthGrants({ auth: { oauth: { listGrants: vi.fn().mockResolvedValue({ data: null, error: { message: "secret" } }) } } } as never)).resolves.toEqual({ status: "error", grants: [] });
     await expect(revokeUserOAuthGrant({ auth: { oauth: { revokeGrant: vi.fn().mockResolvedValue({ error: { message: "secret" } }) } } } as never, "11111111-1111-4111-8111-111111111111")).resolves.toEqual({ ok: false });
   });
 
@@ -25,8 +25,8 @@ describe("user OAuth grants", () => {
 
   it("discloses safe unknown scope names verbatim on an existing grant", async () => {
     const listGrants = vi.fn().mockResolvedValue({ data: [{ client: { id: "11111111-1111-4111-8111-111111111111", name: "Claude" }, scopes: ["openid", "admin:write"], granted_at: "2026-08-06T09:00:00Z" }], error: null });
-    const grants = await listUserOAuthGrants({ auth: { oauth: { listGrants } } } as never);
-    expect(grants[0].scopes).toEqual(["openid", "admin:write"]);
+    const result = await listUserOAuthGrants({ auth: { oauth: { listGrants } } } as never);
+    expect(result.grants[0].scopes).toEqual(["openid", "admin:write"]);
   });
 
   it.each([

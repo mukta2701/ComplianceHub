@@ -9,6 +9,7 @@ export default async function OAuthConsentPage({ searchParams }: { searchParams:
   const parsed = parseOAuthConsentSearchParams(await searchParams);
   if (!parsed) return <ConsentError message="That authorization request is invalid or expired." />;
   const { authorizationId, message } = parsed;
+  if (!authorizationId) return <ConsentError message={message ?? "That authorization request is invalid or expired."} />;
   const continuation = safePostAuthPath(authorizationId ? `/oauth/consent?authorization_id=${authorizationId}` : null, { allowOAuthConsent: true });
   if (continuation === "/app") return <ConsentError message={message ?? "That authorization request is invalid or expired."} />;
   const supabase = await createSupabaseServerClient();

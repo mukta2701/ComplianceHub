@@ -222,6 +222,17 @@ below passes from MCP Inspector, Codex, and Claude.
    each client can register, sign in, display consent, refresh, call the protected
    resource, and then loses access immediately after the user revokes its grant.
 
+Local revocation evidence is executable in
+`session-revocation.integration.test.ts`: a normal user token succeeds against
+`/auth/v1/user`, Auth session revocation makes that same endpoint return
+`session_not_found`, and `auth.getUser(token)` maps it to
+`AuthSessionMissingError`. The current Supabase Auth client sends grant
+revocation to `DELETE /user/oauth/grants?client_id=...`; its API contract states
+that this revokes the user's grant, deletes that client's active sessions, and
+invalidates its refresh tokens. Because the complete OAuth grant/session binding
+depends on hosted beta behavior, re-prove that final link in each staging client
+before production rather than adding a service-role MCP data path.
+
 Production rollout is blocked until DCR + PKCE + resource/audience + refresh +
 revocation pass in all three clients. Record the staging evidence and signing-key
 identifier in the rollout log; never record access tokens, authorization codes,

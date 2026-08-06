@@ -36,8 +36,8 @@ type OAuthApi = {
 
 export async function listUserOAuthGrants(client: OAuthApi) {
   const { data, error } = await client.auth.oauth.listGrants();
-  if (error || !data) return [];
-  return data.filter((grant) => clientIdPattern.test(grant.client.id)).slice(0, 50).map((grant) => {
+  if (error || !data) return { status: "error" as const, grants: [] };
+  const grants = data.filter((grant) => clientIdPattern.test(grant.client.id)).slice(0, 50).map((grant) => {
     return {
       clientId: grant.client.id,
       clientName: grant.client.name.trim().slice(0, 120) || "Connected application",
@@ -45,6 +45,7 @@ export async function listUserOAuthGrants(client: OAuthApi) {
       grantedAt: grant.granted_at,
     };
   });
+  return { status: "loaded" as const, grants };
 }
 
 export async function revokeUserOAuthGrant(client: OAuthApi, clientId: string) {

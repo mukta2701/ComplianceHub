@@ -6,7 +6,7 @@ import { one } from "@/lib/supabase/one";
 import { inviteMemberAction, changeMemberRoleAction, removeMemberAction, resendInvitationAction, revokeInvitationAction, updateMemberJobTitleAction } from "../actions";
 import { canInviteRole, canManageMembership, hasCapability, roleLabel, type MembershipRole } from "@/features/organisations/domain/access";
 import { listUserOAuthGrants } from "@/features/auth/application/oauth-grants";
-import { revokeOAuthGrantAction } from "./oauth-actions";
+import { ConnectedApplications } from "./connected-applications";
 
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -26,9 +26,9 @@ function deliveryLabel(status: string) {
   return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
-export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ inviteStatus?: string; inviteId?: string; oauthStatus?: string }> }) {
+export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ inviteStatus?: string; inviteId?: string }> }) {
   const { supabase, user, membership, organisation } = await requireAppContext();
-  const { inviteStatus, inviteId, oauthStatus } = await searchParams;
+  const { inviteStatus, inviteId } = await searchParams;
   const isOwner = membership.role === "owner";
   const canManageTeam = hasCapability(membership.role, "manage_members");
 
@@ -43,7 +43,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       .order("created_at", { ascending: false })
     : { data: null };
   const pendingInvites = invites ?? [];
-  const oauthGrants = await listUserOAuthGrants(supabase);
+  const oauthGrantState = await listUserOAuthGrants(supabase);
   const statusMessage = inviteStatus && inviteStatus in invitationStatusMessage
     ? invitationStatusMessage[inviteStatus as keyof typeof invitationStatusMessage]
     : null;
@@ -145,14 +145,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           <div className="security-row"><Icon name="lock" /><span><b>Row-level access controls</b><small>Your organisation&rsquo;s data is isolated at the database layer, so members only ever see this workspace.</small></span><Pill tone="green">Enabled</Pill></div>
           <div className="security-row"><Icon name="file" /><span><b>Audit trail</b><small>Important changes are recorded on the Activity page without storing sensitive evidence content.</small></span><Pill tone="green">Enabled</Pill></div>
         </Card>
-        <Card id="connected-apps">
-          <div className="settings-head"><h2 style={{ fontSize: "14px", margin: "0 0 4px" }}>Connected AI applications</h2><p>Applications you personally authorized. Revoking one invalidates its sessions and refresh tokens.</p></div>
-          {oauthStatus && <p role="status" style={{ padding: "12px 20px" }}>{oauthStatus === "revoked" ? "Application access revoked." : "Could not revoke application access. Try again."}</p>}
-          <div className="team-list">
-            {oauthGrants.map((grant) => <div key={grant.clientId}><span><b>{grant.clientName}</b><small>{grant.scopes.join(", ") || "Identity access"} · Connected {new Date(grant.grantedAt).toLocaleDateString("en-GB")}</small></span><form action={revokeOAuthGrantAction}><input type="hidden" name="clientId" value={grant.clientId} /><button className="button secondary">Revoke</button></form></div>)}
-            {!oauthGrants.length && <div><span><b>No connected AI applications.</b><small>Approved Codex or Claude connections will appear here.</small></span></div>}
-          </div>
-        </Card>
+        <ConnectedApplications state={oauthGrantState} />
       </div>
     </div>
   </>;

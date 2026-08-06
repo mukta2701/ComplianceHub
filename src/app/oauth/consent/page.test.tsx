@@ -28,4 +28,9 @@ describe("OAuthConsentPage scopes", () => {
     expect(screen.queryByRole("button", { name: "Approve connection" })).not.toBeInTheDocument();
     expect(document.body).not.toHaveTextContent("admin:write");
   });
+  it("renders an allowlisted terminal action error without requiring an authorization id", async () => {
+    render(await OAuthConsentPage({ searchParams: Promise.resolve({ message: "Could not complete that authorization request." }) }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Could not complete that authorization request.");
+    expect(hoisted.getAuthorizationDetails).not.toHaveBeenCalled();
+  });
 });

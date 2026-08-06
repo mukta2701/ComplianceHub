@@ -7,6 +7,6 @@ export async function revokeOAuthGrantAction(formData: FormData) {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/sign-in");
-  const result = await revokeUserOAuthGrant(supabase, String(formData.get("clientId") ?? ""));
-  redirect(`/app/settings?oauthStatus=${result.ok ? "revoked" : "failed"}#connected-apps`);
+  await revokeUserOAuthGrant(supabase, String(formData.get("clientId") ?? ""));
+  redirect("/app/settings#connected-apps");
 }
