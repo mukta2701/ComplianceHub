@@ -66,19 +66,20 @@ describe("MCP attention aggregation", () => {
       ],
       policies: [{ id: "p-today", reference: "POL-1", title: "Review", review_due: "2026-08-06", status: "approved" }],
       risks: [{ id: "risk", reference: "R-1", title: "Risk", review_date: null, status: "open", residual_likelihood: 5, residual_impact: 5 }],
-      findings: [{ id: "finding", summary: "Finding", severity: "major_nc", status: "open", created_at: "2026-08-01T00:00:00Z" }],
+      findings: [{ id: "finding", audit_reference: "AUD-1", severity: "major_nc", status: "open", created_at: "2026-08-01T00:00:00Z" }],
     }, { localDate: "2026-08-06", config: { lowMax: 4, moderateMax: 9, highMax: 14, appetite: null } });
 
     expect(items.map((item) => `${item.severity}:${item.category}:${item.id}`)).toEqual([
-      "critical:unresolved_finding:finding",
-      "critical:stale_evidence:e-expired",
-      "critical:high_risk:risk",
-      "high:overdue_task:task-old",
-      "high:policy_review:p-today",
-      "high:stale_evidence:e-today",
+      "critical:unresolved_finding:audit_finding:finding",
+      "critical:stale_evidence:evidence:e-expired",
+      "critical:high_risk:risk:risk",
+      "high:overdue_task:task:task-old",
+      "high:stale_evidence:evidence:e-today",
+      "high:policy_review:policy:p-today",
     ]);
-    expect(items.find(({ id }) => id === "task-old")?.summary).toBe("Overdue task: Email me at [redacted] now[redacted]");
-    expect(items.some(({ id }) => id === "task-today")).toBe(false);
+    expect(items.find(({ id }) => id === "task:task-old")?.summary).toBe("Overdue task: Email me at [redacted] now[redacted]");
+    expect(items.some(({ id }) => id === "task:task-today")).toBe(false);
+    expect(items[0]?.summary).toBe("Unresolved major non-conformity in audit AUD-1");
   });
 
   it("validates filters and detects limit-plus-one truncation", () => {

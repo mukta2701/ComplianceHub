@@ -64,6 +64,8 @@ export type DigestAttentionItem = {
   severity: DigestSeverity;
   summary: string;
   dueOn?: string;
+  observedOn?: string;
+  source: "task" | "evidence" | "policy" | "risk" | "audit_finding" | "system";
 };
 
 export type DigestMonitoringFinding = {
@@ -97,6 +99,7 @@ type BuildDailyDigestFactsInput = {
 };
 
 const severityRank: Record<DigestSeverity, number> = { low: 1, medium: 2, high: 3, critical: 4 };
+const categoryRank: Record<DigestAttentionCategory, number> = { overdue_task: 1, stale_evidence: 2, policy_review: 3, high_risk: 4, unresolved_finding: 5 };
 
 function cleanFactText(value: string, max: number): string {
   return digestText(max).parse(value.replace(/\s+/g, " ").trim());
@@ -120,22 +123,32 @@ export function buildDailyDigestFacts(input: BuildDailyDigestFactsInput): DailyD
   const localDate = localDateSchema.parse(input.localDate);
   const attentionLimit = boundedLimit(input.limits?.attentionItems, 20);
   const monitoringLimit = boundedLimit(input.limits?.monitoringFindings, 20);
-  const attentionItems = input.attentionItems.map((item) => ({
-    id: cleanId(item.id),
-    category: z.enum(DIGEST_ATTENTION_CATEGORIES).parse(item.category),
-    severity: z.enum(DIGEST_SEVERITIES).parse(item.severity),
-    summary: cleanFactText(item.summary, 240),
-    ...(item.dueOn ? { dueOn: localDateSchema.parse(item.dueOn) } : {}),
-  })).sort((left, right) => severityRank[right.severity] - severityRank[left.severity]
+  const attentionItems = input.attentionItems.map((item) => {
+    const source = z.enum(["task", "evidence", "policy", "risk", "audit_finding", "system"]).parse(item.source);
+    const id = cleanId(item.id);
+    if (!id.startsWith(`${source}:`)) throw new Error("Digest attention ID must be source-prefixed");
+    return {
+      id, source,
+      category: z.enum(DIGEST_ATTENTION_CATEGORIES).parse(item.category),
+      severity: z.enum(DIGEST_SEVERITIES).parse(item.severity),
+      summary: cleanFactText(item.summary, 240),
+      ...(item.dueOn ? { dueOn: localDateSchema.parse(item.dueOn) } : {}),
+      ...(item.observedOn ? { observedOn: normaliseDateTime(item.observedOn) } : {}),
+    };
+  }).sort((left, right) => severityRank[right.severity] - severityRank[left.severity]
+    || (left.dueOn ?? left.observedOn ?? "9999-12-31").localeCompare(right.dueOn ?? right.observedOn ?? "9999-12-31")
+    || categoryRank[left.category] - categoryRank[right.category]
+    || left.source.localeCompare(right.source)
     || left.id.localeCompare(right.id));
   const monitoringFindings = input.monitoringFindings.map((finding) => ({
-    id: cleanId(finding.id),
+    id: z.string().refine((id) => id.startsWith("monitoring_finding:"), "Monitoring ID must be source-prefixed").parse(cleanId(finding.id)),
     severity: z.enum(DIGEST_SEVERITIES).parse(finding.severity),
     status: cleanFactText(finding.status, 40),
     title: cleanFactText(finding.title, 240),
     ...(finding.controlRef ? { controlRef: cleanFactText(finding.controlRef, 80) } : {}),
     detectedAt: normaliseDateTime(finding.detectedAt),
   })).sort((left, right) => severityRank[right.severity] - severityRank[left.severity]
+    || right.detectedAt.localeCompare(left.detectedAt)
     || left.id.localeCompare(right.id));
 
   return {
@@ -191,6 +204,7 @@ function allowedFactNumbers(facts: DailyDigestFacts): Set<number> {
   for (const item of facts.attentionItems) {
     addText(item.summary);
     addText(item.dueOn);
+    addText(item.observedOn);
   }
   for (const finding of facts.monitoringFindings) {
     addText(finding.title);

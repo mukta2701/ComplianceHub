@@ -17,4 +17,8 @@ describe("safeSummary", () => {
     expect(safeSummary("Found sk-proj-1234567890 and eyJhbGciOiJIUzI1NiJ9.abcdefgh.signature", 120))
       .toBe("Found [redacted] and [redacted]");
   });
+
+  it("removes unmatched angle brackets as well as complete markup", () => {
+    expect(safeSummary("Risk < threshold > target and dangling <tag", 120)).toBe("Risk [redacted] target and dangling tag");
+  });
 });

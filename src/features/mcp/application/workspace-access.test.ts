@@ -7,11 +7,22 @@ const ORG_A = "20000000-0000-4000-8000-000000000001";
 const ORG_B = "20000000-0000-4000-8000-000000000002";
 
 function membershipClient(rows: unknown[], error: unknown = null) {
-  const result = { data: rows, error };
+  let range: [number, number] | null = null;
+  const filters: Array<[string, unknown]> = [];
   const chain: Record<string, unknown> = {};
-  for (const name of ["select", "eq", "order"]) chain[name] = vi.fn(() => chain);
-  chain.then = (resolve: (value: typeof result) => unknown) => Promise.resolve(result).then(resolve);
-  return { client: { from: vi.fn(() => chain) }, chain };
+  chain.select = vi.fn(() => chain);
+  chain.eq = vi.fn((column: string, value: unknown) => { filters.push([column, value]); return chain; });
+  chain.order = vi.fn(() => chain);
+  chain.range = vi.fn((from: number, to: number) => { range = [from, to]; return chain; });
+  const result = (single = false) => {
+    const org = filters.find(([column]) => column === "organisation_id")?.[1];
+    const filtered = org ? rows.filter((row) => (row as { organisation_id?: unknown }).organisation_id === org) : rows;
+    const selected = range ? filtered.slice(range[0], range[1] + 1) : filtered;
+    return { data: single ? selected[0] ?? null : selected, error };
+  };
+  chain.maybeSingle = vi.fn(async () => result(true));
+  chain.then = (resolve: (value: ReturnType<typeof result>) => unknown) => Promise.resolve(result()).then(resolve);
+  return { client: { from: vi.fn(() => chain) }, chain, filters };
 }
 
 const rows = [
@@ -49,6 +60,23 @@ describe("MCP workspace access", () => {
       .rejects.toMatchObject({ code: "FORBIDDEN" } satisfies Partial<McpError>);
     await expect(resolveWorkspace(membershipClient([]).client as never, USER_ID))
       .rejects.toMatchObject({ code: "NOT_FOUND" } satisfies Partial<McpError>);
+  });
+
+  it("paginates the full workspace list and directly scopes supplied IDs by user and organisation", async () => {
+    const manyRows = Array.from({ length: 1_205 }, (_, index) => {
+      const id = `26000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+      return { organisation_id: id, role: "member", organisation: { id, name: `Workspace ${index}` } };
+    });
+    const paged = membershipClient(manyRows);
+    await expect(listWorkspaces(paged.client as never, USER_ID)).resolves.toHaveLength(1_205);
+    expect(paged.chain.range).toHaveBeenCalledTimes(3);
+
+    const direct = membershipClient(manyRows);
+    const target = manyRows[1_204]!.organisation_id;
+    await expect(resolveWorkspace(direct.client as never, USER_ID, target)).resolves.toMatchObject({ id: target });
+    expect(direct.filters).toContainEqual(["user_id", USER_ID]);
+    expect(direct.filters).toContainEqual(["organisation_id", target]);
+    expect(direct.chain.range).not.toHaveBeenCalled();
   });
 
   it("fails closed when the membership query fails", async () => {

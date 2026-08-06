@@ -17,6 +17,7 @@ export function safeSummary(value: unknown, max = 240, fallback = "Untitled item
   const input = typeof value === "string" ? value : "";
   const cleaned = input
     .replace(MARKUP_PATTERN, "[redacted]")
+    .replace(/[<>]/gu, "")
     .replace(URL_PATTERN, "[redacted]")
     .replace(EMAIL_PATTERN, "[redacted]")
     .replace(BEARER_PATTERN, "[redacted]")

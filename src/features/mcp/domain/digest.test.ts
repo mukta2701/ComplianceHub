@@ -20,13 +20,13 @@ const overview = {
 
 function makeFacts(reverse = false) {
   const attentionItems = [
-    { id: "task-z", category: "overdue_task" as const, severity: "high" as const, summary: "  Review access controls  ", dueOn: "2026-08-05" },
-    { id: "risk-a", category: "high_risk" as const, severity: "critical" as const, summary: "Treat supplier risk" },
-    { id: "evidence-b", category: "stale_evidence" as const, severity: "medium" as const, summary: "Refresh backup evidence" },
+    { id: "task:task-z", category: "overdue_task" as const, severity: "high" as const, summary: "  Review access controls  ", dueOn: "2026-08-05", source: "task" as const },
+    { id: "risk:risk-a", category: "high_risk" as const, severity: "critical" as const, summary: "Treat supplier risk", source: "risk" as const },
+    { id: "evidence:evidence-b", category: "stale_evidence" as const, severity: "medium" as const, summary: "Refresh backup evidence", source: "evidence" as const },
   ];
   const monitoringFindings = [
-    { id: "finding-b", severity: "high" as const, status: "open", title: "Branch protection disabled", detectedAt: "2026-08-06T07:00:00.000Z" },
-    { id: "finding-a", severity: "critical" as const, status: "open", title: "Secret scanning disabled", detectedAt: "2026-08-06T06:00:00.000Z" },
+    { id: "monitoring_finding:finding-b", severity: "high" as const, status: "open", title: "Branch protection disabled", detectedAt: "2026-08-06T07:00:00.000Z" },
+    { id: "monitoring_finding:finding-a", severity: "critical" as const, status: "open", title: "Secret scanning disabled", detectedAt: "2026-08-06T06:00:00.000Z" },
   ];
   return buildDailyDigestFacts({
     workspace: { id: "00000000-0000-4000-8000-000000000001", name: "Internal ISMS" },
@@ -44,11 +44,28 @@ describe("daily digest facts", () => {
     const facts = makeFacts();
 
     expect(facts.schemaVersion).toBe(1);
-    expect(facts.attentionItems.map((item) => item.id)).toEqual(["risk-a", "task-z"]);
+    expect(facts.attentionItems.map((item) => item.id)).toEqual(["risk:risk-a", "task:task-z"]);
     expect(facts.attentionItems[1]?.summary).toBe("Review access controls");
-    expect(facts.monitoringFindings.map((item) => item.id)).toEqual(["finding-a"]);
+    expect(facts.monitoringFindings.map((item) => item.id)).toEqual(["monitoring_finding:finding-a"]);
     expect(facts.truncation).toEqual({ attentionItems: true, monitoringFindings: true });
     expect(facts.latestLeadershipReport).toEqual({ id: "report-1", publishedAt: "2026-08-05T16:00:00.000Z" });
+  });
+
+  it("preserves severity, date, category, source, and ID priority in canonical facts", () => {
+    const facts = buildDailyDigestFacts({
+      workspace: { id: "00000000-0000-4000-8000-000000000001", name: "Internal ISMS" }, localDate: "2026-08-06", overview,
+      attentionItems: [
+        { id: "risk:b", category: "high_risk", severity: "critical", summary: "B", source: "risk" },
+        { id: "audit_finding:a", category: "unresolved_finding", severity: "critical", summary: "A", source: "audit_finding", observedOn: "2026-08-01T00:00:00Z" },
+        { id: "evidence:c", category: "stale_evidence", severity: "critical", summary: "C", source: "evidence", dueOn: "2026-08-02" },
+      ],
+      monitoringFindings: [
+        { id: "monitoring_finding:a", severity: "critical", status: "open", title: "A", detectedAt: "2026-08-01T00:00:00Z" },
+        { id: "monitoring_finding:z", severity: "critical", status: "open", title: "Z", detectedAt: "2026-08-02T00:00:00Z" },
+      ], latestLeadershipReport: null,
+    });
+    expect(facts.attentionItems.map(({ id }) => id)).toEqual(["audit_finding:a", "evidence:c", "risk:b"]);
+    expect(facts.monitoringFindings.map(({ id }) => id)).toEqual(["monitoring_finding:z", "monitoring_finding:a"]);
   });
 
   it("produces the same hash for equivalent inputs and a new hash when a fact changes", () => {
@@ -69,6 +86,14 @@ describe("daily digest facts", () => {
       monitoringFindings: [],
       latestLeadershipReport: null,
     })).toThrow(/localDate/i);
+  });
+
+  it("rejects IDs that do not match their closed-world source", () => {
+    expect(() => buildDailyDigestFacts({
+      workspace: { id: "00000000-0000-4000-8000-000000000001", name: "Internal ISMS" }, localDate: "2026-08-06", overview,
+      attentionItems: [{ id: "risk-id", category: "high_risk", severity: "high", summary: "Risk", source: "risk" }],
+      monitoringFindings: [], latestLeadershipReport: null,
+    })).toThrow(/source-prefixed/i);
   });
 });
 

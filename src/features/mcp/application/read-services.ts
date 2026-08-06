@@ -75,7 +75,7 @@ type TaskRow = { id: string; title: string; due_on: string | null; status: strin
 type EvidenceRow = { id: string; title: string; valid_until: string | null; status: EvidenceStatus };
 type PolicyRow = { id: string; reference: string; title: string; review_due: string | null; status: string };
 type RiskRow = { id: string; reference: string; title: string; review_date: string | null; status: string; residual_likelihood: number; residual_impact: number };
-type FindingRow = { id: string; summary: string; severity: string; status: string; created_at: string };
+type FindingRow = { id: string; audit_reference: string; severity: string; status: string; created_at: string };
 
 export type AttentionSourceRows = {
   tasks: TaskRow[];
@@ -88,6 +88,9 @@ export type AttentionSourceRows = {
 export type AttentionItem = DigestAttentionItem & { source: string; observedOn?: string };
 
 const severityRank: Record<DigestSeverity, number> = { low: 1, medium: 2, high: 3, critical: 4 };
+const categoryRank: Record<DigestAttentionCategory, number> = {
+  overdue_task: 1, stale_evidence: 2, policy_review: 3, high_risk: 4, unresolved_finding: 5,
+};
 
 function attentionOptions(options: {
   localDate: string;
@@ -132,7 +135,7 @@ export function buildAttentionItems(
   const results: AttentionItem[] = [];
   if (parsed.categories.has("overdue_task")) {
     for (const row of rows.tasks) if (["open", "in_progress"].includes(row.status) && row.due_on && row.due_on < parsed.localDate) {
-      results.push(item({ id: row.id, category: "overdue_task", severity: "high", summary: `Overdue task: ${row.title}`, dueOn: row.due_on, source: "task" }));
+      results.push(item({ id: `task:${row.id}`, category: "overdue_task", severity: "high", summary: `Overdue task: ${row.title}`, dueOn: row.due_on, source: "task" }));
     }
   }
   if (parsed.categories.has("stale_evidence")) {
@@ -140,13 +143,13 @@ export function buildAttentionItems(
       if (["superseded", "withdrawn"].includes(row.status) || !row.valid_until) continue;
       const status = deriveEvidenceStatus(row.valid_until, parsed.localDate);
       if (status === "expired" || status === "expiring") {
-        results.push(item({ id: row.id, category: "stale_evidence", severity: status === "expired" ? "critical" : "high", summary: `${status === "expired" ? "Expired" : "Expiring"} evidence: ${row.title}`, dueOn: row.valid_until, source: "evidence" }));
+        results.push(item({ id: `evidence:${row.id}`, category: "stale_evidence", severity: status === "expired" ? "critical" : "high", summary: `${status === "expired" ? "Expired" : "Expiring"} evidence: ${row.title}`, dueOn: row.valid_until, source: "evidence" }));
       }
     }
   }
   if (parsed.categories.has("policy_review")) {
     for (const row of rows.policies) if (row.status === "approved" && row.review_due && row.review_due <= parsed.localDate) {
-      results.push(item({ id: row.id, category: "policy_review", severity: "high", summary: `Policy review due: ${row.reference} ${row.title}`, dueOn: row.review_due, source: "policy" }));
+      results.push(item({ id: `policy:${row.id}`, category: "policy_review", severity: "high", summary: `Policy review due: ${row.reference} ${row.title}`, dueOn: row.review_due, source: "policy" }));
     }
   }
   if (parsed.categories.has("high_risk")) {
@@ -154,21 +157,22 @@ export function buildAttentionItems(
       if (row.status === "closed") continue;
       const band = riskBand(calculateRiskScore(row.residual_likelihood, row.residual_impact), options.config);
       if (band === "high" || band === "very_high") {
-        results.push(item({ id: row.id, category: "high_risk", severity: band === "very_high" ? "critical" : "high", summary: `${band === "very_high" ? "Very high" : "High"} residual risk: ${row.reference} ${row.title}`, ...(row.review_date ? { dueOn: row.review_date } : {}), source: "risk" }));
+        results.push(item({ id: `risk:${row.id}`, category: "high_risk", severity: band === "very_high" ? "critical" : "high", summary: `${band === "very_high" ? "Very high" : "High"} residual risk: ${row.reference} ${row.title}`, ...(row.review_date ? { dueOn: row.review_date } : {}), source: "risk" }));
       }
     }
   }
   if (parsed.categories.has("unresolved_finding")) {
     for (const row of rows.findings) if (row.status !== "closed") {
       const severity: DigestSeverity = row.severity === "major_nc" ? "critical" : row.severity === "minor_nc" ? "high" : "medium";
-      results.push(item({ id: row.id, category: "unresolved_finding", severity, summary: `Unresolved audit finding: ${row.summary}`, observedOn: row.created_at, source: "audit_finding" }));
+      const label = row.severity === "major_nc" ? "major non-conformity" : row.severity === "minor_nc" ? "minor non-conformity" : "observation";
+      results.push(item({ id: `audit_finding:${row.id}`, category: "unresolved_finding", severity, summary: `Unresolved ${label} in audit ${row.audit_reference}`, observedOn: row.created_at, source: "audit_finding" }));
     }
   }
   return results
     .filter((entry) => !parsed.severity || entry.severity === parsed.severity)
     .sort((left, right) => severityRank[right.severity] - severityRank[left.severity]
       || (left.dueOn ?? left.observedOn ?? "9999-12-31").localeCompare(right.dueOn ?? right.observedOn ?? "9999-12-31")
-      || left.category.localeCompare(right.category)
+      || categoryRank[left.category] - categoryRank[right.category]
       || left.source.localeCompare(right.source)
       || left.id.localeCompare(right.id))
     .slice(0, parsed.limit + 1);

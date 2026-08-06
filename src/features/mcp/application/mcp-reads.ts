@@ -44,7 +44,7 @@ const monitoringRow = z.object({
 
 type Snapshot = z.infer<typeof snapshotRow>;
 
-function londonDate(now = new Date()): string {
+export function dateInLondon(now = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now);
   const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
   return parseLocalDate(`${values.year}-${values.month}-${values.day}`);
@@ -129,8 +129,7 @@ async function loadLiveOverview(supabase: SupabaseClient, organisationId: string
   });
 }
 
-async function overviewForWorkspace(supabase: SupabaseClient, workspace: AccessibleWorkspace, localDate: string) {
-  const report = await latestSnapshot(supabase, workspace.id);
+async function overviewForWorkspace(supabase: SupabaseClient, workspace: AccessibleWorkspace, localDate: string, report: Snapshot | null) {
   if (workspace.role === "member") {
     if (!report) throw new McpError("NOT_FOUND");
     return { workspace: { id: workspace.id, name: workspace.name }, source: "published" as const, readiness: report.payload, latestReport: { id: report.id, publishedAt: report.published_at } };
@@ -145,36 +144,37 @@ export async function getComplianceOverview(
   input: { workspaceId?: string; localDate?: string },
 ) {
   const workspace = await resolveWorkspace(supabase, verifiedUserId, input.workspaceId);
-  return overviewForWorkspace(supabase, workspace, parseLocalDate(input.localDate ?? londonDate()));
+  const report = await latestSnapshot(supabase, workspace.id);
+  return overviewForWorkspace(supabase, workspace, parseLocalDate(input.localDate ?? dateInLondon()), report);
 }
 
-async function loadAttentionRows(supabase: SupabaseClient, organisationId: string, localDate: string, fetchLimit = 51): Promise<AttentionSourceRows> {
+async function loadAttentionRows(supabase: SupabaseClient, organisationId: string, localDate: string, categories: ReadonlySet<string>): Promise<AttentionSourceRows> {
   const expiryThrough = new Date(`${localDate}T00:00:00Z`);
   expiryThrough.setUTCDate(expiryThrough.getUTCDate() + 30);
   const expiryDate = expiryThrough.toISOString().slice(0, 10);
   const [tasks, evidence, policies, risks, findings] = await Promise.all([
-    supabase.from("tasks").select("id,title,due_on,status").eq("organisation_id", organisationId).in("status", ["open", "in_progress"])
-      .not("due_on", "is", null).lt("due_on", localDate).order("due_on", { ascending: true }).order("id", { ascending: true }).limit(fetchLimit),
-    supabase.from("evidence").select("id,title,valid_until,status").eq("organisation_id", organisationId)
+    categories.has("overdue_task") ? fetchAllPages((from, to) => supabase.from("tasks").select("id,title,due_on,status").eq("organisation_id", organisationId).in("status", ["open", "in_progress"])
+      .not("due_on", "is", null).lt("due_on", localDate).order("due_on", { ascending: true }).order("id", { ascending: true }).range(from, to)) : Promise.resolve([]),
+    categories.has("stale_evidence") ? fetchAllPages((from, to) => supabase.from("evidence").select("id,title,valid_until,status").eq("organisation_id", organisationId)
       .not("status", "in", "(superseded,withdrawn)").not("valid_until", "is", null).lte("valid_until", expiryDate)
-      .order("valid_until", { ascending: true }).order("id", { ascending: true }).limit(fetchLimit),
-    supabase.from("policies").select("id,reference,title,review_due,status").eq("organisation_id", organisationId).eq("status", "approved")
-      .not("review_due", "is", null).lte("review_due", localDate).order("review_due", { ascending: true }).order("id", { ascending: true }).limit(fetchLimit),
-    fetchAllPages((from, to) => supabase.from("risks").select("id,reference,title,review_date,status,residual_likelihood,residual_impact")
-      .eq("organisation_id", organisationId).neq("status", "closed").order("id", { ascending: true }).range(from, to)),
-    supabase.from("audit_findings").select("id,summary,severity,status,created_at").eq("organisation_id", organisationId).neq("status", "closed")
-      .order("created_at", { ascending: true }).order("id", { ascending: true }).limit(fetchLimit),
+      .order("valid_until", { ascending: true }).order("id", { ascending: true }).range(from, to)) : Promise.resolve([]),
+    categories.has("policy_review") ? fetchAllPages((from, to) => supabase.from("policies").select("id,reference,title,review_due,status").eq("organisation_id", organisationId).eq("status", "approved")
+      .not("review_due", "is", null).lte("review_due", localDate).order("review_due", { ascending: true }).order("id", { ascending: true }).range(from, to)) : Promise.resolve([]),
+    categories.has("high_risk") ? fetchAllPages((from, to) => supabase.from("risks").select("id,reference,title,review_date,status,residual_likelihood,residual_impact")
+      .eq("organisation_id", organisationId).neq("status", "closed").order("id", { ascending: true }).range(from, to)) : Promise.resolve([]),
+    categories.has("unresolved_finding") ? fetchAllPages((from, to) => supabase.from("audit_findings").select("id,severity,status,created_at,audit:audits!inner(reference)").eq("organisation_id", organisationId).neq("status", "closed")
+      .order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to)) : Promise.resolve([]),
   ]);
-  if ([tasks, evidence, policies, findings].some((result) => result.error)) queryFailure();
+  const auditRelation = z.union([z.object({ reference: z.string() }), z.array(z.object({ reference: z.string() })).min(1).max(1).transform((items) => items[0]!) ]);
   const schema = z.object({
     tasks: z.array(z.object({ id: uuid, title: z.string(), due_on: z.string().nullable(), status: z.string() })),
     evidence: z.array(z.object({ id: uuid, title: z.string(), valid_until: z.string().nullable(), status: z.enum(["current", "expiring", "expired", "superseded", "withdrawn"]) })),
     policies: z.array(z.object({ id: uuid, reference: z.string(), title: z.string(), review_due: z.string().nullable(), status: z.string() })),
     risks: z.array(z.object({ id: uuid, reference: z.string(), title: z.string(), review_date: z.string().nullable(), status: z.string(), residual_likelihood: z.number().int(), residual_impact: z.number().int() })),
-    findings: z.array(z.object({ id: uuid, summary: z.string(), severity: z.string(), status: z.string(), created_at: dateTime })),
-  }).safeParse({ tasks: tasks.data, evidence: evidence.data, policies: policies.data, risks, findings: findings.data });
+    findings: z.array(z.object({ id: uuid, severity: z.string(), status: z.string(), created_at: dateTime, audit: auditRelation })),
+  }).safeParse({ tasks, evidence, policies, risks, findings });
   if (!schema.success) queryFailure();
-  return schema.data;
+  return { ...schema.data, findings: schema.data.findings.map(({ audit, ...row }) => ({ ...row, audit_reference: audit.reference })) };
 }
 
 async function loadRiskConfig(supabase: SupabaseClient, organisationId: string): Promise<RiskMatrixConfig> {
@@ -188,8 +188,10 @@ async function loadRiskConfig(supabase: SupabaseClient, organisationId: string):
 
 async function attentionForWorkspace(supabase: SupabaseClient, workspace: AccessibleWorkspace, input: { localDate: string; categories?: string[]; severity?: string; limit?: number }) {
   const validated = validateAttentionRequest(input);
-  const config = await loadRiskConfig(supabase, workspace.id);
-  const rows = await loadAttentionRows(supabase, workspace.id, validated.localDate, validated.limit + 1);
+  const categories = new Set(validated.categories ?? ["overdue_task", "stale_evidence", "policy_review", "high_risk", "unresolved_finding"]);
+  if (categories.size === 0) return { workspace: { id: workspace.id, name: workspace.name }, items: [], truncated: false };
+  const config = categories.has("high_risk") ? await loadRiskConfig(supabase, workspace.id) : DEFAULT_RISK_MATRIX_CONFIG;
+  const rows = await loadAttentionRows(supabase, workspace.id, validated.localDate, categories);
   const items = buildAttentionItems(rows, { ...validated, categories: validated.categories, config });
   const limit = validated.limit;
   return { workspace: { id: workspace.id, name: workspace.name }, items: items.slice(0, limit), truncated: items.length > limit };
@@ -197,7 +199,7 @@ async function attentionForWorkspace(supabase: SupabaseClient, workspace: Access
 
 export async function listAttentionItems(supabase: SupabaseClient, verifiedUserId: string, input: { workspaceId?: string; categories?: string[]; severity?: string; limit?: number; localDate?: string }) {
   const workspace = await resolveWorkspace(supabase, verifiedUserId, input.workspaceId);
-  return attentionForWorkspace(supabase, workspace, { ...input, localDate: parseLocalDate(input.localDate ?? londonDate()) });
+  return attentionForWorkspace(supabase, workspace, { ...input, localDate: parseLocalDate(input.localDate ?? dateInLondon()) });
 }
 
 async function monitoringForWorkspace(supabase: SupabaseClient, workspace: AccessibleWorkspace, input: { status?: string; severity?: string; limit?: number }) {
@@ -214,7 +216,7 @@ async function monitoringForWorkspace(supabase: SupabaseClient, workspace: Acces
   const parsed = z.array(monitoringRow).safeParse(result.data);
   if (!parsed.success) queryFailure();
   const findings = parsed.data.map((row) => ({
-    id: row.id,
+    id: `monitoring_finding:${row.id}`,
     severity: row.severity,
     status: row.status,
     title: safeSummary(row.title, 240, "Monitoring finding"),
@@ -261,11 +263,11 @@ export function mapDeliveryStatus(status: "reserved" | "delivered" | "failed" | 
 export async function prepareDailyDigest(supabase: SupabaseClient, verifiedUserId: string, input: { workspaceId?: string; localDate: string }): Promise<PrepareDailyDigestResult> {
   const localDate = parseLocalDate(input.localDate);
   const workspace = await resolveWorkspace(supabase, verifiedUserId, input.workspaceId);
-  const [overview, attention, monitoring, report] = await Promise.all([
-    overviewForWorkspace(supabase, workspace, localDate),
+  const report = await latestSnapshot(supabase, workspace.id);
+  const [overview, attention, monitoring] = await Promise.all([
+    overviewForWorkspace(supabase, workspace, localDate, report),
     attentionForWorkspace(supabase, workspace, { localDate, limit: 20 }),
     monitoringForWorkspace(supabase, workspace, { limit: 20 }),
-    latestSnapshot(supabase, workspace.id),
   ]);
   let delivery: z.infer<typeof deliveryRow> | null = null;
   if (workspace.role === "owner") {
@@ -278,9 +280,9 @@ export async function prepareDailyDigest(supabase: SupabaseClient, verifiedUserI
       delivery = parsed.data;
     }
   }
-  const attentionWithOverflow: AttentionItem[] = attention.items.concat(attention.truncated ? [{ id: "truncation-marker", category: "overdue_task", severity: "low", summary: "Additional attention items were omitted", source: "system" }] : []);
+  const attentionWithOverflow: AttentionItem[] = attention.items.concat(attention.truncated ? [{ id: "system:attention-truncation", category: "overdue_task", severity: "low", summary: "Additional attention items were omitted", source: "system" }] : []);
   const monitoringWithOverflow: DigestMonitoringFinding[] = monitoring.findings.map(({ id, severity, status, title, controlRef, detectedAt }) => ({ id, severity: severity as DigestSeverity, status, title, ...(controlRef ? { controlRef } : {}), detectedAt }));
-  if (monitoring.truncated) monitoringWithOverflow.push({ id: "truncation-marker", severity: "low", status: "omitted", title: "Additional monitoring findings were omitted", detectedAt: `${localDate}T00:00:00.000Z` });
+  if (monitoring.truncated) monitoringWithOverflow.push({ id: "monitoring_finding:truncation", severity: "low", status: "omitted", title: "Additional monitoring findings were omitted", detectedAt: `${localDate}T00:00:00.000Z` });
   const facts = buildDailyDigestFacts({
     workspace: { id: workspace.id, name: workspace.name },
     localDate,

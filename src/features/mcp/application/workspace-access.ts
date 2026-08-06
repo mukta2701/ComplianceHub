@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { McpError } from "../auth/errors";
 import { safeSummary } from "../domain/safe-summary";
+import { fetchAllPages } from "./read-services";
 
 const workspaceRoleSchema = z.enum(["owner", "admin", "member"]);
 const workspaceRowSchema = z.object({
@@ -15,6 +16,12 @@ const workspaceRowSchema = z.object({
 
 export type WorkspaceRole = z.infer<typeof workspaceRoleSchema>;
 export type AccessibleWorkspace = { id: string; name: string; role: WorkspaceRole };
+
+function parseWorkspaceRow(value: unknown): AccessibleWorkspace {
+  const parsed = workspaceRowSchema.safeParse(value);
+  if (!parsed.success || parsed.data.organisation.id !== parsed.data.organisation_id) throw new McpError("INTERNAL_ERROR");
+  return { id: parsed.data.organisation_id, name: safeSummary(parsed.data.organisation.name, 160, "Workspace"), role: parsed.data.role };
+}
 
 export class WorkspaceRequiredError extends McpError {
   readonly choices: Array<{ id: string; name: string }>;
@@ -35,19 +42,12 @@ export async function listWorkspaces(
   verifiedUserId: string,
 ): Promise<AccessibleWorkspace[]> {
   if (!z.uuid().safeParse(verifiedUserId).success) throw new McpError("INVALID_TOKEN");
-  const { data, error } = await supabase
-    .from("memberships")
+  const rows = await fetchAllPages((from, to) => supabase.from("memberships")
     .select("organisation_id,role,organisation:organisations!inner(id,name)")
     .eq("user_id", verifiedUserId)
-    .order("organisation_id", { ascending: true });
-  if (error) throw new McpError("INTERNAL_ERROR");
-  const parsed = z.array(workspaceRowSchema).safeParse(data);
-  if (!parsed.success) throw new McpError("INTERNAL_ERROR");
-  return parsed.data.map((row) => ({
-    id: row.organisation_id,
-    name: safeSummary(row.organisation.name, 160, "Workspace"),
-    role: row.role,
-  }));
+    .order("organisation_id", { ascending: true })
+    .range(from, to));
+  return rows.map(parseWorkspaceRow);
 }
 
 export async function resolveWorkspace(
@@ -55,15 +55,21 @@ export async function resolveWorkspace(
   verifiedUserId: string,
   workspaceId?: string,
 ): Promise<AccessibleWorkspace> {
+  if (!z.uuid().safeParse(verifiedUserId).success) throw new McpError("INVALID_TOKEN");
   if (workspaceId !== undefined && !z.uuid().safeParse(workspaceId).success) {
     throw new McpError("VALIDATION_ERROR");
   }
-  const workspaces = await listWorkspaces(supabase, verifiedUserId);
   if (workspaceId) {
-    const selected = workspaces.find(({ id }) => id === workspaceId);
-    if (!selected) throw new McpError("FORBIDDEN");
-    return selected;
+    const result = await supabase.from("memberships")
+      .select("organisation_id,role,organisation:organisations!inner(id,name)")
+      .eq("user_id", verifiedUserId)
+      .eq("organisation_id", workspaceId)
+      .maybeSingle();
+    if (result.error) throw new McpError("INTERNAL_ERROR");
+    if (!result.data) throw new McpError("FORBIDDEN");
+    return parseWorkspaceRow(result.data);
   }
+  const workspaces = await listWorkspaces(supabase, verifiedUserId);
   if (workspaces.length === 0) throw new McpError("NOT_FOUND");
   if (workspaces.length > 1) throw new WorkspaceRequiredError(workspaces);
   return workspaces[0]!;
