@@ -31,6 +31,10 @@ Create a Vercel project from this repo and set these environment variables (name
 | `INVITATION_FROM_EMAIL` | for invitation delivery | **Server-only.** Verified sender, e.g. `ComplianceHub <invites@notify.example.com>`. |
 | `GOOGLE_AUTH_ENABLED` | after Google setup | Server-side flag. Leave unset until the Google + Supabase checkpoints below are complete, then set to `1`. |
 | `MICROSOFT_AUTH_ENABLED` | after Microsoft setup | Server-side flag. Leave unset until the Entra + Supabase checkpoints below are complete, then set to `1`. |
+| `MCP_RESOURCE_URL` | for internal MCP staging | Exact canonical HTTPS endpoint ending `/mcp`; never a preview URL. |
+| `SUPABASE_OAUTH_ISSUER` | for internal MCP staging | Exact `https://<project-ref>.supabase.co/auth/v1` issuer. |
+| `SUPABASE_OAUTH_JWKS_URL` | for internal MCP staging | Exact issuer JWKS URL: `<issuer>/.well-known/jwks.json`. |
+| `MCP_JWT_ALGORITHMS` | for internal MCP staging | Asymmetric allowlist only: `RS256,ES256`. |
 | `NANGO_BASE_URL` | for provider OAuth | **Server-only.** Defaults to `https://api.nango.dev`; set only when using another reviewed Nango deployment. |
 | `NANGO_SECRET_KEY` | for provider OAuth | **Server-only. Never `NEXT_PUBLIC_*`.** Creates short-lived Connect sessions and authorizes Nango Proxy calls. |
 | `NANGO_GITHUB_INTEGRATION_ID` | for GitHub OAuth | Nango integration ID/unique key configured for the reviewed GitHub OAuth app. |
@@ -174,6 +178,53 @@ authenticates a person signing in to ComplianceHub.
 
 The manual password-token forms remain inside **Local sandbox / developer setup**
 for deterministic local tests. They are not the recommended production path.
+
+## 5a. Internal MCP OAuth staging gate **(you — production blocker)**
+
+Supabase OAuth Server remains beta. Apply this only in staging first; the MCP
+business tools must remain disabled in production until every compatibility test
+below passes from MCP Inspector, Codex, and Claude.
+
+1. In **Authentication → OAuth Server**, enable OAuth 2.1, set the authorization
+   path to `/oauth/consent`, and enable Dynamic Client Registration. Explicit
+   consent must remain required. The local equivalents are committed under
+   `[auth.oauth_server]` in `supabase/config.toml`.
+2. In **Authentication → Signing Keys**, activate an asymmetric RS256 or ES256
+   key. Confirm the published JWKS URL and copy the exact issuer/JWKS values into
+   deployment variables. Symmetric JWT algorithms are rejected by ComplianceHub.
+3. Insert the one exact hosted audience after migrations are applied:
+
+   ```sql
+   insert into private.mcp_oauth_config(config_key, audience)
+   values ('resource', 'https://compliancehub.example/mcp')
+   on conflict (config_key) do update
+   set audience = excluded.audience, updated_at = now();
+   ```
+
+   Do this separately in staging and production. The migration intentionally has
+   no hosted default. `supabase/seed.sql` supplies localhost only for local resets.
+4. In **Authentication → Hooks**, enable the Custom Access Token hook
+   `pg-functions://postgres/private/mcp_access_token_hook`. It is a security-
+   invoker function: ordinary browser events are returned exactly unchanged;
+   OAuth events get only the configured `aud` change and fail closed when the
+   private audience row is absent.
+5. Register exact redirect URIs for the test clients. Do not use wildcard or
+   preview-deployment redirects. The consent screen displays the registered
+   return origin and never approves automatically.
+6. Verify discovery and resource metadata, DCR, authorization-code + S256 PKCE,
+   exact `resource`/audience behavior, refresh rotation, user grant revocation,
+   expired tokens, and revoked sessions. In particular, current Supabase
+   documentation does not prove that every client/server combination echoes RFC
+   8707 `resource` exactly, so validate the issued `aud` and the complete round
+   trip rather than inferring compatibility from discovery alone.
+7. Repeat the complete flow in **MCP Inspector, Codex, and Claude**. A pass means
+   each client can register, sign in, display consent, refresh, call the protected
+   resource, and then loses access immediately after the user revokes its grant.
+
+Production rollout is blocked until DCR + PKCE + resource/audience + refresh +
+revocation pass in all three clients. Record the staging evidence and signing-key
+identifier in the rollout log; never record access tokens, authorization codes,
+or refresh tokens.
 
 ## 6. Slack alert channel (optional) **(you)**
 

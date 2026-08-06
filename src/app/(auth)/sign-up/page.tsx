@@ -4,7 +4,7 @@ import { signUpAction } from "../actions";
 
 export default async function SignUpPage({ searchParams }: { searchParams: Promise<{ message?: string; next?: string }> }) {
   const { message, next: requestedNext } = await searchParams;
-  const next = safePostAuthPath(requestedNext);
+  const next = safePostAuthPath(requestedNext, { allowOAuthConsent: true });
   const invitationContinuation = next === "/invite";
   return <section className="card" style={{ padding: "28px" }}>
     <h1 style={{ fontSize: "22px", letterSpacing: "-.02em" }}>Create your account</h1><p style={{ marginTop: "6px", fontSize: "13px", color: "#6d7787" }}>{invitationContinuation ? "Create an account to continue to your workspace invitation." : "Start a private readiness workspace for your organisation."}</p>

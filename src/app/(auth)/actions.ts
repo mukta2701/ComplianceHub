@@ -15,7 +15,7 @@ function message(path: string, value: string, next?: string) {
 }
 
 function safeNext(formData: FormData): string {
-  return safePostAuthPath(formData.get("next"));
+  return safePostAuthPath(formData.get("next"), { allowOAuthConsent: true });
 }
 
 function authCallbackUrl(next: string): string {

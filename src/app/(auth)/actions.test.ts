@@ -71,6 +71,14 @@ describe("post-auth continuation", () => {
     expect(auth.signInWithPassword).toHaveBeenCalledWith({ email: "member@example.test", password: TEST_PASSWORD });
   });
 
+  it("preserves the exact validated OAuth consent request across sign-in and sign-up", async () => {
+    const next = "/oauth/consent?authorization_id=11111111-1111-4111-8111-111111111111";
+    const auth = authClient(); hoisted.serverClient = auth.value;
+    await expect(signInAction(signInForm(next))).rejects.toThrow(`REDIRECT:${next}`);
+    await signUpAction(signUpForm(next)).catch(() => undefined);
+    expect(auth.signUp.mock.calls[0][0].options.emailRedirectTo).toBe(`https://app.example.com/auth/callback?next=${encodeURIComponent(next)}`);
+  });
+
   it.each(["https://evil.example/steal", "//evil.example/steal", "/\\evil.example/steal", "/%5Cevil.example/steal", "/invite/raw-token", "/sign-in"])(
     "falls back to /app for unsafe password continuation %s",
     async (next) => {

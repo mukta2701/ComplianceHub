@@ -18,4 +18,17 @@ describe("safePostAuthPath", () => {
   it("continues to preserve approved application query parameters", () => {
     expect(safePostAuthPath("/app/policies?state=draft#comments")).toBe("/app/policies?state=draft#comments");
   });
+
+  it("preserves only a canonical OAuth consent continuation when explicitly enabled", () => {
+    const id = "11111111-1111-4111-8111-111111111111";
+    expect(safePostAuthPath(`/oauth/consent?authorization_id=${id}`, { allowOAuthConsent: true }))
+      .toBe(`/oauth/consent?authorization_id=${id}`);
+  });
+
+  it.each([
+    "/oauth/consent", "/oauth/consent?authorization_id=bad", "/oauth/consent?authorization_id=11111111-1111-4111-8111-111111111111&extra=1",
+    "/oauth/consent?authorization_id=11111111-1111-4111-8111-111111111111#fragment",
+  ])("rejects a non-canonical OAuth continuation %s", (candidate) => {
+    expect(safePostAuthPath(candidate, { allowOAuthConsent: true })).toBe("/app");
+  });
 });

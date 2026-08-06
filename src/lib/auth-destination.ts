@@ -3,7 +3,7 @@ const VALIDATION_ORIGIN = "https://post-auth-destination.invalid";
 
 export function safePostAuthPath(
   candidate: unknown,
-  options: { fallback?: "/app" | "/invite"; allowResetPassword?: boolean } = {},
+  options: { fallback?: "/app" | "/invite"; allowResetPassword?: boolean; allowOAuthConsent?: boolean } = {},
 ): string {
   const fallback = options.fallback ?? "/app";
   if (typeof candidate !== "string" || !candidate.startsWith("/") || candidate.startsWith("//")) return fallback;
@@ -17,6 +17,15 @@ export function safePostAuthPath(
     if (destination.origin !== VALIDATION_ORIGIN) return fallback;
 
     if (destination.pathname === "/invite") return "/invite";
+
+    if (options.allowOAuthConsent === true && destination.pathname === "/oauth/consent") {
+      if (destination.hash || [...destination.searchParams.keys()].length !== 1) return fallback;
+      const authorizationId = destination.searchParams.get("authorization_id");
+      if (authorizationId && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(authorizationId)) {
+        return `/oauth/consent?authorization_id=${authorizationId}`;
+      }
+      return fallback;
+    }
 
     const allowed = destination.pathname === "/app"
       || destination.pathname.startsWith("/app/")
