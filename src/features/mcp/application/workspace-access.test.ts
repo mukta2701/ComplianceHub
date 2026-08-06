@@ -69,7 +69,7 @@ describe("MCP workspace access", () => {
     });
     const paged = membershipClient(manyRows);
     await expect(listWorkspaces(paged.client as never, USER_ID)).resolves.toHaveLength(1_205);
-    expect(paged.chain.range).toHaveBeenCalledTimes(3);
+    expect(paged.chain.range).toHaveBeenCalledTimes(4);
 
     const direct = membershipClient(manyRows);
     const target = manyRows[1_204]!.organisation_id;

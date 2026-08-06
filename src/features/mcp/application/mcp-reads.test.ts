@@ -16,8 +16,9 @@ const readiness = { soaPercent: 75, soaTotal: 4, riskBands: { low: 1, moderate: 
 
 type State = { table: string; select?: string; filters: Array<[string, unknown, unknown?]>; orders: Array<[string, boolean]>; range?: [number, number]; limit?: number };
 type Resolver = (state: State) => { data: unknown; error: unknown; count?: number | null };
+type RpcResolver = (name: string, args: Record<string, unknown>) => { data: unknown; error: unknown };
 
-function fakeSupabase(resolvers: Record<string, Resolver>) {
+function fakeSupabase(resolvers: Record<string, Resolver>, rpcResolver?: RpcResolver) {
   const states: State[] = [];
   const from = vi.fn((table: string) => {
     const state: State = { table, filters: [], orders: [] };
@@ -35,13 +36,29 @@ function fakeSupabase(resolvers: Record<string, Resolver>) {
     chain.then = (resolve: (value: ReturnType<typeof result>) => unknown) => Promise.resolve(result()).then(resolve);
     return chain;
   });
-  return { client: { from }, states };
+  const rpc = vi.fn(async (name: string, args: Record<string, unknown>) => rpcResolver?.(name, args) ?? { data: null, error: { message: "unexpected RPC" } });
+  return { client: { from, rpc }, states, rpc };
 }
 
 function membership(role: "owner" | "admin" | "member" = "owner"): Resolver {
   return (state) => {
     const row = { organisation_id: ORG, role, organisation: { id: ORG, name: "Acme" } };
-    return { data: state.filters.some(([, column]) => column === "organisation_id") ? row : [row], error: null };
+    if (state.filters.some(([, column]) => column === "organisation_id")) return { data: row, error: null };
+    return { data: state.range && state.range[0] > 0 ? [] : [row], error: null };
+  };
+}
+
+function complianceBundle(role: "owner" | "admin" | "member" = "owner", overrides: Record<string, unknown> = {}) {
+  return {
+    schemaVersion: 1,
+    workspace: { id: ORG, name: "Acme", role },
+    overviewSource: role === "member" ? "published" : "live",
+    overview: readiness,
+    attentionItems: [],
+    monitoringFindings: [],
+    latestLeadershipReport: null,
+    delivery: null,
+    ...overrides,
   };
 }
 
@@ -76,7 +93,7 @@ describe("MCP public read services", () => {
   it("rejects invalid attention filters before reading compliance tables", async () => {
     const fake = fakeSupabase({ memberships: membership() });
     await expect(listAttentionItems(fake.client as never, USER, { limit: 51 })).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
-    expect(fake.states.map(({ table }) => table)).toEqual(["memberships"]);
+    expect(fake.states.map(({ table }) => table)).toEqual(["memberships", "memberships"]);
   });
 
   it("queries all attention pages before deriving severity and applying the final limit", async () => {
@@ -91,7 +108,7 @@ describe("MCP public read services", () => {
     expect(result.items).toEqual([expect.objectContaining({ id: "audit_finding:42000000-0000-4000-8000-000000000001", severity: "critical" })]);
     expect(new Set(fake.states.map(({ table }) => table))).toEqual(new Set(["memberships", "audit_findings"]));
     expect(fake.states.find(({ table }) => table === "audit_findings")?.select).toBe("id,severity,status,created_at,audit:audits!inner(reference)");
-    expect(fake.states.filter(({ table }) => table === "audit_findings").map(({ range }) => range)).toEqual([[0, 499], [500, 999], [1000, 1499]]);
+    expect(fake.states.filter(({ table }) => table === "audit_findings").map(({ range }) => range)).toEqual([[0, 499], [500, 999], [1000, 1499], [1206, 1705]]);
     expect(fake.states.filter(({ table }) => table === "audit_findings").every(({ limit }) => limit === undefined)).toBe(true);
   });
 
@@ -111,22 +128,23 @@ describe("MCP public read services", () => {
   it("queries no compliance tables for an empty attention category list", async () => {
     const fake = fakeSupabase({ memberships: membership() });
     await expect(listAttentionItems(fake.client as never, USER, { categories: [], localDate: "2026-08-06" })).resolves.toMatchObject({ items: [], truncated: false });
-    expect(fake.states.map(({ table }) => table)).toEqual(["memberships"]);
+    expect(fake.states.map(({ table }) => table)).toEqual(["memberships", "memberships"]);
   });
 
-  it("loads every live readiness page and fails closed if a later page fails", async () => {
-    const soaRows = Array.from({ length: 1_205 }, (_, index) => ({ id: `43000000-0000-4000-8000-${String(index).padStart(12, "0")}`, status: "advanced" }));
-    const base: Record<string, Resolver> = {
-      memberships: membership("owner"), leadership_report_snapshots: () => ({ data: null, error: null }), soa_registers: () => ({ data: { id: "44000000-0000-4000-8000-000000000001" }, error: null }),
-      soa_items: (state) => ({ data: soaRows.slice(state.range![0], state.range![1] + 1), error: null }), risks: () => ({ data: [], error: null }), evidence: () => ({ data: [], error: null }),
-      tasks: () => ({ data: [], error: null, count: 0 }), audits: () => ({ data: [], error: null, count: 0 }), audit_findings: () => ({ data: [], error: null, count: 0 }), risk_matrix_config: () => ({ data: null, error: null }),
-    };
-    const exact = fakeSupabase(base);
-    await expect(getComplianceOverview(exact.client as never, USER, { localDate: "2026-08-06" })).resolves.toMatchObject({ readiness: { soaTotal: 1205, soaPercent: 100 } });
-    expect(exact.states.filter(({ table }) => table === "soa_items").map(({ range }) => range)).toEqual([[0, 499], [500, 999], [1000, 1499]]);
+  it("loads Owner live readiness through one coherent RPC and fails closed on malformed output", async () => {
+    const exact = fakeSupabase({ memberships: membership("owner") }, () => ({
+      data: complianceBundle("owner", { overview: { ...readiness, soaTotal: 1205, soaPercent: 100 } }), error: null,
+    }));
+    await expect(getComplianceOverview(exact.client as never, USER, { localDate: "2026-08-06" })).resolves.toMatchObject({ source: "live", readiness: { soaTotal: 1205, soaPercent: 100 } });
+    expect(exact.rpc).toHaveBeenCalledWith("get_mcp_compliance_bundle", {
+      target_organisation_id: ORG, target_local_date: "2026-08-06", attention_limit: 20, monitoring_limit: 20,
+    });
+    expect(exact.states.map(({ table }) => table)).toEqual(["memberships", "memberships"]);
 
-    const failed = fakeSupabase({ ...base, soa_items: (state) => state.range![0] >= 500 ? { data: null, error: { message: "later page" } } : { data: soaRows.slice(0, 500), error: null } });
-    await expect(getComplianceOverview(failed.client as never, USER, { localDate: "2026-08-06" })).rejects.toMatchObject({ code: "INTERNAL_ERROR" });
+    const malformed = fakeSupabase({ memberships: membership("owner") }, () => ({
+      data: complianceBundle("owner", { overview: { ...readiness, tasksOpen: 1, tasksOverdue: 2 } }), error: null,
+    }));
+    await expect(getComplianceOverview(malformed.client as never, USER, { localDate: "2026-08-06" })).rejects.toMatchObject({ code: "INTERNAL_ERROR" });
   });
 
   it("selects only safe monitoring columns, hides task IDs, sanitises titles, and applies active defaults", async () => {
@@ -207,51 +225,54 @@ describe("MCP public read services", () => {
   });
 
   it("prepares a deterministic fact hash and exposes Owner-only delivery state", async () => {
-    const rows: Record<string, unknown> = {
-      soa_registers: null, risks: [], evidence: [], audits: [], audit_findings: [], tasks: [], policies: [], monitoring_findings: [], risk_matrix_config: null,
-      leadership_report_snapshots: null,
-      daily_digest_deliveries: { id: "50000000-0000-4000-8000-000000000001", status: "failed", delivered_at: null },
-    };
-    const fake = fakeSupabase({
-      memberships: membership("owner"),
-      ...Object.fromEntries(Object.entries(rows).map(([table, data]) => [table, () => ({ data, error: null, count: 0 })])),
-    });
+    const fake = fakeSupabase({ memberships: membership("owner") }, () => ({ data: complianceBundle("owner", {
+      delivery: { id: "50000000-0000-4000-8000-000000000001", status: "failed", deliveredAt: null },
+    }), error: null }));
     const first = await prepareDailyDigest(fake.client as never, USER, { localDate: "2026-08-06" });
     const second = await prepareDailyDigest(fake.client as never, USER, { localDate: "2026-08-06" });
     expect(first.status).toBe("delivery_failed");
     expect(first.factHash).toMatch(/^[0-9a-f]{64}$/);
     expect(second.factHash).toBe(first.factHash);
-    expect(fake.states.find(({ table }) => table === "daily_digest_deliveries")?.select).toBe("id,status,delivered_at");
-    expect(fake.states.filter(({ table }) => table === "leadership_report_snapshots")).toHaveLength(2);
+    expect(fake.rpc).toHaveBeenCalledTimes(2);
+    expect(new Set(fake.states.map(({ table }) => table))).toEqual(new Set(["memberships"]));
   });
 
-  it("loads one snapshot per preparation and removes angle brackets end to end", async () => {
+  it("loads one coherent bundle per preparation and removes unsafe text end to end", async () => {
     const fake = fakeSupabase({
       memberships: (state) => {
         const row = { organisation_id: ORG, role: "owner", organisation: { id: ORG, name: "Acme < unsafe >" } };
-        return { data: state.filters.some(([, column]) => column === "organisation_id") ? row : [row], error: null };
+        if (state.filters.some(([, column]) => column === "organisation_id")) return { data: row, error: null };
+        return { data: state.range && state.range[0] > 0 ? [] : [row], error: null };
       },
-      leadership_report_snapshots: () => ({ data: null, error: null }), soa_registers: () => ({ data: null, error: null }), risks: () => ({ data: [], error: null }), evidence: () => ({ data: [], error: null }),
-      audits: () => ({ data: [], error: null, count: 0 }), audit_findings: () => ({ data: [], error: null, count: 0 }), tasks: () => ({ data: [], error: null, count: 0 }), policies: () => ({ data: [], error: null }),
-      monitoring_findings: () => ({ data: [{ id: "45000000-0000-4000-8000-000000000001", control_ref: "", severity: "critical", title: "Finding < dangling >", status: "open", task_id: null, detected_at: "2026-08-05T00:00:00Z", resolved_at: null }], error: null }),
-      risk_matrix_config: () => ({ data: null, error: null }), daily_digest_deliveries: () => ({ data: null, error: null }),
-    });
+    }, () => ({ data: complianceBundle("owner", {
+      workspace: { id: ORG, name: "Acme < unsafe >", role: "owner" },
+      monitoringFindings: [{ id: "monitoring_finding:45000000-0000-4000-8000-000000000001", severity: "critical", status: "open", title: "Finding < dangling >", detectedAt: "2026-08-05T00:00:00Z", resolvedAt: null, hasRemediationTask: false }],
+    }), error: null }));
     const result = await prepareDailyDigest(fake.client as never, USER, { localDate: "2026-08-06" });
     expect(JSON.stringify(result.facts)).not.toMatch(/[<>]/);
     expect(result.facts.monitoringFindings[0]?.id).toBe("monitoring_finding:45000000-0000-4000-8000-000000000001");
-    expect(fake.states.filter(({ table }) => table === "leadership_report_snapshots")).toHaveLength(1);
+    expect(fake.rpc).toHaveBeenCalledTimes(1);
   });
 
-  it("does not query delivery history for Admins", async () => {
-    const fake = fakeSupabase({
-      memberships: membership("admin"),
-      soa_registers: () => ({ data: null, error: null }), risks: () => ({ data: [], error: null }), evidence: () => ({ data: [], error: null }),
-      audits: () => ({ data: [], error: null, count: 0 }), audit_findings: () => ({ data: [], error: null, count: 0 }), tasks: () => ({ data: [], error: null, count: 0 }),
-      policies: () => ({ data: [], error: null }), monitoring_findings: () => ({ data: [], error: null }), risk_matrix_config: () => ({ data: null, error: null }), leadership_report_snapshots: () => ({ data: null, error: null }),
-      daily_digest_deliveries: () => { throw new Error("Admin must not query Owner delivery history"); },
-    });
+  it("accepts the RPC's Owner-scoped delivery omission for Admins", async () => {
+    const fake = fakeSupabase({ memberships: membership("admin") }, () => ({ data: complianceBundle("admin"), error: null }));
     await expect(prepareDailyDigest(fake.client as never, USER, { localDate: "2026-08-06" })).resolves.toMatchObject({ status: "ready" });
-    expect(fake.states.some(({ table }) => table === "daily_digest_deliveries")).toBe(false);
+    expect(fake.states.map(({ table }) => table)).toEqual(["memberships", "memberships"]);
+  });
+
+  it("rejects duplicate or inconsistent RPC facts before hashing", async () => {
+    const duplicate = fakeSupabase({ memberships: membership("owner") }, () => ({ data: complianceBundle("owner", {
+      attentionItems: [
+        { id: "task:a", source: "task", category: "overdue_task", severity: "high", summary: "A" },
+        { id: "task:a", source: "task", category: "overdue_task", severity: "high", summary: "B" },
+      ],
+    }), error: null }));
+    await expect(prepareDailyDigest(duplicate.client as never, USER, { localDate: "2026-08-06" })).rejects.toThrow(/duplicate attention/i);
+
+    const inconsistent = fakeSupabase({ memberships: membership("owner") }, () => ({ data: complianceBundle("owner", {
+      overview: { ...readiness, evidence: { total: 1, expiring: 1, expired: 1 } },
+    }), error: null }));
+    await expect(prepareDailyDigest(inconsistent.client as never, USER, { localDate: "2026-08-06" })).rejects.toMatchObject({ code: "INTERNAL_ERROR" });
   });
 
   it("maps every persisted delivery state to a stable preparation state", () => {
@@ -262,21 +283,10 @@ describe("MCP public read services", () => {
     expect(mapDeliveryStatus("reserved")).toBe("delivery_reserved");
   });
 
-  it("uses only the reviewed allow-list of Data API projections", async () => {
-    const fake = fakeSupabase({
-      memberships: membership("owner"), soa_registers: () => ({ data: null, error: null }), risks: () => ({ data: [], error: null }), evidence: () => ({ data: [], error: null }),
-      audits: () => ({ data: [], error: null, count: 0 }), audit_findings: () => ({ data: [], error: null, count: 0 }), tasks: () => ({ data: [], error: null, count: 0 }), policies: () => ({ data: [], error: null }),
-      monitoring_findings: () => ({ data: [], error: null }), risk_matrix_config: () => ({ data: null, error: null }), leadership_report_snapshots: () => ({ data: null, error: null }), daily_digest_deliveries: () => ({ data: null, error: null }),
-    });
+  it("uses the reviewed bundle RPC instead of stitching digest tables in the application", async () => {
+    const fake = fakeSupabase({ memberships: membership("owner") }, () => ({ data: complianceBundle("owner"), error: null }));
     await prepareDailyDigest(fake.client as never, USER, { localDate: "2026-08-06" });
-    const allowed = new Set([
-      "organisation_id,role,organisation:organisations!inner(id,name)",
-      "id,payload,published_at", "id", "id,status", "id,status,residual_likelihood,residual_impact",
-      "id,status,valid_until", "low_max,moderate_max,high_max,appetite_threshold", "id,title,due_on,status",
-      "id,title,valid_until,status", "id,reference,title,review_due,status",
-      "id,reference,title,review_date,status,residual_likelihood,residual_impact", "id,severity,status,created_at,audit:audits!inner(reference)",
-      "id,control_ref,severity,title,status,task_id,detected_at,resolved_at", "id,status,delivered_at",
-    ]);
-    expect(fake.states.every(({ select }) => !select || allowed.has(select))).toBe(true);
+    expect(fake.states.map(({ table }) => table)).toEqual(["memberships", "memberships"]);
+    expect(fake.rpc).toHaveBeenCalledTimes(1);
   });
 });

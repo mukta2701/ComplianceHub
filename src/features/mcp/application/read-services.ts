@@ -27,19 +27,25 @@ export function parseLocalDate(value: string): string {
 }
 
 type PageResult<T> = { data: T[] | null; error: unknown };
+type PageOptions = { pageSize?: number; maxRows?: number; maxPages?: number };
 
 export async function fetchAllPages<T>(
   fetchPage: (from: number, to: number) => PromiseLike<PageResult<T>>,
-  pageSize = 500,
+  options: number | PageOptions = {},
 ): Promise<T[]> {
+  const { pageSize = 500, maxRows = 10_000, maxPages = 100 } = typeof options === "number" ? { pageSize: options } : options;
   if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 1000) throw new RangeError("Invalid page size");
+  if (!Number.isInteger(maxRows) || maxRows < 1 || !Number.isInteger(maxPages) || maxPages < 1) throw new RangeError("Invalid pagination ceiling");
   const rows: T[] = [];
-  for (let from = 0; ; from += pageSize) {
+  for (let page = 0; page < maxPages; page += 1) {
+    const from = rows.length;
     const result = await fetchPage(from, from + pageSize - 1);
     if (result.error || !Array.isArray(result.data)) throw new McpError("INTERNAL_ERROR");
+    if (result.data.length === 0) return rows;
+    if (rows.length + result.data.length > maxRows) throw new McpError("INTERNAL_ERROR");
     rows.push(...result.data);
-    if (result.data.length < pageSize) return rows;
   }
+  throw new McpError("INTERNAL_ERROR");
 }
 
 type LiveReadinessRows = {

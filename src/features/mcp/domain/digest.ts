@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { ReadinessReport } from "@/features/reports/domain/readiness-report";
+import { containsSensitiveCredential } from "./safe-summary";
 
 export const DIGEST_ATTENTION_CATEGORIES = [
   "overdue_task",
@@ -18,7 +19,7 @@ const digestText = (max: number) => z.string()
   .trim()
   .min(1)
   .max(max)
-  .refine((value) => !unsafeTextPattern.test(value), "Digest text contains sensitive or unsupported formatting");
+  .refine((value) => !unsafeTextPattern.test(value) && !containsSensitiveCredential(value), "Digest text contains sensitive or unsupported formatting");
 
 const localDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
   const [year, month, day] = value.split("-").map(Number);
@@ -46,6 +47,13 @@ const overviewSchema: z.ZodType<ReadinessReport> = z.object({
   }),
   openAudits: z.number().int().nonnegative(),
   openNonConformities: z.number().int().nonnegative(),
+}).superRefine((value, context) => {
+  if (value.tasksOverdue > value.tasksOpen) {
+    context.addIssue({ code: "custom", path: ["tasksOverdue"], message: "Overdue tasks cannot exceed open tasks" });
+  }
+  if (value.evidence.expiring + value.evidence.expired > value.evidence.total) {
+    context.addIssue({ code: "custom", path: ["evidence"], message: "Stale evidence cannot exceed total evidence" });
+  }
 });
 
 export const dailyDigestMessageSchema = z.object({
@@ -140,6 +148,9 @@ export function buildDailyDigestFacts(input: BuildDailyDigestFactsInput): DailyD
     || categoryRank[left.category] - categoryRank[right.category]
     || left.source.localeCompare(right.source)
     || left.id.localeCompare(right.id));
+  if (new Set(attentionItems.map(({ id }) => id)).size !== attentionItems.length) {
+    throw new Error("Duplicate attention item ID");
+  }
   const monitoringFindings = input.monitoringFindings.map((finding) => ({
     id: z.string().refine((id) => id.startsWith("monitoring_finding:"), "Monitoring ID must be source-prefixed").parse(cleanId(finding.id)),
     severity: z.enum(DIGEST_SEVERITIES).parse(finding.severity),
@@ -150,6 +161,9 @@ export function buildDailyDigestFacts(input: BuildDailyDigestFactsInput): DailyD
   })).sort((left, right) => severityRank[right.severity] - severityRank[left.severity]
     || right.detectedAt.localeCompare(left.detectedAt)
     || left.id.localeCompare(right.id));
+  if (new Set(monitoringFindings.map(({ id }) => id)).size !== monitoringFindings.length) {
+    throw new Error("Duplicate monitoring finding ID");
+  }
 
   return {
     schemaVersion: 1,

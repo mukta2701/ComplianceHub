@@ -13,7 +13,25 @@ describe("MCP exact read helpers", () => {
     const source = Array.from({ length: 1_205 }, (_, index) => ({ id: String(index).padStart(4, "0") }));
     const page = vi.fn(async (from: number, to: number) => ({ data: source.slice(from, to + 1), error: null }));
     await expect(fetchAllPages(page, 500)).resolves.toEqual(source);
-    expect(page.mock.calls).toEqual([[0, 499], [500, 999], [1000, 1499]]);
+    expect(page.mock.calls).toEqual([[0, 499], [500, 999], [1000, 1499], [1205, 1704]]);
+  });
+
+  it("advances by actual returned rows when the server caps pages below the requested size", async () => {
+    const source = Array.from({ length: 1_205 }, (_, index) => ({ id: index }));
+    const page = vi.fn(async (from: number) => ({ data: source.slice(from, from + 100), error: null }));
+    await expect(fetchAllPages(page, { pageSize: 500, maxRows: 2_000, maxPages: 20 })).resolves.toEqual(source);
+    expect(page.mock.calls.at(-1)).toEqual([1205, 1704]);
+    expect(page).toHaveBeenCalledTimes(14);
+  });
+
+  it("requires an empty terminating page and fails closed at safety ceilings", async () => {
+    const pages = vi.fn(async (from: number) => ({ data: from < 2 ? [{ id: from }] : [], error: null }));
+    await expect(fetchAllPages(pages, { pageSize: 1, maxRows: 2, maxPages: 3 })).resolves.toEqual([{ id: 0 }, { id: 1 }]);
+    expect(pages).toHaveBeenCalledTimes(3);
+
+    const neverEnds = vi.fn(async (from: number) => ({ data: [{ id: from }], error: null }));
+    await expect(fetchAllPages(neverEnds, { pageSize: 1, maxRows: 2, maxPages: 3 }))
+      .rejects.toMatchObject({ code: "INTERNAL_ERROR" });
   });
 
   it("fails closed when any page fails", async () => {

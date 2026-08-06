@@ -17,6 +17,8 @@ const overview = {
   openAudits: 1,
   openNonConformities: 3,
 };
+const privateKeyExample = ["private_key=-----BEGIN", "PRIVATE", "KEY-----abc"].join(" ");
+const awsAccessKeyId = ["AK", "IAIOSFODNN7EXAMPLE"].join("");
 
 function makeFacts(reverse = false) {
   const attentionItems = [
@@ -95,6 +97,35 @@ describe("daily digest facts", () => {
       monitoringFindings: [], latestLeadershipReport: null,
     })).toThrow(/source-prefixed/i);
   });
+
+  it("rejects duplicate attention and monitoring IDs before hashing", () => {
+    const base = {
+      workspace: { id: "00000000-0000-4000-8000-000000000001", name: "Internal ISMS" },
+      localDate: "2026-08-06", overview, latestLeadershipReport: null,
+    };
+    expect(() => buildDailyDigestFacts({
+      ...base,
+      attentionItems: [
+        { id: "task:a", category: "overdue_task" as const, severity: "high" as const, summary: "A", source: "task" as const },
+        { id: "task:a", category: "overdue_task" as const, severity: "high" as const, summary: "B", source: "task" as const },
+      ],
+      monitoringFindings: [],
+    })).toThrow(/duplicate attention/i);
+    expect(() => buildDailyDigestFacts({
+      ...base,
+      attentionItems: [],
+      monitoringFindings: [
+        { id: "monitoring_finding:a", severity: "high" as const, status: "open", title: "A", detectedAt: "2026-08-06T00:00:00Z" },
+        { id: "monitoring_finding:a", severity: "high" as const, status: "open", title: "B", detectedAt: "2026-08-06T01:00:00Z" },
+      ],
+    })).toThrow(/duplicate monitoring/i);
+  });
+
+  it("rejects internally inconsistent overview counts", () => {
+    const base = { workspace: { id: "00000000-0000-4000-8000-000000000001", name: "Internal ISMS" }, localDate: "2026-08-06", attentionItems: [], monitoringFindings: [], latestLeadershipReport: null };
+    expect(() => buildDailyDigestFacts({ ...base, overview: { ...overview, tasksOpen: 1, tasksOverdue: 2 } })).toThrow();
+    expect(() => buildDailyDigestFacts({ ...base, overview: { ...overview, evidence: { total: 1, expiring: 1, expired: 1 } } })).toThrow();
+  });
 });
 
 describe("daily digest message", () => {
@@ -122,6 +153,18 @@ describe("daily digest message", () => {
     "Use Bearer abc123",
     "token=secret-value",
     "line one\nline two",
+    "client_secret=super-sensitive-value",
+    privateKeyExample,
+    "private key: hidden-material",
+    "clientSecret=camel-case-value",
+    "AWS_SECRET_ACCESS_KEY=abcdefghijklmnopqrstuvwxyz1234567890",
+    "secret_access_key: abcdefghijklmnopqrstuvwxyz",
+    `access_key_id=${awsAccessKeyId}`,
+    "Authorization: Basic Zm9vOmJhcg==",
+    "Authorization: Bearer abc.def.ghi",
+    "signing_secret=signing-value",
+    "webhook_secret: hook-value",
+    awsAccessKeyId,
   ])("rejects sensitive or multiline outgoing text: %s", (headline) => {
     expect(() => dailyDigestMessageSchema.parse({ headline, priorities: [], actions: [] })).toThrow();
   });

@@ -1,33 +1,27 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { readinessReportSchema } from "@/features/reports/application/leadership-snapshots";
-import type { ReadinessReport } from "@/features/reports/domain/readiness-report";
 import { DEFAULT_RISK_MATRIX_CONFIG, type RiskMatrixConfig } from "@/features/risks/domain/risks";
-import type { SoaStatus } from "@/features/soa/domain/soa";
 import { McpError } from "../auth/errors";
 import {
   buildDailyDigestFacts,
   DIGEST_SEVERITIES,
   hashDailyDigestFacts,
   type DailyDigestFacts,
-  type DigestMonitoringFinding,
   type DigestSeverity,
 } from "../domain/digest";
 import { safeSummary } from "../domain/safe-summary";
 import { resolveWorkspace, type AccessibleWorkspace } from "./workspace-access";
 import {
   buildAttentionItems,
-  buildLiveReadiness,
   fetchAllPages,
   parseLocalDate,
   validateAttentionRequest,
-  type AttentionItem,
   type AttentionSourceRows,
 } from "./read-services";
 
 const uuid = z.uuid();
 const dateTime = z.string().datetime({ offset: true });
-const soaStatus = z.enum(["pending", "absent", "in_progress", "established", "operational", "advanced", "not_applicable"]);
 const riskConfigRow = z.object({ low_max: z.number().int(), moderate_max: z.number().int(), high_max: z.number().int(), appetite_threshold: z.number().int().nullable() });
 const snapshotRow = z.object({ id: uuid, payload: readinessReportSchema, published_at: dateTime });
 const monitoringStatus = z.enum(["open", "acknowledged", "resolved"]);
@@ -41,6 +35,37 @@ const monitoringRow = z.object({
   detected_at: dateTime,
   resolved_at: dateTime.nullable(),
 });
+const bundleAttentionRow = z.object({
+  id: z.string().min(1).max(200),
+  source: z.enum(["task", "evidence", "policy", "risk", "audit_finding"]),
+  category: z.enum(["overdue_task", "stale_evidence", "policy_review", "high_risk", "unresolved_finding"]),
+  severity: z.enum(DIGEST_SEVERITIES),
+  summary: z.string(),
+  dueOn: z.string().optional(),
+  observedOn: dateTime.optional(),
+}).strict();
+const bundleMonitoringRow = z.object({
+  id: z.string().min(1).max(200),
+  severity: z.enum(DIGEST_SEVERITIES),
+  status: monitoringStatus,
+  title: z.string(),
+  controlRef: z.string().optional(),
+  detectedAt: dateTime,
+  resolvedAt: dateTime.nullable().optional(),
+  hasRemediationTask: z.boolean(),
+}).strict();
+const bundleSchema = z.object({
+  schemaVersion: z.literal(1),
+  workspace: z.object({ id: uuid, name: z.string(), role: z.enum(["owner", "admin", "member"]) }).strict(),
+  overviewSource: z.enum(["live", "published"]),
+  overview: readinessReportSchema.nullable(),
+  attentionItems: z.array(bundleAttentionRow).max(51),
+  monitoringFindings: z.array(bundleMonitoringRow).max(51),
+  latestLeadershipReport: z.object({ id: uuid, publishedAt: dateTime }).strict().nullable(),
+  delivery: z.object({ id: uuid, status: z.enum(["reserved", "delivered", "failed", "unknown"]), deliveredAt: dateTime.nullable() }).strict().nullable(),
+}).strict();
+
+type ComplianceBundle = z.infer<typeof bundleSchema>;
 
 type Snapshot = z.infer<typeof snapshotRow>;
 
@@ -51,6 +76,35 @@ export function dateInLondon(now = new Date()): string {
 }
 
 function queryFailure(): never { throw new McpError("INTERNAL_ERROR"); }
+
+async function loadComplianceBundle(
+  supabase: SupabaseClient,
+  workspace: AccessibleWorkspace,
+  localDate: string,
+): Promise<ComplianceBundle> {
+  const { data, error } = await supabase.rpc("get_mcp_compliance_bundle", {
+    target_organisation_id: workspace.id,
+    target_local_date: localDate,
+    attention_limit: 20,
+    monitoring_limit: 20,
+  });
+  if (error || !data) queryFailure();
+  const parsed = bundleSchema.safeParse(data);
+  if (!parsed.success
+    || parsed.data.workspace.id !== workspace.id
+    || parsed.data.workspace.role !== workspace.role
+    || parsed.data.overviewSource !== (workspace.role === "member" ? "published" : "live")) queryFailure();
+  return {
+    ...parsed.data,
+    workspace: { ...parsed.data.workspace, name: safeSummary(parsed.data.workspace.name, 160, "Workspace") },
+    attentionItems: parsed.data.attentionItems.map((item) => ({ ...item, summary: safeSummary(item.summary, 240, "Attention item") })),
+    monitoringFindings: parsed.data.monitoringFindings.map((finding) => ({
+      ...finding,
+      title: safeSummary(finding.title, 240, "Monitoring finding"),
+      ...(finding.controlRef ? { controlRef: safeSummary(finding.controlRef, 80, "Control") } : {}),
+    })),
+  };
+}
 
 async function latestSnapshot(supabase: SupabaseClient, organisationId: string): Promise<Snapshot | null> {
   const { data, error } = await supabase
@@ -68,74 +122,9 @@ async function latestSnapshot(supabase: SupabaseClient, organisationId: string):
   return parsed.data;
 }
 
-async function exactCount(query: PromiseLike<{ count: number | null; error: unknown }>): Promise<number> {
-  const result = await query;
-  if (result.error || !Number.isSafeInteger(result.count) || (result.count ?? -1) < 0) queryFailure();
-  return result.count!;
-}
-
-async function loadLiveOverview(supabase: SupabaseClient, organisationId: string, localDate: string): Promise<ReadinessReport> {
-  const registerResult = await supabase.from("soa_registers").select("id").eq("organisation_id", organisationId)
-    .order("version", { ascending: false }).order("id", { ascending: false }).limit(1).maybeSingle();
-  if (registerResult.error) queryFailure();
-  const registerId = registerResult.data ? z.object({ id: uuid }).safeParse(registerResult.data) : null;
-  if (registerId && !registerId.success) queryFailure();
-
-  const soaPromise = registerId?.success
-    ? fetchAllPages((from, to) => supabase.from("soa_items").select("id,status").eq("organisation_id", organisationId)
-      .eq("soa_register_id", registerId.data.id).order("id", { ascending: true }).range(from, to))
-    : Promise.resolve([]);
-  const risksPromise = fetchAllPages((from, to) => supabase.from("risks")
-    .select("id,status,residual_likelihood,residual_impact").eq("organisation_id", organisationId)
-    .neq("status", "closed").order("id", { ascending: true }).range(from, to));
-  const evidencePromise = fetchAllPages((from, to) => supabase.from("evidence")
-    .select("id,status,valid_until").eq("organisation_id", organisationId)
-    .order("id", { ascending: true }).range(from, to));
-  const openTasks = exactCount(supabase.from("tasks").select("id", { count: "exact", head: true })
-    .eq("organisation_id", organisationId).in("status", ["open", "in_progress"]));
-  const overdueTasks = exactCount(supabase.from("tasks").select("id", { count: "exact", head: true })
-    .eq("organisation_id", organisationId).in("status", ["open", "in_progress"]).not("due_on", "is", null).lt("due_on", localDate));
-  const openAudits = exactCount(supabase.from("audits").select("id", { count: "exact", head: true })
-    .eq("organisation_id", organisationId).neq("status", "closed"));
-  const openNonConformities = exactCount(supabase.from("audit_findings").select("id", { count: "exact", head: true })
-    .eq("organisation_id", organisationId).neq("status", "closed").neq("severity", "observation"));
-  const configPromise = supabase.from("risk_matrix_config").select("low_max,moderate_max,high_max,appetite_threshold")
-    .eq("organisation_id", organisationId).maybeSingle();
-
-  const [soaRaw, risksRaw, evidenceRaw, taskOpenCount, taskOverdueCount, auditCount, findingCount, configResult] = await Promise.all([
-    soaPromise, risksPromise, evidencePromise, openTasks, overdueTasks, openAudits, openNonConformities, configPromise,
-  ]);
-  if (configResult.error) queryFailure();
-  const soa = z.array(z.object({ id: uuid, status: soaStatus })).safeParse(soaRaw);
-  const risks = z.array(z.object({ id: uuid, status: z.string(), residual_likelihood: z.number().int().min(1).max(5), residual_impact: z.number().int().min(1).max(5) })).safeParse(risksRaw);
-  const evidence = z.array(z.object({ id: uuid, status: z.enum(["current", "expiring", "expired", "superseded", "withdrawn"]), valid_until: z.string().nullable() })).safeParse(evidenceRaw);
-  const configParsed = configResult.data ? riskConfigRow.safeParse(configResult.data) : null;
-  if (!soa.success || !risks.success || !evidence.success || (configParsed && !configParsed.success)) queryFailure();
-  const config: RiskMatrixConfig = configParsed?.success ? {
-    lowMax: configParsed.data.low_max,
-    moderateMax: configParsed.data.moderate_max,
-    highMax: configParsed.data.high_max,
-    appetite: configParsed.data.appetite_threshold,
-  } : DEFAULT_RISK_MATRIX_CONFIG;
-  return buildLiveReadiness({
-    soa: soa.data.map(({ status }) => ({ status: status as SoaStatus })),
-    risks: risks.data,
-    evidence: evidence.data,
-    tasks: { open: taskOpenCount, overdue: taskOverdueCount },
-    openAudits: auditCount,
-    openNonConformities: findingCount,
-    config,
-    localDate,
-  });
-}
-
-async function overviewForWorkspace(supabase: SupabaseClient, workspace: AccessibleWorkspace, localDate: string, report: Snapshot | null) {
-  if (workspace.role === "member") {
-    if (!report) throw new McpError("NOT_FOUND");
-    return { workspace: { id: workspace.id, name: workspace.name }, source: "published" as const, readiness: report.payload, latestReport: { id: report.id, publishedAt: report.published_at } };
-  }
-  const readiness = await loadLiveOverview(supabase, workspace.id, localDate);
-  return { workspace: { id: workspace.id, name: workspace.name }, source: "live" as const, readiness, latestReport: report ? { id: report.id, publishedAt: report.published_at } : null };
+function publishedOverviewForMember(workspace: AccessibleWorkspace, report: Snapshot | null) {
+  if (!report) throw new McpError("NOT_FOUND");
+  return { workspace: { id: workspace.id, name: workspace.name }, source: "published" as const, readiness: report.payload, latestReport: { id: report.id, publishedAt: report.published_at } };
 }
 
 export async function getComplianceOverview(
@@ -144,8 +133,19 @@ export async function getComplianceOverview(
   input: { workspaceId?: string; localDate?: string },
 ) {
   const workspace = await resolveWorkspace(supabase, verifiedUserId, input.workspaceId);
-  const report = await latestSnapshot(supabase, workspace.id);
-  return overviewForWorkspace(supabase, workspace, parseLocalDate(input.localDate ?? dateInLondon()), report);
+  const localDate = parseLocalDate(input.localDate ?? dateInLondon());
+  if (workspace.role === "member") {
+    const report = await latestSnapshot(supabase, workspace.id);
+    return publishedOverviewForMember(workspace, report);
+  }
+  const bundle = await loadComplianceBundle(supabase, workspace, localDate);
+  if (!bundle.overview) queryFailure();
+  return {
+    workspace: { id: bundle.workspace.id, name: bundle.workspace.name },
+    source: bundle.overviewSource,
+    readiness: bundle.overview,
+    latestReport: bundle.latestLeadershipReport,
+  };
 }
 
 async function loadAttentionRows(supabase: SupabaseClient, organisationId: string, localDate: string, categories: ReadonlySet<string>): Promise<AttentionSourceRows> {
@@ -244,7 +244,6 @@ export async function getLatestLeadershipReport(supabase: SupabaseClient, verifi
   return { workspace: { id: workspace.id, name: workspace.name }, report: report ? { id: report.id, payload: report.payload, publishedAt: report.published_at } : null };
 }
 
-const deliveryRow = z.object({ id: uuid, status: z.enum(["reserved", "delivered", "failed", "unknown"]), delivered_at: dateTime.nullable() });
 export type PrepareDailyDigestResult = {
   status: "ready" | "already_delivered" | "delivery_failed" | "delivery_unknown" | "delivery_reserved";
   facts: DailyDigestFacts;
@@ -263,34 +262,21 @@ export function mapDeliveryStatus(status: "reserved" | "delivered" | "failed" | 
 export async function prepareDailyDigest(supabase: SupabaseClient, verifiedUserId: string, input: { workspaceId?: string; localDate: string }): Promise<PrepareDailyDigestResult> {
   const localDate = parseLocalDate(input.localDate);
   const workspace = await resolveWorkspace(supabase, verifiedUserId, input.workspaceId);
-  const report = await latestSnapshot(supabase, workspace.id);
-  const [overview, attention, monitoring] = await Promise.all([
-    overviewForWorkspace(supabase, workspace, localDate, report),
-    attentionForWorkspace(supabase, workspace, { localDate, limit: 20 }),
-    monitoringForWorkspace(supabase, workspace, { limit: 20 }),
-  ]);
-  let delivery: z.infer<typeof deliveryRow> | null = null;
-  if (workspace.role === "owner") {
-    const result = await supabase.from("daily_digest_deliveries").select("id,status,delivered_at")
-      .eq("organisation_id", workspace.id).eq("digest_on", localDate).maybeSingle();
-    if (result.error) queryFailure();
-    if (result.data) {
-      const parsed = deliveryRow.safeParse(result.data);
-      if (!parsed.success) queryFailure();
-      delivery = parsed.data;
-    }
-  }
-  const attentionWithOverflow: AttentionItem[] = attention.items.concat(attention.truncated ? [{ id: "system:attention-truncation", category: "overdue_task", severity: "low", summary: "Additional attention items were omitted", source: "system" }] : []);
-  const monitoringWithOverflow: DigestMonitoringFinding[] = monitoring.findings.map(({ id, severity, status, title, controlRef, detectedAt }) => ({ id, severity: severity as DigestSeverity, status, title, ...(controlRef ? { controlRef } : {}), detectedAt }));
-  if (monitoring.truncated) monitoringWithOverflow.push({ id: "monitoring_finding:truncation", severity: "low", status: "omitted", title: "Additional monitoring findings were omitted", detectedAt: `${localDate}T00:00:00.000Z` });
+  const bundle = await loadComplianceBundle(supabase, workspace, localDate);
+  if (!bundle.overview) throw new McpError("NOT_FOUND");
   const facts = buildDailyDigestFacts({
-    workspace: { id: workspace.id, name: workspace.name },
+    workspace: { id: bundle.workspace.id, name: bundle.workspace.name },
     localDate,
-    overview: overview.readiness,
-    attentionItems: attentionWithOverflow,
-    monitoringFindings: monitoringWithOverflow,
-    latestLeadershipReport: report ? { id: report.id, publishedAt: report.published_at } : null,
+    overview: bundle.overview,
+    attentionItems: bundle.attentionItems,
+    monitoringFindings: bundle.monitoringFindings,
+    latestLeadershipReport: bundle.latestLeadershipReport,
   });
-  const status = mapDeliveryStatus(delivery?.status ?? null);
-  return { status, facts, factHash: hashDailyDigestFacts(facts), delivery: delivery ? { id: delivery.id, deliveredAt: delivery.delivered_at } : null };
+  const status = mapDeliveryStatus(bundle.delivery?.status ?? null);
+  return {
+    status,
+    facts,
+    factHash: hashDailyDigestFacts(facts),
+    delivery: bundle.delivery ? { id: bundle.delivery.id, deliveredAt: bundle.delivery.deliveredAt } : null,
+  };
 }
