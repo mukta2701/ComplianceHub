@@ -24,3 +24,5 @@ ignore:
     reason: "Existing Slack webhook URL input; rendering the form sends no data and the server allowlists hooks.slack.com"
   - fingerprint: "a4417098d3184a85"
     reason: "Static explanatory copy for the existing encrypted Slack webhook configuration; no data transfer"
+  - fingerprint: "ca73b55db58585e5"
+    reason: "Static MCP server safety instructions only; contains no user data and performs no transfer"
