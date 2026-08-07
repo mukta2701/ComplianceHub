@@ -155,6 +155,9 @@ export async function handleMcpPost(
     if (error instanceof McpHttpRequestError) return jsonRpcError(error.status, error.rpcCode, error.message);
     return jsonRpcError(400, -32700, "Invalid JSON request.");
   }
+  // V1 intentionally accepts exactly one JSON-RPC message per HTTP request.
+  // Reject batches before constructing any MCP context or invoking SDK handlers.
+  if (Array.isArray(parsedBody)) return jsonRpcError(400, -32600, "Invalid Request.");
 
   const server = dependencies.createServer({
     userId: authenticated.user.id,

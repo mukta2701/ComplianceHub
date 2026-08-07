@@ -244,6 +244,9 @@ configured. A process-local counter is only the local/degraded fallback: it rese
 with a serverless isolate and cannot enforce a global limit by itself. Confirm the
 RPC migration and service-role variable are present before staging load tests, and
 monitor fallback log events without recording bearer tokens or request bodies.
+V1 accepts exactly one JSON-RPC message per POST and rejects every batch array
+before creating an MCP server or running a tool. Authenticated invalid requests
+still consume the user-and-client rate-limit allowance.
 
 ## 6. Slack alert channel (optional) **(you)**
 

@@ -67,6 +67,66 @@ describe("POST /mcp", () => {
     }
   });
 
+  it("serves ordinary single tool calls and notifications without treating them as batches", async () => {
+    const deps = dependencies();
+    const call = JSON.stringify({
+      jsonrpc: "2.0", id: 3, method: "tools/call",
+      params: { name: "list_workspaces", arguments: {} },
+    });
+    const callResponse = await handleMcpPost(request(call), deps as never);
+    expect(callResponse.status).toBe(200);
+    await expect(callResponse.json()).resolves.toMatchObject({
+      jsonrpc: "2.0", id: 3,
+      result: { structuredContent: { ok: true, data: { workspaces: [] } } },
+    });
+
+    const notification = JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" });
+    const notificationResponse = await handleMcpPost(request(notification), deps as never);
+    expect(notificationResponse.status).toBe(202);
+    expect(await notificationResponse.text()).toBe("");
+    expect(deps.createServer).toHaveBeenCalledTimes(2);
+    expect(deps.createTransport).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects every JSON-RPC batch shape before creating a server or transport", async () => {
+    const calls = Array.from({ length: 1_000 }, (_, index) => ({
+      jsonrpc: "2.0", id: index + 1, method: "tools/call",
+      params: { name: "list_workspaces", arguments: {} },
+    }));
+    const bodies = [
+      "[]",
+      JSON.stringify([JSON.parse(initialize)]),
+      JSON.stringify([{ jsonrpc: "2.0", method: "notifications/initialized" }]),
+      JSON.stringify(calls),
+    ];
+    expect(new TextEncoder().encode(bodies[3]).byteLength).toBeLessThan(MCP_MAX_BODY_BYTES);
+
+    for (const body of bodies) {
+      const deps = dependencies();
+      const response = await handleMcpPost(request(body), deps as never);
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        jsonrpc: "2.0", id: null,
+        error: { code: -32600, message: "Invalid Request." },
+      });
+      expect(deps.authenticate).toHaveBeenCalledTimes(1);
+      expect(deps.rateLimit).toHaveBeenCalledTimes(1);
+      expect(deps.createServer).not.toHaveBeenCalled();
+      expect(deps.createTransport).not.toHaveBeenCalled();
+    }
+  });
+
+  it("cannot turn concurrent batch requests into concurrent MCP contexts", async () => {
+    const deps = dependencies();
+    const oneElementBatch = JSON.stringify([JSON.parse(initialize)]);
+    const responses = await Promise.all(Array.from({ length: 20 }, () => handleMcpPost(request(oneElementBatch), deps as never)));
+    expect(responses.every(({ status }) => status === 400)).toBe(true);
+    expect(deps.authenticate).toHaveBeenCalledTimes(20);
+    expect(deps.rateLimit).toHaveBeenCalledTimes(20);
+    expect(deps.createServer).not.toHaveBeenCalled();
+    expect(deps.createTransport).not.toHaveBeenCalled();
+  });
+
   it("returns exact OAuth challenges for absent, malformed, and rejected bearer tokens", async () => {
     const candidates = [
       { candidate: new Request("https://attacker.example/mcp", { method: "POST", body: initialize, headers: { "content-type": "application/json" } }), code: "AUTH_REQUIRED" as const },
