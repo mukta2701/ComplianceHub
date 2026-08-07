@@ -1,5 +1,5 @@
 begin;
-select plan(49);
+select plan(57);
 
 select has_table('public','daily_digest_delivery_attempts','digest attempts have durable per-attempt history');
 select hasnt_function('public','reserve_daily_digest_delivery',array['uuid','date','text','jsonb'],'actor-less reservation is removed');
@@ -136,6 +136,42 @@ select is((public.reserve_daily_digest_delivery_server(
   current_setting('app.lifecycle_org')::uuid,'86000000-0000-4000-8000-000000000001','2026-08-09',repeat('c',64),'{"text":"Ignored replacement","blocks":[]}'
 )->>'attemptNumber')::int,2,'a confirmed INTERNAL_ERROR remains safely retryable');
 
+select set_config('app.owner_a_retry',public.reserve_daily_digest_delivery_server(
+  current_setting('app.lifecycle_org')::uuid,'86000000-0000-4000-8000-000000000001','2026-08-11',repeat('e',64),'{"text":"Owner retry","blocks":[]}'
+)::text,true);
+select is((current_setting('app.owner_a_retry')::jsonb->>'state'),'reserved','Owner A creates retry scenario attempt one');
+select ok(public.finalize_daily_digest_delivery_server(
+  (current_setting('app.owner_a_retry')::jsonb->>'deliveryId')::uuid,'86000000-0000-4000-8000-000000000001',1,'failed','SLACK_REJECTED'
+),'Owner A records the confirmed attempt-one failure');
+select set_config('app.owner_b_retry',public.reserve_daily_digest_delivery_server(
+  current_setting('app.lifecycle_org')::uuid,'86000000-0000-4000-8000-000000000005','2026-08-11',repeat('e',64),'{"text":"Ignored replacement","blocks":[]}'
+)::text,true);
+select is((current_setting('app.owner_b_retry')::jsonb->>'attemptNumber')::int,2,'Owner B reserves attempt two');
+reset role;
+select is((select attempted_by from public.daily_digest_delivery_attempts
+  where delivery_id=(current_setting('app.owner_b_retry')::jsonb->>'deliveryId')::uuid and attempt_number=2
+),'86000000-0000-4000-8000-000000000005'::uuid,'attempt two is immutably bound to Owner B');
+set local role service_role;
+select ok(not public.finalize_daily_digest_delivery_server(
+  (current_setting('app.owner_b_retry')::jsonb->>'deliveryId')::uuid,'86000000-0000-4000-8000-000000000001',2,'delivered',null
+),'Owner A cannot finalize Owner B''s open retry attempt');
+select ok(public.finalize_daily_digest_delivery_server(
+  (current_setting('app.owner_b_retry')::jsonb->>'deliveryId')::uuid,'86000000-0000-4000-8000-000000000005',2,'delivered',null
+),'Owner B can finalize the exact open retry attempt');
+reset role;
+select is((select status::text from public.daily_digest_deliveries
+  where id=(current_setting('app.owner_b_retry')::jsonb->>'deliveryId')::uuid
+),'delivered','the Owner B retry reaches the delivered terminal state');
+select is((select count(*)::int from public.audit_events
+  where organisation_id=current_setting('app.lifecycle_org')::uuid
+    and entity_type='daily_digest_delivery_attempts'
+    and entity_id=(select id::text from public.daily_digest_delivery_attempts
+      where delivery_id=(current_setting('app.owner_b_retry')::jsonb->>'deliveryId')::uuid and attempt_number=2)
+    and action='update'
+    and actor_id='86000000-0000-4000-8000-000000000005'
+),1,'retry finalization audit records Owner B as the exact attempt actor');
+
+set local role service_role;
 select set_config('app.demotion_reservation',public.reserve_daily_digest_delivery_server(
   current_setting('app.lifecycle_org')::uuid,'86000000-0000-4000-8000-000000000001','2026-08-10',repeat('d',64),'{"text":"Demotion race","blocks":[]}'
 )::text,true);
@@ -149,7 +185,7 @@ select ok(public.finalize_daily_digest_delivery_server(
 ),'the exact reserved actor can persist Slack success after demotion');
 reset role;
 select is((select status::text from public.daily_digest_deliveries where id=(current_setting('app.demotion_reservation')::jsonb->>'deliveryId')::uuid),'delivered','demotion cannot strand a confirmed Slack outcome as reserved');
-select is((select attempted_by from public.daily_digest_deliveries where id=(current_setting('app.demotion_reservation')::jsonb->>'deliveryId')::uuid),'86000000-0000-4000-8000-000000000001'::uuid,'the immutable delivery actor remains the finalization authority');
+select is((select attempted_by from public.daily_digest_deliveries where id=(current_setting('app.demotion_reservation')::jsonb->>'deliveryId')::uuid),'86000000-0000-4000-8000-000000000001'::uuid,'the immutable delivery actor retains original-delivery provenance');
 
 set local role authenticated;
 select set_config('request.jwt.claims','{"sub":"86000000-0000-4000-8000-000000000001","role":"authenticated"}',true);
