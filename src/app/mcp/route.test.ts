@@ -35,7 +35,7 @@ function dependencies(overrides: Record<string, unknown> = {}) {
     createServer: vi.fn((context: Parameters<typeof createComplianceMcpServer>[0]) => createComplianceMcpServer(context, {
       listWorkspaces: vi.fn(async () => []),
       getComplianceOverview: vi.fn(), listAttentionItems: vi.fn(), listMonitoringFindings: vi.fn(),
-      getLatestLeadershipReport: vi.fn(), prepareDailyDigest: vi.fn(),
+      getLatestLeadershipReport: vi.fn(), prepareDailyDigest: vi.fn(), postDailyDigest: vi.fn(),
     })),
     createTransport: vi.fn(() => new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true })),
     ...overrides,
@@ -50,6 +50,7 @@ describe("POST /mcp", () => {
     await expect(response.json()).resolves.toMatchObject({ jsonrpc: "2.0", id: 1, result: { serverInfo: { name: "compliancehub-internal", version: "1.0.0" } } });
     expect(deps.authenticate).toHaveBeenCalledTimes(1);
     expect(deps.rateLimit).toHaveBeenCalledWith(expect.stringMatching(/^mcp:/));
+    expect(deps.createServer).toHaveBeenCalledWith(expect.objectContaining({ userId: USER_ID, clientId: "codex-client" }));
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("x-robots-tag")).toBe("noindex, nofollow");
     expect(response.headers.get("mcp-session-id")).toBeNull();
@@ -60,7 +61,7 @@ describe("POST /mcp", () => {
     const response = await handleMcpPost(request(body), dependencies() as never);
     expect(response.status).toBe(200);
     const payload = await response.json();
-    expect(payload.result.tools).toHaveLength(6);
+    expect(payload.result.tools).toHaveLength(7);
     for (const tool of payload.result.tools) {
       expect(tool.securitySchemes).toEqual([{ type: "oauth2", scopes: ["openid", "email", "profile"] }]);
       expect(tool._meta.securitySchemes).toEqual(tool.securitySchemes);
@@ -187,7 +188,7 @@ describe("POST /mcp", () => {
     const deps = dependencies({
       authenticate: vi.fn(async () => authContext(call++ === 0 ? USER_ID : "10000000-0000-4000-8000-000000000002", `client-${call}`)),
       createServer: vi.fn((context: Parameters<typeof createComplianceMcpServer>[0]) => {
-        const server = createComplianceMcpServer(context, { listWorkspaces: vi.fn(async () => []), getComplianceOverview: vi.fn(), listAttentionItems: vi.fn(), listMonitoringFindings: vi.fn(), getLatestLeadershipReport: vi.fn(), prepareDailyDigest: vi.fn() });
+        const server = createComplianceMcpServer(context, { listWorkspaces: vi.fn(async () => []), getComplianceOverview: vi.fn(), listAttentionItems: vi.fn(), listMonitoringFindings: vi.fn(), getLatestLeadershipReport: vi.fn(), prepareDailyDigest: vi.fn(), postDailyDigest: vi.fn() });
         servers.push(server);
         return server;
       }),

@@ -213,36 +213,83 @@ export function hashDailyDigestFacts(facts: DailyDigestFacts): string {
   return createHash("sha256").update(canonicalJson(facts), "utf8").digest("hex");
 }
 
-function numbersInText(value: string): number[] {
-  return [...value.matchAll(/\b\d+(?:\.\d+)?\b/g)].map((match) => Number(match[0]));
+type NumberClaim = { value: number; start: number; end: number };
+
+function numberClaims(value: string): NumberClaim[] {
+  return [...value.matchAll(/\b\d+(?:\.\d+)?\b/g)].map((match) => ({
+    value: Number(match[0]),
+    start: match.index,
+    end: match.index + match[0].length,
+  }));
 }
 
-function allowedFactNumbers(facts: DailyDigestFacts): Set<number> {
-  const allowed = new Set<number>();
-  const addText = (value: string | undefined) => {
-    if (value) for (const number of numbersInText(value)) allowed.add(number);
-  };
-  const addOverview = (value: unknown) => {
-    if (typeof value === "number") allowed.add(value);
-    else if (value && typeof value === "object") {
-      for (const nested of Object.values(value as Record<string, unknown>)) addOverview(nested);
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function exactFactLiterals(facts: DailyDigestFacts): string[] {
+  return [
+    facts.workspace.name,
+    facts.localDate,
+    ...facts.attentionItems.flatMap((item) => [item.id, item.summary, item.dueOn, item.observedOn]),
+    ...facts.monitoringFindings.flatMap((finding) => [finding.id, finding.title, finding.controlRef, finding.detectedAt]),
+    facts.latestLeadershipReport?.id,
+    facts.latestLeadershipReport?.publishedAt,
+  ].filter((value): value is string => Boolean(value));
+}
+
+function literalNumberRanges(text: string, facts: DailyDigestFacts): Array<{ start: number; end: number }> {
+  const ranges: Array<{ start: number; end: number }> = [];
+  for (const literal of exactFactLiterals(facts)) {
+    const matcher = new RegExp(escapeRegExp(literal), "gi");
+    for (const match of text.matchAll(matcher)) {
+      ranges.push({ start: match.index, end: match.index + match[0].length });
     }
-  };
-  addOverview(facts.overview);
-  addText(facts.workspace.name);
-  addText(facts.localDate);
-  for (const item of facts.attentionItems) {
-    addText(item.summary);
-    addText(item.dueOn);
-    addText(item.observedOn);
   }
-  for (const finding of facts.monitoringFindings) {
-    addText(finding.title);
-    addText(finding.controlRef);
-    addText(finding.detectedAt);
+  return ranges;
+}
+
+type MetricRule = { label: string; expected: number; suffix?: string };
+
+function metricRules(facts: DailyDigestFacts): MetricRule[] {
+  return [
+    { label: "(?:soa\\s+)?(?:readiness|ready)", expected: facts.overview.soaPercent, suffix: "(?:%|percent)?" },
+    { label: "(?:soa\\s+)?(?:controls?|items?)", expected: facts.overview.soaTotal },
+    { label: "open\\s+tasks?", expected: facts.overview.tasksOpen },
+    { label: "overdue\\s+tasks?", expected: facts.overview.tasksOverdue },
+    { label: "(?:evidence\\s+items?|total\\s+evidence)", expected: facts.overview.evidence.total },
+    { label: "expiring\\s+evidence", expected: facts.overview.evidence.expiring },
+    { label: "expired\\s+evidence", expected: facts.overview.evidence.expired },
+    { label: "very[- ]high\\s+risks?", expected: facts.overview.riskBands.very_high },
+    { label: "high\\s+risks?", expected: facts.overview.riskBands.high },
+    { label: "moderate\\s+risks?", expected: facts.overview.riskBands.moderate },
+    { label: "low\\s+risks?", expected: facts.overview.riskBands.low },
+    { label: "open\\s+audits?", expected: facts.overview.openAudits },
+    { label: "open\\s+non[- ]?conformit(?:y|ies)", expected: facts.overview.openNonConformities },
+  ];
+}
+
+function metricClaimSupport(text: string, facts: DailyDigestFacts): Map<number, boolean> {
+  const support = new Map<number, boolean>();
+  for (const rule of metricRules(facts)) {
+    const number = "(?<number>\\d+(?:\\.\\d+)?)";
+    const patterns = [
+      new RegExp(`${number}\\s*${rule.suffix ?? ""}\\s*${rule.label}\\b`, "gi"),
+      new RegExp(`\\b${rule.label}\\s*(?:is|are|:|-)?\\s*${number}${rule.suffix ?? ""}`, "gi"),
+    ];
+    for (const pattern of patterns) {
+      for (const match of text.matchAll(pattern)) {
+        const raw = match.groups?.number;
+        if (!raw || match.index === undefined) continue;
+        const relative = match[0].indexOf(raw);
+        const start = match.index + relative;
+        const current = support.get(start);
+        const valid = Number(raw) === rule.expected;
+        support.set(start, current === undefined ? valid : current && valid);
+      }
+    }
   }
-  addText(facts.latestLeadershipReport?.publishedAt);
-  return allowed;
+  return support;
 }
 
 export function validateDigestMessageAgainstFacts(
@@ -250,12 +297,19 @@ export function validateDigestMessageAgainstFacts(
   facts: DailyDigestFacts,
 ): { ok: true } | { ok: false; unsupportedNumbers: number[] } {
   const parsed = dailyDigestMessageSchema.parse(message);
-  const allowed = allowedFactNumbers(facts);
   const unsupportedNumbers = [...new Set([
     parsed.headline,
     ...parsed.priorities,
     ...parsed.actions,
-  ].flatMap(numbersInText).filter((number) => !allowed.has(number)))].sort((a, b) => a - b);
+  ].flatMap((text) => {
+    const literalRanges = literalNumberRanges(text, facts);
+    const metricSupport = metricClaimSupport(text, facts);
+    return numberClaims(text).filter((claim) => {
+      const metric = metricSupport.get(claim.start);
+      if (metric !== undefined) return !metric;
+      return !literalRanges.some((range) => claim.start >= range.start && claim.end <= range.end);
+    }).map(({ value }) => value);
+  }))].sort((a, b) => a - b);
   return unsupportedNumbers.length > 0 ? { ok: false, unsupportedNumbers } : { ok: true };
 }
 

@@ -215,6 +215,65 @@ describe("daily digest message", () => {
     }, facts)).toEqual({ ok: false, unsupportedNumbers: [9] });
   });
 
+  it("binds numerical claims to their exact compliance metric", () => {
+    const facts = makeFacts();
+
+    expect(validateDigestMessageAgainstFacts({
+      headline: "Compliance needs attention",
+      priorities: ["12 overdue tasks"],
+      actions: [],
+    }, facts)).toEqual({ ok: false, unsupportedNumbers: [12] });
+
+    expect(validateDigestMessageAgainstFacts({
+      headline: "Compliance needs attention",
+      priorities: ["6 high risks"],
+      actions: [],
+    }, facts)).toEqual({ ok: false, unsupportedNumbers: [6] });
+
+    expect(validateDigestMessageAgainstFacts({
+      headline: "Compliance needs attention",
+      priorities: ["72% ready", "7 open tasks", "12 evidence items", "2 high risks"],
+      actions: ["Review 3 open non-conformities"],
+    }, facts)).toEqual({ ok: true });
+  });
+
+  it("allows only exact prepared dates, control references, identifiers, and bounded fact text", () => {
+    const facts = buildDailyDigestFacts({
+      workspace: { id: "00000000-0000-4000-8000-000000000001", name: "Internal ISMS" },
+      localDate: "2026-08-06",
+      overview,
+      attentionItems: [{
+        id: "task:task-27001",
+        category: "overdue_task",
+        severity: "high",
+        summary: "Review ISO 27001 renewal",
+        dueOn: "2026-08-05",
+        source: "task",
+      }],
+      monitoringFindings: [{
+        id: "monitoring_finding:finding-a",
+        severity: "critical",
+        status: "open",
+        title: "Control A.8.1 is disabled",
+        controlRef: "A.8.1",
+        detectedAt: "2026-08-06T06:00:00.000Z",
+      }],
+      latestLeadershipReport: null,
+    });
+
+    expect(validateDigestMessageAgainstFacts({
+      headline: "Compliance needs attention",
+      priorities: ["Review ISO 27001 renewal", "Control A.8.1 is disabled"],
+      actions: ["Complete task:task-27001 by 2026-08-05"],
+    }, facts)).toEqual({ ok: true });
+
+    expect(validateDigestMessageAgainstFacts({
+      headline: "Compliance needs attention",
+      priorities: ["Complete by 2026-08-04", "Control A.9.1 needs review", "80% ready"],
+      actions: [],
+    }, facts)).toEqual({ ok: false, unsupportedNumbers: [4, 8, 9.1, 80, 2026] });
+  });
+
   it("renders bounded Slack blocks without accepting or exposing a destination", () => {
     const payload = buildSlackDigestPayload({
       headline: "Compliance needs attention",

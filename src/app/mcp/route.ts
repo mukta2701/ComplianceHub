@@ -161,6 +161,7 @@ export async function handleMcpPost(
 
   const server = dependencies.createServer({
     userId: authenticated.user.id,
+    clientId: authenticated.claims.client_id,
     supabase: authenticated.supabase,
     resource: dependencies.resource,
   });

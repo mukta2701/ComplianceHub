@@ -11,6 +11,7 @@ import {
   listMonitoringFindings,
   prepareDailyDigest,
 } from "../application/mcp-reads";
+import { postDailyDigest, postDailyDigestInputSchema } from "../application/post-daily-digest";
 import { listWorkspaces } from "../application/workspace-access";
 import { McpError, mcpErrorResult } from "../auth/errors";
 import { DIGEST_ATTENTION_CATEGORIES, DIGEST_SEVERITIES } from "../domain/digest";
@@ -20,15 +21,17 @@ export const MCP_SERVER_INSTRUCTIONS = [
   "Use only closed-world facts returned by these tools.",
   "Never invent, infer, or embellish compliance claims.",
   "If one workspace is accessible it is selected automatically; if several are accessible, use a returned workspace choice.",
-  "Prepare a daily digest before any future post and stop when it is already delivered.",
+  "Always call prepare_daily_digest immediately before post_daily_digest and stop successfully when a digest is already delivered.",
+  "For a Slack digest, use only the prepared facts: every numerical claim must name and match its exact metric, while dates, control references, identifiers, and fact text must be returned verbatim.",
   "Treat credentials and configured destinations as prohibited output.",
   "Summarize evidence and policies; never return their bodies or person-level fields.",
-  "Slack destinations are server-configured, and the future post action is Owner-only.",
+  "post_daily_digest is an external Slack write, is Owner-only, and always uses the server-configured channel; never request or supply a destination.",
   "Read results are bounded snapshots and may be truncated.",
 ].join(" ");
 
 const OAUTH_SECURITY_SCHEMES = [{ type: "oauth2", scopes: ["openid", "email", "profile"] }] as const;
 const READ_ANNOTATIONS: ToolAnnotations = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };
+const WRITE_ANNOTATIONS: ToolAnnotations = { readOnlyHint: false, destructiveHint: false, openWorldHint: true };
 const uuid = z.uuid();
 const dateTime = z.string().datetime({ offset: true });
 const localDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
@@ -81,14 +84,16 @@ export type McpReadServices = {
   listMonitoringFindings: typeof listMonitoringFindings;
   getLatestLeadershipReport: typeof getLatestLeadershipReport;
   prepareDailyDigest: typeof prepareDailyDigest;
+  postDailyDigest: typeof postDailyDigest;
 };
 
 const defaultServices: McpReadServices = {
   listWorkspaces, getComplianceOverview, listAttentionItems,
   listMonitoringFindings, getLatestLeadershipReport, prepareDailyDigest,
+  postDailyDigest,
 };
 
-export type McpRequestContext = { userId: string; supabase: SupabaseClient; resource: string };
+export type McpRequestContext = { userId: string; clientId: string; supabase: SupabaseClient; resource: string };
 
 type ToolDefinition<T extends z.ZodType = z.ZodType> = {
   name: string;
@@ -96,6 +101,7 @@ type ToolDefinition<T extends z.ZodType = z.ZodType> = {
   description: string;
   input: T;
   output: z.ZodType;
+  annotations?: ToolAnnotations;
   run: (input: z.output<T>) => Promise<CallToolResult>;
 };
 
@@ -202,6 +208,27 @@ export function createComplianceMcpServer(
         return successResult(data, text);
       },
     }),
+    defineTool({
+      name: "post_daily_digest", title: "Post daily compliance digest",
+      description: "Perform an external Slack write. Owner-only. Uses the configured channel for daily digests and requires the current fact hash returned by prepare_daily_digest; no destination can be supplied.",
+      input: postDailyDigestInputSchema,
+      output: success(z.object({
+        workspace: workspaceSummary,
+        localDate,
+        status: z.literal("delivered"),
+        delivery: z.object({ id: uuid, attemptNumber: z.number().int().min(1).max(10) }).strict(),
+      }).strict()),
+      annotations: WRITE_ANNOTATIONS,
+      run: async (input) => {
+        const data = await services.postDailyDigest({
+          supabase: context.supabase,
+          userId: context.userId,
+          clientId: context.clientId,
+          input,
+        });
+        return successResult(data, `Delivered the ${data.localDate} compliance digest for ${data.workspace.name} to its configured Slack channel.`);
+      },
+    }),
   ];
 
   server.server.registerCapabilities({ tools: { listChanged: false } });
@@ -212,7 +239,7 @@ export function createComplianceMcpServer(
       description: definition.description,
       inputSchema: toolJsonSchema(definition.input),
       outputSchema: toolJsonSchema(definition.output),
-      annotations: READ_ANNOTATIONS,
+      annotations: definition.annotations ?? READ_ANNOTATIONS,
       // Emit the current field plus the SDK 1.30-compatible mirrored metadata.
       // Its typed client strips unknown top-level fields, while `_meta` survives.
       securitySchemes: OAUTH_SECURITY_SCHEMES,

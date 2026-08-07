@@ -49,8 +49,10 @@ select public.publish_leadership_report(current_setting('app.bundle_org')::uuid,
 
 insert into public.alert_channels(id,organisation_id,type,label,config,connected_by,enabled,daily_digest_enabled) values
  ('88000000-0000-4000-8000-000000000201',current_setting('app.bundle_org')::uuid,'slack','Bundle Slack','{"webhookUrl":"encrypted"}','88000000-0000-4000-8000-000000000001',true,true);
-insert into public.daily_digest_deliveries(id,organisation_id,digest_on,channel_id,fact_hash,message,attempted_by) values
- ('88000000-0000-4000-8000-000000000202',current_setting('app.bundle_org')::uuid,'2026-08-06','88000000-0000-4000-8000-000000000201',repeat('a',64),'{"headline":"Reserved","priorities":[],"actions":[]}','88000000-0000-4000-8000-000000000001');
+select public.reserve_daily_digest_delivery(
+  current_setting('app.bundle_org')::uuid,'2026-08-06',repeat('a',64),
+  '{"text":"Reserved","blocks":[]}'::jsonb
+);
 
 select isnt(public.get_mcp_compliance_bundle(current_setting('app.bundle_org')::uuid,'2026-08-06',2,2),null::jsonb,'Owner receives a bundle');
 select is(public.get_mcp_compliance_bundle(current_setting('app.bundle_org')::uuid,'2026-08-06',2,2)->>'overviewSource','live','Owner receives live readiness');
