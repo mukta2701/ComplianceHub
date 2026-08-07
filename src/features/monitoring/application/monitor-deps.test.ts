@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildMonitorDependencies } from "./monitor-deps";
+import { buildMonitorDependencies, postMonitoringSlackWebhook } from "./monitor-deps";
 import type { AlertChannel, AlertFinding } from "./deliver";
 
 const finding: AlertFinding = {
@@ -83,5 +83,25 @@ describe("buildMonitorDependencies WhatsApp delivery", () => {
     expect(upsert).toHaveBeenCalledTimes(2);
     expect(upsert).toHaveBeenCalledWith(expect.objectContaining({ user_id: "owner-1" }), expect.anything());
     expect(upsert).toHaveBeenCalledWith(expect.objectContaining({ user_id: "admin-1" }), expect.anything());
+  });
+});
+
+describe("monitoring Slack wrapper", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("preserves the existing throw-on-non-2xx contract through the shared hardened transport", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 503 })));
+    await expect(postMonitoringSlackWebhook(
+      "https://hooks.slack.com/services/T/B/secret",
+      { text: "finding" },
+    )).rejects.toThrow("Slack webhook delivery failed");
+  });
+
+  it("accepts a successful shared transport response", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })));
+    await expect(postMonitoringSlackWebhook(
+      "https://hooks.slack.com/services/T/B/secret",
+      { text: "finding" },
+    )).resolves.toBeUndefined();
   });
 });

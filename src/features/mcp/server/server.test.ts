@@ -134,6 +134,18 @@ describe("ComplianceHub MCP server", () => {
 
     const invalid = await client.callTool({ name: "prepare_daily_digest", arguments: { localDate: "2026-02-30", extra: true } });
     expect(invalid).toMatchObject({ isError: true, structuredContent: { ok: false, error: { code: "VALIDATION_ERROR" } } });
+    const invalidPostDate = await client.callTool({
+      name: "post_daily_digest",
+      arguments: {
+        localDate: "2026-02-31",
+        factHash: "a".repeat(64),
+        headline: "75% ready",
+        priorities: [],
+        actions: [],
+      },
+    });
+    expect(invalidPostDate).toMatchObject({ isError: true, structuredContent: { ok: false, error: { code: "VALIDATION_ERROR" } } });
+    expect(services.postDailyDigest).not.toHaveBeenCalled();
     const invalidEmpty = await client.callTool({ name: "list_workspaces", arguments: { extra: true } });
     expect(invalidEmpty).toMatchObject({ isError: true, structuredContent: { ok: false, error: { code: "VALIDATION_ERROR" } } });
     const forbidden = await client.callTool({ name: "get_compliance_overview", arguments: {} });
@@ -143,7 +155,7 @@ describe("ComplianceHub MCP server", () => {
     const unknown = await client.callTool({ name: "list_monitoring_findings", arguments: {} });
     expect(unknown).toMatchObject({ isError: true, structuredContent: { error: { code: "INTERNAL_ERROR" } } });
     expect(JSON.stringify(unknown)).not.toContain("database password");
-    for (const result of [invalid, invalidEmpty, forbidden, choices, unknown]) expect(result).not.toHaveProperty("_meta.mcp/www_authenticate");
+    for (const result of [invalid, invalidPostDate, invalidEmpty, forbidden, choices, unknown]) expect(result).not.toHaveProperty("_meta.mcp/www_authenticate");
   });
 
   it("fails closed when a service violates its declared output contract", async () => {

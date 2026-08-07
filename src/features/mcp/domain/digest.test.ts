@@ -203,9 +203,9 @@ describe("daily digest message", () => {
   it("rejects numerical claims not present in the prepared facts", () => {
     const facts = makeFacts();
     expect(validateDigestMessageAgainstFacts({
-      headline: "Compliance needs attention",
+      headline: "72% ready",
       priorities: ["2 overdue tasks and 1 very-high risk"],
-      actions: ["Review the 3 open non-conformities"],
+      actions: ["Review 3 open non-conformities"],
     }, facts)).toEqual({ ok: true });
 
     expect(validateDigestMessageAgainstFacts({
@@ -215,23 +215,50 @@ describe("daily digest message", () => {
     }, facts)).toEqual({ ok: false, unsupportedNumbers: [9] });
   });
 
+  it.each([
+    "All systems are secure",
+    "No customer data is at risk",
+    "nine overdue tasks",
+  ])("rejects an unsupported closed-world claim: %s", (headline) => {
+    expect(validateDigestMessageAgainstFacts({
+      headline,
+      priorities: [],
+      actions: [],
+    }, makeFacts()).ok).toBe(false);
+  });
+
+  it("requires every digest line to be an exact returned literal or a supported metric claim", () => {
+    const facts = makeFacts();
+    expect(validateDigestMessageAgainstFacts({
+      headline: "72% ready",
+      priorities: ["Treat supplier risk", "2 overdue tasks"],
+      actions: ["Review 3 open non-conformities"],
+    }, facts)).toEqual({ ok: true });
+
+    expect(validateDigestMessageAgainstFacts({
+      headline: "72% ready and everything else looks healthy",
+      priorities: ["Treat supplier risk urgently"],
+      actions: ["Review 3 open non-conformities"],
+    }, facts).ok).toBe(false);
+  });
+
   it("binds numerical claims to their exact compliance metric", () => {
     const facts = makeFacts();
 
     expect(validateDigestMessageAgainstFacts({
-      headline: "Compliance needs attention",
+      headline: "72% ready",
       priorities: ["12 overdue tasks"],
       actions: [],
     }, facts)).toEqual({ ok: false, unsupportedNumbers: [12] });
 
     expect(validateDigestMessageAgainstFacts({
-      headline: "Compliance needs attention",
+      headline: "72% ready",
       priorities: ["6 high risks"],
       actions: [],
     }, facts)).toEqual({ ok: false, unsupportedNumbers: [6] });
 
     expect(validateDigestMessageAgainstFacts({
-      headline: "Compliance needs attention",
+      headline: "72% ready",
       priorities: ["72% ready", "7 open tasks", "12 evidence items", "2 high risks"],
       actions: ["Review 3 open non-conformities"],
     }, facts)).toEqual({ ok: true });
@@ -262,13 +289,13 @@ describe("daily digest message", () => {
     });
 
     expect(validateDigestMessageAgainstFacts({
-      headline: "Compliance needs attention",
+      headline: "72% ready",
       priorities: ["Review ISO 27001 renewal", "Control A.8.1 is disabled"],
-      actions: ["Complete task:task-27001 by 2026-08-05"],
+      actions: ["Review ISO 27001 renewal"],
     }, facts)).toEqual({ ok: true });
 
     expect(validateDigestMessageAgainstFacts({
-      headline: "Compliance needs attention",
+      headline: "72% ready",
       priorities: ["Complete by 2026-08-04", "Control A.9.1 needs review", "80% ready"],
       actions: [],
     }, facts)).toEqual({ ok: false, unsupportedNumbers: [4, 8, 9.1, 80, 2026] });
@@ -285,5 +312,18 @@ describe("daily digest message", () => {
     expect(payload.blocks).toHaveLength(4);
     expect(JSON.stringify(payload)).not.toContain("webhook");
     expect(payload).not.toHaveProperty("channel");
+  });
+
+  it("renders empty priority and action sections without fabricating a no-findings claim", () => {
+    const payload = buildSlackDigestPayload({
+      headline: "72% ready",
+      priorities: [],
+      actions: [],
+    }, { workspaceName: "Internal ISMS", localDate: "2026-08-06" });
+
+    const rendered = JSON.stringify(payload);
+    expect(rendered).not.toContain("None reported");
+    expect(rendered).toContain("Priorities");
+    expect(rendered).toContain("Actions");
   });
 });

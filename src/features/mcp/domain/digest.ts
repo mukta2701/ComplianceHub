@@ -292,16 +292,34 @@ function metricClaimSupport(text: string, facts: DailyDigestFacts): Map<number, 
   return support;
 }
 
+function isSupportedMetricLine(text: string, facts: DailyDigestFacts): boolean {
+  const clauses = text.split(/\s+(?:and|&)\s+/i);
+  if (clauses.length === 0) return false;
+  const action = "(?:review|address|resolve|investigate|prioriti[sz]e)\\s+";
+  return clauses.every((clause) => metricRules(facts).some((rule) => {
+    const expected = escapeRegExp(String(rule.expected));
+    const suffix = rule.suffix ?? "";
+    const patterns = [
+      new RegExp(`^(?:${action})?${expected}\\s*${suffix}\\s*${rule.label}$`, "i"),
+      new RegExp(`^${rule.label}\\s*(?:is|are|:|-)\\s*${expected}${suffix}$`, "i"),
+    ];
+    return patterns.some((pattern) => pattern.test(clause));
+  }));
+}
+
 export function validateDigestMessageAgainstFacts(
   message: DailyDigestMessage,
   facts: DailyDigestFacts,
 ): { ok: true } | { ok: false; unsupportedNumbers: number[] } {
   const parsed = dailyDigestMessageSchema.parse(message);
-  const unsupportedNumbers = [...new Set([
+  const lines = [
     parsed.headline,
     ...parsed.priorities,
     ...parsed.actions,
-  ].flatMap((text) => {
+  ];
+  const literals = new Set(exactFactLiterals(facts));
+  const unsupportedLines = lines.filter((text) => !literals.has(text) && !isSupportedMetricLine(text, facts));
+  const unsupportedNumbers = [...new Set(unsupportedLines.flatMap((text) => {
     const literalRanges = literalNumberRanges(text, facts);
     const metricSupport = metricClaimSupport(text, facts);
     return numberClaims(text).filter((claim) => {
@@ -310,7 +328,7 @@ export function validateDigestMessageAgainstFacts(
       return !literalRanges.some((range) => claim.start >= range.start && claim.end <= range.end);
     }).map(({ value }) => value);
   }))].sort((a, b) => a - b);
-  return unsupportedNumbers.length > 0 ? { ok: false, unsupportedNumbers } : { ok: true };
+  return unsupportedLines.length > 0 ? { ok: false, unsupportedNumbers } : { ok: true };
 }
 
 function escapeSlack(value: string): string {
@@ -324,17 +342,19 @@ export function buildSlackDigestPayload(
   const parsed = dailyDigestMessageSchema.parse(message);
   const workspaceName = cleanFactText(context.workspaceName, 160);
   const localDate = localDateSchema.parse(context.localDate);
-  const bulletList = (items: string[]) => items.length > 0
-    ? items.map((item) => `• ${escapeSlack(item)}`).join("\n")
-    : "• None reported in the prepared facts";
+  const bulletList = (items: string[]) => items.map((item) => `• ${escapeSlack(item)}`).join("\n");
+  const section = (heading: string, items: string[]) => {
+    const bullets = bulletList(items);
+    return bullets ? `*${heading}*\n${bullets}` : `*${heading}*`;
+  };
 
   return {
     text: `ComplianceHub daily brief — ${workspaceName} — ${localDate}`,
     blocks: [
       { type: "header", text: { type: "plain_text", text: "ComplianceHub daily brief" } },
       { type: "section", text: { type: "mrkdwn", text: `*${escapeSlack(parsed.headline)}*\n${escapeSlack(workspaceName)} · ${localDate}` } },
-      { type: "section", text: { type: "mrkdwn", text: `*Priorities*\n${bulletList(parsed.priorities)}` } },
-      { type: "section", text: { type: "mrkdwn", text: `*Actions*\n${bulletList(parsed.actions)}` } },
+      { type: "section", text: { type: "mrkdwn", text: section("Priorities", parsed.priorities) } },
+      { type: "section", text: { type: "mrkdwn", text: section("Actions", parsed.actions) } },
     ],
   } as const;
 }

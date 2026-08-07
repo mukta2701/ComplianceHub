@@ -11,6 +11,7 @@ const USER_ID = "10000000-0000-4000-8000-000000000001";
 const WORKSPACE_ID = "20000000-0000-4000-8000-000000000001";
 const CHANNEL_ID = "30000000-0000-4000-8000-000000000001";
 const DELIVERY_ID = "40000000-0000-4000-8000-000000000001";
+const DELIVERY_CLIENT = { kind: "server-only-delivery-client" } as unknown as import("@supabase/supabase-js").SupabaseClient;
 
 const facts = buildDailyDigestFacts({
   workspace: { id: WORKSPACE_ID, name: "Acme" },
@@ -33,6 +34,7 @@ function dependencies(overrides: Partial<PostDailyDigestDependencies> = {}): Pos
     resolveWorkspace: vi.fn(async () => ({ id: WORKSPACE_ID, name: "Acme", role: "owner" as const })),
     prepare: vi.fn(async () => ({ status: "ready" as const, facts, factHash, delivery: null })),
     rateLimit: vi.fn(async () => undefined),
+    createDeliveryClient: vi.fn(() => DELIVERY_CLIENT),
     reserve: vi.fn(async () => ({
       state: "reserved" as const,
       deliveryId: DELIVERY_ID,
@@ -42,6 +44,7 @@ function dependencies(overrides: Partial<PostDailyDigestDependencies> = {}): Pos
     })),
     loadEncryptedWebhook: vi.fn(async () => "encrypted-webhook"),
     decryptWebhook: vi.fn(() => "https://hooks.slack.com/services/T/B/secret"),
+    isChannelActive: vi.fn(async () => true),
     deliver: vi.fn(async () => ({ outcome: "delivered" as const })),
     finalize: vi.fn(async () => true),
     ...overrides,
@@ -89,6 +92,7 @@ describe("postDailyDigest", () => {
     expect(deps.prepare).not.toHaveBeenCalled();
     expect(deps.reserve).not.toHaveBeenCalled();
     expect(deps.deliver).not.toHaveBeenCalled();
+    expect(deps.createDeliveryClient).not.toHaveBeenCalled();
   });
 
   it("rejects stale and semantically unsupported text before reservation or network", async () => {
@@ -97,12 +101,31 @@ describe("postDailyDigest", () => {
       .rejects.toMatchObject({ code: "STALE_DIGEST" });
     expect(stale.reserve).not.toHaveBeenCalled();
     expect(stale.deliver).not.toHaveBeenCalled();
+    expect(stale.createDeliveryClient).not.toHaveBeenCalled();
 
     const unsupported = dependencies();
     await expect(postDailyDigest({ supabase: {} as never, userId: USER_ID, clientId: "codex", input: { ...request, priorities: ["3 overdue tasks"] } }, unsupported))
       .rejects.toMatchObject({ code: "VALIDATION_ERROR" });
     expect(unsupported.reserve).not.toHaveBeenCalled();
     expect(unsupported.deliver).not.toHaveBeenCalled();
+    expect(unsupported.createDeliveryClient).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "All systems are secure",
+    "No customer data is at risk",
+    "nine overdue tasks",
+  ])("rejects unsupported text before constructing the server-only delivery client: %s", async (headline) => {
+    const deps = dependencies();
+    await expect(postDailyDigest({
+      supabase: {} as never,
+      userId: USER_ID,
+      clientId: "codex",
+      input: { ...request, headline },
+    }, deps)).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+    expect(deps.createDeliveryClient).not.toHaveBeenCalled();
+    expect(deps.reserve).not.toHaveBeenCalled();
+    expect(deps.deliver).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -162,6 +185,22 @@ describe("postDailyDigest", () => {
       .rejects.toMatchObject({ code: "SLACK_REJECTED" });
     expect(deps.deliver).not.toHaveBeenCalled();
     expect(deps.finalize).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ outcome: "failed", errorCode: "SLACK_REJECTED" }));
+  });
+
+  it("rechecks the configured channel immediately before network delivery", async () => {
+    const deps = dependencies({ isChannelActive: vi.fn(async () => false) });
+    await expect(postDailyDigest({ supabase: {} as never, userId: USER_ID, clientId: "codex", input: request }, deps))
+      .rejects.toMatchObject({ code: "NO_DIGEST_CHANNEL" });
+    expect(deps.isChannelActive).toHaveBeenCalledWith(DELIVERY_CLIENT, {
+      workspaceId: WORKSPACE_ID,
+      channelId: CHANNEL_ID,
+    });
+    expect(deps.deliver).not.toHaveBeenCalled();
+    expect(deps.finalize).toHaveBeenCalledWith(DELIVERY_CLIENT, expect.objectContaining({
+      actorUserId: USER_ID,
+      outcome: "failed",
+      errorCode: "NO_DIGEST_CHANNEL",
+    }));
   });
 
   it("separates confirmed local configuration failures from ambiguous transport failures", async () => {

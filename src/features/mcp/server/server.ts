@@ -22,7 +22,7 @@ export const MCP_SERVER_INSTRUCTIONS = [
   "Never invent, infer, or embellish compliance claims.",
   "If one workspace is accessible it is selected automatically; if several are accessible, use a returned workspace choice.",
   "Always call prepare_daily_digest immediately before post_daily_digest and stop successfully when a digest is already delivered.",
-  "For a Slack digest, use only the prepared facts: every numerical claim must name and match its exact metric, while dates, control references, identifiers, and fact text must be returned verbatim.",
+  "For a Slack digest, every nonempty line must be either an exact returned fact literal or a supported metric statement whose value names and matches that exact prepared metric.",
   "Treat credentials and configured destinations as prohibited output.",
   "Summarize evidence and policies; never return their bodies or person-level fields.",
   "post_daily_digest is an external Slack write, is Owner-only, and always uses the server-configured channel; never request or supply a destination.",

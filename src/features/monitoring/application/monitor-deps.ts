@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { memoizeOwners } from "@/features/automation/application/owner-resolver";
 import { decryptSecret } from "@/lib/security/secrets";
+import { postSlackIncomingWebhook } from "@/lib/integrations/slack-incoming-webhook";
 import { resolveMonitorProvider } from "./monitor-registry";
 import { deliverAlert, type AlertChannel, type AlertFinding, type DeliverPorts } from "./deliver";
 import { findingKey, type MonitorDependencies, type MonitorSource } from "./monitor-run";
@@ -18,6 +19,13 @@ function splitKey(key: string): { checkId: string; subjectId: string } {
 // slower control drift. Drives the in-app notification icon + copy.
 function notificationKind(severity: CheckSeverity): "policy_violation" | "control_drift" {
   return severity === "critical" || severity === "high" ? "policy_violation" : "control_drift";
+}
+
+export async function postMonitoringSlackWebhook(webhookUrl: string, payload: unknown): Promise<void> {
+  const result = await postSlackIncomingWebhook(webhookUrl, payload);
+  if (result.kind !== "response" || result.status < 200 || result.status >= 300) {
+    throw new Error("Slack webhook delivery failed");
+  }
 }
 
 // Build the real (Supabase + fetch) dependency port for runMonitoring. Shared by
@@ -38,12 +46,7 @@ export function buildMonitorDependencies(
   });
 
   const ports: DeliverPorts = {
-    postSlack: async (webhookUrl, payload) => {
-      const res = await fetch(webhookUrl, {
-        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload),
-      });
-      if (!res.ok) throw new Error(`Slack webhook failed: ${res.status}`);
-    },
+    postSlack: postMonitoringSlackWebhook,
     postWhatsApp: createTwilioWhatsAppPort(),
     notifyInApp: async (finding: AlertFinding) => {
       const operators = await resolveOperators(finding.organisationId);

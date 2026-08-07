@@ -4,6 +4,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { decryptSecret } from "@/lib/security/secrets";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
+import { createSupabaseServiceClient } from "@/lib/supabase/service";
+import {
+  postSlackIncomingWebhook,
+  validateSlackIncomingWebhookUrl,
+} from "@/lib/integrations/slack-incoming-webhook";
 import { McpError, type McpErrorCode } from "../auth/errors";
 import {
   buildSlackDigestPayload,
@@ -14,7 +19,13 @@ import { prepareDailyDigest, type PrepareDailyDigestResult } from "./mcp-reads";
 import { resolveWorkspace, type AccessibleWorkspace } from "./workspace-access";
 
 const uuid = z.uuid();
-const localDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const localDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
+  const [year, month, day] = value.split("-").map(Number);
+  const parsed = new Date(Date.UTC(year!, month! - 1, day!));
+  return parsed.getUTCFullYear() === year
+    && parsed.getUTCMonth() + 1 === month
+    && parsed.getUTCDate() === day;
+}, "localDate must be a real calendar date");
 const factHash = z.string().regex(/^[0-9a-f]{64}$/);
 const slackPayloadSchema = z.object({
   text: z.string().min(1).max(500),
@@ -31,7 +42,7 @@ export type PostDailyDigestInput = z.infer<typeof postDailyDigestInputSchema>;
 export type SlackDigestPayload = { readonly text: string; readonly blocks: readonly unknown[] };
 export type SlackDeliveryOutcome =
   | { outcome: "delivered" }
-  | { outcome: "failed"; errorCode: "SLACK_REJECTED" | "RATE_LIMITED" }
+  | { outcome: "failed"; errorCode: "SLACK_REJECTED" | "RATE_LIMITED" | "NO_DIGEST_CHANNEL" }
   | { outcome: "unknown"; errorCode: "DELIVERY_UNKNOWN" };
 
 export type DigestReservation =
@@ -45,6 +56,7 @@ export type DigestReservation =
   };
 
 type ReserveInput = {
+  actorUserId: string;
   workspaceId: string;
   localDate: string;
   factHash: string;
@@ -52,19 +64,22 @@ type ReserveInput = {
 };
 
 type FinalizeInput = {
+  actorUserId: string;
   deliveryId: string;
   attemptNumber: number;
   outcome: SlackDeliveryOutcome["outcome"];
-  errorCode?: "SLACK_REJECTED" | "RATE_LIMITED" | "DELIVERY_UNKNOWN";
+  errorCode?: "SLACK_REJECTED" | "RATE_LIMITED" | "NO_DIGEST_CHANNEL" | "DELIVERY_UNKNOWN";
 };
 
 export type PostDailyDigestDependencies = {
   resolveWorkspace: (supabase: SupabaseClient, userId: string, workspaceId?: string) => Promise<AccessibleWorkspace>;
   prepare: (supabase: SupabaseClient, userId: string, input: { workspaceId?: string; localDate: string }) => Promise<PrepareDailyDigestResult>;
   rateLimit: (key: string) => Promise<void>;
+  createDeliveryClient: () => SupabaseClient;
   reserve: (supabase: SupabaseClient, input: ReserveInput) => Promise<DigestReservation>;
   loadEncryptedWebhook: (supabase: SupabaseClient, input: { workspaceId: string; channelId: string }) => Promise<string>;
   decryptWebhook: (stored: string) => string | null;
+  isChannelActive: (supabase: SupabaseClient, input: { workspaceId: string; channelId: string }) => Promise<boolean>;
   deliver: (webhookUrl: string, payload: SlackDigestPayload) => Promise<SlackDeliveryOutcome>;
   finalize: (supabase: SupabaseClient, input: FinalizeInput) => Promise<boolean>;
 };
@@ -81,7 +96,8 @@ const reservationSchema = z.discriminatedUnion("state", [
 ]);
 
 async function reserveDelivery(supabase: SupabaseClient, input: ReserveInput): Promise<DigestReservation> {
-  const { data, error } = await supabase.rpc("reserve_daily_digest_delivery", {
+  const { data, error } = await supabase.rpc("reserve_daily_digest_delivery_server", {
+    target_actor_id: input.actorUserId,
     target_organisation_id: input.workspaceId,
     target_digest_on: input.localDate,
     target_fact_hash: input.factHash,
@@ -109,8 +125,26 @@ async function loadEncryptedWebhook(
   return parsed.data.config.webhookUrl;
 }
 
+async function isChannelActive(
+  supabase: SupabaseClient,
+  input: { workspaceId: string; channelId: string },
+): Promise<boolean> {
+  const { data, error } = await supabase.from("alert_channels")
+    .select("id")
+    .eq("id", input.channelId)
+    .eq("organisation_id", input.workspaceId)
+    .eq("type", "slack")
+    .eq("enabled", true)
+    .eq("daily_digest_enabled", true)
+    .is("revoked_at", null)
+    .maybeSingle();
+  if (error) throw new McpError("INTERNAL_ERROR");
+  return data !== null;
+}
+
 async function finalizeDelivery(supabase: SupabaseClient, input: FinalizeInput): Promise<boolean> {
-  const { data, error } = await supabase.rpc("finalize_daily_digest_delivery", {
+  const { data, error } = await supabase.rpc("finalize_daily_digest_delivery_server", {
+    target_actor_id: input.actorUserId,
     target_delivery_id: input.deliveryId,
     target_attempt_number: input.attemptNumber,
     target_outcome: input.outcome,
@@ -123,9 +157,11 @@ const defaultDependencies: PostDailyDigestDependencies = {
   resolveWorkspace,
   prepare: prepareDailyDigest,
   rateLimit: (key) => enforceRateLimit(key, { limit: 5, windowMs: 60_000 }),
+  createDeliveryClient: createSupabaseServiceClient,
   reserve: reserveDelivery,
   loadEncryptedWebhook,
   decryptWebhook: decryptSecret,
+  isChannelActive,
   deliver: (webhookUrl, payload) => postSlackWebhook(webhookUrl, payload),
   finalize: finalizeDelivery,
 };
@@ -186,7 +222,11 @@ export async function postDailyDigest(
     workspaceName: prepared.facts.workspace.name,
     localDate: prepared.facts.localDate,
   })) as SlackDigestPayload;
-  const reservation = await dependencies.reserve(request.supabase, {
+  // The service-role capability is constructed only after the OAuth user has
+  // passed workspace, Owner, current-facts, and closed-world message checks.
+  const deliveryClient = dependencies.createDeliveryClient();
+  const reservation = await dependencies.reserve(deliveryClient, {
+    actorUserId: request.userId,
     workspaceId: workspace.id,
     localDate: input.localDate,
     factHash: input.factHash,
@@ -196,7 +236,7 @@ export async function postDailyDigest(
 
   let validatedWebhook: string | null = null;
   try {
-    const encrypted = await dependencies.loadEncryptedWebhook(request.supabase, {
+    const encrypted = await dependencies.loadEncryptedWebhook(deliveryClient, {
       workspaceId: workspace.id,
       channelId: reservation.channelId,
     });
@@ -213,10 +253,18 @@ export async function postDailyDigest(
     result = { outcome: "failed", errorCode: "SLACK_REJECTED" };
   } else {
     try {
-      result = await dependencies.deliver(
-        validatedWebhook,
-        reservation.message,
-      );
+      const active = await dependencies.isChannelActive(deliveryClient, {
+        workspaceId: workspace.id,
+        channelId: reservation.channelId,
+      });
+      if (!active) {
+        result = { outcome: "failed", errorCode: "NO_DIGEST_CHANNEL" };
+      } else {
+        result = await dependencies.deliver(
+          validatedWebhook,
+          reservation.message,
+        );
+      }
     } catch {
       // Once the transport begins, an exception cannot prove whether Slack
       // accepted the payload. Persist unknown and require human review.
@@ -224,7 +272,8 @@ export async function postDailyDigest(
     }
   }
 
-  const finalized = await dependencies.finalize(request.supabase, {
+  const finalized = await dependencies.finalize(deliveryClient, {
+    actorUserId: request.userId,
     deliveryId: reservation.deliveryId,
     attemptNumber: reservation.attemptNumber,
     outcome: result.outcome,
@@ -241,43 +290,27 @@ export async function postDailyDigest(
   };
 }
 
-export function validateSlackWebhookUrl(value: string): URL {
-  const url = new URL(value);
-  const allowedHost = url.hostname === "hooks.slack.com" || url.hostname === "hooks.slack-gov.com";
-  if (url.protocol !== "https:"
-    || !allowedHost
-    || url.username
-    || url.password
-    || url.port
-    || url.search
-    || url.hash
-    || !/^\/services\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+$/.test(url.pathname)) {
-    throw new Error("Invalid Slack incoming-webhook URL");
-  }
-  return url;
-}
+export const validateSlackWebhookUrl = validateSlackIncomingWebhookUrl;
 
 export async function postSlackWebhook(
   webhookUrl: string,
   payload: SlackDigestPayload,
   options: { fetcher?: typeof fetch; timeoutMs?: number } = {},
 ): Promise<SlackDeliveryOutcome> {
-  let response: Response;
+  let result;
   try {
-    const url = validateSlackWebhookUrl(webhookUrl);
-    response = await (options.fetcher ?? fetch)(url, {
-      method: "POST",
-      redirect: "error",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(slackPayloadSchema.parse(payload)),
-      signal: AbortSignal.timeout(options.timeoutMs ?? 8_000),
-    });
+    result = await postSlackIncomingWebhook(
+      webhookUrl,
+      slackPayloadSchema.parse(payload),
+      options,
+    );
   } catch {
     return { outcome: "unknown", errorCode: "DELIVERY_UNKNOWN" };
   }
-  if (response.status >= 200 && response.status < 300) return { outcome: "delivered" };
-  if (response.status === 429) return { outcome: "failed", errorCode: "RATE_LIMITED" };
-  if (response.status >= 400 && response.status < 500 && response.status !== 408) {
+  if (result.kind === "transport_error") return { outcome: "unknown", errorCode: "DELIVERY_UNKNOWN" };
+  if (result.status >= 200 && result.status < 300) return { outcome: "delivered" };
+  if (result.status === 429) return { outcome: "failed", errorCode: "RATE_LIMITED" };
+  if (result.status >= 400 && result.status < 500 && result.status !== 408) {
     return { outcome: "failed", errorCode: "SLACK_REJECTED" };
   }
   return { outcome: "unknown", errorCode: "DELIVERY_UNKNOWN" };
