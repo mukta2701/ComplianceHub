@@ -3,6 +3,7 @@ import { buildDailyDigestFacts, buildSlackDigestPayload, hashDailyDigestFacts } 
 import {
   postDailyDigest,
   postSlackWebhook,
+  reserveDelivery,
   validateSlackWebhookUrl,
   type PostDailyDigestDependencies,
 } from "./post-daily-digest";
@@ -179,6 +180,15 @@ describe("postDailyDigest", () => {
     expect(deps.deliver).toHaveBeenCalledTimes(1);
   });
 
+  it("maps a finalization authorization error after transport to DELIVERY_UNKNOWN", async () => {
+    const deps = dependencies({
+      finalize: vi.fn(async () => { throw Object.assign(new Error("demoted"), { code: "42501" }); }),
+    });
+    await expect(postDailyDigest({ supabase: {} as never, userId: USER_ID, clientId: "codex", input: request }, deps))
+      .rejects.toMatchObject({ code: "DELIVERY_UNKNOWN" });
+    expect(deps.deliver).toHaveBeenCalledTimes(1);
+  });
+
   it("treats an invalid stored webhook as a confirmed configuration failure without network access", async () => {
     const deps = dependencies({ decryptWebhook: vi.fn(() => "https://hooks.slack.com.evil.test/services/T/B/secret") });
     await expect(postDailyDigest({ supabase: {} as never, userId: USER_ID, clientId: "codex", input: request }, deps))
@@ -203,6 +213,30 @@ describe("postDailyDigest", () => {
     }));
   });
 
+  it("persists a retryable INTERNAL_ERROR when active-channel preflight fails before transport", async () => {
+    const deps = dependencies({
+      isChannelActive: vi.fn(async () => { throw new Error("database unavailable"); }),
+    });
+    await expect(postDailyDigest({ supabase: {} as never, userId: USER_ID, clientId: "codex", input: request }, deps))
+      .rejects.toMatchObject({ code: "INTERNAL_ERROR" });
+    expect(deps.deliver).not.toHaveBeenCalled();
+    expect(deps.finalize).toHaveBeenCalledWith(DELIVERY_CLIENT, expect.objectContaining({
+      actorUserId: USER_ID,
+      outcome: "failed",
+      errorCode: "INTERNAL_ERROR",
+    }));
+  });
+
+  it("returns DELIVERY_UNKNOWN when preflight-failure finalization cannot be confirmed", async () => {
+    const deps = dependencies({
+      isChannelActive: vi.fn(async () => { throw new Error("database unavailable"); }),
+      finalize: vi.fn(async () => false),
+    });
+    await expect(postDailyDigest({ supabase: {} as never, userId: USER_ID, clientId: "codex", input: request }, deps))
+      .rejects.toMatchObject({ code: "DELIVERY_UNKNOWN" });
+    expect(deps.deliver).not.toHaveBeenCalled();
+  });
+
   it("separates confirmed local configuration failures from ambiguous transport failures", async () => {
     const localFailure = dependencies({ decryptWebhook: vi.fn(() => { throw new Error("cannot decrypt"); }) });
     await expect(postDailyDigest({ supabase: {} as never, userId: USER_ID, clientId: "codex", input: request }, localFailure))
@@ -225,6 +259,30 @@ describe("postDailyDigest", () => {
     expect(key).toMatch(/^mcp-post-digest:[0-9a-f]{64}$/);
     expect(key).not.toContain(USER_ID);
     expect(key).not.toContain("codex-client");
+  });
+});
+
+describe("daily digest reservation error mapping", () => {
+  const input = {
+    actorUserId: USER_ID,
+    workspaceId: WORKSPACE_ID,
+    localDate: "2026-08-07",
+    factHash,
+    message: payload,
+  };
+
+  it("maps an Owner revocation SQLSTATE to FORBIDDEN before any network call", async () => {
+    const supabase = {
+      rpc: vi.fn(async () => ({ data: null, error: { code: "42501" } })),
+    } as unknown as import("@supabase/supabase-js").SupabaseClient;
+    await expect(reserveDelivery(supabase, input)).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("maps other reservation database failures to INTERNAL_ERROR", async () => {
+    const supabase = {
+      rpc: vi.fn(async () => ({ data: null, error: { code: "57014" } })),
+    } as unknown as import("@supabase/supabase-js").SupabaseClient;
+    await expect(reserveDelivery(supabase, input)).rejects.toMatchObject({ code: "INTERNAL_ERROR" });
   });
 });
 

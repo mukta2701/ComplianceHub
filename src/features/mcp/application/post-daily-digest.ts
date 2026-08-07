@@ -42,7 +42,7 @@ export type PostDailyDigestInput = z.infer<typeof postDailyDigestInputSchema>;
 export type SlackDigestPayload = { readonly text: string; readonly blocks: readonly unknown[] };
 export type SlackDeliveryOutcome =
   | { outcome: "delivered" }
-  | { outcome: "failed"; errorCode: "SLACK_REJECTED" | "RATE_LIMITED" | "NO_DIGEST_CHANNEL" }
+  | { outcome: "failed"; errorCode: "SLACK_REJECTED" | "RATE_LIMITED" | "NO_DIGEST_CHANNEL" | "INTERNAL_ERROR" }
   | { outcome: "unknown"; errorCode: "DELIVERY_UNKNOWN" };
 
 export type DigestReservation =
@@ -68,7 +68,7 @@ type FinalizeInput = {
   deliveryId: string;
   attemptNumber: number;
   outcome: SlackDeliveryOutcome["outcome"];
-  errorCode?: "SLACK_REJECTED" | "RATE_LIMITED" | "NO_DIGEST_CHANNEL" | "DELIVERY_UNKNOWN";
+  errorCode?: "SLACK_REJECTED" | "RATE_LIMITED" | "NO_DIGEST_CHANNEL" | "INTERNAL_ERROR" | "DELIVERY_UNKNOWN";
 };
 
 export type PostDailyDigestDependencies = {
@@ -95,7 +95,7 @@ const reservationSchema = z.discriminatedUnion("state", [
   }).strict(),
 ]);
 
-async function reserveDelivery(supabase: SupabaseClient, input: ReserveInput): Promise<DigestReservation> {
+export async function reserveDelivery(supabase: SupabaseClient, input: ReserveInput): Promise<DigestReservation> {
   const { data, error } = await supabase.rpc("reserve_daily_digest_delivery_server", {
     target_actor_id: input.actorUserId,
     target_organisation_id: input.workspaceId,
@@ -103,7 +103,7 @@ async function reserveDelivery(supabase: SupabaseClient, input: ReserveInput): P
     target_fact_hash: input.factHash,
     target_message: input.message,
   });
-  if (error) throw new McpError("INTERNAL_ERROR");
+  if (error) throw new McpError(error.code === "42501" ? "FORBIDDEN" : "INTERNAL_ERROR");
   const parsed = reservationSchema.safeParse(data);
   if (!parsed.success) throw new McpError("INTERNAL_ERROR");
   return parsed.data as DigestReservation;
@@ -183,6 +183,20 @@ function reservationStateError(state: Exclude<DigestReservation, { state: "reser
   return "DELIVERY_UNKNOWN";
 }
 
+async function finalizeOrDeliveryUnknown(
+  dependencies: PostDailyDigestDependencies,
+  deliveryClient: SupabaseClient,
+  input: FinalizeInput,
+): Promise<void> {
+  try {
+    if (!await dependencies.finalize(deliveryClient, input)) {
+      throw new Error("Daily digest finalization was not confirmed");
+    }
+  } catch {
+    throw new McpError("DELIVERY_UNKNOWN");
+  }
+}
+
 export async function postDailyDigest(
   request: {
     supabase: SupabaseClient;
@@ -252,34 +266,45 @@ export async function postDailyDigest(
   if (!validatedWebhook) {
     result = { outcome: "failed", errorCode: "SLACK_REJECTED" };
   } else {
+    let active: boolean;
     try {
-      const active = await dependencies.isChannelActive(deliveryClient, {
+      active = await dependencies.isChannelActive(deliveryClient, {
         workspaceId: workspace.id,
         channelId: reservation.channelId,
       });
-      if (!active) {
-        result = { outcome: "failed", errorCode: "NO_DIGEST_CHANNEL" };
-      } else {
+    } catch {
+      await finalizeOrDeliveryUnknown(dependencies, deliveryClient, {
+        actorUserId: request.userId,
+        deliveryId: reservation.deliveryId,
+        attemptNumber: reservation.attemptNumber,
+        outcome: "failed",
+        errorCode: "INTERNAL_ERROR",
+      });
+      throw new McpError("INTERNAL_ERROR");
+    }
+    if (!active) {
+      result = { outcome: "failed", errorCode: "NO_DIGEST_CHANNEL" };
+    } else {
+      try {
         result = await dependencies.deliver(
           validatedWebhook,
           reservation.message,
         );
+      } catch {
+        // Once the transport begins, an exception cannot prove whether Slack
+        // accepted the payload. Persist unknown and require human review.
+        result = { outcome: "unknown", errorCode: "DELIVERY_UNKNOWN" };
       }
-    } catch {
-      // Once the transport begins, an exception cannot prove whether Slack
-      // accepted the payload. Persist unknown and require human review.
-      result = { outcome: "unknown", errorCode: "DELIVERY_UNKNOWN" };
     }
   }
 
-  const finalized = await dependencies.finalize(deliveryClient, {
+  await finalizeOrDeliveryUnknown(dependencies, deliveryClient, {
     actorUserId: request.userId,
     deliveryId: reservation.deliveryId,
     attemptNumber: reservation.attemptNumber,
     outcome: result.outcome,
     ...(result.outcome === "delivered" ? {} : { errorCode: result.errorCode }),
   });
-  if (!finalized) throw new McpError("DELIVERY_UNKNOWN");
   if (result.outcome !== "delivered") throw new McpError(result.errorCode);
 
   return {

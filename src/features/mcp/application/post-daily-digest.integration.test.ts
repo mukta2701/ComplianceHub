@@ -3,8 +3,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { buildDailyDigestFacts, hashDailyDigestFacts } from "../domain/digest";
+import { isDestructiveIntegrationTargetAllowed } from "@/test/destructive-integration-target";
 import { postDailyDigest, type PostDailyDigestDependencies } from "./post-daily-digest";
 
 const envFile = path.join(process.cwd(), ".env.local");
@@ -18,7 +19,14 @@ if (existsSync(envFile)) {
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const publicKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const live = Boolean(url && publicKey && serviceKey);
+const targetAllowed = isDestructiveIntegrationTargetAllowed(url);
+const live = Boolean(url && publicKey && serviceKey && targetAllowed);
+if (url && publicKey && serviceKey && !targetAllowed) {
+  console.warn(
+    "[post-daily-digest.integration] Refusing destructive setup on a non-local target. "
+    + "Run this test only against a disposable localhost Supabase stack.",
+  );
+}
 const admin = createClient(url ?? "http://127.0.0.1:54321", serviceKey ?? "missing", {
   auth: { persistSession: false, autoRefreshToken: false },
 });
@@ -37,19 +45,6 @@ beforeAll(async () => {
   });
   if (created.error || !created.data.user) throw created.error ?? new Error("User setup failed");
   userId = created.data.user.id;
-  const organisation = await admin.from("organisations").insert({
-    name: `Digest concurrency ${runId}`,
-    slug: `digest-concurrency-${runId}`,
-    created_by: userId,
-  }).select("id").single();
-  if (organisation.error) throw organisation.error;
-  workspaceId = organisation.data.id;
-  const membership = await admin.from("memberships").insert({
-    organisation_id: workspaceId,
-    user_id: userId,
-    role: "owner",
-  });
-  if (membership.error) throw membership.error;
   ownerClient = createClient(String(url), String(publicKey), {
     auth: { persistSession: false, autoRefreshToken: false },
   });
@@ -58,6 +53,14 @@ beforeAll(async () => {
     password,
   });
   if (signedIn.error) throw signedIn.error;
+  const organisation = await ownerClient.rpc("create_organisation_with_owner", {
+    organisation_name: `Digest concurrency ${runId}`,
+    organisation_slug: `digest-concurrency-${runId}`,
+  });
+  if (organisation.error || typeof organisation.data !== "string") {
+    throw organisation.error ?? new Error("Organisation setup failed");
+  }
+  workspaceId = organisation.data;
   const channel = await ownerClient.from("alert_channels").insert({
     organisation_id: workspaceId,
     type: "slack",
@@ -70,11 +73,11 @@ beforeAll(async () => {
   if (channel.error) throw channel.error;
 }, 30_000);
 
-afterAll(async () => {
-  if (!live) return;
-  if (workspaceId && ownerClient) await ownerClient.from("organisations").delete().eq("id", workspaceId);
-  if (userId) await admin.auth.admin.deleteUser(userId);
-});
+// Tenant teardown is intentionally unavailable: organisation deletion would
+// cascade into immutable audit history, and deleting the sole Owner would
+// violate the tenant ownership invariant. Each run therefore uses unique,
+// inert fixture names. Safety comes from the localhost-only guard above and
+// destroying the disposable Supabase stack after the integration run.
 
 describe.runIf(live)("concurrent daily digest delivery", () => {
   it("creates exactly one reservation and one network send path", async () => {

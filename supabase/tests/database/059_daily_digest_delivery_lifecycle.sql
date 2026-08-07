@@ -1,5 +1,5 @@
 begin;
-select plan(42);
+select plan(49);
 
 select has_table('public','daily_digest_delivery_attempts','digest attempts have durable per-attempt history');
 select hasnt_function('public','reserve_daily_digest_delivery',array['uuid','date','text','jsonb'],'actor-less reservation is removed');
@@ -121,6 +121,35 @@ select ok(public.finalize_daily_digest_delivery_server(
 ),'a disabled-before-send recheck can record a confirmed no-channel failure');
 reset role;
 select is((select error_code from public.daily_digest_deliveries where id=(current_setting('app.disabled_reservation')::jsonb->>'deliveryId')::uuid),'NO_DIGEST_CHANNEL','no-channel failure is durable and retryable');
+
+set local role service_role;
+select set_config('app.preflight_reservation',public.reserve_daily_digest_delivery_server(
+  current_setting('app.lifecycle_org')::uuid,'86000000-0000-4000-8000-000000000001','2026-08-09',repeat('c',64),'{"text":"Preflight","blocks":[]}'
+)::text,true);
+select ok(public.finalize_daily_digest_delivery_server(
+  (current_setting('app.preflight_reservation')::jsonb->>'deliveryId')::uuid,'86000000-0000-4000-8000-000000000001',1,'failed','INTERNAL_ERROR'
+),'a database preflight failure is a confirmed failed outcome');
+reset role;
+select is((select error_code from public.daily_digest_deliveries where id=(current_setting('app.preflight_reservation')::jsonb->>'deliveryId')::uuid),'INTERNAL_ERROR','preflight failure stores only the stable safe error code');
+set local role service_role;
+select is((public.reserve_daily_digest_delivery_server(
+  current_setting('app.lifecycle_org')::uuid,'86000000-0000-4000-8000-000000000001','2026-08-09',repeat('c',64),'{"text":"Ignored replacement","blocks":[]}'
+)->>'attemptNumber')::int,2,'a confirmed INTERNAL_ERROR remains safely retryable');
+
+select set_config('app.demotion_reservation',public.reserve_daily_digest_delivery_server(
+  current_setting('app.lifecycle_org')::uuid,'86000000-0000-4000-8000-000000000001','2026-08-10',repeat('d',64),'{"text":"Demotion race","blocks":[]}'
+)::text,true);
+select is((current_setting('app.demotion_reservation')::jsonb->>'state'),'reserved','the live Owner reserves before the external side effect');
+reset role;
+update public.memberships set role='member'
+where organisation_id=current_setting('app.lifecycle_org')::uuid and user_id='86000000-0000-4000-8000-000000000001';
+set local role service_role;
+select ok(public.finalize_daily_digest_delivery_server(
+  (current_setting('app.demotion_reservation')::jsonb->>'deliveryId')::uuid,'86000000-0000-4000-8000-000000000001',1,'delivered',null
+),'the exact reserved actor can persist Slack success after demotion');
+reset role;
+select is((select status::text from public.daily_digest_deliveries where id=(current_setting('app.demotion_reservation')::jsonb->>'deliveryId')::uuid),'delivered','demotion cannot strand a confirmed Slack outcome as reserved');
+select is((select attempted_by from public.daily_digest_deliveries where id=(current_setting('app.demotion_reservation')::jsonb->>'deliveryId')::uuid),'86000000-0000-4000-8000-000000000001'::uuid,'the immutable delivery actor remains the finalization authority');
 
 set local role authenticated;
 select set_config('request.jwt.claims','{"sub":"86000000-0000-4000-8000-000000000001","role":"authenticated"}',true);
