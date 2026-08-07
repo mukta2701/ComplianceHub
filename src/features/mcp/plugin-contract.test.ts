@@ -27,7 +27,7 @@ describe("private ComplianceHub plugin safety contract", () => {
   it("gives every MCP client the same write-intent boundary", () => {
     expect(MCP_SERVER_INSTRUCTIONS).toMatch(/prepare-only[\s\S]*zero calls to post_daily_digest/i);
     expect(MCP_SERVER_INSTRUCTIONS).toMatch(/explicit(?:ly)?[^.]{0,40}(?:send|post|deliver)[\s\S]*trusted hosted scheduled/i);
-    expect(MCP_SERVER_INSTRUCTIONS).toMatch(/Owner role[\s\S]*not sufficient/i);
+    expect(MCP_SERVER_INSTRUCTIONS).toMatch(/Authorization to send[\s\S]*not sufficient/i);
     expect(MCP_SERVER_INSTRUCTIONS).not.toMatch(/Summarize evidence and policies/i);
     expect(MCP_SERVER_INSTRUCTIONS).toMatch(/singular[^.]*<N>[^.]*1[^.]*plural/i);
   });
