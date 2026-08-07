@@ -8,7 +8,15 @@ account owner can do; everything else is already prepared in the repo.
 
 - The repo builds clean locally: `npm run lint && npm run typecheck && npm run test && npm run build`, plus `supabase test db` (pgTAP) green.
 - All committed migrations must apply in order from an empty local database via `supabase db reset`, followed by a green `supabase test db`, before applying them to a hosted project. Never infer production safety from a stale migration/test count in documentation.
-- The full Playwright e2e suite (42 tests) passes against a **production build** (`next build && next start`), confirming the deployed artifact serves the whole app end-to-end. (Locally run e2e with `--workers=1` or `--workers=2` — full parallelism overwhelms the single local Supabase with concurrent sign-ups.)
+- CI also runs `npm run test:db:upgrade` against its disposable local Supabase.
+  This historical-upgrade harness is destructive: it erases the local database,
+  resets to `20260807047000`, seeds malformed legacy delivery rows, applies the
+  later migration, verifies the backfill, and resets once more to a fresh current
+  schema without seed data. It uses `--local` only and must never be pointed at a
+  linked or hosted project. Outside CI it refuses to invoke Supabase unless the
+  operator explicitly sets `COMPLIANCEHUB_ALLOW_LOCAL_DB_RESET=1`; use that
+  override only when all local data can be permanently discarded.
+- The full Playwright e2e suite passes against a **production build** (`next build && next start`), confirming the deployed artifact serves the whole app end-to-end. (Locally run e2e with `--workers=1` or `--workers=2` — full parallelism overwhelms the single local Supabase with concurrent sign-ups.)
 
 ## 1. Hosted Supabase **(you)**
 
@@ -42,16 +50,18 @@ Create a Vercel project from this repo and set these environment variables (name
 
 ## 3. Cron automation (already declared in `vercel.json`)
 
-`vercel.json` declares two Vercel Cron entries; you only need `CRON_SECRET` set for them to work:
+`vercel.json` declares two daily Vercel Cron entries in UTC; you only need `CRON_SECRET` set for them to work:
 
-- `GET /api/cron/daily` — `0 6 * * *` (daily). The evidence-freshness + policy-review sweep: raises tasks and notifications when evidence goes stale or a policy's review date passes. Idempotent (notifications deduped per day; a new task is opened only when none is already open for that item), so retries and manual runs are safe.
-- `GET /api/cron/integrations-sync` — `0 * * * *` (hourly). Polls external ticket status back for connected trackers. Sandbox rows always use the network-free fake provider; verified OAuth rows use their Nango-backed provider automatically.
+- `GET /api/cron/daily` — `0 6 * * *` (06:00 UTC daily). First classifies digest reservations left in-flight for more than 15 minutes as `unknown` for human review (never automatic retry), collects evidence, runs integration sync, and then performs the evidence-freshness + policy-review sweep. Notifications are deduplicated per day and a new task is opened only when none is already open for that item, so retries and manual runs are safe.
+- `GET /api/cron/monitor` — `0 7 * * *` (07:00 UTC daily). Checks every organisation's configured monitoring sources, reconciles findings, and sends enabled finding alerts.
+
+Integration sync is folded into the 06:00 UTC daily pipeline. The compatibility route `POST /api/cron/integrations-sync` remains available for a deliberate manual run, but it has no separate Vercel schedule and must not be described or deployed as an hourly cron.
 
 Vercel Cron sends `Authorization: Bearer <CRON_SECRET>`; each route rejects any request whose bearer token does not match. Manual invocation in development:
 
 ```bash
-curl -i -X GET http://localhost:3000/api/cron/daily            -H "Authorization: Bearer $CRON_SECRET"
-curl -i -X GET http://localhost:3000/api/cron/integrations-sync -H "Authorization: Bearer $CRON_SECRET"
+curl -i -X GET http://localhost:3000/api/cron/daily   -H "Authorization: Bearer $CRON_SECRET"
+curl -i -X GET http://localhost:3000/api/cron/monitor -H "Authorization: Bearer $CRON_SECRET"
 ```
 
 The MCP daily-digest write also requires `SUPABASE_SERVICE_ROLE_KEY`. The OAuth
@@ -259,9 +269,10 @@ still consume the user-and-client rate-limit allowance.
 
 The validated source package is in `plugins/compliancehub-internal`. It stays
 private and must not be submitted to the public plugin directory. Its
-`.app.json` intentionally contains an empty `apps` object in source control:
-official plugin packaging requires a real registered connection ID, and a fake
-ID would create a misleading, non-working install.
+`.app.json` intentionally contains an empty `apps` object in source control.
+That empty `apps` object is an external registration gate: official plugin
+packaging requires a real registered connection ID, and a fake ID would create
+a misleading, non-working install.
 
 1. Deploy the exact staging commit and complete every gate in section 5a.
 2. In ChatGPT developer mode, register the canonical staging `/mcp` URL. Copy
@@ -302,11 +313,13 @@ ID would create a misleading, non-working install.
    **09:00 Europe/London** with the platform default frontier model and the
    designated Owner connection. Use this task prompt:
 
-   > Use `$daily-compliance-brief` for today's Europe/London date. Resolve the
-   > configured ComplianceHub workspace, call `prepare_daily_digest`, and stop
-   > successfully if already delivered. Summarise only returned facts, preserving
-   > exact numerical meanings, then call `post_daily_digest` once. Report failed
-   > or unknown delivery outcomes for human review and never retry an unknown.
+   > This is the trusted hosted scheduled-post invocation. Use
+   > `$daily-compliance-brief` for today's Europe/London date and deliver the
+   > result to the configured Slack channel. Resolve the configured ComplianceHub
+   > workspace, call `prepare_daily_digest`, and stop successfully if already
+   > delivered. Summarise only returned facts using the skill's exact composition
+   > contract, then call `post_daily_digest` once. Report failed or unknown
+   > delivery outcomes for human review and never retry an unknown.
 
 9. Keep delivery on the private channel for three scheduled runs, then move the
    existing configured digest flag to the team channel. Dogfood for ten business

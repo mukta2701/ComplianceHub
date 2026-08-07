@@ -7,6 +7,8 @@ import type { SweepEvidence, SweepPolicy, SweepTask } from "@/features/automatio
 import { collectEvidence } from "@/features/integrations/application/collect-run";
 import { syncTickets } from "@/features/integrations/application/sync-run";
 import { logError } from "@/lib/observability/logger";
+import { collectIdPages, collectStringCursorPages } from "@/lib/supabase/paginate";
+import { recoverAbandonedDailyDigests } from "@/features/mcp/application/recover-abandoned-digests";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -22,6 +24,10 @@ async function stage<T>(name: string, run: () => Promise<T>): Promise<T | { erro
 async function sweep(request: Request) {
   if (!isAuthorisedCron(request)) return NextResponse.json({ error: "unauthorised" }, { status: 401 });
   const supabase = createSupabaseServiceClient();
+  const digestRecoveryResult = await stage("digestRecovery", async () => {
+    const recovery = await recoverAbandonedDailyDigests(supabase);
+    return { classifiedUnknown: recovery.recovered, limitReached: recovery.limitReached };
+  });
   // Order matters: collect fresh evidence, then sync ticket statuses, then
   // sweep (age evidence, raise tasks, notify). Each stage is isolated so a
   // failure is reported, not fatal.
@@ -31,19 +37,34 @@ async function sweep(request: Request) {
   // Memoized so each organisation's owners are fetched at most once per sweep
   // run, instead of once per task/policy row (an N+1 at real tenant scale).
   const resolveOwners = memoizeOwners(async (organisationId) => {
-    const { data, error } = await supabase.from("memberships")
-      .select("user_id").eq("organisation_id", organisationId).eq("role", "owner");
-    if (error) throw error;
-    return (data ?? []).map((row) => row.user_id as string);
+    const rows = await collectStringCursorPages(async (afterUserId, limit) => {
+      let query = supabase.from("memberships")
+        .select("user_id")
+        .eq("organisation_id", organisationId)
+        .eq("role", "owner")
+        .order("user_id", { ascending: true })
+        .limit(limit);
+      if (afterUserId) query = query.gt("user_id", afterUserId);
+      const { data, error } = await query;
+      if (error) throw error;
+      return data ?? [];
+    }, (row) => row.user_id as string);
+    return rows.map((row) => row.user_id as string);
   });
   const deps: SweepDependencies = {
     today,
     listActiveEvidence: async () => {
-      const { data, error } = await supabase.from("evidence")
-        .select("id,organisation_id,title,owner_id,status,valid_until")
-        .in("status", ["current", "expiring", "expired"]).not("valid_until", "is", null);
-      if (error) throw error;
-      return (data ?? []).map((row): SweepEvidence => ({
+      const rows = await collectIdPages(async (afterId, limit) => {
+        let query = supabase.from("evidence")
+          .select("id,organisation_id,title,owner_id,status,valid_until")
+          .in("status", ["current", "expiring", "expired"]).not("valid_until", "is", null)
+          .order("id", { ascending: true }).limit(limit);
+        if (afterId) query = query.gt("id", afterId);
+        const { data, error } = await query;
+        if (error) throw error;
+        return data ?? [];
+      });
+      return rows.map((row): SweepEvidence => ({
         id: row.id, organisationId: row.organisation_id, title: row.title, ownerId: row.owner_id,
         status: row.status as "current" | "expiring" | "expired", validUntil: row.valid_until,
       }));
@@ -53,10 +74,16 @@ async function sweep(request: Request) {
       if (error) throw error;
     },
     listOpenExpiryTaskEvidenceIds: async () => {
-      const { data, error } = await supabase.from("tasks").select("evidence_id")
-        .eq("source", "evidence_expiry").in("status", ["open", "in_progress"]).not("evidence_id", "is", null);
-      if (error) throw error;
-      return (data ?? []).map((row) => row.evidence_id as string);
+      const rows = await collectIdPages(async (afterId, limit) => {
+        let query = supabase.from("tasks").select("id,evidence_id")
+          .eq("source", "evidence_expiry").in("status", ["open", "in_progress"]).not("evidence_id", "is", null)
+          .order("id", { ascending: true }).limit(limit);
+        if (afterId) query = query.gt("id", afterId);
+        const { data, error } = await query;
+        if (error) throw error;
+        return data ?? [];
+      });
+      return rows.map((row) => row.evidence_id as string);
     },
     createTask: async (task) => {
       const owners = await resolveOwners(task.organisationId);
@@ -71,30 +98,48 @@ async function sweep(request: Request) {
       return Boolean(data?.length);
     },
     listOverdueTasks: async () => {
-      const { data, error } = await supabase.from("tasks")
-        .select("id,organisation_id,title,owner_id,status,due_on")
-        .in("status", ["open", "in_progress"]).lt("due_on", today);
-      if (error) throw error;
-      return (data ?? []).map((row): SweepTask => ({
+      const rows = await collectIdPages(async (afterId, limit) => {
+        let query = supabase.from("tasks")
+          .select("id,organisation_id,title,owner_id,status,due_on")
+          .in("status", ["open", "in_progress"]).lt("due_on", today)
+          .order("id", { ascending: true }).limit(limit);
+        if (afterId) query = query.gt("id", afterId);
+        const { data, error } = await query;
+        if (error) throw error;
+        return data ?? [];
+      });
+      return rows.map((row): SweepTask => ({
         id: row.id, organisationId: row.organisation_id, title: row.title, ownerId: row.owner_id,
         status: row.status, dueOn: row.due_on,
       }));
     },
     listReviewablePolicies: async () => {
-      const { data, error } = await supabase.from("policies")
-        .select("id,organisation_id,reference,title,owner_id,review_due")
-        .eq("status", "approved").not("review_due", "is", null);
-      if (error) throw error;
-      return (data ?? []).map((row): SweepPolicy => ({
+      const rows = await collectIdPages(async (afterId, limit) => {
+        let query = supabase.from("policies")
+          .select("id,organisation_id,reference,title,owner_id,review_due")
+          .eq("status", "approved").not("review_due", "is", null)
+          .order("id", { ascending: true }).limit(limit);
+        if (afterId) query = query.gt("id", afterId);
+        const { data, error } = await query;
+        if (error) throw error;
+        return data ?? [];
+      });
+      return rows.map((row): SweepPolicy => ({
         id: row.id, organisationId: row.organisation_id, reference: row.reference,
         title: row.title, ownerId: row.owner_id, reviewDue: row.review_due,
       }));
     },
     listOpenPolicyReviewTaskPolicyIds: async () => {
-      const { data, error } = await supabase.from("tasks").select("policy_id")
-        .eq("source", "policy_review").in("status", ["open", "in_progress"]).not("policy_id", "is", null);
-      if (error) throw error;
-      return (data ?? []).map((row) => row.policy_id as string);
+      const rows = await collectIdPages(async (afterId, limit) => {
+        let query = supabase.from("tasks").select("id,policy_id")
+          .eq("source", "policy_review").in("status", ["open", "in_progress"]).not("policy_id", "is", null)
+          .order("id", { ascending: true }).limit(limit);
+        if (afterId) query = query.gt("id", afterId);
+        const { data, error } = await query;
+        if (error) throw error;
+        return data ?? [];
+      });
+      return rows.map((row) => row.policy_id as string);
     },
     createPolicyReviewTask: async (task) => {
       const owners = await resolveOwners(task.organisationId);
@@ -121,7 +166,7 @@ async function sweep(request: Request) {
     },
   };
   const summary = await stage("sweep", () => runDailySweep(deps));
-  return NextResponse.json({ collect: collectResult, sync: syncResult, sweep: summary });
+  return NextResponse.json({ digestRecovery: digestRecoveryResult, collect: collectResult, sync: syncResult, sweep: summary });
 }
 
 export async function GET(request: Request) { return sweep(request); } // Vercel Cron sends GET

@@ -1,13 +1,20 @@
 // @vitest-environment node
 import { createClient } from "@supabase/supabase-js";
 import { describe, expect, it } from "vitest";
+import { isDestructiveIntegrationTargetAllowed } from "@/test/destructive-integration-target";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const publicKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const live = Boolean(url && publicKey && serviceKey);
+const live = Boolean(url && publicKey && serviceKey && isDestructiveIntegrationTargetAllowed(url));
+if (!live) {
+  throw new Error(
+    "Session-revocation integration tests require NEXT_PUBLIC_SUPABASE_URL, "
+    + "NEXT_PUBLIC_SUPABASE_ANON_KEY, and SUPABASE_SERVICE_ROLE_KEY for a disposable localhost Supabase stack.",
+  );
+}
 
-describe.runIf(live)("real Supabase Auth session revocation", () => {
+describe("real Supabase Auth session revocation", () => {
   it("makes the exact getUser token check return session_not_found after revocation", async () => {
     const admin = createClient(String(url), String(serviceKey), { auth: { persistSession: false } });
     let getUserWireError: unknown = null;

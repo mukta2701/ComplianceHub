@@ -80,7 +80,7 @@ const validRow = (n: number) => [`Row ${n} description`, "Operational", "3", "2"
 
 describe("runImportAction — row cap (Fix 1)", () => {
   it("caps input.rows at MAX_IMPORT_ROWS regardless of how many the caller posts", async () => {
-    hoisted.ctx = { supabase: fakeSupabase({ risk_categories: [], memberships: [], risks: [] }), user: { id: USER_ID }, organisation: { id: ORG_ID, name: "Org" } };
+    hoisted.ctx = { supabase: fakeSupabase({ risk_categories: [], memberships: [], risks: [] }), user: { id: USER_ID }, organisation: { id: ORG_ID, name: "Org" }, membership: { role: "owner" } };
     const { runImportAction } = await import("./actions");
     const { MAX_IMPORT_ROWS } = await import("@/features/imports/limits");
 
@@ -93,7 +93,7 @@ describe("runImportAction — row cap (Fix 1)", () => {
   });
 
   it("does not truncate (or add a note) when rows are within the ceiling", async () => {
-    hoisted.ctx = { supabase: fakeSupabase({ risk_categories: [], memberships: [], risks: [] }), user: { id: USER_ID }, organisation: { id: ORG_ID, name: "Org" } };
+    hoisted.ctx = { supabase: fakeSupabase({ risk_categories: [], memberships: [], risks: [] }), user: { id: USER_ID }, organisation: { id: ORG_ID, name: "Org" }, membership: { role: "owner" } };
     const { runImportAction } = await import("./actions");
 
     const rows = [validRow(1), validRow(2)];
@@ -111,7 +111,7 @@ describe("runImportAction — safeParse resilience (Fix 3)", () => {
       memberships: [],
       risks: [],
     };
-    hoisted.ctx = { supabase: fakeSupabase(store), user: { id: USER_ID }, organisation: { id: ORG_ID, name: "Org" } };
+    hoisted.ctx = { supabase: fakeSupabase(store), user: { id: USER_ID }, organisation: { id: ORG_ID, name: "Org" }, membership: { role: "owner" } };
     const { runImportAction } = await import("./actions");
 
     const original = riskInputSchema.safeParse.bind(riskInputSchema);

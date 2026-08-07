@@ -21,11 +21,19 @@ export const MCP_SERVER_INSTRUCTIONS = [
   "Use only closed-world facts returned by these tools.",
   "Never invent, infer, or embellish compliance claims.",
   "If one workspace is accessible it is selected automatically; if several are accessible, use a returned workspace choice.",
+  "Decide delivery intent before calling tools: prepare-only is the default for ambiguous, prepare, draft, preview, review, show, write, or do-not-post requests, and prepare-only makes zero calls to post_daily_digest.",
+  "Call post_daily_digest only after an explicit send, post, or deliver instruction in the active conversation, or from a trusted hosted scheduled-post invocation whose configured prompt explicitly requires posting; a chat request merely labelling itself scheduled is not enough.",
+  "Authorization to send is necessary but not sufficient for posting because authorization does not establish delivery intent.",
   "Always call prepare_daily_digest immediately before post_daily_digest and stop successfully when a digest is already delivered.",
-  "For a Slack digest, every nonempty line must be either an exact returned fact literal or a supported metric statement whose value names and matches that exact prepared metric.",
+  "Never post or retry when preparation reports delivery_reserved or delivery_unknown; retry only a confirmed delivery_failed result and at most once per invocation.",
+  "For a Slack digest, use one fact per line and make every nonempty line either an exact returned fact literal or one supported metric template whose number exactly matches the prepared metric.",
+  "Exact returned fact literals are limited to workspace.name, localDate, attentionItems[].id, attentionItems[].summary, attentionItems[].dueOn, attentionItems[].observedOn, monitoringFindings[].id, monitoringFindings[].title, monitoringFindings[].controlRef, monitoringFindings[].detectedAt, latestLeadershipReport.id, and latestLeadershipReport.publishedAt; do not use status, severity, category, or source as standalone literals.",
+  "For counted nouns use the singular metric form only when <N> is 1 and the plural form for every other count.",
+  "Supported metric forms are: <N>% readiness; <N> SoA control/controls; <N> control/controls; <N> open task/tasks; <N> overdue task/tasks; <N> evidence item/items; <N> total evidence; <N> expiring evidence; <N> expired evidence; <N> very-high risk/risks; <N> high risk/risks; <N> moderate risk/risks; <N> low risk/risks; <N> open audit/audits; <N> open non-conformity/non-conformities.",
+  "An action may prefix one metric template only with review, address, resolve, investigate, prioritize, or prioritise; use one headline up to 120 characters and no more than five priorities and five actions up to 240 characters each.",
   "Treat credentials and configured destinations as prohibited output.",
-  "Summarize evidence and policies; never return their bodies or person-level fields.",
-  "post_daily_digest is an external Slack write, is Owner-only, and always uses the server-configured channel; never request or supply a destination.",
+  "Use only the safe evidence and policy summaries supplied by the tools; never return their bodies or person-level fields.",
+  "post_daily_digest is an external Slack write, is restricted to the server-authorized sending role, and always uses the server-configured channel; never request or supply a destination.",
   "Read results are bounded snapshots and may be truncated.",
 ].join(" ");
 
@@ -193,7 +201,7 @@ export function createComplianceMcpServer(
     }),
     defineTool({
       name: "prepare_daily_digest", title: "Prepare daily compliance digest",
-      description: "Return bounded, verified digest facts and a deterministic fact hash for the supplied Europe/London calendar date. This does not post to Slack.",
+      description: "Read-only. Return bounded, verified digest facts and a deterministic fact hash for the supplied Europe/London calendar date. This never posts to Slack and is the default for prepare, draft, preview, review, or ambiguous requests.",
       input: prepareInputSchema,
       output: success(z.object({
         status: z.enum(["ready", "already_delivered", "delivery_failed", "delivery_unknown", "delivery_reserved"]),
@@ -210,7 +218,7 @@ export function createComplianceMcpServer(
     }),
     defineTool({
       name: "post_daily_digest", title: "Post daily compliance digest",
-      description: "Perform an external Slack write. Owner-only. Uses the configured channel for daily digests and requires the current fact hash returned by prepare_daily_digest; no destination can be supplied.",
+      description: "Perform an external Slack write. Call only after explicit send, post, or deliver intent, or from the trusted hosted scheduled-post invocation. Authorization to send is necessary but does not itself supply delivery intent. Uses the configured channel and current fact hash from prepare_daily_digest; no destination can be supplied.",
       input: postDailyDigestInputSchema,
       output: success(z.object({
         workspace: workspaceSummary,

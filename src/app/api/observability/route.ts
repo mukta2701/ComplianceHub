@@ -1,8 +1,70 @@
+import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { logError } from "@/lib/observability/logger";
 
 export const dynamic = "force-dynamic";
+const MAX_OBSERVABILITY_BODY_BYTES = 8 * 1024;
+const OPAQUE_DIGEST = /^[A-Za-z0-9._:-]{1,200}$/;
+
+class ObservabilityRequestError extends Error {
+  constructor(readonly status: number) { super("Invalid observability request"); }
+}
+
+async function readDigest(request: Request): Promise<string> {
+  const mediaType = request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+  if (mediaType !== "application/json") throw new ObservabilityRequestError(415);
+
+  const declaredLength = request.headers.get("content-length");
+  if (declaredLength !== null) {
+    const bytes = Number(declaredLength);
+    if (!Number.isSafeInteger(bytes) || bytes < 0) throw new ObservabilityRequestError(400);
+    if (bytes > MAX_OBSERVABILITY_BODY_BYTES) throw new ObservabilityRequestError(413);
+  }
+  if (!request.body) throw new ObservabilityRequestError(400);
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_OBSERVABILITY_BODY_BYTES) {
+        try {
+          await reader.cancel();
+        } catch {
+          // Cancellation is best-effort. A broken producer must not replace
+          // the deterministic payload-too-large response with a parse error.
+        }
+        throw new ObservabilityRequestError(413);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  if (total === 0) throw new ObservabilityRequestError(400);
+
+  const encoded = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    encoded.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  let body: unknown;
+  try {
+    body = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(encoded));
+  } catch {
+    throw new ObservabilityRequestError(400);
+  }
+  if (typeof body !== "object" || body === null || Array.isArray(body)) throw new ObservabilityRequestError(400);
+  const digest = (body as Record<string, unknown>).digest;
+  if (typeof digest !== "string" || !OPAQUE_DIGEST.test(digest)) throw new ObservabilityRequestError(400);
+  return digest;
+}
 
 // Client-side error sink: the error boundaries POST here so uncaught render/data
 // errors reach the same self-hosted log as server failures. Unauthenticated (a
@@ -15,13 +77,16 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ ok: false }, { status: 429 });
   }
-  let body: unknown;
-  try { body = await request.json(); } catch { return NextResponse.json({ ok: false }, { status: 400 }); }
-  const b = (body ?? {}) as Record<string, unknown>;
-  const message = typeof b.message === "string" && b.message ? b.message.slice(0, 2000) : "client error";
-  const context: Record<string, unknown> = {};
-  if (typeof b.digest === "string") context.digest = b.digest.slice(0, 200);
-  if (typeof b.url === "string") context.url = b.url.slice(0, 500);
-  await logError("client", message, undefined, context);
+  let digest: string;
+  try {
+    digest = await readDigest(request);
+  } catch (error) {
+    const status = error instanceof ObservabilityRequestError ? error.status : 400;
+    return NextResponse.json({ ok: false }, { status });
+  }
+  const digestHash = createHash("sha256").update(digest, "utf8").digest("hex");
+  // Client-controlled messages and browser URLs can contain auditor bearer
+  // tokens or personal data. Persist only a fixed category and one-way digest.
+  await logError("client", "client error", undefined, { digestHash });
   return NextResponse.json({ ok: true });
 }

@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { createClient } from "@supabase/supabase-js";
 
 function isoDate(offsetDays: number): string {
   const date = new Date();
@@ -18,6 +19,24 @@ function localEnvironment(name: string): string {
   return line.slice(name.length + 1);
 }
 
+async function confirmE2eUser(email: string): Promise<void> {
+  const admin = createClient(
+    localEnvironment("NEXT_PUBLIC_SUPABASE_URL"),
+    localEnvironment("SUPABASE_SERVICE_ROLE_KEY"),
+    { auth: { persistSession: false, autoRefreshToken: false } },
+  );
+  let userId: string | null = null;
+  for (let page = 1; page <= 10 && userId === null; page += 1) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 1_000 });
+    if (error) throw error;
+    userId = data.users.find((user) => user.email === email)?.id ?? null;
+    if (data.users.length < 1_000) break;
+  }
+  if (!userId) throw new Error("Synthetic Phase 1 user was not found for confirmation");
+  const { error } = await admin.auth.admin.updateUserById(userId, { email_confirm: true });
+  if (error) throw error;
+}
+
 async function createWorkspace(page: Page, suffix: string) {
   const email = `phase1-${suffix}@example.test`;
   const password = `E2e-${suffix}-Aa1!`;
@@ -31,6 +50,7 @@ async function createWorkspace(page: Page, suffix: string) {
     page.waitForURL(/\/sign-in/),
     page.getByRole("button", { name: "Create account" }).click(),
   ]);
+  await confirmE2eUser(email);
 
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(password);
@@ -60,7 +80,7 @@ async function openSection(page: Page, name: string) {
   if (await toggle.isVisible()) await toggle.click();
   const link = page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name, exact: true });
   await link.scrollIntoViewIfNeeded();
-  await link.click({ force: true });
+  await link.dispatchEvent("click");
   await page.waitForURL(new RegExp(`/app/${name.toLowerCase()}`));
 }
 

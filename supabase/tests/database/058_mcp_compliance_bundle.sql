@@ -48,7 +48,11 @@ select public.publish_leadership_report(current_setting('app.bundle_org')::uuid,
   '{"soaPercent":77,"soaTotal":10,"riskBands":{"low":1,"moderate":2,"high":3,"very_high":4},"tasksOpen":9,"tasksOverdue":2,"evidence":{"total":5,"expiring":1,"expired":1},"openAudits":2,"openNonConformities":1}'::jsonb);
 
 insert into public.alert_channels(id,organisation_id,type,label,config,connected_by,enabled,daily_digest_enabled) values
- ('88000000-0000-4000-8000-000000000201',current_setting('app.bundle_org')::uuid,'slack','Bundle Slack','{"webhookUrl":"encrypted"}','88000000-0000-4000-8000-000000000001',true,true);
+ ('88000000-0000-4000-8000-000000000201',current_setting('app.bundle_org')::uuid,'slack','Bundle Slack','{"webhookUrl":"encrypted"}','88000000-0000-4000-8000-000000000001',true,false);
+select public.set_daily_digest_channel(
+  current_setting('app.bundle_org')::uuid,
+  '88000000-0000-4000-8000-000000000201'
+);
 set local role service_role;
 select public.reserve_daily_digest_delivery_server(
   current_setting('app.bundle_org')::uuid,'88000000-0000-4000-8000-000000000001','2026-08-06',repeat('a',64),

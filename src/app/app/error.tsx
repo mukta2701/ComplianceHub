@@ -9,7 +9,7 @@ export default function AppError({ error, reset }: { error: Error & { digest?: s
   useEffect(() => {
     fetch("/api/observability", {
       method: "POST", headers: { "content-type": "application/json" }, keepalive: true,
-      body: JSON.stringify({ message: error.message, digest: error.digest, url: typeof window !== "undefined" ? window.location.href : undefined }),
+      body: JSON.stringify({ digest: error.digest }),
     }).catch(() => {});
   }, [error]);
   return (

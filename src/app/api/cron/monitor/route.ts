@@ -8,7 +8,7 @@ import { logError } from "@/lib/observability/logger";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-// Continuous monitoring — runs hourly (vercel.json). Watches every org's
+// Continuous monitoring — runs daily at 07:00 UTC (vercel.json). Watches every org's
 // connected sources, raises/re-opens/auto-resolves findings, and alerts in-app +
 // to external channels. The per-org "Run checks now" button shares the same
 // dependency builder (monitor-deps) so manual and scheduled runs behave identically.

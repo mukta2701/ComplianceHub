@@ -200,19 +200,72 @@ describe("daily digest message", () => {
     expect(() => dailyDigestMessageSchema.parse({ headline, priorities: [], actions: [] })).toThrow();
   });
 
-  it("rejects numerical claims not present in the prepared facts", () => {
+  it("rejects combined or mismatched numerical claims", () => {
     const facts = makeFacts();
     expect(validateDigestMessageAgainstFacts({
-      headline: "72% ready",
+      headline: "72% readiness",
       priorities: ["2 overdue tasks and 1 very-high risk"],
       actions: ["Review 3 open non-conformities"],
-    }, facts)).toEqual({ ok: true });
+    }, facts).ok).toBe(false);
 
     expect(validateDigestMessageAgainstFacts({
       headline: "9 overdue tasks",
       priorities: [],
       actions: [],
     }, facts)).toEqual({ ok: false, unsupportedNumbers: [9] });
+  });
+
+  it.each([
+    "72% ready",
+    "readiness is 72%",
+    "2 overdue tasks and 1 very-high risk",
+    "1 very high risks",
+    "100 SoA items",
+  ])("rejects a non-canonical metric line: %s", (line) => {
+    expect(validateDigestMessageAgainstFacts({
+      headline: "72% readiness",
+      priorities: [line],
+      actions: [],
+    }, makeFacts()).ok).toBe(false);
+  });
+
+  it("uses singular metric nouns only when the prepared count is one", () => {
+    const facts = buildDailyDigestFacts({
+      workspace: { id: "00000000-0000-4000-8000-000000000001", name: "Internal ISMS" },
+      localDate: "2026-08-06",
+      overview: {
+        soaPercent: 1, soaTotal: 1,
+        riskBands: { low: 1, moderate: 1, high: 1, very_high: 1 },
+        tasksOpen: 1, tasksOverdue: 1,
+        evidence: { total: 1, expiring: 1, expired: 0 },
+        openAudits: 1, openNonConformities: 1,
+      },
+      attentionItems: [], monitoringFindings: [], latestLeadershipReport: null,
+    });
+
+    expect(validateDigestMessageAgainstFacts({
+      headline: "1 SoA control",
+      priorities: ["1 control", "1 open task", "1 overdue task", "1 evidence item", "1 very-high risk"],
+      actions: ["review 1 high risk", "address 1 moderate risk", "resolve 1 low risk", "investigate 1 open audit", "prioritize 1 open non-conformity"],
+    }, facts)).toEqual({ ok: true });
+
+    for (const line of [
+      "1 SoA controls", "1 controls", "1 open tasks", "1 overdue tasks", "1 evidence items",
+      "1 very-high risks", "1 high risks", "1 moderate risks", "1 low risks",
+      "1 open audits", "1 open non-conformities",
+    ]) {
+      expect(validateDigestMessageAgainstFacts({ headline: "1% readiness", priorities: [line], actions: [] }, facts).ok).toBe(false);
+    }
+  });
+
+  it("rejects singular metric nouns when the prepared count is not one", () => {
+    const facts = makeFacts();
+    for (const line of [
+      "100 SoA control", "100 control", "7 open task", "2 overdue task", "12 evidence item",
+      "2 high risk", "3 moderate risk", "4 low risk", "3 open non-conformity",
+    ]) {
+      expect(validateDigestMessageAgainstFacts({ headline: "72% readiness", priorities: [line], actions: [] }, facts).ok).toBe(false);
+    }
   });
 
   it.each([
@@ -230,13 +283,13 @@ describe("daily digest message", () => {
   it("requires every digest line to be an exact returned literal or a supported metric claim", () => {
     const facts = makeFacts();
     expect(validateDigestMessageAgainstFacts({
-      headline: "72% ready",
+      headline: "72% readiness",
       priorities: ["Treat supplier risk", "2 overdue tasks"],
       actions: ["Review 3 open non-conformities"],
     }, facts)).toEqual({ ok: true });
 
     expect(validateDigestMessageAgainstFacts({
-      headline: "72% ready and everything else looks healthy",
+      headline: "72% readiness and everything else looks healthy",
       priorities: ["Treat supplier risk urgently"],
       actions: ["Review 3 open non-conformities"],
     }, facts).ok).toBe(false);
@@ -246,20 +299,20 @@ describe("daily digest message", () => {
     const facts = makeFacts();
 
     expect(validateDigestMessageAgainstFacts({
-      headline: "72% ready",
+      headline: "72% readiness",
       priorities: ["12 overdue tasks"],
       actions: [],
     }, facts)).toEqual({ ok: false, unsupportedNumbers: [12] });
 
     expect(validateDigestMessageAgainstFacts({
-      headline: "72% ready",
+      headline: "72% readiness",
       priorities: ["6 high risks"],
       actions: [],
     }, facts)).toEqual({ ok: false, unsupportedNumbers: [6] });
 
     expect(validateDigestMessageAgainstFacts({
-      headline: "72% ready",
-      priorities: ["72% ready", "7 open tasks", "12 evidence items", "2 high risks"],
+      headline: "72% readiness",
+      priorities: ["72% readiness", "7 open tasks", "12 evidence items", "2 high risks"],
       actions: ["Review 3 open non-conformities"],
     }, facts)).toEqual({ ok: true });
   });
@@ -289,16 +342,47 @@ describe("daily digest message", () => {
     });
 
     expect(validateDigestMessageAgainstFacts({
-      headline: "72% ready",
+      headline: "72% readiness",
       priorities: ["Review ISO 27001 renewal", "Control A.8.1 is disabled"],
       actions: ["Review ISO 27001 renewal"],
     }, facts)).toEqual({ ok: true });
 
     expect(validateDigestMessageAgainstFacts({
-      headline: "72% ready",
-      priorities: ["Complete by 2026-08-04", "Control A.9.1 needs review", "80% ready"],
+      headline: "72% readiness",
+      priorities: ["Complete by 2026-08-04", "Control A.9.1 needs review", "80% readiness"],
       actions: [],
     }, facts)).toEqual({ ok: false, unsupportedNumbers: [4, 8, 9.1, 80, 2026] });
+  });
+
+  it("accepts only the documented returned literal field types", () => {
+    const facts = buildDailyDigestFacts({
+      workspace: { id: "00000000-0000-4000-8000-000000000001", name: "Internal ISMS" },
+      localDate: "2026-08-06", overview,
+      attentionItems: [{
+        id: "task:task-27001", category: "overdue_task", severity: "high",
+        summary: "Review ISO 27001 renewal", dueOn: "2026-08-05",
+        observedOn: "2026-08-04T09:00:00Z", source: "task",
+      }],
+      monitoringFindings: [{
+        id: "monitoring_finding:finding-a", severity: "critical", status: "open",
+        title: "Control A.8.1 is disabled", controlRef: "A.8.1",
+        detectedAt: "2026-08-06T06:00:00Z",
+      }],
+      latestLeadershipReport: { id: "report-1", publishedAt: "2026-08-05T16:00:00Z" },
+    });
+
+    expect(validateDigestMessageAgainstFacts({
+      headline: facts.workspace.name,
+      priorities: [facts.localDate, facts.attentionItems[0]!.id, facts.attentionItems[0]!.summary, facts.attentionItems[0]!.dueOn!, facts.attentionItems[0]!.observedOn!],
+      actions: [facts.monitoringFindings[0]!.id, facts.monitoringFindings[0]!.title, facts.monitoringFindings[0]!.controlRef!, facts.monitoringFindings[0]!.detectedAt, facts.latestLeadershipReport!.id],
+    }, facts)).toEqual({ ok: true });
+    expect(validateDigestMessageAgainstFacts({
+      headline: facts.latestLeadershipReport!.publishedAt, priorities: [], actions: [],
+    }, facts)).toEqual({ ok: true });
+
+    for (const line of ["critical", "open", "high", "task", "overdue_task"]) {
+      expect(validateDigestMessageAgainstFacts({ headline: "72% readiness", priorities: [line], actions: [] }, facts).ok).toBe(false);
+    }
   });
 
   it("renders bounded Slack blocks without accepting or exposing a destination", () => {
@@ -316,7 +400,7 @@ describe("daily digest message", () => {
 
   it("renders empty priority and action sections without fabricating a no-findings claim", () => {
     const payload = buildSlackDigestPayload({
-      headline: "72% ready",
+      headline: "72% readiness",
       priorities: [],
       actions: [],
     }, { workspaceName: "Internal ISMS", localDate: "2026-08-06" });

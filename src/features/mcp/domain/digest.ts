@@ -293,18 +293,29 @@ function metricClaimSupport(text: string, facts: DailyDigestFacts): Map<number, 
 }
 
 function isSupportedMetricLine(text: string, facts: DailyDigestFacts): boolean {
-  const clauses = text.split(/\s+(?:and|&)\s+/i);
-  if (clauses.length === 0) return false;
-  const action = "(?:review|address|resolve|investigate|prioriti[sz]e)\\s+";
-  return clauses.every((clause) => metricRules(facts).some((rule) => {
-    const expected = escapeRegExp(String(rule.expected));
-    const suffix = rule.suffix ?? "";
-    const patterns = [
-      new RegExp(`^(?:${action})?${expected}\\s*${suffix}\\s*${rule.label}$`, "i"),
-      new RegExp(`^${rule.label}\\s*(?:is|are|:|-)\\s*${expected}${suffix}$`, "i"),
-    ];
-    return patterns.some((pattern) => pattern.test(clause));
-  }));
+  const overview = facts.overview;
+  const counted = (count: number, singular: string, plural = `${singular}s`) => `${count} ${count === 1 ? singular : plural}`;
+  const canonical = new Set([
+    `${overview.soaPercent}% readiness`,
+    counted(overview.soaTotal, "SoA control"),
+    counted(overview.soaTotal, "control"),
+    counted(overview.tasksOpen, "open task"),
+    counted(overview.tasksOverdue, "overdue task"),
+    counted(overview.evidence.total, "evidence item"),
+    `${overview.evidence.total} total evidence`,
+    `${overview.evidence.expiring} expiring evidence`,
+    `${overview.evidence.expired} expired evidence`,
+    counted(overview.riskBands.very_high, "very-high risk"),
+    counted(overview.riskBands.high, "high risk"),
+    counted(overview.riskBands.moderate, "moderate risk"),
+    counted(overview.riskBands.low, "low risk"),
+    counted(overview.openAudits, "open audit"),
+    counted(overview.openNonConformities, "open non-conformity", "open non-conformities"),
+  ].map((line) => line.toLowerCase()));
+  const normalized = text.toLowerCase();
+  if (canonical.has(normalized)) return true;
+  const action = normalized.match(/^(?:review|address|resolve|investigate|prioritize|prioritise)\s+(.+)$/);
+  return Boolean(action?.[1] && canonical.has(action[1]));
 }
 
 export function validateDigestMessageAgainstFacts(

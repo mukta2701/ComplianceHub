@@ -21,11 +21,10 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
-      - run: npm run build
       - run: npx playwright install --with-deps chromium
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: 2.109.0
       - run: supabase start
       - name: Configure local application environment
         run: |
@@ -38,12 +37,17 @@ jobs:
           # skipping to a vacuous pass) and so secret-encryption paths have a key.
           echo "CRON_SECRET=ci-test-cron-secret" >> "$GITHUB_ENV"
           echo "APP_ENCRYPTION_KEY=$(openssl rand -base64 32)" >> "$GITHUB_ENV"
+          echo "E2E_TEST_TOOLS_ENABLED=1" >> "$GITHUB_ENV"
+      # Build only after the same local Supabase environment used by the
+      # browser suite is available. Playwright starts this artifact with
+      # `next start`, so CI exercises production routing and bundling.
+      - run: npm run build
       # Non-hermetic integration tests: run only now that the DB stack is up and
       # its env (incl. the service-role key) is provisioned. Excluded from the
       # earlier `npm test` on purpose.
       - run: npm run test:integration
       # Run BOTH Playwright projects (desktop chromium + mobile) so mobile-viewport
-      # regressions are caught in CI, not just locally.
+      # regressions are caught against the production build, not just locally.
       - run: npm run test:e2e
 
   secrets:
@@ -60,6 +64,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: 2.109.0
       - run: supabase start
+      - run: bash scripts/test-db-upgrade.sh
       - run: supabase test db

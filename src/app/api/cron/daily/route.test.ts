@@ -32,6 +32,7 @@ type Filter =
   | { kind: "in"; col: string; vals: unknown[] }
   | { kind: "notNull"; col: string }
   | { kind: "isNull"; col: string }
+  | { kind: "gt"; col: string; val: unknown }
   | { kind: "lt"; col: string; val: unknown };
 
 let idCounter = 0;
@@ -43,6 +44,7 @@ function matches(row: Row, filters: Filter[]): boolean {
     if (f.kind === "in") return f.vals.includes(row[f.col]);
     if (f.kind === "notNull") return row[f.col] !== null && row[f.col] !== undefined;
     if (f.kind === "isNull") return row[f.col] === null || row[f.col] === undefined;
+    if (f.kind === "gt") return (row[f.col] as string) > (f.val as string);
     return (row[f.col] as string) < (f.val as string);
   });
 }
@@ -54,6 +56,8 @@ class Builder implements PromiseLike<{ data: unknown; error: unknown }> {
   private upsertKeys: string[] = [];
   private isSingle = false;
   private isMaybeSingle = false;
+  private orderColumn: string | null = null;
+  private resultLimit: number | null = null;
 
   constructor(private store: Store, private table: keyof Store) {}
 
@@ -87,7 +91,16 @@ class Builder implements PromiseLike<{ data: unknown; error: unknown }> {
     this.filters.push({ kind: "lt", col, val });
     return this;
   }
-  limit() {
+  gt(col: string, val: unknown) {
+    this.filters.push({ kind: "gt", col, val });
+    return this;
+  }
+  order(col: string) {
+    this.orderColumn = col;
+    return this;
+  }
+  limit(value: number) {
+    this.resultLimit = value;
     return this;
   }
   update(payload: Row) {
@@ -122,7 +135,14 @@ class Builder implements PromiseLike<{ data: unknown; error: unknown }> {
       this.rows.push(inserted);
       return { data: [{ id: inserted.id }], error: null };
     }
-    const found = this.rows.filter((r) => matches(r, this.filters));
+    let found = this.rows.filter((r) => matches(r, this.filters));
+    if (this.orderColumn) {
+      const col = this.orderColumn;
+      found = [...found].sort((left, right) => String(left[col]).localeCompare(String(right[col])));
+    }
+    // Match the local/hosted Data API ceiling so missing pagination fails in
+    // unit tests instead of silently passing against the in-memory store.
+    found = found.slice(0, this.resultLimit ?? 1_000);
     if (this.isSingle) {
       if (found.length === 0) return { data: null, error: { message: "no rows" } };
       return { data: found[0], error: null };
@@ -142,7 +162,10 @@ class Builder implements PromiseLike<{ data: unknown; error: unknown }> {
 }
 
 function createFakeClient(store: Store) {
-  return { from: (table: keyof Store) => new Builder(store, table) };
+  return {
+    from: (table: keyof Store) => new Builder(store, table),
+    rpc: vi.fn(async () => ({ data: 0, error: null })),
+  };
 }
 
 function seed(): Store {
@@ -209,6 +232,7 @@ describe("GET /api/cron/daily", () => {
     expect(summary.sweep.tasksCreated).toBe(2);
     expect(summary.collect).toEqual({ collected: 0, refreshed: 0, failed: 0 });
     expect(summary.sync).toEqual({ synced: 0, failed: 0, tasksClosed: 0 });
+    expect(summary.digestRecovery).toEqual({ classifiedUnknown: 0, limitReached: false });
   });
 
   it("raises exactly one policy_review task for the due policy and notifies the owner", async () => {
@@ -236,6 +260,26 @@ describe("GET /api/cron/daily", () => {
     // Every notification key (user_id, kind, subject_type, subject_id, sweep_on) is unique.
     const keys = store.notifications.map((n) => [n.user_id, n.kind, n.subject_type, n.subject_id, n.sweep_on].join("|"));
     expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it("paginates every workspace Owner beyond the Supabase row ceiling", async () => {
+    store.memberships = Array.from({ length: 1_205 }, (_, index) => ({
+      organisation_id: "org-1",
+      user_id: `owner-${String(index + 1).padStart(4, "0")}`,
+      role: "owner",
+    }));
+    store.evidence[0].owner_id = null;
+    store.tasks[0].owner_id = null;
+    store.policies[0].owner_id = null;
+
+    const response = await GET(request("test-secret"));
+    expect(response.status).toBe(200);
+
+    const overdueRecipients = new Set(store.notifications
+      .filter((row) => row.kind === "task_overdue")
+      .map((row) => row.user_id));
+    expect(overdueRecipients.size).toBe(1_205);
+    expect(overdueRecipients.has("owner-1205")).toBe(true);
   });
 
   it("rejects a wrong bearer token with 401 and touches no state", async () => {

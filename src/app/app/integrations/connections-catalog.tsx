@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { Pill } from "@/components/ui";
 import { OAuthConnectButton } from "./oauth-connect-button";
 import {
@@ -9,6 +9,7 @@ import {
   revokeAlertChannelAction,
   revokeConnectionAction,
   setAlertChannelEnabledAction,
+  setDailyDigestChannelAction,
   setIntegrationConnectionEnabledAction,
 } from "./actions";
 
@@ -27,6 +28,18 @@ export type AlertChannelSummary = {
   label: string;
   min_severity: string;
   enabled: boolean;
+  daily_digest_enabled: boolean;
+};
+
+export type DailyDigestDeliverySummary = {
+  id: string;
+  digest_on: string;
+  channel_id: string;
+  status: "reserved" | "delivered" | "failed" | "unknown";
+  attempt_count: number;
+  error_code: string | null;
+  last_attempted_at: string;
+  delivered_at: string | null;
 };
 
 type ProviderId = "github" | "jira" | "slack";
@@ -140,12 +153,16 @@ function ProviderPanel({
   alertChannels,
   onClose,
   panelRef,
+  canManageDailyDigest,
+  digestDeliveries,
 }: {
   provider: ProviderId;
   connections: ConnectionSummary[];
   alertChannels: AlertChannelSummary[];
   onClose: () => void;
   panelRef: React.RefObject<HTMLElement | null>;
+  canManageDailyDigest: boolean;
+  digestDeliveries: DailyDigestDeliverySummary[];
 }) {
   const metadata = PROVIDERS.find((candidate) => candidate.id === provider)!;
   const providerConnections = connections.filter((connection) => connection.provider === provider);
@@ -173,7 +190,11 @@ function ProviderPanel({
       </button>
     </div>
 
-    {provider === "slack" ? <SlackPanel alertChannels={alertChannels} /> : <SystemPanel
+    {provider === "slack" ? <SlackPanel
+      alertChannels={alertChannels}
+      canManageDailyDigest={canManageDailyDigest}
+      digestDeliveries={digestDeliveries}
+    /> : <SystemPanel
       provider={provider}
       connections={providerConnections}
     />}
@@ -229,7 +250,76 @@ function SystemPanel({
   </div>;
 }
 
-function SlackPanel({ alertChannels }: { alertChannels: AlertChannelSummary[] }) {
+function deliveryTone(status: DailyDigestDeliverySummary["status"]) {
+  if (status === "delivered") return "green";
+  if (status === "reserved") return "blue";
+  return status === "failed" ? "amber" : "red";
+}
+
+function deliveryLabel(status: DailyDigestDeliverySummary["status"]): string {
+  if (status === "delivered") return "Delivered";
+  if (status === "reserved") return "In progress";
+  if (status === "failed") return "Failed";
+  return "Unknown — review Slack";
+}
+
+function DigestChannelForm({ channel, pendingChannelId, onSubmit }: {
+  channel: AlertChannelSummary;
+  pendingChannelId: string | null;
+  onSubmit: (channel: AlertChannelSummary, event: React.FormEvent<HTMLFormElement>) => void;
+}) {
+  const anyPending = pendingChannelId !== null;
+  const label = channel.daily_digest_enabled
+    ? "Stop daily digest"
+    : `Use ${channel.label} for daily digest`;
+  return <form onSubmit={(event) => onSubmit(channel, event)}>
+    <input type="hidden" name="channelId" value={channel.daily_digest_enabled ? "" : channel.id} />
+    <button className="button secondary" type="submit" disabled={anyPending}>
+      {pendingChannelId === channel.id ? "Saving daily digest…" : label}
+    </button>
+  </form>;
+}
+
+function formatDeliveryAttempt(value: string): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Europe/London",
+  }).format(new Date(value));
+}
+
+function SlackPanel({ alertChannels, canManageDailyDigest, digestDeliveries }: {
+  alertChannels: AlertChannelSummary[];
+  canManageDailyDigest: boolean;
+  digestDeliveries: DailyDigestDeliverySummary[];
+}) {
+  const labels = new Map(alertChannels.map((channel) => [channel.id, channel.label]));
+  const [digestPendingChannelId, setDigestPendingChannelId] = useState<string | null>(null);
+  const [digestMessage, setDigestMessage] = useState("");
+  const [digestTransitionPending, startDigestTransition] = useTransition();
+
+  function submitDigestChannel(channel: AlertChannelSummary, event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (digestPendingChannelId !== null || digestTransitionPending) return;
+    const formData = new FormData(event.currentTarget);
+    setDigestMessage("");
+    setDigestPendingChannelId(channel.id);
+    startDigestTransition(async () => {
+      try {
+        await setDailyDigestChannelAction(formData);
+        setDigestMessage("Daily digest channel updated.");
+      } catch {
+        setDigestMessage("Could not update the daily digest channel. Try again.");
+      } finally {
+        setDigestPendingChannelId(null);
+      }
+    });
+  }
+
   return <div className="connections-slack-panel">
     {alertChannels.length > 0 && <div className="connections-account-list">
       {alertChannels.map((channel) => <div className="connections-account" key={channel.id}>
@@ -238,7 +328,10 @@ function SlackPanel({ alertChannels }: { alertChannels: AlertChannelSummary[] })
             <strong>{channel.label}</strong>
             <p>{channel.min_severity} severity and above</p>
           </div>
-          <Pill tone={channel.enabled ? "green" : "neutral"}>{channel.enabled ? "Active" : "Paused"}</Pill>
+          <span style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+            <Pill tone={channel.enabled ? "green" : "neutral"}>{channel.enabled ? "Active" : "Paused"}</Pill>
+            {channel.daily_digest_enabled && <Pill tone="blue">Daily digest</Pill>}
+          </span>
         </div>
         <div className="connections-account-actions">
           <ToggleForm
@@ -251,9 +344,16 @@ function SlackPanel({ alertChannels }: { alertChannels: AlertChannelSummary[] })
             <input type="hidden" name="id" value={channel.id} />
             <button className="button secondary danger" type="submit">Remove</button>
           </form>
+          {canManageDailyDigest && (channel.enabled || channel.daily_digest_enabled) && <DigestChannelForm
+            channel={channel}
+            pendingChannelId={digestPendingChannelId}
+            onSubmit={submitDigestChannel}
+          />}
         </div>
       </div>)}
     </div>}
+
+    {digestMessage && <p className="field-hint" role="status" aria-live="polite">{digestMessage}</p>}
 
     <form action={addAlertChannelAction} className="app-form connections-slack-form">
       <h4>{alertChannels.length > 0 ? "Add another channel" : "Add a channel"}</h4>
@@ -265,13 +365,38 @@ function SlackPanel({ alertChannels }: { alertChannels: AlertChannelSummary[] })
       <button className="button primary" type="submit">Add Slack channel</button>
       <p className="field-hint">The destination is encrypted and never displayed again.</p>
     </form>
+
+    {canManageDailyDigest && <section style={{ marginTop: "20px" }} aria-label="Daily digest delivery history">
+      <h4>Recent daily digests</h4>
+      {digestDeliveries.length > 0 ? <div className="connections-account-list">
+        {digestDeliveries.slice(0, 10).map((delivery) => <div className="connections-account" key={delivery.id}>
+          <div className="connections-account-summary">
+            <div>
+              <strong>{new Date(`${delivery.digest_on}T12:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</strong>
+              <p>{labels.get(delivery.channel_id) ?? "Configured Slack channel"} · Attempt {delivery.attempt_count}</p>
+              <p className="field-hint"><time dateTime={delivery.last_attempted_at}>Last attempt {formatDeliveryAttempt(delivery.last_attempted_at)}</time></p>
+            </div>
+            <Pill tone={deliveryTone(delivery.status)}>{deliveryLabel(delivery.status)}</Pill>
+          </div>
+          {delivery.error_code && <p className="field-hint">Review code: {delivery.error_code}</p>}
+        </div>)}
+      </div> : <p className="field-hint">No daily digest delivery attempts yet.</p>}
+    </section>}
   </div>;
 }
 
-export function ConnectionsCatalog({ connections, alertChannels, navigation }: {
+export function ConnectionsCatalog({
+  connections,
+  alertChannels,
+  navigation,
+  canManageDailyDigest = false,
+  digestDeliveries = [],
+}: {
   connections: ConnectionSummary[];
   alertChannels: AlertChannelSummary[];
   navigation?: React.ReactNode;
+  canManageDailyDigest?: boolean;
+  digestDeliveries?: DailyDigestDeliverySummary[];
 }) {
   const [selectedProvider, setSelectedProvider] = useState<ProviderId | null>(null);
   const panelRef = useRef<HTMLElement>(null);
@@ -345,6 +470,8 @@ export function ConnectionsCatalog({ connections, alertChannels, navigation }: {
       alertChannels={liveSlackChannels}
       panelRef={panelRef}
       onClose={closeProviderPanel}
+      canManageDailyDigest={canManageDailyDigest}
+      digestDeliveries={digestDeliveries}
     />}
   </div>;
 }

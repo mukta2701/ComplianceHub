@@ -21,10 +21,10 @@ const publicKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const targetAllowed = isDestructiveIntegrationTargetAllowed(url);
 const live = Boolean(url && publicKey && serviceKey && targetAllowed);
-if (url && publicKey && serviceKey && !targetAllowed) {
-  console.warn(
-    "[post-daily-digest.integration] Refusing destructive setup on a non-local target. "
-    + "Run this test only against a disposable localhost Supabase stack.",
+if (!live) {
+  throw new Error(
+    "Daily-digest integration tests require NEXT_PUBLIC_SUPABASE_URL, "
+    + "NEXT_PUBLIC_SUPABASE_ANON_KEY, and SUPABASE_SERVICE_ROLE_KEY for a disposable localhost Supabase stack.",
   );
 }
 const admin = createClient(url ?? "http://127.0.0.1:54321", serviceKey ?? "missing", {
@@ -37,7 +37,6 @@ let workspaceId = "";
 let ownerClient: SupabaseClient;
 
 beforeAll(async () => {
-  if (!live) return;
   const created = await admin.auth.admin.createUser({
     email: `digest-concurrency-${runId}@example.test`,
     password,
@@ -68,9 +67,14 @@ beforeAll(async () => {
     config: { webhookUrl: "test-encrypted" },
     connected_by: userId,
     enabled: true,
-    daily_digest_enabled: true,
+    daily_digest_enabled: false,
+  }).select("id").single();
+  if (channel.error || !channel.data) throw channel.error ?? new Error("Digest channel setup failed");
+  const selected = await ownerClient.rpc("set_daily_digest_channel", {
+    target_organisation_id: workspaceId,
+    target_channel_id: channel.data.id,
   });
-  if (channel.error) throw channel.error;
+  if (selected.error || selected.data !== true) throw selected.error ?? new Error("Digest channel setup failed");
 }, 30_000);
 
 // Tenant teardown is intentionally unavailable: organisation deletion would
@@ -79,7 +83,7 @@ beforeAll(async () => {
 // inert fixture names. Safety comes from the localhost-only guard above and
 // destroying the disposable Supabase stack after the integration run.
 
-describe.runIf(live)("concurrent daily digest delivery", () => {
+describe("concurrent daily digest delivery", () => {
   it("creates exactly one reservation and one network send path", async () => {
     const facts = buildDailyDigestFacts({
       workspace: { id: workspaceId, name: `Digest concurrency ${runId}` },
@@ -149,7 +153,7 @@ describe.runIf(live)("concurrent daily digest delivery", () => {
       workspaceId,
       localDate: "2026-08-07",
       factHash,
-      headline: "75% ready",
+      headline: "75% readiness",
       priorities: ["1 overdue task"],
       actions: ["Review 1 high risk"],
     };

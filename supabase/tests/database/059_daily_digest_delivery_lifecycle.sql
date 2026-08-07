@@ -36,7 +36,11 @@ insert into public.memberships(organisation_id,user_id,role) values
  (current_setting('app.lifecycle_org')::uuid,'86000000-0000-4000-8000-000000000003','member'),
  (current_setting('app.lifecycle_org')::uuid,'86000000-0000-4000-8000-000000000005','owner');
 insert into public.alert_channels(id,organisation_id,type,label,config,connected_by,enabled,daily_digest_enabled)
-values ('86000000-0000-4000-8000-000000000101',current_setting('app.lifecycle_org')::uuid,'slack','Digest','{"webhookUrl":"encrypted"}','86000000-0000-4000-8000-000000000001',true,true);
+values ('86000000-0000-4000-8000-000000000101',current_setting('app.lifecycle_org')::uuid,'slack','Digest','{"webhookUrl":"encrypted"}','86000000-0000-4000-8000-000000000001',true,false);
+select public.set_daily_digest_channel(
+  current_setting('app.lifecycle_org')::uuid,
+  '86000000-0000-4000-8000-000000000101'
+);
 
 select throws_ok(
   $$ insert into public.daily_digest_deliveries(organisation_id,digest_on,channel_id,fact_hash,message,attempted_by,status,delivered_at)

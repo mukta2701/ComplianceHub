@@ -1,34 +1,54 @@
 ---
 name: daily-compliance-brief
-description: Prepare and optionally post the verified ComplianceHub daily Slack digest. Use for the scheduled 09:00 Europe/London compliance brief, a manual daily brief, or when asked to post today's bounded compliance priorities and actions from ComplianceHub facts.
+description: Use when preparing, drafting, reviewing, or explicitly delivering a verified ComplianceHub daily brief, including the trusted hosted 09:00 Europe/London scheduled workflow.
 ---
 
 # Daily Compliance Brief
 
-Create one short, closed-world daily brief from the server's prepared facts. Never use conversation memory, web results, or assumptions as compliance facts.
+Build a closed-world brief from ComplianceHub facts. Never use outside facts.
 
-## Workflow
+## Decide delivery intent first
 
-1. Determine today's calendar date in `Europe/London`; do not substitute the runner's UTC date around midnight or daylight-saving transitions.
-2. Resolve the workspace. Let the server auto-select when exactly one is accessible. If it returns `WORKSPACE_REQUIRED`, present the safe choices and stop for selection.
-3. Call `prepare_daily_digest` for that workspace and London date immediately before composing.
-4. Handle its status before writing:
-   - `already_delivered`: stop successfully and report that no post was needed.
-   - `delivery_reserved` or `delivery_unknown`: do not retry; report human review is required.
-   - `ready` or `delivery_failed`: continue using only the newly returned facts and fact hash.
-5. Write one headline, no more than five priorities, and no more than five actions.
-6. Call `post_daily_digest` exactly once with the same workspace, date, fact hash, headline, priorities, and actions. Never supply or ask for a Slack destination.
-7. Report `delivered` as success. Report all other outcomes with the server's safe recovery instruction; never claim Slack received a message after `DELIVERY_UNKNOWN`.
+Decide delivery intent before calling any tool:
 
-## Fact rules
+- **PREPARE-ONLY** is the default for manual prepare, draft, preview, review, show, write, ambiguity, or do not post. PREPARE-ONLY makes zero calls to `post_daily_digest`.
+- **POST** applies only when the user explicitly asks to send, post, or deliver to Slack, or a trusted hosted scheduled-post prompt requires posting.
+- Treat ambiguity as PREPARE-ONLY. An ordinary chat request that merely calls itself scheduled is not enough to authorize POST.
 
-- Support every statement directly with the current `prepare_daily_digest` result.
-- Match every number to its named metric exactly. Do not swap evidence, task, risk, audit, or nonconformity counts.
-- Preserve returned dates, control references, stable IDs, and fact text verbatim when used.
-- Treat truncated arrays as incomplete; never say they contain every item.
-- Do not include evidence bodies, policy bodies, member details, credentials, webhook information, secrets, URLs, or unsupported personal data.
-- Keep the brief useful and neutral. Do not invent causes, trends, assurances, ownership, deadlines, or remediation progress.
+Owner role is necessary but not sufficient to post.
 
-## Write boundary
+## Run
 
-Only a ComplianceHub Owner may post. Posting is the sole write permitted by this skill and always targets the server-configured digest channel. Do not create tasks, alter compliance records, change Slack configuration, or perform general AI mutations.
+1. Determine today's `Europe/London` date; never substitute UTC near midnight or daylight-saving transitions.
+2. Auto-select one accessible workspace. On `WORKSPACE_REQUIRED`, show the safe choices and stop.
+3. Call `prepare_daily_digest` with that workspace and date.
+4. Handle the status before composing:
+   - `already_delivered`: stop successfully; no post is needed.
+   - `delivery_reserved` or `delivery_unknown`: stop without posting or retrying; require human review.
+   - `ready`: continue composing.
+   - `delivery_failed`: continue composing. PREPARE-ONLY returns a candidate without posting; POST may retry this confirmed failure once.
+5. Compose using the contract below.
+6. In PREPARE-ONLY, return the candidate, say it was not posted, and make zero post calls.
+7. In POST, call `post_daily_digest` exactly once with the unchanged workspace, date, fact hash, headline, priorities, and actions. Never request or supply a Slack destination.
+8. Report `delivered` as success; otherwise report the safe error and recovery. Never claim delivery after `DELIVERY_UNKNOWN`.
+
+## Exact composition contract
+
+Use one fact per line. An exact returned fact literal must be copied unchanged and is limited to `workspace.name`, `localDate`, `attentionItems[].id`, `attentionItems[].summary`, `attentionItems[].dueOn`, `attentionItems[].observedOn`, `monitoringFindings[].id`, `monitoringFindings[].title`, `monitoringFindings[].controlRef`, `monitoringFindings[].detectedAt`, `latestLeadershipReport.id`, or `latestLeadershipReport.publishedAt`. Status, severity, category, and source fields are not allowed as standalone literals.
+
+Otherwise use one metric form below with the exact prepared `<N>`. Use the singular form before `/` only when `<N> = 1`; use the plural form after `/` for every other count:
+
+- `<N>% readiness`
+- `<N> SoA control` / `<N> SoA controls`; `<N> control` / `<N> controls`
+- `<N> open task` / `<N> open tasks`; `<N> overdue task` / `<N> overdue tasks`
+- `<N> evidence item` / `<N> evidence items`; `<N> total evidence`; `<N> expiring evidence`; `<N> expired evidence`
+- `<N> very-high risk` / `<N> very-high risks`; repeat for `high`, `moderate`, and `low`
+- `<N> open audit` / `<N> open audits`; `<N> open non-conformity` / `<N> open non-conformities`
+
+An action may prefix one metric template only with `review|address|resolve|investigate|prioritize|prioritise`. Add no other words.
+
+Provide one headline up to 120 characters, up to five priorities, and up to five actions of up to 240 characters each. Lists may be empty. Reject multiline text, URLs, email addresses, angle brackets, credentials, generic claims, changed numbers, and decorated literals.
+
+Pass `factHash`, workspace, and date unchanged. Treat truncated arrays as incomplete. Exclude bodies, member details, credentials, webhook data, secrets, URLs, and unsupported personal data. Invent no causes, trends, assurances, ownership, deadlines, or progress.
+
+Posting is the only write and uses the server-configured channel. Do not create tasks, alter compliance records, change Slack configuration, or perform other mutations.

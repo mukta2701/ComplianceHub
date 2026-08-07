@@ -27,7 +27,7 @@ const facts = buildDailyDigestFacts({
   attentionItems: [], monitoringFindings: [], latestLeadershipReport: null,
 });
 const factHash = hashDailyDigestFacts(facts);
-const message = { headline: "75% ready", priorities: ["1 overdue task"], actions: ["Review 1 high risk"] };
+const message = { headline: "75% readiness", priorities: ["1 overdue task"], actions: ["Review 1 high risk"] };
 const payload = buildSlackDigestPayload(message, { workspaceName: "Acme", localDate: "2026-08-07" });
 
 function dependencies(overrides: Partial<PostDailyDigestDependencies> = {}): PostDailyDigestDependencies {

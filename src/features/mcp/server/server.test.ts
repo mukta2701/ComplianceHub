@@ -97,7 +97,7 @@ describe("ComplianceHub MCP server", () => {
     expect(tools.find(({ name }) => name === "get_compliance_overview")?.inputSchema.properties).not.toHaveProperty("localDate");
     expect(tools.find(({ name }) => name === "prepare_daily_digest")?.inputSchema.required).toContain("localDate");
     const post = tools.find(({ name }) => name === "post_daily_digest");
-    expect(post?.description).toMatch(/external Slack write[\s\S]*Owner-only[\s\S]*configured channel[\s\S]*prepare/i);
+    expect(post?.description).toMatch(/external Slack write[\s\S]*authorization to send[\s\S]*configured channel[\s\S]*prepare/i);
     expect(post?.inputSchema.required).toEqual(expect.arrayContaining(["localDate", "factHash", "headline", "priorities", "actions"]));
   });
 
@@ -139,7 +139,7 @@ describe("ComplianceHub MCP server", () => {
       arguments: {
         localDate: "2026-02-31",
         factHash: "a".repeat(64),
-        headline: "75% ready",
+        headline: "75% readiness",
         priorities: [],
         actions: [],
       },

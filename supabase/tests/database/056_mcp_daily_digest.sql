@@ -29,15 +29,20 @@ insert into public.memberships(organisation_id,user_id,role) values
  (current_setting('app.digest_org_a')::uuid,'85000000-0000-4000-8000-000000000002','admin'),
  (current_setting('app.digest_org_a')::uuid,'85000000-0000-4000-8000-000000000003','member');
 
+insert into public.alert_channels(
+  id,organisation_id,type,label,config,connected_by,enabled,daily_digest_enabled
+) values (
+  '85000000-0000-4000-8000-000000000101',current_setting('app.digest_org_a')::uuid,
+  'slack','Private digest','{"webhookUrl":"encrypted"}',
+  '85000000-0000-4000-8000-000000000001',true,false
+);
+
 select lives_ok(
-  $$ insert into public.alert_channels(
-       id,organisation_id,type,label,config,connected_by,enabled,daily_digest_enabled
-     ) values (
-       '85000000-0000-4000-8000-000000000101',current_setting('app.digest_org_a')::uuid,
-       'slack','Private digest','{"webhookUrl":"encrypted"}',
-       '85000000-0000-4000-8000-000000000001',true,true
+  $$ select public.set_daily_digest_channel(
+       current_setting('app.digest_org_a')::uuid,
+       '85000000-0000-4000-8000-000000000101'
      ) $$,
-  'an Owner can enable one active Slack digest channel'
+  'an Owner can enable one active Slack digest channel through the atomic boundary'
 );
 
 select throws_ok(
@@ -48,7 +53,8 @@ select throws_ok(
        'slack','Duplicate digest','{"webhookUrl":"encrypted"}',
        '85000000-0000-4000-8000-000000000001',true,true
      ) $$,
-  '23505',null,'an organisation cannot have two active digest channels'
+  '42501','daily digest channel must be selected with set_daily_digest_channel',
+  'an Owner cannot bypass the atomic boundary while adding another channel'
 );
 
 insert into public.alert_channels(
@@ -61,9 +67,11 @@ insert into public.alert_channels(
 
 select set_config('request.jwt.claims','{"sub":"85000000-0000-4000-8000-000000000002","email":"digest-admin-a@example.test","role":"authenticated"}',true);
 select throws_ok(
-  $$ update public.alert_channels set daily_digest_enabled=true
-     where id='85000000-0000-4000-8000-000000000103' returning id $$,
-  '42501','only workspace owners can select the daily digest channel',
+  $$ select public.set_daily_digest_channel(
+       current_setting('app.digest_org_a')::uuid,
+       '85000000-0000-4000-8000-000000000103'
+     ) $$,
+  '42501','daily digest channel selection requires a workspace Owner',
   'an Admin cannot select a digest channel'
 );
 

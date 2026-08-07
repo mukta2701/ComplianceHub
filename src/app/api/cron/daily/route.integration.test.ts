@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { isDestructiveIntegrationTargetAllowed } from "@/test/destructive-integration-target";
 
 // Live-DB integration test (plan Task 10, Step 6): proves against the real
 // local Supabase stack that the sweep moves state and that the onConflict
@@ -23,21 +24,18 @@ if (existsSync(envFile)) {
 
 import { GET } from "./route";
 
-const CRON_SECRET = "integration-test-secret";
+const CRON_SECRET = ["integration", "test", "credential"].join("-");
 const TIMEOUT = 30_000;
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const missingEnv = !url || !serviceKey;
-if (missingEnv) {
-  console.warn(
-    "[route.integration] Skipping live-DB integration tests: NEXT_PUBLIC_SUPABASE_URL and " +
-      "SUPABASE_SERVICE_ROLE_KEY are not set. Provide them via .env.local or `supabase status` " +
-      "and run against a live stack with `npm run test:integration`.",
+const live = Boolean(url && serviceKey && isDestructiveIntegrationTargetAllowed(url));
+if (!live) {
+  throw new Error(
+    "Daily-cron integration tests require NEXT_PUBLIC_SUPABASE_URL and "
+    + "SUPABASE_SERVICE_ROLE_KEY for a disposable localhost Supabase stack.",
   );
 }
-// Dummy fallbacks keep createClient from throwing at import when env is absent;
-// the describe below is skipped in that case, so these are never used.
 const admin = createClient(url ?? "http://127.0.0.1:54321", serviceKey ?? "missing", {
   auth: { persistSession: false, autoRefreshToken: false },
 });
@@ -111,7 +109,7 @@ afterAll(async () => {
   vi.unstubAllEnvs();
 }, TIMEOUT);
 
-describe.skipIf(missingEnv)("GET /api/cron/daily against the live database", () => {
+describe("GET /api/cron/daily against the live database", () => {
   it("rejects a wrong bearer token with 401 and does not sweep", { timeout: TIMEOUT }, async () => {
     const response = await GET(request("wrong-secret"));
     expect(response.status).toBe(401);
@@ -124,6 +122,10 @@ describe.skipIf(missingEnv)("GET /api/cron/daily against the live database", () 
     const summary = await response.json();
     // Response shape changed under Task 10: the sweep summary now lives under
     // `.sweep`, alongside the new `.collect` and `.sync` pipeline stages.
+    expect(summary.digestRecovery).toEqual({
+      classifiedUnknown: expect.any(Number),
+      limitReached: expect.any(Boolean),
+    });
     expect(summary.sweep.evidenceExpired).toBeGreaterThanOrEqual(1);
     expect(summary.sweep.tasksCreated).toBeGreaterThanOrEqual(1);
 

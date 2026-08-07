@@ -11,10 +11,12 @@ vi.mock("./actions", () => ({
   revokeAlertChannelAction: vi.fn(),
   revokeConnectionAction: vi.fn(),
   setAlertChannelEnabledAction: vi.fn(),
+  setDailyDigestChannelAction: vi.fn(),
   setIntegrationConnectionEnabledAction: vi.fn(),
 }));
 
 import { ConnectionsCatalog } from "./connections-catalog";
+import { setDailyDigestChannelAction } from "./actions";
 
 const connections = [{
   id: "github-1",
@@ -38,6 +40,7 @@ const alertChannels = [{
   label: "#compliance-alerts",
   min_severity: "high",
   enabled: true,
+  daily_digest_enabled: true,
 }];
 
 describe("ConnectionsCatalog", () => {
@@ -100,6 +103,7 @@ describe("ConnectionsCatalog", () => {
         label: "#security-alerts",
         min_severity: "critical",
         enabled: true,
+        daily_digest_enabled: false,
       }]}
     />);
 
@@ -131,6 +135,7 @@ describe("ConnectionsCatalog", () => {
         label: "#paused-alerts",
         min_severity: "high",
         enabled: false,
+        daily_digest_enabled: false,
       }]}
     />);
 
@@ -156,12 +161,14 @@ describe("ConnectionsCatalog", () => {
         label: "#paused-alerts",
         min_severity: "high",
         enabled: false,
+        daily_digest_enabled: false,
       }, {
         id: "slack-active",
         type: "slack",
         label: "#active-alerts",
         min_severity: "critical",
         enabled: true,
+        daily_digest_enabled: false,
       }]}
     />);
 
@@ -213,5 +220,112 @@ describe("ConnectionsCatalog", () => {
 
     const panel = screen.getByRole("region", { name: "Connect GitHub" });
     expect(within(panel).getByRole("button", { name: "Connect GitHub" })).toBeVisible();
+  });
+
+  it("lets an Owner choose one digest channel and inspect safe delivery history", async () => {
+    const user = userEvent.setup();
+    render(<ConnectionsCatalog
+      connections={[]}
+      alertChannels={[...alertChannels, {
+        id: "slack-2",
+        type: "slack",
+        label: "#security-alerts",
+        min_severity: "critical",
+        enabled: true,
+        daily_digest_enabled: false,
+      }]}
+      canManageDailyDigest
+      digestDeliveries={[{
+        id: "delivery-1",
+        digest_on: "2026-08-07",
+        channel_id: "slack-1",
+        status: "delivered",
+        attempt_count: 1,
+        error_code: null,
+        last_attempted_at: "2026-08-07T08:00:00Z",
+        delivered_at: "2026-08-07T08:00:01Z",
+      }]}
+    />);
+
+    await user.click(within(screen.getByRole("article", { name: "Slack connection" })).getByRole("button", { name: "Manage" }));
+    const panel = screen.getByRole("region", { name: "Manage Slack" });
+    expect(within(panel).getByText("Daily digest")).toBeVisible();
+    expect(within(panel).getByRole("button", { name: "Stop daily digest" })).toBeVisible();
+    expect(within(panel).getByRole("button", { name: "Use #security-alerts for daily digest" })).toBeVisible();
+    expect(within(panel).getByRole("heading", { name: "Recent daily digests" })).toBeVisible();
+    expect(within(panel).getByText("Delivered")).toBeVisible();
+    expect(within(panel).getByText("Last attempt 7 Aug 2026, 09:00")).toBeVisible();
+    expect(panel).not.toHaveTextContent("message");
+  });
+
+  it("shows an in-progress state while an Owner digest-channel change is saving", async () => {
+    const user = userEvent.setup();
+    vi.mocked(setDailyDigestChannelAction).mockReset();
+    vi.mocked(setDailyDigestChannelAction).mockImplementationOnce(() => new Promise(() => undefined));
+    render(<ConnectionsCatalog
+      connections={[]}
+      alertChannels={[...alertChannels, {
+        id: "slack-2",
+        type: "slack",
+        label: "#security-alerts",
+        min_severity: "critical",
+        enabled: true,
+        daily_digest_enabled: false,
+      }]}
+      canManageDailyDigest
+    />);
+
+    await user.click(within(screen.getByRole("article", { name: "Slack connection" })).getByRole("button", { name: "Manage" }));
+    const panel = screen.getByRole("region", { name: "Manage Slack" });
+    await user.click(within(panel).getByRole("button", { name: "Use #security-alerts for daily digest" }));
+
+    const pending = await within(panel).findByRole("button", { name: "Saving daily digest…" });
+    expect(pending).toBeDisabled();
+    expect(within(panel).getByRole("button", { name: "Stop daily digest" })).toBeDisabled();
+    expect(setDailyDigestChannelAction).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a safe inline recovery message when a digest-channel change fails", async () => {
+    const user = userEvent.setup();
+    vi.mocked(setDailyDigestChannelAction).mockReset();
+    vi.mocked(setDailyDigestChannelAction).mockRejectedValueOnce(new Error("sensitive database detail"));
+    render(<ConnectionsCatalog
+      connections={[]}
+      alertChannels={alertChannels}
+      canManageDailyDigest
+    />);
+
+    await user.click(within(screen.getByRole("article", { name: "Slack connection" })).getByRole("button", { name: "Manage" }));
+    const panel = screen.getByRole("region", { name: "Manage Slack" });
+    await user.click(within(panel).getByRole("button", { name: "Stop daily digest" }));
+
+    expect(await within(panel).findByRole("status")).toHaveTextContent(
+      "Could not update the daily digest channel. Try again.",
+    );
+    expect(panel).not.toHaveTextContent("sensitive database detail");
+    expect(within(panel).getByRole("button", { name: "Stop daily digest" })).toBeEnabled();
+  });
+
+  it("lets an Owner stop a stale selected digest while its Slack channel is paused", async () => {
+    const user = userEvent.setup();
+    render(<ConnectionsCatalog
+      connections={[]}
+      alertChannels={[{
+        id: "slack-paused-selected",
+        type: "slack",
+        label: "#paused-digest",
+        min_severity: "high",
+        enabled: false,
+        daily_digest_enabled: true,
+      }]}
+      canManageDailyDigest
+    />);
+
+    await user.click(within(screen.getByRole("article", { name: "Slack connection" })).getByRole("button", { name: "Manage" }));
+    const panel = screen.getByRole("region", { name: "Manage Slack" });
+    expect(within(panel).getByText("Paused")).toBeVisible();
+    expect(within(panel).getByText("Daily digest")).toBeVisible();
+    expect(within(panel).getByRole("button", { name: "Stop daily digest" })).toBeVisible();
+    expect(within(panel).queryByRole("button", { name: /Use .* for daily digest/ })).not.toBeInTheDocument();
   });
 });

@@ -12,6 +12,7 @@ import { MAX_IMPORT_ROWS } from "@/features/imports/limits";
 import { riskInputSchema } from "@/features/risks/application/risk";
 import { assetInputSchema } from "@/features/assets/application/asset";
 import { soaItemReviewSchema } from "@/features/soa/application/review";
+import { hasCapability } from "@/features/organisations/domain/access";
 
 export type AnalyseResult = { headers: string[]; rows: string[][]; suggestion: Record<string, string> } | { error: string };
 export type ImportRunResult = { committed: boolean; total: number; valid: number; invalid: number; imported: number; updated: number; skipped: number; rowErrors: { row: number; errors: string[] }[]; notes: string[] };
@@ -19,7 +20,15 @@ export type ImportRunResult = { committed: boolean; total: number; valid: number
 const MODULES = new Set<ImportModule>(["risk", "soa", "asset"]);
 
 export async function analyseImportAction(formData: FormData): Promise<AnalyseResult> {
-  await requireAppContext(); // auth gate; parsing needs no org data
+  const { user, membership } = await requireAppContext();
+  if (!hasCapability(membership.role, "manage_imports")) {
+    return { error: "You do not have permission to manage imports." };
+  }
+  try {
+    await enforceRateLimit(`import-analyse:${user.id}`, { limit: 10, windowMs: 60_000 });
+  } catch {
+    return { error: "Too many import attempts. Please wait and try again." };
+  }
   const moduleName = String(formData.get("module")) as ImportModule;
   if (!MODULES.has(moduleName)) return { error: "Unknown import type." };
   const file = formData.get("file");
@@ -88,7 +97,10 @@ function zodMessage(error: { issues: { message: string }[] }): string {
 }
 
 export async function runImportAction(input: { module: ImportModule; headers: string[]; rows: string[][]; mapping: Record<string, string>; commit: boolean; registerId?: string }): Promise<ImportRunResult> {
-  const { supabase, user, organisation } = await requireAppContext();
+  const { supabase, user, organisation, membership } = await requireAppContext();
+  if (!hasCapability(membership.role, "manage_imports")) {
+    throw new Error("You do not have permission to manage imports.");
+  }
   if (!MODULES.has(input.module)) return emptyResult(input.commit);
   // Fix 1: analyseImportAction only ever hands back MAX_IMPORT_ROWS rows, so a legitimate client never
   // exceeds the ceiling — but this action trusts its input directly, so a caller could otherwise post an
