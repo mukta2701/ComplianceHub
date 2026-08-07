@@ -238,6 +238,13 @@ revocation pass in all three clients. Record the staging evidence and signing-ke
 identifier in the rollout log; never record access tokens, authorization codes,
 or refresh tokens.
 
+The hosted `/mcp` endpoint limits requests per verified user and OAuth client.
+Production uses the shared Postgres rate-limit RPC when the service-role secret is
+configured. A process-local counter is only the local/degraded fallback: it resets
+with a serverless isolate and cannot enforce a global limit by itself. Confirm the
+RPC migration and service-role variable are present before staging load tests, and
+monitor fallback log events without recording bearer tokens or request bodies.
+
 ## 6. Slack alert channel (optional) **(you)**
 
 1. Create a Slack incoming webhook for the intended workspace/channel.

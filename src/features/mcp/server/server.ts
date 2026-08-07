@@ -1,0 +1,229 @@
+import "server-only";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { CallToolRequestSchema, ListToolsRequestSchema, type CallToolResult, type ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { z } from "zod";
+import { readinessReportSchema } from "@/features/reports/application/leadership-snapshots";
+import {
+  getComplianceOverview,
+  getLatestLeadershipReport,
+  listAttentionItems,
+  listMonitoringFindings,
+  prepareDailyDigest,
+} from "../application/mcp-reads";
+import { listWorkspaces } from "../application/workspace-access";
+import { McpError, mcpErrorResult } from "../auth/errors";
+import { DIGEST_ATTENTION_CATEGORIES, DIGEST_SEVERITIES } from "../domain/digest";
+
+export const MCP_SERVER_INSTRUCTIONS = [
+  "Supabase is canonical.",
+  "Use only closed-world facts returned by these tools.",
+  "Never invent, infer, or embellish compliance claims.",
+  "If one workspace is accessible it is selected automatically; if several are accessible, use a returned workspace choice.",
+  "Prepare a daily digest before any future post and stop when it is already delivered.",
+  "Treat credentials and configured destinations as prohibited output.",
+  "Summarize evidence and policies; never return their bodies or person-level fields.",
+  "Slack destinations are server-configured, and the future post action is Owner-only.",
+  "Read results are bounded snapshots and may be truncated.",
+].join(" ");
+
+const OAUTH_SECURITY_SCHEMES = [{ type: "oauth2", scopes: ["openid", "email", "profile"] }] as const;
+const READ_ANNOTATIONS: ToolAnnotations = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };
+const uuid = z.uuid();
+const dateTime = z.string().datetime({ offset: true });
+const localDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
+  const [year, month, day] = value.split("-").map(Number);
+  const parsed = new Date(Date.UTC(year!, month! - 1, day!));
+  return parsed.getUTCFullYear() === year && parsed.getUTCMonth() + 1 === month && parsed.getUTCDate() === day;
+}, "localDate must be a real calendar date");
+const workspaceSummary = z.object({ id: uuid, name: z.string().min(1).max(160) }).strict();
+const workspace = workspaceSummary.extend({ role: z.enum(["owner", "admin", "member"]) }).strict();
+const reportMetadata = z.object({ id: uuid, publishedAt: dateTime }).strict();
+const success = <T extends z.ZodType>(data: T) => z.object({ ok: z.literal(true), data }).strict();
+const noInputSchema = z.object({}).strict();
+const workspaceInputSchema = z.object({ workspaceId: uuid.optional() }).strict();
+const attentionInputSchema = z.object({
+  workspaceId: uuid.optional(),
+  categories: z.array(z.enum(DIGEST_ATTENTION_CATEGORIES)).max(DIGEST_ATTENTION_CATEGORIES.length).optional(),
+  severity: z.enum(DIGEST_SEVERITIES).optional(),
+  limit: z.number().int().min(1).max(50).default(20).optional(),
+}).strict();
+const monitoringInputSchema = z.object({
+  workspaceId: uuid.optional(), status: z.enum(["open", "acknowledged", "resolved"]).optional(),
+  severity: z.enum(DIGEST_SEVERITIES).optional(), limit: z.number().int().min(1).max(50).default(20).optional(),
+}).strict();
+const prepareInputSchema = z.object({ workspaceId: uuid.optional(), localDate }).strict();
+
+const attentionItem = z.object({
+  id: z.string().min(1).max(200),
+  source: z.enum(["task", "evidence", "policy", "risk", "audit_finding", "system"]),
+  category: z.enum(DIGEST_ATTENTION_CATEGORIES), severity: z.enum(DIGEST_SEVERITIES),
+  summary: z.string().min(1).max(240), dueOn: localDate.optional(), observedOn: dateTime.optional(),
+}).strict();
+const monitoringFinding = z.object({
+  id: z.string().min(1).max(200), severity: z.enum(DIGEST_SEVERITIES),
+  status: z.enum(["open", "acknowledged", "resolved"]), title: z.string().min(1).max(240),
+  controlRef: z.string().min(1).max(80).optional(), detectedAt: dateTime,
+  resolvedAt: dateTime.nullable(), hasRemediationTask: z.boolean(),
+}).strict();
+const digestFacts = z.object({
+  schemaVersion: z.literal(1), workspace: workspaceSummary, localDate, overview: readinessReportSchema,
+  attentionItems: z.array(attentionItem).max(20),
+  monitoringFindings: z.array(monitoringFinding.omit({ resolvedAt: true, hasRemediationTask: true })).max(20),
+  latestLeadershipReport: reportMetadata.nullable(),
+  truncation: z.object({ attentionItems: z.boolean(), monitoringFindings: z.boolean() }).strict(),
+}).strict();
+
+export type McpReadServices = {
+  listWorkspaces: typeof listWorkspaces;
+  getComplianceOverview: typeof getComplianceOverview;
+  listAttentionItems: typeof listAttentionItems;
+  listMonitoringFindings: typeof listMonitoringFindings;
+  getLatestLeadershipReport: typeof getLatestLeadershipReport;
+  prepareDailyDigest: typeof prepareDailyDigest;
+};
+
+const defaultServices: McpReadServices = {
+  listWorkspaces, getComplianceOverview, listAttentionItems,
+  listMonitoringFindings, getLatestLeadershipReport, prepareDailyDigest,
+};
+
+export type McpRequestContext = { userId: string; supabase: SupabaseClient; resource: string };
+
+type ToolDefinition<T extends z.ZodType = z.ZodType> = {
+  name: string;
+  title: string;
+  description: string;
+  input: T;
+  output: z.ZodType;
+  run: (input: z.output<T>) => Promise<CallToolResult>;
+};
+
+function defineTool<T extends z.ZodType>(definition: ToolDefinition<T>) { return definition; }
+
+function successResult<T extends Record<string, unknown>>(data: T, text: string): CallToolResult {
+  return { structuredContent: { ok: true, data }, content: [{ type: "text", text }] };
+}
+
+function toolJsonSchema(schema: z.ZodType) {
+  const json = z.toJSONSchema(schema, { target: "draft-7", unrepresentable: "any" });
+  if (json.type !== "object") throw new Error("MCP tool schema must be an object");
+  return json as { type: "object"; properties?: Record<string, object>; required?: string[]; [key: string]: unknown };
+}
+
+async function executeTool(definition: ToolDefinition, rawInput: unknown, resource: string): Promise<CallToolResult> {
+  const parsed = definition.input.safeParse(rawInput ?? {});
+  if (!parsed.success) return mcpErrorResult(new McpError("VALIDATION_ERROR"), resource);
+  try {
+    const result = await definition.run(parsed.data);
+    if (!result.isError && !definition.output.safeParse(result.structuredContent).success) {
+      return mcpErrorResult(new McpError("INTERNAL_ERROR"), resource);
+    }
+    return result;
+  } catch (error) {
+    return mcpErrorResult(error instanceof McpError ? error : new McpError("INTERNAL_ERROR"), resource);
+  }
+}
+
+export function createComplianceMcpServer(
+  context: McpRequestContext,
+  services: McpReadServices = defaultServices,
+): McpServer {
+  const server = new McpServer(
+    { name: "compliancehub-internal", version: "1.0.0" },
+    { instructions: MCP_SERVER_INSTRUCTIONS },
+  );
+
+  const definitions: ToolDefinition[] = [
+    defineTool({
+      name: "list_workspaces", title: "List accessible workspaces",
+      description: "List the ComplianceHub workspaces accessible to the signed-in user using safe identifiers, names, and roles.",
+      input: noInputSchema,
+      output: success(z.object({ workspaces: z.array(workspace) }).strict()),
+      run: async () => {
+        const workspaces = await services.listWorkspaces(context.supabase, context.userId);
+        return successResult({ workspaces }, `Found ${workspaces.length} accessible workspace${workspaces.length === 1 ? "" : "s"}.`);
+      },
+    }),
+    defineTool({
+      name: "get_compliance_overview", title: "Get compliance overview",
+      description: "Get readiness, risk bands, task and evidence health, audits, and latest report metadata for one accessible workspace.",
+      input: workspaceInputSchema,
+      output: success(z.object({ workspace: workspaceSummary, source: z.enum(["live", "published"]), readiness: readinessReportSchema, latestReport: reportMetadata.nullable() }).strict()),
+      run: async (input) => {
+        const data = await services.getComplianceOverview(context.supabase, context.userId, input);
+        return successResult(data, `${data.workspace.name} is ${data.readiness.soaPercent}% ready with ${data.readiness.tasksOverdue} overdue tasks.`);
+      },
+    }),
+    defineTool({
+      name: "list_attention_items", title: "List attention items",
+      description: "List bounded overdue tasks, stale evidence, policy reviews, high risks, and unresolved findings for one accessible workspace.",
+      input: attentionInputSchema,
+      output: success(z.object({ workspace: workspaceSummary, items: z.array(attentionItem).max(50), truncated: z.boolean() }).strict()),
+      run: async (input) => {
+        const data = await services.listAttentionItems(context.supabase, context.userId, input);
+        return successResult(data, `Found ${data.items.length} attention item${data.items.length === 1 ? "" : "s"} for ${data.workspace.name}.`);
+      },
+    }),
+    defineTool({
+      name: "list_monitoring_findings", title: "List monitoring findings",
+      description: "List bounded monitoring findings with safe summaries and remediation-task state for one accessible workspace.",
+      input: monitoringInputSchema,
+      output: success(z.object({ workspace: workspaceSummary, findings: z.array(monitoringFinding).max(50), truncated: z.boolean() }).strict()),
+      run: async (input) => {
+        const data = await services.listMonitoringFindings(context.supabase, context.userId, input);
+        return successResult(data, `Found ${data.findings.length} monitoring finding${data.findings.length === 1 ? "" : "s"} for ${data.workspace.name}.`);
+      },
+    }),
+    defineTool({
+      name: "get_latest_leadership_report", title: "Get latest leadership report",
+      description: "Get the latest published leadership report for one accessible workspace without publisher or member details.",
+      input: workspaceInputSchema,
+      output: success(z.object({ workspace: workspaceSummary, report: z.object({ id: uuid, payload: readinessReportSchema, publishedAt: dateTime }).strict().nullable() }).strict()),
+      run: async (input) => {
+        const data = await services.getLatestLeadershipReport(context.supabase, context.userId, input);
+        return successResult(data, data.report ? `Latest leadership report for ${data.workspace.name} was published ${data.report.publishedAt}.` : `No published leadership report exists for ${data.workspace.name}.`);
+      },
+    }),
+    defineTool({
+      name: "prepare_daily_digest", title: "Prepare daily compliance digest",
+      description: "Return bounded, verified digest facts and a deterministic fact hash for the supplied Europe/London calendar date. This does not post to Slack.",
+      input: prepareInputSchema,
+      output: success(z.object({
+        status: z.enum(["ready", "already_delivered", "delivery_failed", "delivery_unknown", "delivery_reserved"]),
+        facts: digestFacts, factHash: z.string().regex(/^[0-9a-f]{64}$/),
+        delivery: z.object({ id: uuid, deliveredAt: dateTime.nullable() }).strict().nullable(),
+      }).strict()),
+      run: async (input) => {
+        const data = await services.prepareDailyDigest(context.supabase, context.userId, input);
+        const text = data.status === "already_delivered"
+          ? `The ${data.facts.localDate} digest for ${data.facts.workspace.name} was already delivered; stop successfully.`
+          : `Prepared verified facts for ${data.facts.workspace.name} on ${data.facts.localDate}; use fact hash ${data.factHash}.`;
+        return successResult(data, text);
+      },
+    }),
+  ];
+
+  server.server.registerCapabilities({ tools: { listChanged: false } });
+  server.server.setRequestHandler(ListToolsRequestSchema, () => ({
+    tools: definitions.map((definition) => ({
+      name: definition.name,
+      title: definition.title,
+      description: definition.description,
+      inputSchema: toolJsonSchema(definition.input),
+      outputSchema: toolJsonSchema(definition.output),
+      annotations: READ_ANNOTATIONS,
+      // Emit the current field plus the SDK 1.30-compatible mirrored metadata.
+      // Its typed client strips unknown top-level fields, while `_meta` survives.
+      securitySchemes: OAUTH_SECURITY_SCHEMES,
+      _meta: { securitySchemes: OAUTH_SECURITY_SCHEMES },
+    })),
+  }));
+  server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const definition = definitions.find(({ name }) => name === request.params.name);
+    if (!definition) return mcpErrorResult(new McpError("VALIDATION_ERROR"), context.resource);
+    return executeTool(definition, request.params.arguments, context.resource);
+  });
+
+  return server;
+}
