@@ -24,7 +24,7 @@ Create a Vercel project from this repo and set these environment variables (name
 |---|---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` | yes | Supabase Project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | yes | Supabase anon (public) key |
-| `SUPABASE_SERVICE_ROLE_KEY` | yes | **Server-only.** Used solely by the cron routes; never exposed to the client. |
+| `SUPABASE_SERVICE_ROLE_KEY` | yes | **Server-only.** Used by cron routes and the MCP daily-digest delivery boundary only after user-scoped Owner, current-fact, and message validation. Never expose it to the client. |
 | `NEXT_PUBLIC_SITE_URL` | yes | Your real site origin, e.g. `https://app.example.com`. It is the canonical origin for invitation and Auth redirects; production fails closed if it is absent. |
 | `CRON_SECRET` | yes | High-entropy random string; gates both cron routes. |
 | `RESEND_API_KEY` | for invitation delivery | **Server-only.** Resend API key with sending access. Never use a `NEXT_PUBLIC_` variable for it. If absent, invitations remain retryable with status `not_configured` and no mail request is made. |
@@ -53,6 +53,13 @@ Vercel Cron sends `Authorization: Bearer <CRON_SECRET>`; each route rejects any 
 curl -i -X GET http://localhost:3000/api/cron/daily            -H "Authorization: Bearer $CRON_SECRET"
 curl -i -X GET http://localhost:3000/api/cron/integrations-sync -H "Authorization: Bearer $CRON_SECRET"
 ```
+
+The MCP daily-digest write also requires `SUPABASE_SERVICE_ROLE_KEY`. The OAuth
+client never receives this key: the Next server resolves the signed-in user and
+workspace, verifies Owner role, recomputes facts, validates every outgoing line,
+and only then constructs the server-only client used for the actor-bound reserve
+and finalize RPCs. Deployment smoke tests must confirm authenticated/anon clients
+cannot execute either lifecycle RPC directly.
 
 ## 4. Production hardening **(you)**
 
@@ -247,6 +254,71 @@ monitor fallback log events without recording bearer tokens or request bodies.
 V1 accepts exactly one JSON-RPC message per POST and rejects every batch array
 before creating an MCP server or running a tool. Authenticated invalid requests
 still consume the user-and-client rate-limit allowance.
+
+## 5b. Private plugin, Slack digest, and scheduled task **(you — after 5a passes)**
+
+The validated source package is in `plugins/compliancehub-internal`. It stays
+private and must not be submitted to the public plugin directory. Its
+`.app.json` intentionally contains an empty `apps` object in source control:
+official plugin packaging requires a real registered connection ID, and a fake
+ID would create a misleading, non-working install.
+
+1. Deploy the exact staging commit and complete every gate in section 5a.
+2. In ChatGPT developer mode, register the canonical staging `/mcp` URL. Copy
+   the technical connection ID from the resulting plugin URL; it starts with
+   `plugin_asdk_app`.
+3. Replace the empty application map in
+   `plugins/compliancehub-internal/.app.json` with the registered mapping:
+
+   ```json
+   {
+     "apps": {
+       "compliancehub": {
+         "id": "plugin_asdk_app_REPLACE_WITH_REGISTERED_ID",
+         "required": true
+       }
+     }
+   }
+   ```
+
+   Do not commit the example marker. Validate the finished package with
+   `python3 ~/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py plugins/compliancehub-internal`.
+4. Install the finished package from a private local or organisation-controlled
+   marketplace. Share it only with the internal ChatGPT/Codex workspace. The
+   `daily-compliance-brief` skill supplies the Codex workflow; the MCP server's
+   own instructions carry the essential closed-world and write constraints for
+   Claude and other clients.
+5. Connect the designated Owner OAuth account. Confirm Member and Admin accounts
+   can use read tools but receive `FORBIDDEN` from `post_daily_digest`.
+6. Run digest generation in shadow mode without calling the post tool. Manually
+   compare every number, date, control reference, and selected priority with the
+   returned fact bundle.
+7. Enable one private Slack test channel as the organisation's digest channel.
+   Run three manual London-date deliveries and verify one delivery row, one
+   immutable attempt history, one safe audit trail, and no duplicate for each
+   date. Exercise a confirmed Slack rejection and an ambiguous network outcome;
+   only the confirmed failure may be retried.
+8. Only after those three runs pass, create the hosted Codex scheduled task for
+   **09:00 Europe/London** with the platform default frontier model and the
+   designated Owner connection. Use this task prompt:
+
+   > Use `$daily-compliance-brief` for today's Europe/London date. Resolve the
+   > configured ComplianceHub workspace, call `prepare_daily_digest`, and stop
+   > successfully if already delivered. Summarise only returned facts, preserving
+   > exact numerical meanings, then call `post_daily_digest` once. Report failed
+   > or unknown delivery outcomes for human review and never retry an unknown.
+
+9. Keep delivery on the private channel for three scheduled runs, then move the
+   existing configured digest flag to the team channel. Dogfood for ten business
+   days while retaining the web application as the administration and fallback
+   surface. Review the first ten digests manually.
+
+V1 is accepted only when every numerical claim matches its fact bundle, no
+duplicate or unauthorised post occurs, no restricted content appears, and at
+least 95% of scheduled runs deliver successfully. An `unknown` outcome is not a
+successful delivery and always requires human review. Do not create the schedule
+before the registered app mapping and private-channel tests exist; a locally
+scheduled job cannot substitute for the hosted Owner OAuth connection.
 
 ## 6. Slack alert channel (optional) **(you)**
 

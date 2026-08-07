@@ -1,0 +1,26 @@
+{
+  "name": "compliancehub-internal",
+  "version": "0.1.0",
+  "description": "Inspect ComplianceHub status and deliver a verified daily Slack compliance brief.",
+  "author": {
+    "name": "ComplianceHub"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "ComplianceHub Internal",
+    "shortDescription": "Verified compliance status and daily Slack briefs",
+    "longDescription": "Securely inspect internal ComplianceHub readiness, risks, evidence health, monitoring findings, and leadership reports. Owners can deliver one fact-checked daily brief to the workspace's configured Slack channel.",
+    "developerName": "ComplianceHub",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Prepare today's verified compliance brief.",
+      "Show the compliance items needing attention.",
+      "Get the latest leadership compliance report."
+    ]
+  },
+  "apps": "./.app.json"
+}
