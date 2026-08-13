@@ -1,0 +1,59 @@
+name: Azure scheduled maintenance
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+    inputs:
+      route:
+        description: Maintenance route to invoke
+        required: true
+        type: choice
+        options:
+          - daily
+          - monitor
+
+permissions:
+  contents: read
+
+concurrency:
+  group: azure-maintenance-${{ github.event.schedule || inputs.route }}
+  cancel-in-progress: false
+
+jobs:
+  invoke:
+    runs-on: ubuntu-latest
+    environment: azure-staging
+    timeout-minutes: 10
+    steps:
+      - name: Select maintenance route
+        id: route
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_SCHEDULE: ${{ github.event.schedule }}
+          REQUESTED_ROUTE: ${{ inputs.route }}
+        run: |
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            route="$REQUESTED_ROUTE"
+          elif [[ "$EVENT_SCHEDULE" == "0 6 * * *" ]]; then
+            route="daily"
+          else
+            route="monitor"
+          fi
+          echo "route=$route" >> "$GITHUB_OUTPUT"
+
+      - name: Invoke authenticated maintenance route
+        env:
+          SITE_URL: ${{ vars.NEXT_PUBLIC_SITE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          ROUTE: ${{ steps.route.outputs.route }}
+        run: |
+          curl --request POST \
+            --fail-with-body \
+            --retry 2 \
+            --retry-all-errors \
+            --retry-delay 5 \
+            --max-time 300 \
+            --header "Authorization: Bearer ${CRON_SECRET}" \
+            "${SITE_URL}/api/cron/${ROUTE}"

@@ -94,18 +94,18 @@ describe("private ComplianceHub plugin safety contract", () => {
     const appMap = JSON.parse(read("plugins/compliancehub-internal/.app.json")) as { apps: object };
     const deployment = read("docs/deployment.md");
     const workflow = read(".github/workflows/ci.yml");
-    const vercel = JSON.parse(read("vercel.json")) as { crons: Array<{ path: string; schedule: string }> };
+    const maintenanceWorkflow = read(".github/workflows/azure-maintenance.yml");
+    const vercel = JSON.parse(read("vercel.json")) as { crons?: Array<{ path: string; schedule: string }> };
 
     expect(appMap.apps).toEqual({});
     expect(deployment).toMatch(/empty `apps` object[\s\S]*external registration gate/i);
-    expect(deployment).toMatch(/`GET \/api\/cron\/daily`[^\n]*`0 6 \* \* \*`[^\n]*06:00 UTC/i);
-    expect(deployment).toMatch(/`GET \/api\/cron\/monitor`[^\n]*`0 7 \* \* \*`[^\n]*07:00 UTC/i);
+    expect(deployment).toMatch(/`POST \/api\/cron\/daily`[^\n]*`0 6 \* \* \*`[^\n]*06:00 UTC/i);
+    expect(deployment).toMatch(/`POST \/api\/cron\/monitor`[^\n]*`0 7 \* \* \*`[^\n]*07:00 UTC/i);
     expect(deployment).toMatch(/integration sync[\s\S]*folded into[\s\S]*daily pipeline/i);
     expect(workflow.match(/version: 2\.109\.0/g)).toHaveLength(2);
     expect(workflow).not.toMatch(/version: latest/);
-    expect(vercel.crons).toEqual([
-      { path: "/api/cron/daily", schedule: "0 6 * * *" },
-      { path: "/api/cron/monitor", schedule: "0 7 * * *" },
-    ]);
+    expect(maintenanceWorkflow).toMatch(/cron: ["']0 6 \* \* \*["']/);
+    expect(maintenanceWorkflow).toMatch(/cron: ["']0 7 \* \* \*["']/);
+    expect(vercel.crons ?? []).toEqual([]);
   });
 });

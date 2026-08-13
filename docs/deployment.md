@@ -24,9 +24,61 @@ account owner can do; everything else is already prepared in the repo.
 2. Apply the committed migrations to it (link the project, then `supabase db push`, or run the SQL in order). Do **not** run `db reset` against production.
 3. From the project's API settings, copy: the **Project URL**, the **anon key**, and the **service-role key** (server-only).
 
-## 2. Vercel project + environment **(you)**
+## 2. Azure Container Apps staging **(you — external authorization checkpoint)**
 
-Create a Vercel project from this repo and set these environment variables (names must match exactly — see `.env.example`):
+The staging target is Azure Container Apps Consumption in UK South. It scales
+from zero to one replica and uses a public immutable image in GHCR; do not create
+an Azure Container Registry. Render, AWS, and Vercel hosting are not used.
+
+1. Install Azure CLI and Bicep, then sign in to the intended subscription.
+2. Deploy `infra/azure/foundation.bicep` at subscription scope. Supply the owner
+   email for budget alerts. The template creates the resource group, capped
+   30-day Log Analytics workspace, Consumption environment, bootstrap app, and a
+   one-unit monthly budget in the subscription's billing currency with 50%, 80%,
+   and 100% notifications.
+3. Record the `containerAppFqdn` output. Set `NEXT_PUBLIC_SITE_URL` to its HTTPS
+   origin and `MCP_RESOURCE_URL` to the same origin ending exactly in `/mcp`.
+4. Create the protected GitHub environment `azure-staging`. Configure the
+   variables and secrets below. Public values are build inputs; secret values
+   are secure Bicep parameters and Container Apps secret references.
+5. Create a Microsoft Entra application and GitHub federated credential only
+   after the account owner approves the persistent authorization. Limit its role
+   assignment to `rg-compliancehub-staging-uks`, not the whole subscription.
+6. Manually run **Deploy Azure staging** from `codex/internal-mcp-digest`. The
+   workflow verifies the app, publishes the exact commit image, applies
+   `infra/azure/application.bicep`, and checks liveness plus readiness. Automatic
+   `main` deployment begins only after the feature PR merges.
+   Before Azure authorization exists, run the same workflow once with **deploy**
+   disabled to prove the remote Linux image build without changing Azure.
+
+GitHub environment variables:
+
+| Variable | Value |
+|---|---|
+| `AZURE_RESOURCE_GROUP` | `rg-compliancehub-staging-uks` |
+| `AZURE_CONTAINER_ENVIRONMENT` | `cae-compliancehub-staging-uks` |
+| `AZURE_CONTAINER_APP` | `ca-compliancehub-staging` |
+| `NEXT_PUBLIC_SUPABASE_URL` | Staging Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Legacy public key, if still used |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Preferred public key |
+| `NEXT_PUBLIC_SITE_URL` | Exact Azure HTTPS origin |
+| `MCP_RESOURCE_URL` | Exact Azure HTTPS origin plus `/mcp` |
+| `SUPABASE_OAUTH_ISSUER` | `https://<project-ref>.supabase.co/auth/v1` |
+| `SUPABASE_OAUTH_JWKS_URL` | `<issuer>/.well-known/jwks.json` |
+| `MCP_JWT_ALGORITHMS` | `RS256,ES256` |
+
+GitHub environment secrets:
+
+| Secret | Purpose |
+|---|---|
+| `AZURE_CLIENT_ID` | OIDC application/client ID |
+| `AZURE_TENANT_ID` | OIDC tenant ID |
+| `AZURE_SUBSCRIPTION_ID` | Target subscription ID |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server-only cron and validated digest lifecycle |
+| `APP_ENCRYPTION_KEY` | Stable AES-256-GCM application key |
+| `CRON_SECRET` | Authenticates maintenance workflow calls |
+
+Application environment variables (names must match `.env.example`):
 
 | Variable | Required | Notes |
 |---|---|---|
@@ -48,20 +100,22 @@ Create a Vercel project from this repo and set these environment variables (name
 | `NANGO_GITHUB_INTEGRATION_ID` | for GitHub OAuth | Nango integration ID/unique key configured for the reviewed GitHub OAuth app. |
 | `NANGO_JIRA_INTEGRATION_ID` | for Jira OAuth | Nango integration ID/unique key configured for the reviewed Jira OAuth app. |
 
-## 3. Cron automation (already declared in `vercel.json`)
+## 3. Cron automation (GitHub Actions calling Azure)
 
-`vercel.json` declares two daily Vercel Cron entries in UTC; you only need `CRON_SECRET` set for them to work:
+`.github/workflows/azure-maintenance.yml` declares two UTC schedules and calls
+the Azure origin with `CRON_SECRET` from the protected `azure-staging`
+environment:
 
-- `GET /api/cron/daily` — `0 6 * * *` (06:00 UTC daily). First classifies digest reservations left in-flight for more than 15 minutes as `unknown` for human review (never automatic retry), collects evidence, runs integration sync, and then performs the evidence-freshness + policy-review sweep. Notifications are deduplicated per day and a new task is opened only when none is already open for that item, so retries and manual runs are safe.
-- `GET /api/cron/monitor` — `0 7 * * *` (07:00 UTC daily). Checks every organisation's configured monitoring sources, reconciles findings, and sends enabled finding alerts.
+- `POST /api/cron/daily` — `0 6 * * *` (06:00 UTC daily). First classifies digest reservations left in-flight for more than 15 minutes as `unknown` for human review (never automatic retry), collects evidence, runs integration sync, and then performs the evidence-freshness + policy-review sweep. Notifications are deduplicated per day and a new task is opened only when none is already open for that item, so retries and manual runs are safe.
+- `POST /api/cron/monitor` — `0 7 * * *` (07:00 UTC daily). Checks every organisation's configured monitoring sources, reconciles findings, and sends enabled finding alerts.
 
 Integration sync is folded into the 06:00 UTC daily pipeline. The compatibility route `POST /api/cron/integrations-sync` remains available for a deliberate manual run, but it has no separate Vercel schedule and must not be described or deployed as an hourly cron.
 
-Vercel Cron sends `Authorization: Bearer <CRON_SECRET>`; each route rejects any request whose bearer token does not match. Manual invocation in development:
+The workflow sends `Authorization: Bearer <CRON_SECRET>`; each route rejects any request whose bearer token does not match. Manual invocation in development:
 
 ```bash
-curl -i -X GET http://localhost:3000/api/cron/daily   -H "Authorization: Bearer $CRON_SECRET"
-curl -i -X GET http://localhost:3000/api/cron/monitor -H "Authorization: Bearer $CRON_SECRET"
+curl -i -X POST http://localhost:3000/api/cron/daily   -H "Authorization: Bearer $CRON_SECRET"
+curl -i -X POST http://localhost:3000/api/cron/monitor -H "Authorization: Bearer $CRON_SECRET"
 ```
 
 The MCP daily-digest write also requires `SUPABASE_SERVICE_ROLE_KEY`. The OAuth
@@ -76,7 +130,9 @@ cannot execute either lifecycle RPC directly.
 1. Verify a dedicated sending subdomain in Resend and publish the required SPF and DKIM records; publish a DMARC policy as well. Create `RESEND_API_KEY` and set `INVITATION_FROM_EMAIL` only after verification. This enables ComplianceHub's workspace-membership invitations.
 2. Configure a custom SMTP provider in Supabase Auth for sign-up, confirmation, password-reset, and other Auth-owned emails, with the verified application URL matching `NEXT_PUBLIC_SITE_URL`. This is separate from the Resend HTTP adapter used for workspace-membership invitations.
 3. Spend controls, monitoring, and database backups; exercise a restore into a separate project before public launch.
-4. The Supabase free tier and Vercel Hobby are for development, not dependable/commercial production (projects can pause; backups are limited).
+4. Supabase Free and Azure's monthly Container Apps grant are for internal
+   staging, not a dependable production SLA. Scale-to-zero creates cold starts;
+   budget alerts do not impose a hard spending cap.
 5. Confirm the hosted project's exposed schemas remain the Supabase defaults and
    verify Storage operations through the official API. `storage.objects` is owned
    by `supabase_storage_admin`; do not change its ownership or revoke its managed
