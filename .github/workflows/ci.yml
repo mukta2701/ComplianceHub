@@ -8,6 +8,25 @@ permissions:
   contents: read
 
 jobs:
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build production container
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          platforms: linux/amd64
+          build-args: |
+            NEXT_PUBLIC_SUPABASE_URL=https://example.supabase.co
+            NEXT_PUBLIC_SUPABASE_ANON_KEY=ci-anon-key-placeholder-long
+            NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=ci-publishable-key-placeholder-long
+            NEXT_PUBLIC_SITE_URL=https://compliancehub-staging.example
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   application:
     runs-on: ubuntu-latest
     steps:
