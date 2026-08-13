@@ -50,6 +50,12 @@ an Azure Container Registry. Render, AWS, and Vercel hosting are not used.
    `main` deployment begins only after the feature PR merges.
    Before Azure authorization exists, run the same workflow once with **deploy**
    disabled to prove the remote Linux image build without changing Azure.
+7. The first GHCR publish creates a private package. In GitHub package settings,
+   change `mukta2701/compliancehub` to public before the first Azure deployment;
+   Container Apps intentionally has no long-lived registry credential. This is
+   a separate account-level visibility change and requires owner confirmation at
+   the time it is made. Verify anonymous access to the exact image digest before
+   deploying it.
 
 GitHub environment variables:
 
@@ -59,7 +65,7 @@ GitHub environment variables:
 | `AZURE_CONTAINER_ENVIRONMENT` | `cae-compliancehub-staging-uks` |
 | `AZURE_CONTAINER_APP` | `ca-compliancehub-staging` |
 | `NEXT_PUBLIC_SUPABASE_URL` | Staging Supabase project URL |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Legacy public key, if still used |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Required legacy public key used by current browser/server clients |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Preferred public key |
 | `NEXT_PUBLIC_SITE_URL` | Exact Azure HTTPS origin |
 | `MCP_RESOURCE_URL` | Exact Azure HTTPS origin plus `/mcp` |

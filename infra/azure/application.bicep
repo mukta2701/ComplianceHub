@@ -4,9 +4,10 @@ param location string = resourceGroup().location
 param managedEnvironmentName string = 'cae-compliancehub-staging-uks'
 param containerAppName string = 'ca-compliancehub-staging'
 param imageReference string
+param revisionSuffix string
 
 param nextPublicSupabaseUrl string
-param nextPublicSupabaseAnonKey string = ''
+param nextPublicSupabaseAnonKey string
 param nextPublicSupabasePublishableKey string = ''
 param nextPublicSiteUrl string
 param mcpResourceUrl string
@@ -63,6 +64,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
       ]
     }
     template: {
+      revisionSuffix: revisionSuffix
       containers: [
         {
           name: 'compliancehub'

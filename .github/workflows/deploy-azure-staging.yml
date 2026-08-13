@@ -109,6 +109,7 @@ jobs:
             --arg managedEnvironmentName "$AZURE_CONTAINER_ENVIRONMENT" \
             --arg containerAppName "$AZURE_CONTAINER_APP" \
             --arg imageReference "$IMAGE_REFERENCE" \
+            --arg revisionSuffix "run-${GITHUB_RUN_ID}" \
             --arg nextPublicSupabaseUrl "${{ vars.NEXT_PUBLIC_SUPABASE_URL }}" \
             --arg nextPublicSupabaseAnonKey "${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY }}" \
             --arg nextPublicSupabasePublishableKey "${{ vars.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}" \
@@ -124,6 +125,7 @@ jobs:
                 managedEnvironmentName: { value: $managedEnvironmentName },
                 containerAppName: { value: $containerAppName },
                 imageReference: { value: $imageReference },
+                revisionSuffix: { value: $revisionSuffix },
                 nextPublicSupabaseUrl: { value: $nextPublicSupabaseUrl },
                 nextPublicSupabaseAnonKey: { value: $nextPublicSupabaseAnonKey },
                 nextPublicSupabasePublishableKey: { value: $nextPublicSupabasePublishableKey },

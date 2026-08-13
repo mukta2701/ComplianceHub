@@ -18,6 +18,11 @@ startup, liveness, and Supabase-aware readiness probes. Azure retains five
 inactive revisions; single-revision mode keeps traffic on the previous healthy
 revision when a replacement cannot become ready.
 
+The first GHCR package is private by default. The owner must explicitly approve
+making that package public before Azure is allowed to pull it anonymously. Each
+deployment supplies a unique revision suffix so same-image secret rotations also
+create a fresh revision and cannot leave the running process on stale secrets.
+
 The foundation deployment creates the staging resource group, bounded Log
 Analytics workspace, Consumption Container Apps environment, bootstrap app, and
 a one-unit monthly budget in the subscription's billing currency. Logging is
