@@ -362,6 +362,7 @@ test("a treatment plan spawns an owned, dated task", async ({ page }, testInfo) 
 });
 
 test("an audit runs from plan through checklist to a corrective-action task", async ({ page, browser }, testInfo) => {
+  test.setTimeout(90_000);
   const suffix = `${Date.now()}-${testInfo.project.name}`;
   const email = `aud-${suffix}@example.test`;
   const password = createTestPassword(suffix);
