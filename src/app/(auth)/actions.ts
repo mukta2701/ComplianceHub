@@ -48,7 +48,7 @@ export async function signUpAction(formData: FormData) {
   const result = signUpSchema.safeParse(Object.fromEntries(formData));
   if (!result.success) redirect(message("/sign-up", result.error.issues[0]?.message ?? "Check your details.", next));
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.auth.signUp({ email: result.data.email, password: result.data.password, options: { data: { display_name: result.data.displayName }, emailRedirectTo: authCallbackUrl(next) } });
+  const { data, error } = await supabase.auth.signUp({ email: result.data.email, password: result.data.password, options: { data: { display_name: result.data.displayName }, emailRedirectTo: authCallbackUrl(next) } });
   if (error) {
     console.error(
       "Supabase authentication request failed",
@@ -57,6 +57,7 @@ export async function signUpAction(formData: FormData) {
     const failure = authFailureMessage(error.message, "sign-up");
     redirect(message(failure.path, failure.message, next));
   }
+  if (data.session) redirect(next);
   redirect(message("/sign-in", "Check your email to confirm your account.", next));
 }
 

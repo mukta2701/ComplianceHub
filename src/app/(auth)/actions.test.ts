@@ -19,11 +19,15 @@ import { signInAction, signInWithOAuthAction, signUpAction } from "./actions";
 function authClient(options: {
   passwordError?: unknown;
   signupError?: unknown;
+  signupSession?: object | null;
   oauthError?: unknown;
   oauthUrl?: string | null;
 } = {}) {
   const signInWithPassword = vi.fn().mockResolvedValue({ error: options.passwordError ?? null });
-  const signUp = vi.fn().mockResolvedValue({ error: options.signupError ?? null });
+  const signUp = vi.fn().mockResolvedValue({
+    data: { session: options.signupSession ?? null },
+    error: options.signupError ?? null,
+  });
   const signInWithOAuth = vi.fn().mockResolvedValue({
     data: { url: options.oauthUrl === undefined ? "https://provider.example/authorize" : options.oauthUrl },
     error: options.oauthError ?? null,
@@ -113,6 +117,13 @@ describe("post-auth continuation", () => {
         emailRedirectTo: "https://app.example.com/auth/callback?next=%2Finvite",
       }),
     }));
+  });
+
+  it("enters the requested app route when staging signup returns an authenticated session", async () => {
+    const auth = authClient({ signupSession: {} });
+    hoisted.serverClient = auth.value;
+
+    await expect(signUpAction(signUpForm("/app"))).rejects.toThrow("REDIRECT:/app");
   });
 
   it("strips invite query/hash data from password and confirmation continuations", async () => {
