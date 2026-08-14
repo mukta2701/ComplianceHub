@@ -19,8 +19,7 @@
     "defaultPrompt": [
       "Prepare today's verified compliance brief without posting.",
       "Post today's verified compliance brief to the configured Slack channel.",
-      "Show the compliance items needing attention.",
-      "Get the latest leadership compliance report."
+      "Show the compliance items needing attention and the latest leadership report."
     ]
   },
   "apps": "./.app.json"

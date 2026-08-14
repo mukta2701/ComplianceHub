@@ -2,8 +2,8 @@ name: Azure scheduled maintenance
 
 on:
   schedule:
-    - cron: "0 6 * * *"
-    - cron: "0 7 * * *"
+    - cron: "7 6 * * *"
+    - cron: "13 7 * * *"
   workflow_dispatch:
     inputs:
       route:
@@ -36,7 +36,7 @@ jobs:
         run: |
           if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
             route="$REQUESTED_ROUTE"
-          elif [[ "$EVENT_SCHEDULE" == "0 6 * * *" ]]; then
+          elif [[ "$EVENT_SCHEDULE" == "7 6 * * *" ]]; then
             route="daily"
           else
             route="monitor"

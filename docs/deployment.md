@@ -40,22 +40,30 @@ an Azure Container Registry. Render, AWS, and Vercel hosting are not used.
    origin and `MCP_RESOURCE_URL` to the same origin ending exactly in `/mcp`.
 4. Create the protected GitHub environment `azure-staging`. Configure the
    variables and secrets below. Public values are build inputs; secret values
-   are secure Bicep parameters and Container Apps secret references.
+   are written directly to alternating Container Apps secret slots and are never
+   placed in the Bicep parameters file or container image.
 5. Create a Microsoft Entra application and GitHub federated credential only
-   after the account owner approves the persistent authorization. Limit its role
-   assignment to `rg-compliancehub-staging-uks`, not the whole subscription.
-6. Manually run **Deploy Azure staging** from `codex/internal-mcp-digest`. The
-   workflow verifies the app, publishes the exact commit image, applies
-   `infra/azure/application.bicep`, and checks liveness plus readiness. Automatic
-   `main` deployment begins only after the feature PR merges.
-   Before Azure authorization exists, run the same workflow once with **deploy**
-   disabled to prove the remote Linux image build without changing Azure.
-7. The first GHCR publish creates a private package. In GitHub package settings,
-   change `mukta2701/compliancehub` to public before the first Azure deployment;
-   Container Apps intentionally has no long-lived registry credential. This is
-   a separate account-level visibility change and requires owner confirmation at
-   the time it is made. Verify anonymous access to the exact image digest before
-   deploying it.
+   after the account owner approves the persistent authorization. Grant only the
+   custom ARM-deployment role at the staging resource group, Container App
+   read/write at the exact app, and managed-environment read/join at the exact
+   environment. Azure CLI also needs `listSecrets/action` at that exact app to
+   preserve the untouched rollback slot during its update; never print that
+   response. Do not grant subscription scope, Contributor, delete, exec, or
+   role-management permissions.
+6. The **Deploy Azure staging** workflow publishes and deploys `main` only after
+   the complete `CI` workflow succeeds. A manual run may publish without
+   deploying, or deploy a deliberately selected ref after the workflow exists on
+   the default branch. The deploy job alone receives the Azure OIDC token and
+   environment secrets; build and test actions run outside that trust boundary.
+7. Verify the GHCR package is anonymously pullable before deployment. This
+   public repository's package inherits public visibility, so Container Apps
+   needs no long-lived registry credential. The workflow deploys the immutable
+   image digest, not a mutable tag.
+8. Each rollout writes credentials to the secret slot not referenced by the
+   previous healthy revision, creates a new revision even on a rerun, validates
+   liveness, readiness, OAuth resource metadata, and the unauthenticated MCP
+   challenge, then retains the prior slot for rollback. On failure it copies the
+   previous healthy revision and verifies its health.
 
 GitHub environment variables:
 
@@ -112,10 +120,10 @@ Application environment variables (names must match `.env.example`):
 the Azure origin with `CRON_SECRET` from the protected `azure-staging`
 environment:
 
-- `POST /api/cron/daily` — `0 6 * * *` (06:00 UTC daily). First classifies digest reservations left in-flight for more than 15 minutes as `unknown` for human review (never automatic retry), collects evidence, runs integration sync, and then performs the evidence-freshness + policy-review sweep. Notifications are deduplicated per day and a new task is opened only when none is already open for that item, so retries and manual runs are safe.
-- `POST /api/cron/monitor` — `0 7 * * *` (07:00 UTC daily). Checks every organisation's configured monitoring sources, reconciles findings, and sends enabled finding alerts.
+- `POST /api/cron/daily` — `7 6 * * *` (06:07 UTC daily). First classifies digest reservations left in-flight for more than 15 minutes as `unknown` for human review (never automatic retry), collects evidence, runs integration sync, and then performs the evidence-freshness + policy-review sweep. Notifications are deduplicated per day and a new task is opened only when none is already open for that item, so retries and manual runs are safe.
+- `POST /api/cron/monitor` — `13 7 * * *` (07:13 UTC daily). Checks every organisation's configured monitoring sources, reconciles findings, and sends enabled finding alerts. Non-zero minutes avoid GitHub Actions' highest scheduled-load window.
 
-Integration sync is folded into the 06:00 UTC daily pipeline. The compatibility route `POST /api/cron/integrations-sync` remains available for a deliberate manual run, but it has no separate Vercel schedule and must not be described or deployed as an hourly cron.
+Integration sync is folded into the 06:07 UTC daily pipeline. The compatibility route `POST /api/cron/integrations-sync` remains available for a deliberate manual run, but it has no separate Vercel schedule and must not be described or deployed as an hourly cron.
 
 The workflow sends `Authorization: Bearer <CRON_SECRET>`; each route rejects any request whose bearer token does not match. Manual invocation in development:
 
@@ -372,13 +380,17 @@ a misleading, non-working install.
    date. Exercise a confirmed Slack rejection and an ambiguous network outcome;
    only the confirmed failure may be retried.
 8. Only after those three runs pass, create the hosted Codex scheduled task for
-   **09:00 Europe/London** with the platform default frontier model and the
-   designated Owner connection. Use this task prompt:
+   **09:00 Europe/London** with the platform default model and reasoning settings
+   and the designated Owner connection. First call `list_workspaces`. If the
+   Owner can access more than one workspace, put the exact intended workspace
+   UUID in the saved prompt; do not rely on a display name or an undefined
+   "configured workspace". Use this task prompt:
 
    > This is the trusted hosted scheduled-post invocation. Use
    > `$daily-compliance-brief` for today's Europe/London date and deliver the
-   > result to the configured Slack channel. Resolve the configured ComplianceHub
-   > workspace, call `prepare_daily_digest`, and stop successfully if already
+   > result to the configured Slack channel. Resolve the single accessible
+   > ComplianceHub workspace, or use the exact saved workspace UUID, call
+   > `prepare_daily_digest`, and stop successfully if already
    > delivered. Summarise only returned facts using the skill's exact composition
    > contract, then call `post_daily_digest` once. Report failed or unknown
    > delivery outcomes for human review and never retry an unknown.

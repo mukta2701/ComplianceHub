@@ -18,10 +18,12 @@ startup, liveness, and Supabase-aware readiness probes. Azure retains five
 inactive revisions; single-revision mode keeps traffic on the previous healthy
 revision when a replacement cannot become ready.
 
-The first GHCR package is private by default. The owner must explicitly approve
-making that package public before Azure is allowed to pull it anonymously. Each
-deployment supplies a unique revision suffix so same-image secret rotations also
-create a fresh revision and cannot leave the running process on stale secrets.
+The package inherits public visibility from the public source repository and its
+immutable digest is verified as anonymously pullable before deployment. Each
+deployment supplies a run-and-attempt revision suffix so same-image secret
+rotations create a fresh revision. Credentials alternate between two secret
+slots: the previous healthy revision's slot is never overwritten until a newer
+revision has passed the functional smoke tests, preserving one-step rollback.
 
 The foundation deployment creates the staging resource group, bounded Log
 Analytics workspace, Consumption Container Apps environment, bootstrap app, and
@@ -32,11 +34,16 @@ retained for 30 days and capped at 0.1 GB per day. Budget notifications fire at
 ## Configuration and trust boundaries
 
 Public Supabase and site values are supplied both to the image build and runtime.
-The service-role key, application encryption key, and cron secret are secure
-Bicep parameters backed by GitHub environment secrets and become Container Apps
-secret references. They never enter the public image. GitHub authenticates to
-Azure with OIDC; the resulting principal receives deployment access only to the
-staging resource group.
+The service-role key, application encryption key, and cron secret are GitHub
+environment secrets written directly to the inactive Container Apps secret slot;
+only their reference names enter Bicep. They never enter the public image or a
+deployment parameters file. GitHub authenticates to Azure with OIDC. The
+resulting principal can create and inspect ARM deployments at the staging
+resource group, update only the exact Container App, and read/join only the exact
+managed environment. At the exact app only, `listSecrets/action` lets Azure CLI
+retain the untouched rollback slot while updating the inactive slot; the
+workflow never emits its response. The principal cannot delete resources,
+execute in the container, manage roles, or act at subscription scope.
 
 After the bootstrap hostname is known, it becomes `NEXT_PUBLIC_SITE_URL` and its
 exact `/mcp` path becomes `MCP_RESOURCE_URL`. Supabase Auth receives the matching
@@ -47,10 +54,17 @@ unchanged.
 ## Scheduling and rollout
 
 GitHub Actions replaces the unused Vercel schedules by invoking the authenticated
-daily and monitoring routes at 06:00 and 07:00 UTC. The daily Slack digest stays
-a separate hosted Codex task at 09:00 Europe/London. The deployment is first run
-manually from `codex/internal-mcp-digest`; automatic `main` deployments begin only
-after the feature pull request is accepted.
+daily and monitoring routes at 06:07 and 07:13 UTC, avoiding the top-of-hour
+scheduler peak. The daily Slack digest stays a separate hosted Codex task at
+09:00 Europe/London. After the one-time staging bootstrap, feature pushes no
+longer deploy. A successful complete `CI` run on `main` triggers immutable image
+publication and deployment; a failed CI run cannot publish or change Azure.
+
+The deploy job captures the previous healthy revision, validates process and
+database health, OAuth protected-resource metadata, and the unauthenticated MCP
+challenge. If any rollout or functional check fails, it copies the previous
+revision using the still-retained previous secret slot and verifies restored
+health.
 
 Acceptance requires a clean repository verification, a non-root container,
 successful health checks, OAuth and MCP client tests, digest shadow comparison,

@@ -15,14 +15,9 @@ param supabaseOauthIssuer string
 param supabaseOauthJwksUrl string
 param mcpJwtAlgorithms string = 'RS256,ES256'
 
-@secure()
-param supabaseServiceRoleKey string
-
-@secure()
-param appEncryptionKey string
-
-@secure()
-param cronSecret string
+param supabaseRefName string
+param encryptionRefName string
+param cronRefName string
 
 resource environment 'Microsoft.App/managedEnvironments@2024-03-01' existing = {
   name: managedEnvironmentName
@@ -48,20 +43,6 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
           }
         ]
       }
-      secrets: [
-        {
-          name: 'supabase-service-role-key'
-          value: supabaseServiceRoleKey
-        }
-        {
-          name: 'app-encryption-key'
-          value: appEncryptionKey
-        }
-        {
-          name: 'cron-secret'
-          value: cronSecret
-        }
-      ]
     }
     template: {
       revisionSuffix: revisionSuffix
@@ -78,9 +59,9 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
             { name: 'SUPABASE_OAUTH_ISSUER', value: supabaseOauthIssuer }
             { name: 'SUPABASE_OAUTH_JWKS_URL', value: supabaseOauthJwksUrl }
             { name: 'MCP_JWT_ALGORITHMS', value: mcpJwtAlgorithms }
-            { name: 'SUPABASE_SERVICE_ROLE_KEY', secretRef: 'supabase-service-role-key' }
-            { name: 'APP_ENCRYPTION_KEY', secretRef: 'app-encryption-key' }
-            { name: 'CRON_SECRET', secretRef: 'cron-secret' }
+            { name: 'SUPABASE_SERVICE_ROLE_KEY', secretRef: supabaseRefName }
+            { name: 'APP_ENCRYPTION_KEY', secretRef: encryptionRefName }
+            { name: 'CRON_SECRET', secretRef: cronRefName }
           ]
           resources: {
             cpu: json('0.5')

@@ -21,6 +21,7 @@ describe("private ComplianceHub plugin safety contract", () => {
     expect(skill).toMatch(/ordinary chat[\s\S]*scheduled[\s\S]*not enough/i);
     expect(skill).toMatch(/`delivery_failed`[\s\S]*continue composing[\s\S]*PREPARE-ONLY/i);
     expect(manifest.interface.defaultPrompt[0]).toMatch(/without posting/i);
+    expect(manifest.interface.defaultPrompt.length).toBeLessThanOrEqual(3);
     expect(openAi).toMatch(/default_prompt:.*without posting/i);
   });
 
@@ -99,13 +100,13 @@ describe("private ComplianceHub plugin safety contract", () => {
 
     expect(appMap.apps).toEqual({});
     expect(deployment).toMatch(/empty `apps` object[\s\S]*external registration gate/i);
-    expect(deployment).toMatch(/`POST \/api\/cron\/daily`[^\n]*`0 6 \* \* \*`[^\n]*06:00 UTC/i);
-    expect(deployment).toMatch(/`POST \/api\/cron\/monitor`[^\n]*`0 7 \* \* \*`[^\n]*07:00 UTC/i);
+    expect(deployment).toMatch(/`POST \/api\/cron\/daily`[^\n]*`7 6 \* \* \*`[^\n]*06:07 UTC/i);
+    expect(deployment).toMatch(/`POST \/api\/cron\/monitor`[^\n]*`13 7 \* \* \*`[^\n]*07:13 UTC/i);
     expect(deployment).toMatch(/integration sync[\s\S]*folded into[\s\S]*daily pipeline/i);
     expect(workflow.match(/version: 2\.109\.0/g)).toHaveLength(2);
     expect(workflow).not.toMatch(/version: latest/);
-    expect(maintenanceWorkflow).toMatch(/cron: ["']0 6 \* \* \*["']/);
-    expect(maintenanceWorkflow).toMatch(/cron: ["']0 7 \* \* \*["']/);
+    expect(maintenanceWorkflow).toMatch(/cron: ["']7 6 \* \* \*["']/);
+    expect(maintenanceWorkflow).toMatch(/cron: ["']13 7 \* \* \*["']/);
     expect(vercel.crons ?? []).toEqual([]);
   });
 });

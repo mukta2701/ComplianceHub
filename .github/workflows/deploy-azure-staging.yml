@@ -8,18 +8,10 @@ on:
         required: true
         type: boolean
         default: true
-  push:
-    branches: [main, codex/internal-mcp-digest]
-    paths:
-      - "src/**"
-      - "public/**"
-      - "infra/azure/**"
-      - "Dockerfile"
-      - ".dockerignore"
-      - "next.config.ts"
-      - "package.json"
-      - "package-lock.json"
-      - ".github/workflows/deploy-azure-staging.yml"
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: read
@@ -34,9 +26,11 @@ env:
   AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
   AZURE_CONTAINER_APP: ${{ vars.AZURE_CONTAINER_APP }}
   AZURE_CONTAINER_ENVIRONMENT: ${{ vars.AZURE_CONTAINER_ENVIRONMENT }}
+  DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
 
 jobs:
   publish:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -45,9 +39,11 @@ jobs:
     outputs:
       image-digest: ${{ steps.build.outputs.digest }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: npm
@@ -63,23 +59,23 @@ jobs:
           NEXT_PUBLIC_SITE_URL: ${{ vars.NEXT_PUBLIC_SITE_URL }}
 
       - name: Log in to GHCR
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
       - name: Build and publish immutable image
         id: build
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           push: true
           platforms: linux/amd64
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.DEPLOY_SHA }}
           build-args: |
             NEXT_PUBLIC_SUPABASE_URL=${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
             NEXT_PUBLIC_SUPABASE_ANON_KEY=${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
@@ -90,10 +86,7 @@ jobs:
 
   deploy:
     needs: publish
-    if: >-
-      github.ref == 'refs/heads/main' ||
-      (github.ref == 'refs/heads/codex/internal-mcp-digest' && vars.GHCR_PUBLIC_READY == 'true') ||
-      (github.event_name == 'workflow_dispatch' && inputs.deploy)
+    if: github.event_name == 'workflow_run' || inputs.deploy
     runs-on: ubuntu-latest
     environment: azure-staging
     timeout-minutes: 20
@@ -101,21 +94,65 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
 
       - name: Log in to Azure with OIDC
-        uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6 # v2
+        uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca # v3.0.1
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Deploy immutable image and configuration
+      - name: Capture rollback revision and select inactive secret slot
+        id: rollout
+        run: |
+          previous_revision="$(az containerapp show \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_CONTAINER_APP" \
+            --query properties.latestReadyRevisionName \
+            --output tsv)"
+          current_service_ref=""
+          if [ -n "$previous_revision" ]; then
+            current_service_ref="$(az containerapp revision show \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --name "$AZURE_CONTAINER_APP" \
+              --revision "$previous_revision" \
+              --query 'properties.template.containers[0].env' \
+              --output json | jq -r '.[] | select(.name == "SUPABASE_SERVICE_ROLE_KEY") | .secretRef // empty')"
+          fi
+          if [ "$current_service_ref" = "supabase-service-role-a" ]; then
+            secret_slot="b"
+          else
+            secret_slot="a"
+          fi
+          {
+            echo "previous-revision=$previous_revision"
+            echo "service-role-ref=supabase-service-role-$secret_slot"
+            echo "encryption-ref=app-encryption-$secret_slot"
+            echo "cron-ref=cron-secret-$secret_slot"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Stage rollback-safe secret slot
         env:
-          IMAGE_REFERENCE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.publish.outputs.image-digest }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           APP_ENCRYPTION_KEY: ${{ secrets.APP_ENCRYPTION_KEY }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          az containerapp secret set \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_CONTAINER_APP" \
+            --secrets \
+              "${{ steps.rollout.outputs.service-role-ref }}=$SUPABASE_SERVICE_ROLE_KEY" \
+              "${{ steps.rollout.outputs.encryption-ref }}=$APP_ENCRYPTION_KEY" \
+              "${{ steps.rollout.outputs.cron-ref }}=$CRON_SECRET" \
+            --only-show-errors \
+            --output none
+
+      - name: Deploy immutable image and configuration
+        env:
+          IMAGE_REFERENCE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.publish.outputs.image-digest }}
         run: |
           parameters_file="$(mktemp "$RUNNER_TEMP/compliancehub-parameters.XXXXXX.json")"
           trap 'rm -f "$parameters_file"' EXIT
@@ -124,7 +161,7 @@ jobs:
             --arg managedEnvironmentName "$AZURE_CONTAINER_ENVIRONMENT" \
             --arg containerAppName "$AZURE_CONTAINER_APP" \
             --arg imageReference "$IMAGE_REFERENCE" \
-            --arg revisionSuffix "run-${GITHUB_RUN_ID}" \
+            --arg revisionSuffix "run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
             --arg nextPublicSupabaseUrl "${{ vars.NEXT_PUBLIC_SUPABASE_URL }}" \
             --arg nextPublicSupabaseAnonKey "${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY }}" \
             --arg nextPublicSupabasePublishableKey "${{ vars.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}" \
@@ -133,6 +170,9 @@ jobs:
             --arg supabaseOauthIssuer "${{ vars.SUPABASE_OAUTH_ISSUER }}" \
             --arg supabaseOauthJwksUrl "${{ vars.SUPABASE_OAUTH_JWKS_URL }}" \
             --arg mcpJwtAlgorithms "${{ vars.MCP_JWT_ALGORITHMS }}" \
+            --arg supabaseRefName "${{ steps.rollout.outputs.service-role-ref }}" \
+            --arg encryptionRefName "${{ steps.rollout.outputs.encryption-ref }}" \
+            --arg cronRefName "${{ steps.rollout.outputs.cron-ref }}" \
             '{
               "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
               contentVersion: "1.0.0.0",
@@ -149,9 +189,9 @@ jobs:
                 supabaseOauthIssuer: { value: $supabaseOauthIssuer },
                 supabaseOauthJwksUrl: { value: $supabaseOauthJwksUrl },
                 mcpJwtAlgorithms: { value: $mcpJwtAlgorithms },
-                supabaseServiceRoleKey: { value: env.SUPABASE_SERVICE_ROLE_KEY },
-                appEncryptionKey: { value: env.APP_ENCRYPTION_KEY },
-                cronSecret: { value: env.CRON_SECRET }
+                supabaseRefName: { value: $supabaseRefName },
+                encryptionRefName: { value: $encryptionRefName },
+                cronRefName: { value: $cronRefName }
               }
             }' > "$parameters_file"
           az deployment group create \
@@ -162,8 +202,43 @@ jobs:
             --only-show-errors \
             --output none
 
-      - name: Verify deployed liveness and readiness
+      - name: Verify deployed health and OAuth/MCP contract
+        env:
+          AUTHORIZATION_SERVER: ${{ vars.SUPABASE_OAUTH_ISSUER }}
         run: |
+          fqdn="$(az containerapp show --resource-group "$AZURE_RESOURCE_GROUP" --name "$AZURE_CONTAINER_APP" --query properties.configuration.ingress.fqdn --output tsv)"
+          origin="https://${fqdn}"
+          curl --fail-with-body --retry 5 --retry-all-errors --retry-delay 5 --max-time 120 "$origin/api/health/live"
+          curl --fail-with-body --retry 5 --retry-all-errors --retry-delay 5 --max-time 120 "$origin/api/health"
+          curl --fail-with-body --retry 5 --retry-all-errors --retry-delay 5 --max-time 120 \
+            "$origin/.well-known/oauth-protected-resource" | jq --exit-status \
+            --arg resource "$origin/mcp" \
+            --arg authorizationServer "$AUTHORIZATION_SERVER" \
+            '.resource == $resource and .authorization_servers == [$authorizationServer] and .scopes_supported == ["openid", "email", "profile"]'
+          headers_file="$(mktemp "$RUNNER_TEMP/compliancehub-mcp-headers.XXXXXX")"
+          trap 'rm -f "$headers_file"' EXIT
+          mcp_status="$(curl --silent --show-error \
+            --output /dev/null \
+            --dump-header "$headers_file" \
+            --write-out '%{http_code}' \
+            --request POST \
+            --header 'content-type: application/json' \
+            --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"deploy-smoke","version":"1.0.0"}}}' \
+            "$origin/mcp")"
+          test "$mcp_status" = "401"
+          tr -d '\r' < "$headers_file" | grep --fixed-strings --ignore-case \
+            "www-authenticate: Bearer resource_metadata=\"$origin/.well-known/oauth-protected-resource\""
+
+      - name: Restore the previous healthy revision after a failed rollout
+        if: failure() && steps.rollout.outputs.previous-revision != ''
+        run: |
+          az containerapp revision copy \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_CONTAINER_APP" \
+            --from-revision "${{ steps.rollout.outputs.previous-revision }}" \
+            --revision-suffix "rollback-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --only-show-errors \
+            --output none
           fqdn="$(az containerapp show --resource-group "$AZURE_RESOURCE_GROUP" --name "$AZURE_CONTAINER_APP" --query properties.configuration.ingress.fqdn --output tsv)"
           curl --fail-with-body --retry 5 --retry-all-errors --retry-delay 5 --max-time 120 "https://${fqdn}/api/health/live"
           curl --fail-with-body --retry 5 --retry-all-errors --retry-delay 5 --max-time 120 "https://${fqdn}/api/health"
