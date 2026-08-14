@@ -9,7 +9,7 @@ on:
         type: boolean
         default: true
   push:
-    branches: [main]
+    branches: [main, codex/internal-mcp-digest]
     paths:
       - "src/**"
       - "public/**"
@@ -23,8 +23,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
-  id-token: write
 
 concurrency:
   group: compliancehub-azure-staging
@@ -38,14 +36,18 @@ env:
   AZURE_CONTAINER_ENVIRONMENT: ${{ vars.AZURE_CONTAINER_ENVIRONMENT }}
 
 jobs:
-  deploy:
+  publish:
     runs-on: ubuntu-latest
-    environment: azure-staging
     timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image-digest: ${{ steps.build.outputs.digest }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
@@ -61,18 +63,18 @@ jobs:
           NEXT_PUBLIC_SITE_URL: ${{ vars.NEXT_PUBLIC_SITE_URL }}
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Build and publish immutable image
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           push: true
@@ -86,18 +88,31 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  deploy:
+    needs: publish
+    if: >-
+      github.ref == 'refs/heads/main' ||
+      (github.ref == 'refs/heads/codex/internal-mcp-digest' && vars.GHCR_PUBLIC_READY == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.deploy)
+    runs-on: ubuntu-latest
+    environment: azure-staging
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
       - name: Log in to Azure with OIDC
-        if: github.event_name == 'push' || inputs.deploy
-        uses: azure/login@v2
+        uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6 # v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Deploy immutable image and configuration
-        if: github.event_name == 'push' || inputs.deploy
         env:
-          IMAGE_REFERENCE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          IMAGE_REFERENCE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.publish.outputs.image-digest }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           APP_ENCRYPTION_KEY: ${{ secrets.APP_ENCRYPTION_KEY }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
@@ -148,7 +163,6 @@ jobs:
             --output none
 
       - name: Verify deployed liveness and readiness
-        if: github.event_name == 'push' || inputs.deploy
         run: |
           fqdn="$(az containerapp show --resource-group "$AZURE_RESOURCE_GROUP" --name "$AZURE_CONTAINER_APP" --query properties.configuration.ingress.fqdn --output tsv)"
           curl --fail-with-body --retry 5 --retry-all-errors --retry-delay 5 --max-time 120 "https://${fqdn}/api/health/live"
