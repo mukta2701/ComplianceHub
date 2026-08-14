@@ -150,55 +150,32 @@ jobs:
             --only-show-errors \
             --output none
 
-      - name: Deploy immutable image and configuration
+      - name: Create rollout revision from the previous healthy revision
         env:
           IMAGE_REFERENCE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.publish.outputs.image-digest }}
         run: |
-          parameters_file="$(mktemp "$RUNNER_TEMP/compliancehub-parameters.XXXXXX.json")"
-          trap 'rm -f "$parameters_file"' EXIT
-          chmod 600 "$parameters_file"
-          jq --null-input \
-            --arg managedEnvironmentName "$AZURE_CONTAINER_ENVIRONMENT" \
-            --arg containerAppName "$AZURE_CONTAINER_APP" \
-            --arg imageReference "$IMAGE_REFERENCE" \
-            --arg revisionSuffix "run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
-            --arg nextPublicSupabaseUrl "${{ vars.NEXT_PUBLIC_SUPABASE_URL }}" \
-            --arg nextPublicSupabaseAnonKey "${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY }}" \
-            --arg nextPublicSupabasePublishableKey "${{ vars.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}" \
-            --arg nextPublicSiteUrl "${{ vars.NEXT_PUBLIC_SITE_URL }}" \
-            --arg mcpResourceUrl "${{ vars.MCP_RESOURCE_URL }}" \
-            --arg supabaseOauthIssuer "${{ vars.SUPABASE_OAUTH_ISSUER }}" \
-            --arg supabaseOauthJwksUrl "${{ vars.SUPABASE_OAUTH_JWKS_URL }}" \
-            --arg mcpJwtAlgorithms "${{ vars.MCP_JWT_ALGORITHMS }}" \
-            --arg supabaseRefName "${{ steps.rollout.outputs.service-role-ref }}" \
-            --arg encryptionRefName "${{ steps.rollout.outputs.encryption-ref }}" \
-            --arg cronRefName "${{ steps.rollout.outputs.cron-ref }}" \
-            '{
-              "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
-              contentVersion: "1.0.0.0",
-              parameters: {
-                managedEnvironmentName: { value: $managedEnvironmentName },
-                containerAppName: { value: $containerAppName },
-                imageReference: { value: $imageReference },
-                revisionSuffix: { value: $revisionSuffix },
-                nextPublicSupabaseUrl: { value: $nextPublicSupabaseUrl },
-                nextPublicSupabaseAnonKey: { value: $nextPublicSupabaseAnonKey },
-                nextPublicSupabasePublishableKey: { value: $nextPublicSupabasePublishableKey },
-                nextPublicSiteUrl: { value: $nextPublicSiteUrl },
-                mcpResourceUrl: { value: $mcpResourceUrl },
-                supabaseOauthIssuer: { value: $supabaseOauthIssuer },
-                supabaseOauthJwksUrl: { value: $supabaseOauthJwksUrl },
-                mcpJwtAlgorithms: { value: $mcpJwtAlgorithms },
-                supabaseRefName: { value: $supabaseRefName },
-                encryptionRefName: { value: $encryptionRefName },
-                cronRefName: { value: $cronRefName }
-              }
-            }' > "$parameters_file"
-          az deployment group create \
-            --name "compliancehub-${GITHUB_RUN_ID}" \
+          az containerapp revision copy \
             --resource-group "$AZURE_RESOURCE_GROUP" \
-            --template-file infra/azure/application.bicep \
-            --parameters "@$parameters_file" \
+            --name "$AZURE_CONTAINER_APP" \
+            --from-revision "${{ steps.rollout.outputs.previous-revision }}" \
+            --image "$IMAGE_REFERENCE" \
+            --revision-suffix "run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --cpu 0.5 \
+            --memory 1Gi \
+            --min-replicas 0 \
+            --max-replicas 1 \
+            --replace-env-vars \
+              "NEXT_PUBLIC_SUPABASE_URL=${{ vars.NEXT_PUBLIC_SUPABASE_URL }}" \
+              "NEXT_PUBLIC_SUPABASE_ANON_KEY=${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY }}" \
+              "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=${{ vars.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}" \
+              "NEXT_PUBLIC_SITE_URL=${{ vars.NEXT_PUBLIC_SITE_URL }}" \
+              "MCP_RESOURCE_URL=${{ vars.MCP_RESOURCE_URL }}" \
+              "SUPABASE_OAUTH_ISSUER=${{ vars.SUPABASE_OAUTH_ISSUER }}" \
+              "SUPABASE_OAUTH_JWKS_URL=${{ vars.SUPABASE_OAUTH_JWKS_URL }}" \
+              "MCP_JWT_ALGORITHMS=${{ vars.MCP_JWT_ALGORITHMS }}" \
+              "SUPABASE_SERVICE_ROLE_KEY=secretref:${{ steps.rollout.outputs.service-role-ref }}" \
+              "APP_ENCRYPTION_KEY=secretref:${{ steps.rollout.outputs.encryption-ref }}" \
+              "CRON_SECRET=secretref:${{ steps.rollout.outputs.cron-ref }}" \
             --only-show-errors \
             --output none
 
