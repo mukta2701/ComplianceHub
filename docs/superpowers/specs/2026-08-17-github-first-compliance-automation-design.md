@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-17
 
-**Status:** Approved in conversation; awaiting written-spec review
+**Status:** Approved for implementation
 
 **Product:** ComplianceHub internal tool for Adtecher
 
