@@ -61,6 +61,22 @@ function reconcileSelectionState(
   return { serverSelections, overrides };
 }
 
+function rollbackSelectionState(
+  state: SelectionState,
+  repositoryId: string,
+  attemptServerSelected: boolean | undefined,
+  previousSelected: boolean,
+): SelectionState {
+  const overrides = { ...state.overrides };
+  const currentServerSelected = state.serverSelections[repositoryId];
+  if (currentServerSelected !== attemptServerSelected || currentServerSelected === previousSelected) {
+    delete overrides[repositoryId];
+  } else {
+    overrides[repositoryId] = previousSelected;
+  }
+  return { ...state, overrides };
+}
+
 function installationHealth(installation: GitHubInstallationSummary): { label: string; tone: string } {
   if (installation.status === "suspended") return { label: "Suspended", tone: "amber" };
   if (installation.status === "revoked") return { label: "Revoked", tone: "neutral" };
@@ -119,6 +135,7 @@ export function GitHubInstallationPanel({
 
   async function changeRepository(repository: GitHubRepositoryShadowSummary, selected: boolean) {
     if (!repository.available || pendingRepositories.has(repository.repository_id)) return;
+    const attemptServerSelected = selectionState.serverSelections[repository.repository_id];
     const previousSelected = selectionState.overrides[repository.repository_id] ?? repository.selected;
     setMessage("");
     setSelectionState((current) => ({
@@ -133,18 +150,22 @@ export function GitHubInstallationPanel({
       const result = await setGitHubRepositorySelectedAction(formData);
       setMessage(result.message);
       if (!result.ok) {
-        setSelectionState((current) => ({
-          ...current,
-          overrides: { ...current.overrides, [repository.repository_id]: previousSelected },
-        }));
+        setSelectionState((current) => rollbackSelectionState(
+          current,
+          repository.repository_id,
+          attemptServerSelected,
+          previousSelected,
+        ));
       } else {
         router.refresh();
       }
     } catch {
-      setSelectionState((current) => ({
-        ...current,
-        overrides: { ...current.overrides, [repository.repository_id]: previousSelected },
-      }));
+      setSelectionState((current) => rollbackSelectionState(
+        current,
+        repository.repository_id,
+        attemptServerSelected,
+        previousSelected,
+      ));
       setMessage("Could not update repository scope. Please try again.");
     } finally {
       setPendingRepositories((current) => {

@@ -242,6 +242,46 @@ describe("GitHubInstallationPanel", () => {
     expect(checkbox).not.toBeChecked();
   });
 
+  it("trusts a newer server selection when a pending toggle fails", async () => {
+    const user = userEvent.setup();
+    let resolveSecondToggle!: (value: { ok: false; message: string }) => void;
+    hoisted.selectRepository
+      .mockResolvedValueOnce({ ok: true, message: "Repository scope updated." })
+      .mockReturnValueOnce(new Promise((resolve) => { resolveSecondToggle = resolve; }));
+    const { rerender } = render(<GitHubInstallationPanel
+      installations={[installation]}
+      repositories={[repository({ selected: false })]}
+      nowIso="2026-08-17T20:00:00Z"
+    />);
+    const checkbox = screen.getByRole("checkbox", { name: "Select Adtecher/compliancehub for shadow collection" });
+
+    await user.click(checkbox);
+    await waitFor(() => expect(checkbox).toBeEnabled());
+    expect(checkbox).toBeChecked();
+
+    await user.click(checkbox);
+    expect(checkbox).not.toBeChecked();
+    expect(checkbox).toBeDisabled();
+
+    rerender(<GitHubInstallationPanel
+      installations={[installation]}
+      repositories={[repository({ selected: true })]}
+      nowIso="2026-08-17T20:00:00Z"
+    />);
+    expect(checkbox).not.toBeChecked();
+
+    resolveSecondToggle({ ok: false, message: "Could not update repository scope. Please try again." });
+    await waitFor(() => expect(checkbox).toBeEnabled());
+    expect(checkbox).toBeChecked();
+
+    rerender(<GitHubInstallationPanel
+      installations={[installation]}
+      repositories={[repository({ selected: false })]}
+      nowIso="2026-08-17T20:00:00Z"
+    />);
+    expect(checkbox).not.toBeChecked();
+  });
+
   it("disables unavailable repositories with an explanation and keeps their full accessible label", () => {
     render(<GitHubInstallationPanel
       installations={[installation]}
