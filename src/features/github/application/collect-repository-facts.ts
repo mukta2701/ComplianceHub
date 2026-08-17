@@ -28,9 +28,13 @@ const metadataSchema = z.object({
   archived: z.boolean(),
   default_branch: z.string().min(1).max(255),
   security_and_analysis: z.object({
-    secret_scanning: z.object({ status: z.enum(["enabled", "disabled"]) }).passthrough().nullish(),
-    secret_scanning_push_protection: z.object({ status: z.enum(["enabled", "disabled"]) }).passthrough().nullish(),
+    secret_scanning: z.unknown().optional(),
+    secret_scanning_push_protection: z.unknown().optional(),
   }).passthrough().nullish(),
+}).passthrough();
+
+const secretFeatureSchema = z.object({
+  status: z.enum(["enabled", "disabled"]),
 }).passthrough();
 
 const ruleEnvelopeSchema = z.object({ type: z.string().min(1).max(100) }).passthrough();
@@ -52,8 +56,8 @@ const statusChecksRuleSchema = z.object({
 }).passthrough();
 
 const classicProtectionSchema = z.object({
-  allow_force_pushes: z.object({ enabled: z.boolean() }).passthrough().nullish(),
-  allow_deletions: z.object({ enabled: z.boolean() }).passthrough().nullish(),
+  allow_force_pushes: z.object({ enabled: z.boolean() }).passthrough(),
+  allow_deletions: z.object({ enabled: z.boolean() }).passthrough(),
   required_pull_request_reviews: z.object({
     required_approving_review_count: z.number().int().min(0).max(100),
     dismiss_stale_reviews: z.boolean(),
@@ -133,6 +137,8 @@ type RequestContext = {
   signal: AbortSignal;
   requests: number;
   maxRequests: number;
+  clock: () => number;
+  deadlineAt: number;
 };
 
 function boundedInteger(value: string | null, maximum: number): number | undefined {
@@ -170,7 +176,11 @@ async function request(context: RequestContext, input: {
   pathSegments: readonly string[];
   query?: Record<string, string>;
 }): Promise<Response> {
-  if (context.signal.aborted || context.requests >= context.maxRequests) {
+  if (
+    context.signal.aborted
+    || context.requests >= context.maxRequests
+    || context.clock() >= context.deadlineAt
+  ) {
     throw new GitHubCollectionError("provider_unavailable");
   }
   context.requests += 1;
@@ -201,26 +211,72 @@ async function parseJson(response: Response): Promise<unknown> {
   }
 }
 
-function nextPage(response: Response, expectedPath: string): number | null {
+function splitLinkHeader(header: string): string[] {
+  const entries: string[] = [];
+  let start = 0;
+  let inAngle = false;
+  let inQuote = false;
+
+  for (let index = 0; index < header.length; index += 1) {
+    const character = header[index];
+    if (character === '"' && !inAngle) inQuote = !inQuote;
+    else if (character === "<" && !inQuote) {
+      if (inAngle) throw new GitHubCollectionError("invalid_response");
+      inAngle = true;
+    } else if (character === ">" && !inQuote) {
+      if (!inAngle) throw new GitHubCollectionError("invalid_response");
+      inAngle = false;
+    } else if (character === "," && !inAngle && !inQuote) {
+      entries.push(header.slice(start, index));
+      start = index + 1;
+    }
+  }
+  if (inAngle || inQuote) throw new GitHubCollectionError("invalid_response");
+  entries.push(header.slice(start));
+  return entries;
+}
+
+function nextPage(response: Response, expectedPath: string, expectedPage: number): number | null {
   const header = response.headers.get("link");
-  if (!header) return null;
-  for (const match of header.matchAll(/<([^>]*)>((?:\s*;\s*[^,]*)?)(?:,|$)/g)) {
-    const parameters = match[2] ?? "";
-    const relation = /(?:^|;)\s*rel\s*=\s*(?:"([^"]*)"|([^;\s,]+))/i.exec(parameters);
-    const relations = (relation?.[1] ?? relation?.[2] ?? "").split(/\s+/);
-    if (!relations.includes("next")) continue;
+  if (header === null || header.trim() === "") return null;
+
+  let found: number | null = null;
+  for (const rawEntry of splitLinkHeader(header)) {
+    const entry = /^\s*<([^<>]+)>\s*((?:;.*)?)\s*$/.exec(rawEntry);
+    if (!entry || !entry[2]) throw new GitHubCollectionError("invalid_response");
+    const parameters = entry[2].split(";").slice(1);
+    let relationValue: string | null = null;
+    for (const rawParameter of parameters) {
+      const parameter = /^\s*([!#$%&'*+.^_`|~0-9A-Za-z-]+)\s*=\s*(?:"([^"]*)"|([^;,\s]+))\s*$/.exec(rawParameter);
+      if (!parameter) throw new GitHubCollectionError("invalid_response");
+      if (parameter[1]?.toLowerCase() === "rel") {
+        if (relationValue !== null) throw new GitHubCollectionError("invalid_response");
+        relationValue = parameter[2] ?? parameter[3] ?? "";
+      }
+    }
+
     try {
-      const url = new URL(match[1] ?? "");
+      const url = new URL(entry[1] ?? "");
       const page = boundedInteger(url.searchParams.get("page"), MAX_PAGES + 1);
-      if (url.origin !== API_ORIGIN || url.pathname !== expectedPath || !page || page < 2) {
+      if (
+        url.origin !== API_ORIGIN
+        || url.username
+        || url.password
+        || url.hash
+        || url.pathname !== expectedPath
+      ) {
         throw new Error("invalid");
       }
-      return page;
+
+      const relations = (relationValue ?? "").split(/\s+/).filter(Boolean);
+      if (!relations.includes("next")) continue;
+      if (found !== null || page !== expectedPage) throw new Error("invalid");
+      found = page;
     } catch {
       throw new GitHubCollectionError("invalid_response");
     }
   }
-  return null;
+  return found;
 }
 
 async function listPages<T>(context: RequestContext, input: {
@@ -246,7 +302,8 @@ async function listPages<T>(context: RequestContext, input: {
     if (!parsed.success) throw new GitHubCollectionError("invalid_response");
     items.push(...parsed.data);
 
-    const following = nextPage(response, expectedPath);
+    const currentPage = page ?? 1;
+    const following = nextPage(response, expectedPath, currentPage + 1);
     if (!following) return items;
     if (pagesRead === input.maxPages - 1) throw new GitHubCollectionError("invalid_response");
     page = following;
@@ -284,8 +341,8 @@ function mergeRules(input: unknown[], classic: z.infer<typeof classicProtectionS
   const checks = new Set<string>();
 
   if (classic) {
-    controls.forcePushesBlocked = classic.allow_force_pushes?.enabled === false;
-    controls.deletionsBlocked = classic.allow_deletions?.enabled === false;
+    controls.forcePushesBlocked = classic.allow_force_pushes.enabled === false;
+    controls.deletionsBlocked = classic.allow_deletions.enabled === false;
     const reviews = classic.required_pull_request_reviews;
     if (reviews) {
       controls.approvingReviews = reviews.required_approving_review_count;
@@ -360,6 +417,13 @@ function validateWorkflowIds(ids: readonly number[]): number[] {
   return [...ids];
 }
 
+function secretFeatureState(value: unknown): DataState<{ enabled: boolean }> {
+  if (value === null || value === undefined) return unavailable("feature_unavailable");
+  const parsed = secretFeatureSchema.safeParse(value);
+  if (!parsed.success) return unavailable("invalid_response");
+  return { state: "available", value: { enabled: parsed.data.status === "enabled" } };
+}
+
 function archivedFacts(repository: GitHubFactSet["repository"]): GitHubFactSet {
   const notRuntime = unavailable<never>("feature_unavailable");
   return {
@@ -382,6 +446,8 @@ export async function collectRepositoryFacts(input: {
   fetchImpl?: FetchLike;
   signal?: AbortSignal;
   maxPagesPerEndpoint?: number;
+  requestBudget?: number;
+  clock?: () => number;
 }): Promise<GitHubFactSet> {
   const selected = targetSchema.safeParse(input.repository);
   if (!selected.success || !input.installationToken) throw new Error("Invalid repository collection request");
@@ -390,6 +456,13 @@ export async function collectRepositoryFacts(input: {
   if (!Number.isSafeInteger(maxPages) || maxPages < 1 || maxPages > MAX_PAGES) {
     throw new Error("Invalid repository collection request");
   }
+  const requestBudget = input.requestBudget ?? MAX_COLLECTOR_REQUESTS;
+  if (!Number.isSafeInteger(requestBudget) || requestBudget < 1 || requestBudget > MAX_COLLECTOR_REQUESTS) {
+    throw new Error("Invalid repository collection request");
+  }
+  const clock = input.clock ?? Date.now;
+  const startedAt = clock();
+  if (!Number.isFinite(startedAt)) throw new Error("Invalid repository collection request");
 
   const deadlineSignal = AbortSignal.timeout(MAX_COLLECTOR_MS);
   const signal = input.signal
@@ -400,7 +473,9 @@ export async function collectRepositoryFacts(input: {
     fetchImpl: input.fetchImpl ?? fetch,
     signal,
     requests: 0,
-    maxRequests: MAX_COLLECTOR_REQUESTS,
+    maxRequests: requestBudget,
+    clock,
+    deadlineAt: startedAt + MAX_COLLECTOR_MS,
   };
   const requestedBase = ["repos", selected.data.owner, selected.data.name] as const;
 
@@ -470,14 +545,10 @@ export async function collectRepositoryFacts(input: {
   });
 
   const security = metadata.data.security_and_analysis;
-  const secretScanningConfiguration: GitHubFactSet["secretScanningConfiguration"] =
-    security?.secret_scanning
-      ? { state: "available", value: { enabled: security.secret_scanning.status === "enabled" } }
-      : unavailable("invalid_response");
-  const secretScanningPushProtection: GitHubFactSet["secretScanningPushProtection"] =
-    security?.secret_scanning_push_protection
-      ? { state: "available", value: { enabled: security.secret_scanning_push_protection.status === "enabled" } }
-      : unavailable("invalid_response");
+  const secretScanningConfiguration = secretFeatureState(security?.secret_scanning);
+  const secretScanningPushProtection = secretFeatureState(
+    security?.secret_scanning_push_protection,
+  );
   const secretScanningAlerts = await asDataState(async () => {
     const alerts = await listPages(context, {
       pathSegments: [...verifiedBase, "secret-scanning", "alerts"],
@@ -506,7 +577,8 @@ export async function collectRepositoryFacts(input: {
       if (!parsed.success) throw new GitHubCollectionError("invalid_response");
       workflows.push(...parsed.data.workflows);
       advertisedTotal = Math.max(advertisedTotal, parsed.data.total_count);
-      const following = nextPage(response, expectedPath);
+      const currentPage = page ?? 1;
+      const following = nextPage(response, expectedPath, currentPage + 1);
       if (!following) break;
       if (pagesRead === maxPages - 1) throw new GitHubCollectionError("invalid_response");
       page = following;

@@ -131,8 +131,54 @@ describe("collectRepositoryFacts", () => {
     const facts = await collect(fetchImpl);
 
     expect(facts.secretScanningConfiguration).toEqual({ state: "available", value: { enabled: false } });
-    expect(facts.secretScanningPushProtection).toEqual({ state: "unavailable", diagnosticCode: "invalid_response" });
+    expect(facts.secretScanningPushProtection).toEqual({ state: "unavailable", diagnosticCode: "feature_unavailable" });
     expect(facts.secretScanningAlerts).toEqual({ state: "unavailable", diagnosticCode: "feature_unavailable" });
+  });
+
+  it.each([
+    { name: "missing security metadata", securityAndAnalysis: undefined },
+    { name: "null security metadata", securityAndAnalysis: null },
+    { name: "missing recognised fields", securityAndAnalysis: {} },
+    {
+      name: "null recognised fields",
+      securityAndAnalysis: { secret_scanning: null, secret_scanning_push_protection: null },
+    },
+  ])("maps $name to feature-unavailable secret facts", async ({ securityAndAnalysis }) => {
+    const metadata = { ...completeFixture.metadata } as Record<string, unknown>;
+    if (securityAndAnalysis === undefined) delete metadata.security_and_analysis;
+    else metadata.security_and_analysis = securityAndAnalysis;
+
+    const facts = await collect(fixtureFetch({ metadata: Response.json(metadata) }));
+
+    expect(facts.secretScanningConfiguration).toEqual({
+      state: "unavailable",
+      diagnosticCode: "feature_unavailable",
+    });
+    expect(facts.secretScanningPushProtection).toEqual({
+      state: "unavailable",
+      diagnosticCode: "feature_unavailable",
+    });
+  });
+
+  it("maps malformed recognised secret status values to invalid_response without aborting metadata", async () => {
+    const facts = await collect(fixtureFetch({
+      metadata: Response.json({
+        ...completeFixture.metadata,
+        security_and_analysis: {
+          secret_scanning: { status: "provider-added-state" },
+          secret_scanning_push_protection: { enabled: true },
+        },
+      }),
+    }));
+
+    expect(facts.secretScanningConfiguration).toEqual({
+      state: "unavailable",
+      diagnosticCode: "invalid_response",
+    });
+    expect(facts.secretScanningPushProtection).toEqual({
+      state: "unavailable",
+      diagnosticCode: "invalid_response",
+    });
   });
 
   it.each([
@@ -201,6 +247,26 @@ describe("collectRepositoryFacts", () => {
     });
   });
 
+  it.each([
+    { missing: "allow_force_pushes", protection: { allow_deletions: { enabled: false } } },
+    { missing: "allow_deletions", protection: { allow_force_pushes: { enabled: false } } },
+    {
+      missing: "non-null force-push control",
+      protection: { allow_force_pushes: null, allow_deletions: { enabled: false } },
+    },
+    {
+      missing: "non-null deletion control",
+      protection: { allow_force_pushes: { enabled: false }, allow_deletions: null },
+    },
+  ])("rejects classic 200 protection missing $missing", async ({ protection }) => {
+    const facts = await collect(fixtureFetch({ protection: Response.json(protection) }));
+
+    expect(facts.branchProtection).toEqual({
+      state: "unavailable",
+      diagnosticCode: "invalid_response",
+    });
+  });
+
   it("rejects malformed recognised rules while ignoring unknown future rule types", async () => {
     const malformed = await collect(fixtureFetch({
       rules: Response.json([{ type: "pull_request", parameters: { provider_added_field: true } }]),
@@ -259,6 +325,151 @@ describe("collectRepositoryFacts", () => {
 
     expect(facts.dependabot).toEqual({ state: "available", value: { openHigh: 1, openCritical: 1 } });
     expect(dependabotPages).toBe(2);
+  });
+
+  it.each([
+    {
+      name: "malformed",
+      link: "not-a-link-header",
+    },
+    {
+      name: "hostile-origin",
+      link: '<https://example.test/repos/AdTecher/Portal/dependabot/alerts?page=2>; rel="next"',
+    },
+    {
+      name: "page-jump",
+      link: '<https://api.github.com/repos/AdTecher/Portal/dependabot/alerts?page=3>; rel="next"',
+    },
+  ])("rejects a $name pagination link without following it", async ({ link }) => {
+    const facts = await collect(fixtureFetch({
+      dependabot: new Response(JSON.stringify(completeFixture.dependabot), {
+        status: 200,
+        headers: { Link: link },
+      }),
+    }));
+
+    expect(facts.dependabot).toEqual({ state: "unavailable", diagnosticCode: "invalid_response" });
+  });
+
+  it.each([1, 2])("rejects a backward or repeated page %s after page 2", async (badNextPage) => {
+    const baseFetch = fixtureFetch();
+    let dependabotPages = 0;
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input : input.url);
+      if (url.pathname.endsWith("/dependabot/alerts")) {
+        dependabotPages += 1;
+        const nextPage = dependabotPages === 1 ? 2 : badNextPage;
+        return new Response(JSON.stringify([completeFixture.dependabot[dependabotPages - 1]]), {
+          status: 200,
+          headers: {
+            Link: `<https://api.github.com/repos/AdTecher/Portal/dependabot/alerts?page=${nextPage}>; rel="next"`,
+          },
+        });
+      }
+      return baseFetch(input);
+    }) as typeof fetch;
+
+    const facts = await collect(fetchImpl);
+
+    expect(facts.dependabot).toEqual({ state: "unavailable", diagnosticCode: "invalid_response" });
+    expect(dependabotPages).toBe(2);
+  });
+
+  it("stops at the deterministic request budget and marks unfinished facts unavailable", async () => {
+    const fetchImpl = fixtureFetch();
+
+    const facts = await collectRepositoryFacts({
+      installationToken: installationCredential,
+      repository: target,
+      approvedSecurityWorkflowIds: [31],
+      fetchImpl,
+      requestBudget: 1,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    for (const fact of [
+      facts.branchProtection,
+      facts.dependabot,
+      facts.codeScanning,
+      facts.secretScanningAlerts,
+      facts.securityWorkflows,
+      facts.administration,
+    ]) {
+      expect(fact).toEqual({ state: "unavailable", diagnosticCode: "provider_unavailable" });
+    }
+  });
+
+  it("stops at the deterministic collector deadline and makes no further fetch", async () => {
+    let currentTime = 0;
+    const baseFetch = fixtureFetch();
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const response = await baseFetch(input);
+      currentTime = 90_001;
+      return response;
+    }) as typeof fetch;
+
+    const facts = await collectRepositoryFacts({
+      installationToken: installationCredential,
+      repository: target,
+      approvedSecurityWorkflowIds: [31],
+      fetchImpl,
+      clock: () => currentTime,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(facts.branchProtection).toEqual({
+      state: "unavailable",
+      diagnosticCode: "provider_unavailable",
+    });
+    expect(facts.administration).toEqual({
+      state: "unavailable",
+      diagnosticCode: "provider_unavailable",
+    });
+  });
+
+  it("recursively serialises neither credentials, raw headers/bodies, nor collaborator identity", async () => {
+    const bodyDetail = crypto.randomUUID();
+    const headerDetail = crypto.randomUUID();
+    const identityDetail = crypto.randomUUID();
+    const authorization = `Bearer ${installationCredential}`;
+    const facts = await collect(fixtureFetch({
+      metadata: Response.json({ ...completeFixture.metadata, authorization }),
+      dependabot: new Response(bodyDetail, {
+        status: 403,
+        headers: { Authorization: authorization, "X-Private-Detail": headerDetail },
+      }),
+      collaborators: Response.json([{
+        id: 41,
+        login: identityDetail,
+        permissions: { admin: true },
+      }]),
+    }));
+    const serialisedFacts = JSON.stringify(facts);
+
+    for (const privateValue of [
+      installationCredential,
+      authorization,
+      bodyDetail,
+      headerDetail,
+      identityDetail,
+    ]) {
+      expect(serialisedFacts).not.toContain(privateValue);
+    }
+
+    const rateError = await collect(fixtureFetch({
+      rules: new Response(bodyDetail, {
+        status: 429,
+        headers: {
+          Authorization: authorization,
+          "X-Private-Detail": headerDetail,
+          "Retry-After": "5",
+        },
+      }),
+    })).catch((caught: unknown) => caught);
+    const serialisedError = `${String(rateError)}${JSON.stringify(rateError)}`;
+    for (const privateValue of [installationCredential, authorization, bodyDetail, headerDetail]) {
+      expect(serialisedError).not.toContain(privateValue);
+    }
   });
 
   it("validates the immutable workflow allowlist before making a request", async () => {
