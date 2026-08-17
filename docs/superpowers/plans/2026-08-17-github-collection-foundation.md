@@ -514,35 +514,41 @@ git commit -m "feat(github): run idempotent shadow collection"
 **Files:**
 - Create: `src/features/github/application/webhook.ts`
 - Test: `src/features/github/application/webhook.test.ts`
+- Create: `src/features/github/application/webhook-worker.ts`
+- Test: `src/features/github/application/webhook-worker.test.ts`
 - Create: `src/app/api/github/webhook/route.ts`
 - Test: `src/app/api/github/webhook/route.test.ts`
+- Modify: `src/app/api/cron/github-collect/route.ts`
+- Modify: `src/app/api/cron/github-collect/route.test.ts`
 
 **Interfaces:**
 - Consumes: raw UTF-8 request bytes, `X-Hub-Signature-256`, `X-GitHub-Delivery`, `X-GitHub-Event`, `GITHUB_WEBHOOK_SECRET`.
-- Produces: verified delivery record and a scoped webhook collection request; no direct compliance writes.
+- Produces: a durably queued verified delivery and, when the bounded worker drains it, a scoped webhook collection request; no direct compliance writes.
 
 - [ ] **Step 1: Write failing signature and replay tests**
 
-Use GitHub's published vector (`secret = "It's a Secret to Everybody"`, payload `Hello, World!`, expected `sha256=757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17`). Prove missing/invalid signatures return 401, duplicate delivery returns 202 without reprocessing, unsupported events return 202/ignored, malformed payload returns 400 after signature verification, and installation/repository events create only a scoped request.
+Use GitHub's published vector (`secret = "It's a Secret to Everybody"`, payload `Hello, World!`, expected `sha256=757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17`). Prove missing/invalid signatures return 401, duplicate delivery returns 202 without re-enqueuing, unsupported events return 202/ignored, malformed payload returns 400 after signature verification, and installation/repository events enqueue only validated numeric routing IDs. Prove the worker atomically claims queued or retryable rows, maps provider IDs to one tenant-scoped local installation/repository, invokes Task 6 with `requestKey: "webhook:<delivery-id>"`, and reaches `processed`, `ignored`, or a safe retryable `failed` state without exposing raw errors.
 
 - [ ] **Step 2: Run webhook tests and confirm RED**
 
-Run: `npm test -- src/features/github/application/webhook.test.ts src/app/api/github/webhook/route.test.ts`
+Run: `npm test -- src/features/github/application/webhook.test.ts src/features/github/application/webhook-worker.test.ts src/app/api/github/webhook/route.test.ts src/app/api/cron/github-collect/route.test.ts`
 
 Expected: FAIL because webhook handling does not exist.
 
 - [ ] **Step 3: Implement constant-time verification and allowlisted events**
 
-Read `request.arrayBuffer()` before JSON parsing; calculate HMAC-SHA256; compare equal-length buffers with `timingSafeEqual`; cap body size at 1 MiB; hash but do not store the body. Allow `installation`, `installation_repositories`, `repository`, `branch_protection_rule`, `repository_ruleset`, `workflow_run`, `dependabot_alert`, `code_scanning_alert`, and `secret_scanning_alert`. Treat sender/repository names as untrusted text and retain only validated numeric IDs for routing.
+Read the request stream with a hard 1 MiB bound before JSON parsing; reject a larger declared or streamed body with `413`; calculate HMAC-SHA256 over the exact retained bytes; compare strictly formatted equal-length buffers with `timingSafeEqual`; hash but do not store the body. Allow `installation`, `installation_repositories`, `repository`, `branch_protection_rule`, `repository_ruleset`, `workflow_run`, `dependabot_alert`, `code_scanning_alert`, and `secret_scanning_alert`. Treat sender/repository names as untrusted text and retain only validated positive numeric IDs for routing. Atomically reserve the unique delivery as `queued` and return `202` without waiting for GitHub collection; a duplicate returns `202` and does not create another request.
+
+Add a bounded worker to the existing `github-collect` cron path before scheduled reconciliation. It claims queued rows and stale `processing` rows with an attempt cap, resolves only active installations and selected repositories from stored numeric IDs, then calls `runGitHubCollection`. Installation-wide events remain installation-scoped and Task 6 expands them only to selected repositories. Update delivery lifecycle timestamps and safe diagnostic codes; never store a raw body or provider/database error. The daily scheduled collector remains the recovery path for deliberately rejected oversized deliveries and any webhook that exhausts retries.
 
 - [ ] **Step 4: Run tests and commit**
 
-Run: `npm test -- src/features/github/application/webhook.test.ts src/app/api/github/webhook/route.test.ts`
+Run: `npm test -- src/features/github/application/webhook.test.ts src/features/github/application/webhook-worker.test.ts src/app/api/github/webhook/route.test.ts src/app/api/cron/github-collect/route.test.ts`
 
 Expected: PASS with duplicate, malformed, hostile-text, and signature-vector cases green.
 
 ```bash
-git add src/features/github/application/webhook.ts src/features/github/application/webhook.test.ts src/app/api/github/webhook
+git add src/features/github/application/webhook.ts src/features/github/application/webhook.test.ts src/features/github/application/webhook-worker.ts src/features/github/application/webhook-worker.test.ts src/app/api/github/webhook src/app/api/cron/github-collect
 git commit -m "feat(github): accept replay-safe signed webhooks"
 ```
 
@@ -558,12 +564,12 @@ git commit -m "feat(github): accept replay-safe signed webhooks"
 - Modify: `src/app/app/integrations/actions.test.ts`
 
 **Interfaces:**
-- Consumes: safe installation/repository/run summaries and `set_github_repository_selected` RPC.
+- Consumes: safe installation/repository/latest-run summaries and `set_github_repository_selected` RPC.
 - Produces: Owner/Admin install link, repository selection controls, manual shadow recheck, and explicit health text.
 
 - [ ] **Step 1: Write failing UI and action tests**
 
-Prove operators see the private GitHub App panel; Members do not; install uses `/api/github/setup`; selection requires an operator and validated UUID/boolean; 101st selected repository is rejected; manual recheck uses a random request key; status distinguishes Active, Needs attention, Suspended, Partial collection, Never collected, and Stale; no observation can be approved or made readiness-affecting in this release.
+Prove operators see the private GitHub App panel; Members do not; install uses `/api/github/setup`; selection requires an operator and validated UUID/boolean; 101st selected repository is rejected; manual recheck uses a random request key; status distinguishes Active, Needs attention, Suspended, Partial collection, Never collected, and Stale; `Stale` means the latest completed collection is older than the domain's 36-hour observation-freshness boundary; no observation can be approved or made readiness-affecting in this release.
 
 - [ ] **Step 2: Run UI tests and confirm RED**
 
@@ -573,7 +579,7 @@ Expected: FAIL because the panel and actions do not exist.
 
 - [ ] **Step 3: Implement safe queries, actions, and accessible controls**
 
-Page projections must exclude permissions JSON beyond a derived `permissions_ok` boolean and exclude every credential by construction. Repository controls use native checkboxes with labels containing the full repository name; status text uses `role="status"`; the manual recheck button is disabled while pending and reports counts without raw errors.
+Page projections must exclude permissions JSON beyond a persisted derived `permissions_ok` boolean and exclude every credential by construction. Use the tenant-safe latest-run summary view/RPC rather than an unbounded run-history query or per-repository N+1 reads. Keep the existing Nango GitHub connection distinct and label this surface `GitHub App shadow collection`. Repository controls use native checkboxes with labels containing the full repository name; status text uses `role="status"`; the manual recheck button is disabled while pending and reports counts without raw errors. The server action calls the Task 6 runner directly after operator validation and server-side rate limiting; it never calls the cron route or exposes `CRON_SECRET`.
 
 - [ ] **Step 4: Run UI tests and commit**
 
