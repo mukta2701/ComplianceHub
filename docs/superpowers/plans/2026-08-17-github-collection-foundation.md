@@ -298,7 +298,7 @@ create table public.github_installations (
 );
 ```
 
-`github_repositories` stores provider ID, owner, name, full name, safe HTML URL, visibility, default branch, archive state, `selected boolean default false`, and `last_seen_at`. `github_collection_runs` stores trigger (`initial`, `scheduled`, `manual`, `webhook`), request key, status, safe diagnostic code, timestamps, and counts. `github_observations` stores every field in `GitHubObservation`, uses `(collection_run_id, observation_key)` as the immutable uniqueness boundary, and never stores raw provider payloads. `github_webhook_deliveries` stores delivery ID, event name, payload SHA-256, safe repository/installation IDs, status, received/processed timestamps, and no raw body.
+`github_repositories` stores provider ID, owner, name, full name, safe HTML URL, visibility, default branch, archive state, `selected boolean default false`, and `last_seen_at`. `github_collection_runs` stores trigger (`initial`, `scheduled`, `manual`, `webhook`), request key, status, safe diagnostic code, timestamps, and counts, with unique `(repository_id, request_key)` so one scheduled request can reserve one run per target. `github_observations` stores every field in `GitHubObservation`, uses `(collection_run_id, observation_key)` as the immutable uniqueness boundary, and never stores raw provider payloads. Carry installation IDs through repository, run, and observation rows and use composite consistency foreign keys so a repository cannot be attached to a run from another installation even within the same tenant. `github_webhook_deliveries` stores delivery ID, event name, payload SHA-256, safe repository/installation IDs, status, received/processed timestamps, and no raw body.
 
 - [ ] **Step 4: Add RLS, grants, audit triggers, and safe RPCs**
 
@@ -383,6 +383,9 @@ git commit -m "feat(github): verify and claim GitHub App installations"
 **Files:**
 - Create: `src/features/github/application/collect-repository-facts.ts`
 - Test: `src/features/github/application/collect-repository-facts.test.ts`
+- Modify: `src/features/github/domain/observation.ts`
+- Modify: `src/features/github/domain/rules.ts`
+- Modify: `src/features/github/domain/rules.test.ts`
 - Create: `src/features/github/application/fixtures/repository-complete.json`
 - Create: `src/features/github/application/fixtures/repository-denied.json`
 - Create: `src/features/github/application/fixtures/repository-unlicensed.json`
@@ -396,16 +399,16 @@ git commit -m "feat(github): verify and claim GitHub App installations"
 Assert exact requests and output for:
 
 - `GET /repos/{owner}/{repo}`
-- `GET /repos/{owner}/{repo}/branches/{default_branch}/protection`
-- `GET /repos/{owner}/{repo}/rulesets?includes_parents=true`
+- `GET /repos/{owner}/{repo}/rules/branches/{default_branch}?per_page=100`
 - `GET /repos/{owner}/{repo}/dependabot/alerts?state=open&severity=high,critical&per_page=100`
-- `GET /repos/{owner}/{repo}/code-scanning/alerts?state=open&severity=high,critical&per_page=100`
+- `GET /repos/{owner}/{repo}/code-scanning/alerts?state=open&severity=high&per_page=100`
+- `GET /repos/{owner}/{repo}/code-scanning/alerts?state=open&severity=critical&per_page=100`
 - `GET /repos/{owner}/{repo}/secret-scanning/alerts?state=open&per_page=100`
 - `GET /repos/{owner}/{repo}/actions/workflows?per_page=100`
-- latest run lookup only for configured security workflow names
+- latest run lookup only for server-configured approved security workflow numeric IDs
 - `GET /repos/{owner}/{repo}/collaborators?affiliation=outside&permission=admin&per_page=100`
 
-Tests must prove that 403/404/429 become explicit unavailable states, malformed JSON becomes `invalid_response`, pagination is bounded, member names are reduced to a count, and no file contents are requested.
+Tests must prove endpoint-aware status semantics: repository metadata 404 aborts; ordinary 401/403 becomes `permission_denied`; code-scanning 403 and secret-alert 404 become `feature_unavailable`; 429 becomes a typed rate-limit stop; 5xx becomes `provider_unavailable`; malformed JSON becomes `invalid_response`; pagination is bounded; member names are reduced to a count; and no file contents are requested. If the 100-page cap is reached while a next link remains, the corresponding fact is unavailable rather than a partial count.
 
 - [ ] **Step 2: Run the collector test and confirm RED**
 
@@ -415,7 +418,9 @@ Expected: FAIL because the collector does not exist.
 
 - [ ] **Step 3: Implement endpoint-specific Zod schemas and safe mapping**
 
-Keep each response schema inside `collect-repository-facts.ts`, `.passthrough()` provider objects, and expose only fields used by `GitHubFactSet`. An endpoint failure affects only its corresponding `DataState`; repository metadata failure aborts the repository because the stable subject cannot be verified.
+Keep each response schema inside `collect-repository-facts.ts`, `.passthrough()` provider objects, and expose only fields used by `GitHubFactSet`. An endpoint failure affects only its corresponding `DataState`; repository metadata failure aborts the repository because the stable subject cannot be verified. Verify the returned numeric repository ID matches the selected target. Read secret-scanning and push-protection enablement from repository metadata's `security_and_analysis` block; the alert list establishes only the alert count. Refactor the Task 1 fact contract and rules so configuration, push protection, and alert count have separate `DataState` values—known-disabled configuration must fail even when the alert list is unavailable, and no unavailable alert list may become a zero-alert pass.
+
+`collectRepositoryFacts` accepts `approvedSecurityWorkflowIds: readonly number[]`. Treat numeric workflow IDs as the reviewed allowlist; never approve a mutable display name. List workflows, retain only allowlisted IDs, then request `GET /repos/{owner}/{repo}/actions/workflows/{workflowId}/runs?per_page=1`. Empty runs yield `latestConclusion: null`; a failed approved-workflow lookup makes the workflow fact unavailable.
 
 - [ ] **Step 4: Run tests and commit**
 
@@ -424,7 +429,7 @@ Run: `npm test -- src/features/github/application/collect-repository-facts.test.
 Expected: PASS and fixture snapshots contain no tokens, headers, source bodies, or member identities.
 
 ```bash
-git add src/features/github/application/collect-repository-facts.ts src/features/github/application/collect-repository-facts.test.ts src/features/github/application/fixtures
+git add src/features/github/application/collect-repository-facts.ts src/features/github/application/collect-repository-facts.test.ts src/features/github/application/fixtures src/features/github/domain
 git commit -m "feat(github): collect sanitised repository security facts"
 ```
 
@@ -478,17 +483,20 @@ export type CollectionDependencies = {
   reserveRun(target: CollectionTarget, request: CollectionRequest): Promise<{ id: string; duplicate: boolean }>;
   collectFacts(target: CollectionTarget): Promise<GitHubFactSet>;
   evaluate(facts: GitHubFactSet, context: { runId: string; observedAt: string }): GitHubObservation[];
+  refreshRepository(target: CollectionTarget, facts: GitHubFactSet): Promise<void>;
   saveObservations(runId: string, organisationId: string, repositoryId: string, observations: GitHubObservation[]): Promise<number>;
   finaliseRun(runId: string, result: RunResult): Promise<void>;
   now(): Date;
 };
 ```
 
-Database writes use insert-on-conflict/no-op for the request key and `(run, observation_key)`. Collection history is append-only; repository inventory fields may refresh; a failure never extends observation freshness.
+Database writes use insert-on-conflict/no-op for `(repository_id, request_key)` and `(collection_run_id, observation_key)`. A scheduled request therefore reserves one run per target repository instead of colliding globally. Collection history is append-only; repository inventory fields refresh only after verified metadata; a failure never extends observation freshness.
+
+`CollectionTarget` must distinguish local UUIDs (`installationId`, `repositoryId`) from GitHub numeric IDs (`providerInstallationId`, `providerRepositoryId`) and also carry `organisationId`, `owner`, and `name`. Validate a complete, distinct observation set before one bulk insert: every observation's `runId` matches the reservation and numeric `repositoryId` matches `providerRepositoryId`. A typed safe `GitHubCollectionError` with `diagnosticCode: "rate_limited"` finalises the current run as rate-limited, skips only the remaining targets for that installation, and continues other installations. A complete set containing any `unknown` finalises as `partial`; `not_applicable` alone remains `succeeded`. Finalisation updates only rows still in `running` state.
 
 - [ ] **Step 4: Add the cron route and personal-Azure schedule**
 
-The route uses `isAuthorisedCron`, `createSupabaseServiceClient`, a 300-second maximum duration, safe structured logging, and returns counts only. Add `github-collect` to `workflow_dispatch`; schedule it at `29 5 * * *` so collection completes before existing 06:07 daily maintenance and 07:13 monitoring. The scheduled workflow invokes `${SITE_URL}/api/cron/github-collect` with `CRON_SECRET`.
+The route uses `isAuthorisedCron`, `createSupabaseServiceClient`, a 300-second maximum duration, safe structured logging, and returns counts only. Never pass raw provider errors to `logError`, because it persists messages and stacks. Add `github-collect` to `workflow_dispatch`; schedule it at `29 5 * * *` so collection completes before existing 06:07 daily maintenance and 07:13 monitoring. Replace the workflow's catch-all route selection with explicit schedule/route cases that fail closed for an unknown value. The scheduled workflow invokes `${SITE_URL}/api/cron/github-collect` with `CRON_SECRET`.
 
 - [ ] **Step 5: Run tests and commit**
 
