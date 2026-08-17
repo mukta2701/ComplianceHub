@@ -15,10 +15,10 @@ const base = { authorization_id: id, redirect_uri: "https://client.example/callb
 
 describe("OAuthConsentPage scopes", () => {
   beforeEach(() => hoisted.getAuthorizationDetails.mockReset());
-  it("shows every supported requested scope", async () => {
-    hoisted.getAuthorizationDetails.mockResolvedValue({ data: { ...base, scope: "openid email profile" }, error: null });
+  it("shows approval controls when ChatGPT requests refresh-token continuity", async () => {
+    hoisted.getAuthorizationDetails.mockResolvedValue({ data: { ...base, scope: "openid email offline_access profile" }, error: null });
     render(await OAuthConsentPage({ searchParams: Promise.resolve({ authorization_id: id }) }));
-    expect(screen.getByText("openid, email, profile")).toBeInTheDocument();
+    expect(screen.getByText("openid, email, offline_access, profile")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Approve connection" })).toBeInTheDocument();
   });
   it("fails closed and removes approval controls for an unsupported scope", async () => {

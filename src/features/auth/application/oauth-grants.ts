@@ -1,7 +1,7 @@
 import "server-only";
 
 const clientIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const standardScopes = new Set(["openid", "email", "profile"]);
+const standardScopes = new Set(["openid", "email", "profile", "offline_access"]);
 const MAX_DISPLAYED_SCOPES = 20;
 const MAX_SCOPE_LENGTH = 80;
 // RFC 6749 scope-token permits printable ASCII except DQUOTE and backslash.
