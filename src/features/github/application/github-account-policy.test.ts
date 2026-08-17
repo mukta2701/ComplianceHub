@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { resolveGitHubAccountType } from "./github-account-policy";
 
 const INVALID_CONFIGURATION_ERROR =
-  "GitHub account type configuration is invalid";
+  /^GitHub account type configuration is invalid$/;
 
 function expectInvalidConfiguration(
   input: Parameters<typeof resolveGitHubAccountType>[0],
@@ -52,6 +52,51 @@ describe("resolveGitHubAccountType", () => {
         siteUrl: "http://localhost:3000",
       }),
     ).toBe("User");
+  });
+
+  it.each([
+    "http://localhost",
+    "http://localhost/",
+    "http://localhost:1",
+    "http://localhost:65535/",
+    "http://127.0.0.1",
+    "http://127.0.0.1/",
+    "http://127.0.0.1:1",
+    "http://127.0.0.1:65535/",
+  ])("accepts canonical local User site %s", (siteUrl) => {
+    expect(
+      resolveGitHubAccountType({
+        configuredType: "User",
+        nodeEnv: "development",
+        siteUrl,
+      }),
+    ).toBe("User");
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["empty", ""],
+    ["unknown", "staging"],
+    ["case-varied development", "Development"],
+    ["case-varied test", "TEST"],
+    ["leading-whitespace", " development"],
+    ["trailing-whitespace", "test "],
+  ])("rejects User for a %s nodeEnv", (_case, nodeEnv) => {
+    expectInvalidConfiguration({
+      configuredType: "User",
+      nodeEnv,
+      siteUrl: "http://localhost:3000",
+    });
+  });
+
+  it("keeps Organization independent of nodeEnv and site URL", () => {
+    expect(
+      resolveGitHubAccountType({
+        configuredType: "Organization",
+        nodeEnv: " staging ",
+        siteUrl: "not a URL",
+      }),
+    ).toBe("Organization");
   });
 
   it.each([
@@ -125,6 +170,32 @@ describe("resolveGitHubAccountType", () => {
     ],
   ])("rejects User for a %s", (_case, input) => {
     expectInvalidConfiguration(input);
+  });
+
+  it.each([
+    ["non-root path", "http://localhost:3000/pilot"],
+    ["second trailing slash", "http://localhost:3000//"],
+    ["leading whitespace", " http://localhost:3000"],
+    ["trailing whitespace", "http://localhost:3000 "],
+    ["embedded tab canonicalization", "http://local\thost:3000"],
+    ["embedded newline canonicalization", "http://local\nhost:3000"],
+    ["embedded carriage return canonicalization", "http://local\rhost:3000"],
+    ["empty userinfo", "http://@localhost:3000"],
+    ["percent-encoded localhost", "http://%6cocalhost:3000"],
+    ["percent-encoded IPv4 dots", "http://127%2e0%2e0%2e1:3000"],
+    ["alternate numeric loopback", "http://127.1:3000"],
+    ["localhost subdomain", "http://pilot.localhost:3000"],
+    ["IPv6 loopback", "http://[::1]:3000"],
+    ["zero port", "http://localhost:0"],
+    ["leading-zero port", "http://localhost:03000"],
+    ["invalid port", "http://localhost:pilot"],
+    ["out-of-range port", "http://localhost:65536"],
+  ])("rejects non-canonical User site with %s", (_case, siteUrl) => {
+    expectInvalidConfiguration({
+      configuredType: "User",
+      nodeEnv: "development",
+      siteUrl,
+    });
   });
 
   it.each(["user", "Enterprise", " ", "Organization "])(
