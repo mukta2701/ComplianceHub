@@ -72,6 +72,8 @@ describe("ConnectionsCatalog", () => {
     const slackCard = screen.getByRole("article", { name: "Slack connection" });
     expect(githubCard).toHaveClass("connection-card");
     expect(githubCard).toHaveTextContent("Connected");
+    expect(githubCard).toHaveTextContent("Create and track remediation work in GitHub Issues.");
+    expect(githubCard).not.toHaveTextContent("Monitor repositories and security controls.");
     expect(githubCard).toHaveTextContent("acme/isms");
     expect(within(githubCard).getByText("acme/isms")).toHaveClass("connection-card-target");
     const githubCardFooter = within(githubCard).getByRole("button", { name: "Manage" }).parentElement;

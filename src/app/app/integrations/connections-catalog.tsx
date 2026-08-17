@@ -54,7 +54,7 @@ const PROVIDERS: Array<{
     id: "github",
     label: "GitHub",
     mark: "GH",
-    description: "Monitor repositories and security controls.",
+    description: "Create and track remediation work in GitHub Issues.",
   },
   {
     id: "jira",

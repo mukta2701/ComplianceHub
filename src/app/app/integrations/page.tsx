@@ -4,6 +4,11 @@ import { hasCapability } from "@/features/organisations/domain/access";
 import { requireAppContext } from "@/lib/app-context";
 import { canShowDeveloperTools } from "@/lib/security/developer-tools";
 import {
+  GitHubInstallationPanel,
+  type GitHubInstallationSummary,
+  type GitHubRepositoryShadowSummary,
+} from "@/features/github/components/github-installation-panel";
+import {
   addConnectionAction,
   addEvidenceSourceAction,
   addMonitorSourceAction,
@@ -74,7 +79,11 @@ function DeveloperConnectionTools() {
   </details>;
 }
 
-export default async function IntegrationsPage() {
+export default async function IntegrationsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ github?: string | string[] }>;
+}) {
   const { supabase, membership, organisation } = await requireAppContext();
   const canManageConnections = hasCapability(membership.role, "manage_connections");
 
@@ -91,7 +100,8 @@ export default async function IntegrationsPage() {
     </>;
   }
 
-  const [connectionsResult, alertChannelsResult, deliveryResult] = await Promise.all([
+  const { github } = await searchParams;
+  const [connectionsResult, alertChannelsResult, installationResult, repositorySummaryResult, deliveryResult] = await Promise.all([
     supabase.from("integration_connections")
       .select("id,provider,label,config,connection_mode,enabled,created_at,revoked_at")
       .eq("organisation_id", organisation.id)
@@ -101,6 +111,14 @@ export default async function IntegrationsPage() {
       .select("id,type,label,min_severity,enabled,daily_digest_enabled,created_at,revoked_at")
       .eq("organisation_id", organisation.id)
       .order("created_at", { ascending: false }),
+    supabase.from("github_installations")
+      .select("id,account_login,status,repository_selection,permissions_ok,updated_at,revoked_at")
+      .eq("organisation_id", organisation.id)
+      .order("updated_at", { ascending: false }),
+    supabase.from("github_repository_shadow_summaries")
+      .select("repository_id,installation_id,full_name,html_url,visibility,default_branch,archived,selected,available,last_seen_at,latest_run_id,latest_trigger_type,latest_status,latest_diagnostic_code,latest_started_at,latest_completed_at,latest_observation_count,latest_passed_count,latest_failed_count,latest_unknown_count,latest_not_applicable_count,last_completed_collection_at")
+      .eq("organisation_id", organisation.id)
+      .order("full_name", { ascending: true }),
     membership.role === "owner"
       ? supabase.from("daily_digest_deliveries")
         .select("id,digest_on,channel_id,status,attempt_count,error_code,last_attempted_at,delivered_at")
@@ -110,7 +128,13 @@ export default async function IntegrationsPage() {
       : Promise.resolve({ data: [] as DailyDigestDeliverySummary[], error: null }),
   ]);
 
-  if (connectionsResult.error || alertChannelsResult.error || deliveryResult.error) {
+  if (
+    connectionsResult.error
+    || alertChannelsResult.error
+    || installationResult.error
+    || repositorySummaryResult.error
+    || deliveryResult.error
+  ) {
     throw new Error("Could not load connection settings");
   }
 
@@ -125,6 +149,13 @@ export default async function IntegrationsPage() {
   });
 
   return <>
+    {github === "connected" && <Card
+      role="status"
+      aria-label="GitHub connection status"
+      style={{ padding: "16px", background: "#eef7f0", borderColor: "#cfe6d5", margin: "0 auto 16px", maxWidth: "1100px" }}
+    >
+      <b>GitHub App connected.</b> Choose the repositories to include in shadow collection below.
+    </Card>}
     <ConnectionsCatalog
       connections={connections}
       alertChannels={alertChannels}
@@ -134,6 +165,11 @@ export default async function IntegrationsPage() {
         { href: "/app/settings", label: "Settings" },
         { href: "/app/integrations", label: "Connections" },
       ]} />}
+    />
+    <GitHubInstallationPanel
+      installations={(installationResult.data ?? []) as GitHubInstallationSummary[]}
+      repositories={(repositorySummaryResult.data ?? []) as GitHubRepositoryShadowSummary[]}
+      nowIso={new Date().toISOString()}
     />
     {showDeveloperTools && <DeveloperConnectionTools />}
   </>;

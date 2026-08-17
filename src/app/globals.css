@@ -414,3 +414,35 @@ a.heat-cell:hover{outline:2px solid var(--ink);outline-offset:-2px}
 .connection-card button:focus-visible,.connection-management button:focus-visible,.connection-management input:focus-visible,.connection-management select:focus-visible,.developer-connection-tools summary:focus-visible{outline:none;box-shadow:var(--ch-focus-ring)}
 @media(max-width:920px){.connections-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:640px){.connections-catalog-head h2{font-size:28px}.connections-grid{grid-template-columns:1fr}.connection-card{min-height:190px}.connection-card>p{min-height:0}.connections-panel-head,.connections-account,.connections-slack-form{padding:var(--ch-space-4)}.connections-panel-empty{align-items:stretch;flex-direction:column;padding:var(--ch-space-4)}.connections-panel-empty .button{width:100%}.connections-account-summary{align-items:flex-start;flex-direction:column}.connections-account-actions{align-items:stretch;flex-direction:column}.connections-account-actions form,.connections-account-actions .button{width:100%}.connections-target-form .button,.connections-slack-form .button{width:100%}}
+
+/* Private GitHub App shadow collection */
+.github-shadow-panel{width:100%;max-width:1100px;margin:var(--ch-space-6) auto 0;overflow:hidden;border:1px solid var(--ch-border);border-radius:12px;background:var(--ch-surface);box-shadow:0 8px 28px -24px color-mix(in srgb,var(--ch-ink) 60%,transparent)}
+.github-shadow-panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--ch-space-6);padding:var(--ch-space-6);border-bottom:1px solid var(--ch-border)}
+.github-shadow-panel-head .eyebrow{margin:0 0 var(--ch-space-1);color:var(--ch-text-muted);font-size:11px}
+.github-shadow-panel-head h2{margin:0;font-size:20px;letter-spacing:-.015em}
+.github-shadow-panel-head p:last-child{max-width:680px;margin:var(--ch-space-2) 0 0;color:var(--ch-text-muted);font-size:12.5px;line-height:1.55}
+.github-shadow-panel-head .button{min-height:42px;flex:none}
+.github-shadow-empty,.github-repositories-empty{padding:var(--ch-space-6);color:var(--ch-text);font-size:13px}
+.github-shadow-empty p,.github-repositories-empty{margin:var(--ch-space-2) 0 0;color:var(--ch-text-muted)}
+.github-installation{border-top:1px solid var(--ch-border)}
+.github-installation:first-child{border-top:0}
+.github-installation-head{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:var(--ch-space-5);padding:var(--ch-space-5) var(--ch-space-6);background:var(--ch-canvas)}
+.github-installation-head h3{margin:0;font-size:15px}
+.github-installation-head p{margin:4px 0 0;color:var(--ch-text-muted);font-size:12px}
+.github-installation-head .button{min-height:40px}
+.github-health-facts{display:flex;align-items:center;gap:var(--ch-space-4);margin:0}
+.github-health-facts>div{display:grid;gap:5px}
+.github-health-facts dt{color:var(--ch-text-muted);font-size:10px;font-weight:750;text-transform:uppercase;letter-spacing:.04em}
+.github-health-facts dd{margin:0}
+.github-repository{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:var(--ch-space-5);padding:var(--ch-space-5) var(--ch-space-6);border-top:1px solid var(--ch-border)}
+.github-repository-scope{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:flex-start;gap:var(--ch-space-3)}
+.github-repository-scope>label{display:flex;align-items:center;min-height:44px;cursor:pointer}
+.github-repository-scope>label>input{width:auto;margin:0}
+.github-repository-scope>label>span{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.github-repository-scope a{color:var(--ch-ink);font-size:13px;font-weight:750;text-decoration:none;overflow-wrap:anywhere}
+.github-repository-scope a:hover{text-decoration:underline}
+.github-repository-scope p{margin:4px 0 0;color:var(--ch-text-muted);font-size:11.5px;line-height:1.45}
+.github-repository-health{justify-content:flex-end;min-width:250px}
+.github-shadow-status{min-height:20px;margin:0;padding:0 var(--ch-space-6) var(--ch-space-4);color:var(--ch-text-muted);font-size:12px}
+.github-shadow-panel button:focus-visible,.github-shadow-panel input:focus-visible,.github-shadow-panel a:focus-visible{outline:none;box-shadow:var(--ch-focus-ring)}
+@media(max-width:760px){.github-shadow-panel-head{align-items:stretch;flex-direction:column}.github-shadow-panel-head .button{width:100%}.github-installation-head{grid-template-columns:1fr}.github-installation-head .button{width:100%}.github-repository{grid-template-columns:1fr}.github-repository-health{justify-content:flex-start;min-width:0}}

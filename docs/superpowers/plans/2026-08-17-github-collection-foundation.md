@@ -572,7 +572,7 @@ git commit -m "feat(github): accept replay-safe signed webhooks"
 - Modify: `src/app/app/integrations/page.tsx`
 - Modify: `src/app/app/integrations/connections-catalog.tsx`
 - Modify: `src/app/app/integrations/actions.ts`
-- Create: `supabase/migrations/20260817040000_github_shadow_ui_summary.sql`
+- Create: `supabase/migrations/20260817192458_github_shadow_ui_summary.sql`
 - Create: `supabase/tests/database/066_github_shadow_ui_summary.sql`
 - Create: `src/features/github/components/github-installation-panel.tsx`
 - Test: `src/features/github/components/github-installation-panel.test.tsx`
@@ -606,7 +606,7 @@ Run: `npx supabase db reset && npx supabase test db supabase/tests/database/066_
 Expected: PASS with axe-compatible labels and operator boundaries.
 
 ```bash
-git add src/app/app/integrations src/features/github/components supabase/migrations/20260817040000_github_shadow_ui_summary.sql supabase/tests/database/066_github_shadow_ui_summary.sql
+git add src/app/app/integrations src/features/github/components supabase/migrations/20260817192458_github_shadow_ui_summary.sql supabase/tests/database/066_github_shadow_ui_summary.sql
 git commit -m "feat(github): manage repository shadow collection"
 ```
 
