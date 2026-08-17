@@ -33,6 +33,50 @@ describe("claimInstallation", () => {
     }));
   });
 
+  it("persists a verified configured personal installation claim", async () => {
+    const persist = vi.fn().mockResolvedValue("installation-uuid");
+    const personal: VerifiedInstallationClaim = {
+      ...verified,
+      appInstallation: {
+        ...verified.appInstallation,
+        account: { id: 61040544, login: "mukta2701", type: "User" },
+      },
+      repositories: [{
+        id: 102,
+        owner: "mukta2701",
+        name: "ComplianceHub",
+        fullName: "mukta2701/ComplianceHub",
+        htmlUrl: "https://evil.example/spoof",
+        visibility: "private",
+        archived: false,
+        defaultBranch: "main",
+      }],
+    };
+
+    await expect(claimInstallation(personal, {
+      allowedAccountId: 61040544,
+      allowedAccountType: "User",
+      persist,
+    })).resolves.toBe("installation-uuid");
+    expect(persist).toHaveBeenCalledWith(expect.objectContaining({
+      accountId: 61040544,
+      accountType: "User",
+      repositories: [expect.objectContaining({
+        htmlUrl: "https://github.com/mukta2701/ComplianceHub",
+      })],
+    }));
+  });
+
+  it("rejects an installation whose account type does not match configuration", async () => {
+    const persist = vi.fn();
+    await expect(claimInstallation(verified, {
+      allowedAccountId: 99,
+      allowedAccountType: "User",
+      persist,
+    })).rejects.toThrow("GitHub installation verification failed");
+    expect(persist).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["not visible to user", { userInstallationIds: [88] }],
     ["app id mismatch", { appInstallation: { ...verified.appInstallation, id: 78 } }],

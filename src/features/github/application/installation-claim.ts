@@ -2,6 +2,7 @@ import "server-only";
 
 import { z } from "zod";
 
+import type { GitHubAccountType } from "./github-account-policy";
 import { READ_PERMISSIONS } from "./github-app-auth";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
@@ -35,7 +36,7 @@ export type CanonicalInstallationClaim = {
   requestedInstallationId: number;
   accountId: number;
   accountLogin: string;
-  accountType: "Organization";
+  accountType: GitHubAccountType;
   repositorySelection: "selected";
   permissions: typeof READ_PERMISSIONS;
   repositories: VerifiedInstallationClaim["repositories"];
@@ -118,10 +119,12 @@ export async function claimInstallation(
   claim: VerifiedInstallationClaim,
   dependencies: {
     allowedAccountId?: number;
+    allowedAccountType?: GitHubAccountType;
     persist?: (input: CanonicalInstallationClaim) => Promise<string>;
   } = {},
 ): Promise<string> {
   const allowedAccountId = requiredAllowedAccountId(dependencies.allowedAccountId);
+  const allowedAccountType = dependencies.allowedAccountType ?? "Organization";
   try {
     const app = claim.appInstallation;
     if (!z.uuid().safeParse(claim.organisationId).success || !z.uuid().safeParse(claim.actorId).success) throw failure();
@@ -129,7 +132,7 @@ export async function claimInstallation(
     if (!claim.userInstallationIds.includes(claim.requestedInstallationId)) throw failure();
     if (app.id !== claim.requestedInstallationId) throw failure();
     if (app.repositorySelection !== "selected") throw failure();
-    if (app.account.type !== "Organization" || app.account.id !== allowedAccountId) throw failure();
+    if (app.account.type !== allowedAccountType || app.account.id !== allowedAccountId) throw failure();
     if (app.suspendedAt !== null || !exactPermissions(app.permissions)) throw failure();
     const accountLogin = login.parse(app.account.login);
     const repositories = canonicalizeRepositories(claim.repositories, accountLogin);
@@ -139,7 +142,7 @@ export async function claimInstallation(
       requestedInstallationId: claim.requestedInstallationId,
       accountId: app.account.id,
       accountLogin,
-      accountType: "Organization",
+      accountType: allowedAccountType,
       repositorySelection: "selected",
       permissions: READ_PERMISSIONS,
       repositories,
