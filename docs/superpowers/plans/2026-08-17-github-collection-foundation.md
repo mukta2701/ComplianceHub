@@ -613,11 +613,11 @@ git commit -m "feat(github): manage repository shadow collection"
 
 **Interfaces:**
 - Consumes: GitHub App registration values and the existing rollback-safe personal Azure deployment.
-- Produces: documented, secret-safe deployment and recorded shadow-collection proof for one dedicated test repository.
+- Produces: documented, secret-safe personal-Azure deployment, a local seeded UI proof, and—after Adtecher GitHub-owner approval—a recorded live shadow-collection proof for one dedicated test repository.
 
 - [ ] **Step 1: Write failing deployment-contract and E2E tests**
 
-Require these server-only variables/secrets: `GITHUB_APP_ID`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_SLUG`, and `GITHUB_ALLOWED_ACCOUNT_ID`. Assert none is a Docker build arg, `NEXT_PUBLIC_*` value, workflow log line, health response, or client bundle reference. E2E covers mocked install inventory, selecting one test repository, manual collection, and viewing shadow results without any readiness delta.
+Require these server-only variables/secrets: `GITHUB_APP_ID`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_SLUG`, and `GITHUB_ALLOWED_ACCOUNT_ID`. Assert none is a Docker build arg, `NEXT_PUBLIC_*` value, workflow log line, health response, or client bundle reference. Vitest route/action integration tests use injected provider dependencies to cover callback inventory, repository selection, manual collection, and no readiness delta. Playwright seeds only safe shadow rows in local Supabase and proves the complete visible selection/status UI plus unchanged readiness; never add a production-toggleable fake GitHub origin.
 
 - [ ] **Step 2: Run focused tests and confirm RED**
 
@@ -627,7 +627,7 @@ Expected: FAIL because the secret-slot contract and E2E flow are absent.
 
 - [ ] **Step 3: Extend rollback-safe secret slots and documentation**
 
-Extend the existing inactive-slot staging and revision activation steps in `.github/workflows/deploy-azure-staging.yml` and the corresponding secret references in `infra/azure/application.bicep`; preserve the previous revision's values during rollback; pass only secret references to Container Apps. Document GitHub App registration as private, Adtecher-only, read-only; set `GITHUB_ALLOWED_ACCOUNT_ID` to the immutable numeric Adtecher organisation ID; leave GitHub's `Request user authorization (OAuth) during installation` option disabled because it prevents the setup-URL flow; use exact callback `/api/github/callback`, setup `/api/github/setup`, and webhook `/api/github/webhook`; subscribe only to the events from Task 7; and use one dedicated test repository.
+Extend the existing inactive-slot staging and revision activation steps in `.github/workflows/deploy-azure-staging.yml` and the corresponding secret references in `infra/azure/application.bicep`; rotate all seven GitHub values in the same inactive a/b slot group, run silent non-empty preflight checks before mutation, preserve the previous revision's values during rollback, and pass only `secretref:` values to Container Apps. Keep the publish/build job free of deployment-environment secrets and build arguments; document the private key as a one-line escaped-`\n` PEM. After revision copy, capture the exact new revision name, poll it to Ready/Running, assert it is `latestReadyRevisionName`, and only then smoke the canonical site URL; apply the same readiness proof before rollback smoke. Document GitHub App registration as private, Adtecher-only, read-only; set `GITHUB_ALLOWED_ACCOUNT_ID` to the immutable numeric Adtecher organisation ID; leave GitHub's `Request user authorization (OAuth) during installation` option disabled because it prevents the setup-URL flow; use the exact canonical `NEXT_PUBLIC_SITE_URL` origin for callback `/api/github/callback`, setup `/api/github/setup`, and webhook `/api/github/webhook`; keep SSL verification enabled; subscribe only to the events from Task 7; and use one dedicated selected repository.
 
 - [ ] **Step 4: Run complete local verification**
 
@@ -636,14 +636,16 @@ Run:
 ```bash
 npx supabase db reset
 npm run test:db
+npm run test:db:upgrade
+npm run test:integration
 npm run lint
 npm run typecheck
 npm test
 npm run build
-npx playwright test e2e/github-shadow-collection.spec.ts --workers=1
+npm run test:e2e
 ```
 
-Expected: every command exits 0; no live GitHub request occurs.
+Expected: every command exits 0; no live GitHub request occurs; `npm run build` also succeeds with every `GITHUB_*` value unset.
 
 - [ ] **Step 5: Commit the release configuration**
 
@@ -652,15 +654,19 @@ git add .env.example docs/deployment.md docs/release-checklist.md .github/workfl
 git commit -m "chore(github): prepare personal Azure shadow rollout"
 ```
 
-- [ ] **Step 6: Perform the external registration checkpoint**
+- [ ] **Step 6: Apply and verify the hosted database migration**
 
-In GitHub, create or update the private App with the documented URLs and read-only permissions. Add its secrets to the existing personal Azure staging GitHub environment. Do not add them to `.env.local`, repository secrets visible to forks, application tables, or the Adtecher Azure environment.
+Before deploying the application, confirm the exact personal-staging Supabase project reference, take/verify a backup, compare `supabase migration list`, and apply only the reviewed additive migration through the approved hosted migration path. Verify the new tables, safe view, and RPC signatures directly. Record that the migration remains compatible with the previous app revision because an application rollback does not roll back the database.
 
-- [ ] **Step 7: Deploy with the existing personal Azure workflow**
+- [ ] **Step 7: Perform the external registration checkpoint**
 
-Run the `Deploy Azure staging` workflow with `deploy=true`. Confirm the immutable image digest, new Container Apps revision, health check, OAuth/MCP contract check, and rollback target. Do not run `Deploy Azure Adtecher staging`.
+Before merging to `main` or triggering a live feature-branch deployment, have an Adtecher GitHub organisation owner/app manager create or update the private organisation-owned App with the documented URLs and read-only permissions and approve installation on the dedicated repository. Add its secrets to the existing personal Azure staging GitHub environment. Do not weaken `GITHUB_ALLOWED_ACCOUNT_ID`, substitute a personal repository, add credentials to `.env.local`, expose them to forks, store them in application tables, or use the unavailable Adtecher Azure environment. If approval is still pending, stop live rollout after the local seeded proof while retaining the implementation.
 
-- [ ] **Step 8: Execute and record the shadow proof**
+- [ ] **Step 8: Deploy with the existing personal Azure workflow**
+
+Run the `Deploy Azure staging` workflow with `deploy=true` at the exact reviewed branch/SHA. Confirm the immutable image digest, exact new Container Apps revision reaches Ready/Running and becomes latest-ready before smoke, health check, OAuth/MCP contract check, and ready rollback target. This worktree has only the personal `azure-staging` target; do not introduce or invoke an Adtecher Azure deployment.
+
+- [ ] **Step 9: Execute and record the shadow proof**
 
 Install the App on one dedicated Adtecher test repository, select it in ComplianceHub, run collection, and record:
 
