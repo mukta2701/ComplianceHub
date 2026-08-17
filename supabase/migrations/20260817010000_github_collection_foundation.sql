@@ -241,6 +241,15 @@ create table public.github_webhook_deliveries (
   constraint github_webhook_deliveries_resolution_check check (
     (provider_repository_id is null or provider_installation_id is not null)
     and (
+      provider_installation_id is not null
+      or (
+        provider_repository_id is null
+        and organisation_id is null
+        and installation_id is null
+        and repository_id is null
+      )
+    )
+    and (
       (organisation_id is null and installation_id is null and repository_id is null)
     or (
       organisation_id is not null
@@ -459,8 +468,8 @@ grant insert (
 
 grant select on public.github_webhook_deliveries to service_role;
 grant insert (
-  organisation_id, installation_id, repository_id, provider_installation_id,
-  provider_repository_id, provider_delivery_id, event_name, payload_sha256,
+  provider_installation_id, provider_repository_id, provider_delivery_id,
+  event_name, payload_sha256,
   status, attempt_count, diagnostic_code,
   received_at, last_attempted_at, processed_at
 ) on public.github_webhook_deliveries to service_role;

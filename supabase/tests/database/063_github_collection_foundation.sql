@@ -126,6 +126,9 @@ select ok(has_column_privilege('service_role', 'public.github_collection_runs', 
 select ok(has_column_privilege('service_role', 'public.github_observations', 'observation_key', 'INSERT'), 'service boundary may append observations');
 select ok(not has_table_privilege('service_role', 'public.github_observations', 'UPDATE'), 'service boundary cannot update observation history');
 select ok(has_column_privilege('service_role', 'public.github_webhook_deliveries', 'provider_delivery_id', 'INSERT'), 'service boundary may reserve verified webhook deliveries');
+select ok(not has_column_privilege('service_role', 'public.github_webhook_deliveries', 'organisation_id', 'INSERT'), 'webhook intake cannot assert a resolved tenant directly');
+select ok(not has_column_privilege('service_role', 'public.github_webhook_deliveries', 'installation_id', 'INSERT'), 'webhook intake cannot assert a resolved installation directly');
+select ok(not has_column_privilege('service_role', 'public.github_webhook_deliveries', 'repository_id', 'INSERT'), 'webhook intake cannot assert a resolved repository directly');
 select ok(not has_column_privilege('service_role', 'public.github_webhook_deliveries', 'attempt_count', 'UPDATE'), 'service boundary cannot forge webhook recovery attempts directly');
 select ok(not has_column_privilege('service_role', 'public.github_webhook_deliveries', 'diagnostic_code', 'UPDATE'), 'service boundary cannot forge webhook outcomes directly');
 select ok(has_column_privilege('service_role', 'public.github_oauth_states', 'state_hash', 'INSERT'), 'service boundary may reserve a hashed OAuth nonce');
@@ -284,6 +287,7 @@ insert into public.github_webhook_deliveries(
   '8b000000-0000-4000-8000-000000000101', '8b000000-0000-4000-8000-000000000201',
   81001, 83001, '123e4567-e89b-12d3-a456-426614174000', 'repository', repeat('b', 64), 'queued', now() - interval '1 hour'
 );
+set local role service_role;
 select lives_ok(
   $$ insert into public.github_webhook_deliveries(
        provider_delivery_id, event_name, payload_sha256, status, processed_at
@@ -292,6 +296,20 @@ select lives_ok(
        repeat('9', 64), 'ignored', now()
      ) $$,
   'a signed unsupported event is durably ignored before local tenant resolution'
+);
+reset role;
+select throws_ok(
+  $$ insert into public.github_webhook_deliveries(
+       organisation_id, installation_id, provider_delivery_id, event_name,
+       payload_sha256, status, processed_at
+     ) values (
+       current_setting('app.github_org')::uuid,
+       '8b000000-0000-4000-8000-000000000101',
+       '123e4567-e89b-12d3-a456-426614174005', 'unsupported_event',
+       repeat('5', 64), 'ignored', now()
+     ) $$,
+  '23514', null,
+  'a provider-less ignored webhook cannot retain local tenant or installation ids'
 );
 insert into public.github_webhook_deliveries(
   id, organisation_id, installation_id, repository_id, provider_installation_id,
@@ -438,8 +456,8 @@ select throws_ok(
   '42501', null, 'the service boundary cannot bypass webhook lifecycle CAS functions'
 );
 select throws_ok(
-  $$ insert into public.github_webhook_deliveries(organisation_id, installation_id, provider_installation_id, provider_delivery_id, event_name, payload_sha256)
-     values (current_setting('app.github_org')::uuid, '8b000000-0000-4000-8000-000000000101', 81001, '123e4567-e89b-12d3-a456-426614174000', 'repository', repeat('c', 64)) $$,
+  $$ insert into public.github_webhook_deliveries(provider_installation_id, provider_delivery_id, event_name, payload_sha256)
+     values (81001, '123e4567-e89b-12d3-a456-426614174000', 'repository', repeat('c', 64)) $$,
   '23505', null, 'provider webhook delivery identifiers are replay-safe and unique'
 );
 
