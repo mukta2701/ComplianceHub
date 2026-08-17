@@ -339,30 +339,27 @@ still consume the user-and-client rate-limit allowance.
 
 The validated source package is in `plugins/compliancehub-internal`. It stays
 private and must not be submitted to the public plugin directory. Its
-`.app.json` intentionally contains an empty `apps` object in source control.
-That empty `apps` object is an external registration gate: official plugin
-packaging requires a real registered connection ID, and a fake ID would create
-a misleading, non-working install.
+`.app.json` references the registered private application
+`asdk_app_6a82f504a814819182e544ececddefc9`.
 
 1. Deploy the exact staging commit and complete every gate in section 5a.
 2. In ChatGPT developer mode, register the canonical staging `/mcp` URL. Copy
-   the technical connection ID from the resulting plugin URL; it starts with
-   `plugin_asdk_app`.
-3. Replace the empty application map in
-   `plugins/compliancehub-internal/.app.json` with the registered mapping:
+   the application ID from the resulting plugin settings page; it starts with
+   `asdk_app`.
+3. Confirm `plugins/compliancehub-internal/.app.json` contains the registered
+   mapping:
 
    ```json
    {
      "apps": {
        "compliancehub": {
-         "id": "plugin_asdk_app_REPLACE_WITH_REGISTERED_ID",
-         "required": true
+         "id": "asdk_app_6a82f504a814819182e544ececddefc9"
        }
      }
    }
    ```
 
-   Do not commit the example marker. Validate the finished package with
+   Validate the finished package with
    `python3 ~/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py plugins/compliancehub-internal`.
 4. Install the finished package from a private local or organisation-controlled
    marketplace. Share it only with the internal ChatGPT/Codex workspace. The

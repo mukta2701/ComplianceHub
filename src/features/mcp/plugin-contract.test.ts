@@ -91,15 +91,17 @@ describe("private ComplianceHub plugin safety contract", () => {
     }
   });
 
-  it("keeps registration gated and deployment schedules synchronized", () => {
+  it("packages the registered private app and keeps deployment schedules synchronized", () => {
     const appMap = JSON.parse(read("plugins/compliancehub-internal/.app.json")) as { apps: object };
     const deployment = read("docs/deployment.md");
     const workflow = read(".github/workflows/ci.yml");
     const maintenanceWorkflow = read(".github/workflows/azure-maintenance.yml");
     const vercel = JSON.parse(read("vercel.json")) as { crons?: Array<{ path: string; schedule: string }> };
 
-    expect(appMap.apps).toEqual({});
-    expect(deployment).toMatch(/empty `apps` object[\s\S]*external registration gate/i);
+    expect(appMap.apps).toEqual({
+      compliancehub: { id: "asdk_app_6a82f504a814819182e544ececddefc9" },
+    });
+    expect(deployment).toMatch(/registered private application[\s\S]*asdk_app_6a82f504a814819182e544ececddefc9/i);
     expect(deployment).toMatch(/`POST \/api\/cron\/daily`[^\n]*`7 6 \* \* \*`[^\n]*06:07 UTC/i);
     expect(deployment).toMatch(/`POST \/api\/cron\/monitor`[^\n]*`13 7 \* \* \*`[^\n]*07:13 UTC/i);
     expect(deployment).toMatch(/integration sync[\s\S]*folded into[\s\S]*daily pipeline/i);
