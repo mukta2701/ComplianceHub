@@ -37,6 +37,20 @@ async function confirmE2eUser(email: string): Promise<void> {
   if (error) throw error;
 }
 
+async function completeE2eSignUp(page: Page, email: string, password: string): Promise<void> {
+  await Promise.all([
+    page.waitForURL((url) => ["/sign-in", "/app", "/app/onboarding"].includes(url.pathname)),
+    page.getByRole("button", { name: "Create account" }).click(),
+  ]);
+  await confirmE2eUser(email);
+  if (new URL(page.url()).pathname === "/sign-in") {
+    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Password").fill(password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+  }
+  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
+}
+
 async function createWorkspace(page: Page, suffix: string) {
   const email = `phase1-${suffix}@example.test`;
   const password = `E2e-${suffix}-Aa1!`;
@@ -46,15 +60,7 @@ async function createWorkspace(page: Page, suffix: string) {
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
-  await Promise.all([
-    page.waitForURL(/\/sign-in/),
-    page.getByRole("button", { name: "Create account" }).click(),
-  ]);
-  await confirmE2eUser(email);
-
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await completeE2eSignUp(page, email, password);
   await page.getByLabel("Organisation name").fill(`Phase1 Workspace ${suffix}`);
   const workspaceResponse = page.waitForResponse((response) =>
     response.request().method() === "POST" && new URL(response.url()).pathname === "/app",

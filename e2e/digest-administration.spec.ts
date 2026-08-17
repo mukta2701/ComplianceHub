@@ -40,6 +40,21 @@ async function confirmLocalUser(email: string): Promise<string> {
   return userId;
 }
 
+async function completeLocalSignUp(page: Page, email: string, password: string): Promise<string> {
+  await Promise.all([
+    page.waitForURL((url) => ["/sign-in", "/app", "/app/onboarding"].includes(url.pathname)),
+    page.getByRole("button", { name: "Create account" }).click(),
+  ]);
+  const userId = await confirmLocalUser(email);
+  if (new URL(page.url()).pathname === "/sign-in") {
+    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Password").fill(password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+  }
+  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
+  return userId;
+}
+
 async function submitServerAction(page: Page, button: Locator, pathname: string) {
   const responsePromise = page.waitForResponse((response) =>
     response.request().method() === "POST" && new URL(response.url()).pathname === pathname,
@@ -59,16 +74,7 @@ async function createOwnerWorkspace(page: Page, testInfo: TestInfo) {
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
-  await Promise.all([
-    page.waitForURL(/\/sign-in/),
-    page.getByRole("button", { name: "Create account" }).click(),
-  ]);
-  const userId = await confirmLocalUser(email);
-
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
+  const userId = await completeLocalSignUp(page, email, password);
   await page.getByLabel("Organisation name").fill(organisationName);
   await submitServerAction(page, page.getByRole("button", { name: "Create workspace" }), "/app");
   await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();

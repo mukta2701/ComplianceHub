@@ -41,6 +41,20 @@ async function confirmE2eUser(email: string): Promise<void> {
   if (error) throw error;
 }
 
+async function completeE2eSignUp(page: Page, email: string, password: string): Promise<void> {
+  await Promise.all([
+    page.waitForURL((url) => ["/sign-in", "/app", "/app/onboarding"].includes(url.pathname)),
+    page.getByRole("button", { name: "Create account" }).click(),
+  ]);
+  await confirmE2eUser(email);
+  if (new URL(page.url()).pathname === "/sign-in") {
+    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Password").fill(password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+  }
+  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
+}
+
 async function createWorkspaceOwner(
   page: Page,
   testInfo: TestInfo,
@@ -56,15 +70,7 @@ async function createWorkspaceOwner(
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
-  await Promise.all([
-    page.waitForURL(/\/sign-in/),
-    page.getByRole("button", { name: "Create account" }).click(),
-  ]);
-  await confirmE2eUser(email);
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
+  await completeE2eSignUp(page, email, password);
   await page.getByLabel("Organisation name").fill(organisationName);
   await submitServerAction(page, page.getByRole("button", { name: "Create workspace" }), "/app");
   await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
@@ -323,14 +329,7 @@ test("a treatment plan spawns an owned, dated task", async ({ page }, testInfo) 
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
-  await page.getByRole("button", { name: "Create account" }).click();
-
-  await page.waitForURL(/\/sign-in/);
-  await confirmE2eUser(email);
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
+  await completeE2eSignUp(page, email, password);
   await page.getByLabel("Organisation name").fill(`RTP Workspace ${suffix}`);
   await page.getByRole("button", { name: "Create workspace" }).click();
   await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
@@ -372,14 +371,7 @@ test("an audit runs from plan through checklist to a corrective-action task", as
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
-  await page.getByRole("button", { name: "Create account" }).click();
-
-  await page.waitForURL(/\/sign-in/);
-  await confirmE2eUser(email);
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
+  await completeE2eSignUp(page, email, password);
   await page.getByLabel("Organisation name").fill(`Audit Workspace ${suffix}`);
   await page.getByRole("button", { name: "Create workspace" }).click();
   await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
@@ -649,14 +641,7 @@ test("an asset workbook can be imported through the wizard", async ({ page }, te
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
-  await page.getByRole("button", { name: "Create account" }).click();
-
-  await page.waitForURL(/\/sign-in/);
-  await confirmE2eUser(email);
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
+  await completeE2eSignUp(page, email, password);
   await page.getByLabel("Organisation name").fill(`Import Workspace ${suffix}`);
   await page.getByRole("button", { name: "Create workspace" }).click();
   await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
@@ -796,14 +781,7 @@ test("a minted auditor link exposes a read-only view to an unauthenticated visit
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
-  await page.getByRole("button", { name: "Create account" }).click();
-
-  await page.waitForURL(/\/sign-in/);
-  await confirmE2eUser(email);
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
+  await completeE2eSignUp(page, email, password);
   await page.getByLabel("Organisation name").fill(orgName);
   await page.getByRole("button", { name: "Create workspace" }).click();
   await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
@@ -986,14 +964,7 @@ test("a task is pushed to a sandbox tracker, polled to In Progress, then the con
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
-  await page.getByRole("button", { name: "Create account" }).click();
-
-  await page.waitForURL(/\/sign-in/);
-  await confirmE2eUser(email);
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
+  await completeE2eSignUp(page, email, password);
   await page.getByLabel("Organisation name").fill(`Integrations Workspace ${suffix}`);
   await page.getByRole("button", { name: "Create workspace" }).click();
   await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
@@ -1257,14 +1228,7 @@ test("an owner enables a public Trust Center that leaks nothing sensitive", asyn
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
-  await page.getByRole("button", { name: "Create account" }).click();
-
-  await page.waitForURL(/\/sign-in/);
-  await confirmE2eUser(email);
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
+  await completeE2eSignUp(page, email, password);
   await page.getByLabel("Organisation name").fill(orgName);
   await page.getByRole("button", { name: "Create workspace" }).click();
   await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
