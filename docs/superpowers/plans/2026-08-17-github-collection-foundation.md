@@ -569,6 +569,8 @@ git commit -m "feat(github): accept replay-safe signed webhooks"
 - Modify: `src/app/app/integrations/page.tsx`
 - Modify: `src/app/app/integrations/connections-catalog.tsx`
 - Modify: `src/app/app/integrations/actions.ts`
+- Create: `supabase/migrations/20260817030000_github_shadow_ui_summary.sql`
+- Create: `supabase/tests/database/065_github_shadow_ui_summary.sql`
 - Create: `src/features/github/components/github-installation-panel.tsx`
 - Test: `src/features/github/components/github-installation-panel.test.tsx`
 - Modify: `src/app/app/integrations/page.test.tsx`
@@ -580,7 +582,7 @@ git commit -m "feat(github): accept replay-safe signed webhooks"
 
 - [ ] **Step 1: Write failing UI and action tests**
 
-Prove operators see the private GitHub App panel; Members do not; install uses `/api/github/setup`; selection requires an operator and validated UUID/boolean; the 101st selected repository for one installation is rejected without affecting another installation; manual recheck uses a random request key; status distinguishes Active, Needs attention, Suspended, Partial collection, Never collected, and Stale; `Stale` means the latest completed collection is older than the domain's 36-hour observation-freshness boundary; no observation can be approved or made readiness-affecting in this release.
+Prove operators see the private GitHub App panel; Members short-circuit before any GitHub query/action dependency; install uses `/api/github/setup`; selection requires an operator and strict UUID/`"true" | "false"`; the 101st selected repository for one installation is rejected without affecting another installation; manual recheck is installation-scoped and uses `manual:${randomUUID()}` generated server-side; and no observation can be approved or made readiness-affecting in this release. Keep three independent labels: installation health (`Active`, `Suspended`, `Revoked`, `Needs attention`), collection health (`Never collected`, `Collection in progress`, `Partial collection`, `Collected`, `Needs attention`), and freshness (`Stale` at `now >= last_completed_collection_at + 36h`). A succeeded run with compliance failures is still `Collected`; invalid timestamps fail closed to `Needs attention`.
 
 - [ ] **Step 2: Run UI tests and confirm RED**
 
@@ -590,16 +592,18 @@ Expected: FAIL because the panel and actions do not exist.
 
 - [ ] **Step 3: Implement safe queries, actions, and accessible controls**
 
-Page projections must exclude permissions JSON beyond a persisted derived `permissions_ok` boolean and exclude every credential by construction. Use the tenant-safe latest-run summary view/RPC rather than an unbounded run-history query or per-repository N+1 reads. Keep the existing Nango GitHub connection distinct and label this surface `GitHub App shadow collection`. Repository controls use native checkboxes with labels containing the full repository name; status text uses `role="status"`; the manual recheck button is disabled while pending and reports counts without raw errors. The server action calls the Task 6 runner directly after operator validation and server-side rate limiting; it never calls the cron route or exposes `CRON_SECRET`.
+Extend the security-invoker summary view with `last_completed_collection_at`, derived independently from the newest `succeeded` or `partial` run; the newest run may be `running`, so `latest_completed_at` cannot establish freshness. Test a stale completed run hidden behind a newer running run. Page queries use exact minimal projections, each scoped with `.eq("organisation_id", organisation.id)`, and one summary-view query—no run history, observations, provider/account IDs, raw permissions, actors, or N+1 reads. Keep the existing Nango GitHub connection distinct, correct its copy to its actual issue/remediation purpose, and label this surface exactly `GitHub App shadow collection`. Whitelist only `?github=connected` for a success banner.
+
+Repository controls use native labelled checkboxes; unavailable repositories are visibly explained and disabled; controlled state rolls back on failure; only the affected controls disable during transition. Use one polite `role="status"` mutation message and expose `Rechecking…`; pass a server-evaluated/injected ISO timestamp for deterministic freshness. The selection action calls authenticated `set_github_repository_selected({target_repository_id, target_selected})`, requires `data === true`, and returns generic failure copy. The manual action first performs an authenticated/RLS installation lookup under the active organisation and requires active + `permissions_ok`, then applies per-actor/organisation rate limiting and calls Task 6 directly with only the validated local installation UUID and server-generated key. It never accepts organisation/request key from the client, calls the cron route, or exposes `CRON_SECRET`; return only the five safe aggregate counts and fixed errors.
 
 - [ ] **Step 4: Run UI tests and commit**
 
-Run: `npm test -- src/features/github/components/github-installation-panel.test.tsx src/app/app/integrations/page.test.tsx src/app/app/integrations/actions.test.ts && npm run typecheck`
+Run: `npx supabase db reset && npx supabase test db supabase/tests/database/065_github_shadow_ui_summary.sql && npm test -- src/features/github/components/github-installation-panel.test.tsx src/app/app/integrations/page.test.tsx src/app/app/integrations/actions.test.ts && npm run typecheck`
 
 Expected: PASS with axe-compatible labels and operator boundaries.
 
 ```bash
-git add src/app/app/integrations src/features/github/components
+git add src/app/app/integrations src/features/github/components supabase/migrations/20260817030000_github_shadow_ui_summary.sql supabase/tests/database/065_github_shadow_ui_summary.sql
 git commit -m "feat(github): manage repository shadow collection"
 ```
 
@@ -620,7 +624,7 @@ git commit -m "feat(github): manage repository shadow collection"
 
 - [ ] **Step 1: Write failing deployment-contract and E2E tests**
 
-Require these server-only variables/secrets: `GITHUB_APP_ID`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_SLUG`, and `GITHUB_ALLOWED_ACCOUNT_ID`. Assert none is a Docker build arg, `NEXT_PUBLIC_*` value, workflow log line, health response, or client bundle reference. Vitest route/action integration tests use injected provider dependencies to cover callback inventory, repository selection, manual collection, and no readiness delta. Playwright seeds only safe shadow rows in local Supabase and proves the complete visible selection/status UI plus unchanged readiness; never add a production-toggleable fake GitHub origin.
+Require these server-only variables/secrets: `GITHUB_APP_ID`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_SLUG`, and `GITHUB_ALLOWED_ACCOUNT_ID`. Assert none is a Docker build arg, `NEXT_PUBLIC_*` value, workflow log line, health response, or client bundle reference. Vitest route/action integration tests use injected provider dependencies to cover callback inventory, repository selection, manual collection, and no readiness delta. Playwright seeds installation/repository inventory through `claim_github_installation_server` and run summaries through the final Task 6 service boundary using globally unique positive provider IDs; it exercises the real selection RPC and proves fresh/partial/stale/never visible states plus unchanged readiness. It does not click manual collection, which would require live GitHub, and never adds a production-toggleable fake GitHub origin.
 
 - [ ] **Step 2: Run focused tests and confirm RED**
 
