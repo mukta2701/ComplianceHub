@@ -4,12 +4,18 @@ const hoisted = vi.hoisted(() => ({
   createClient: vi.fn(),
   build: vi.fn(),
   run: vi.fn(),
+  buildWebhookWorker: vi.fn(),
+  drainWebhooks: vi.fn(),
   logError: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/service", () => ({ createSupabaseServiceClient: hoisted.createClient }));
 vi.mock("@/features/github/application/collection-deps", () => ({ buildCollectionDependencies: hoisted.build }));
 vi.mock("@/features/github/application/run-collection", () => ({ runGitHubCollection: hoisted.run }));
+vi.mock("@/features/github/application/webhook-worker", () => ({
+  buildWebhookWorkerDependencies: hoisted.buildWebhookWorker,
+  drainGitHubWebhookDeliveries: hoisted.drainWebhooks,
+}));
 vi.mock("@/lib/observability/logger", () => ({ logError: hoisted.logError }));
 
 function request(secret = "secret") {
@@ -25,6 +31,8 @@ beforeEach(() => {
   hoisted.createClient.mockReset().mockReturnValue({});
   hoisted.build.mockReset().mockReturnValue({});
   hoisted.run.mockReset().mockResolvedValue({ installationsChecked: 1, repositoriesChecked: 1, observationsStored: 15, repositoriesFailed: 0, repositoriesDeferred: 0, runsPartial: 0 });
+  hoisted.buildWebhookWorker.mockReset().mockReturnValue({});
+  hoisted.drainWebhooks.mockReset().mockResolvedValue({ claimed: 2, processed: 1, ignored: 1, failed: 0, ownershipLost: 0 });
   hoisted.logError.mockReset().mockResolvedValue(undefined);
 });
 
@@ -37,15 +45,21 @@ describe("POST /api/cron/github-collect", () => {
     expect(response.status).toBe(401);
     expect(hoisted.createClient).not.toHaveBeenCalled();
     expect(hoisted.build).not.toHaveBeenCalled();
+    expect(hoisted.drainWebhooks).not.toHaveBeenCalled();
   });
 
-  it("uses a deterministic UTC-day key and returns counts only", async () => {
+  it("drains bounded webhook work before scheduled reconciliation and returns counts only", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-17T23:59:00.000Z"));
     const { POST } = await import("./route");
     const response = await POST(request());
+    expect(hoisted.drainWebhooks).toHaveBeenCalledWith(expect.anything(), { limit: 20, signal: expect.any(AbortSignal) });
     expect(hoisted.run).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ trigger: "scheduled", requestKey: "scheduled:2026-08-17", signal: expect.any(AbortSignal) }));
-    expect(await response.json()).toEqual({ installationsChecked: 1, repositoriesChecked: 1, observationsStored: 15, repositoriesFailed: 0, repositoriesDeferred: 0, runsPartial: 0 });
+    expect(hoisted.drainWebhooks.mock.invocationCallOrder[0]).toBeLessThan(hoisted.run.mock.invocationCallOrder[0]);
+    expect(await response.json()).toEqual({
+      webhooks: { claimed: 2, processed: 1, ignored: 1, failed: 0, ownershipLost: 0 },
+      collection: { installationsChecked: 1, repositoriesChecked: 1, observationsStored: 15, repositoriesFailed: 0, repositoriesDeferred: 0, runsPartial: 0 },
+    });
     vi.useRealTimers();
   });
 

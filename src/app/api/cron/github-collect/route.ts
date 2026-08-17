@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { buildCollectionDependencies } from "@/features/github/application/collection-deps";
 import { runGitHubCollection } from "@/features/github/application/run-collection";
+import { buildWebhookWorkerDependencies, drainGitHubWebhookDeliveries } from "@/features/github/application/webhook-worker";
 import { logError } from "@/lib/observability/logger";
 import { isAuthorisedCron } from "@/lib/security/cron-auth";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
@@ -34,12 +35,13 @@ export async function POST(request: Request) {
     });
     const now = new Date();
     const signal = AbortSignal.timeout(ROUTE_DEADLINE_MS);
-    const summary = await runGitHubCollection(deps, {
+    const webhooks = await drainGitHubWebhookDeliveries(buildWebhookWorkerDependencies(service, deps), { limit: 20, signal });
+    const collection = await runGitHubCollection(deps, {
       trigger: "scheduled",
       requestKey: `scheduled:${now.toISOString().slice(0, 10)}`,
       signal,
     });
-    return NextResponse.json(summary);
+    return NextResponse.json({ webhooks, collection });
   } catch {
     await logError("cron", "GitHub collection cron failed", undefined, { stage: "collection" });
     return NextResponse.json({ error: "GitHub collection failed" }, { status: 500 });
