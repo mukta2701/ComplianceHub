@@ -1,0 +1,659 @@
+# GitHub Collection Foundation Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Replace ComplianceHub's sample-only GitHub posture with a private GitHub App that collects deterministic, traceable repository observations into a tenant-safe shadow store without changing readiness, evidence, findings, Slack, or MCP answers.
+
+**Architecture:** This is the first of three releases from the approved GitHub-first automation design. A canonical `github_installations` record owns repository scope; a server-only GitHub App adapter creates short-lived installation tokens; a pure rule evaluator converts bounded API facts into versioned observations; and scheduled, manual, and webhook-triggered runs write only to shadow tables. The existing Nango ticketing connection and existing evidence/finding machinery remain unchanged until the second release deliberately consumes approved observations.
+
+**Tech Stack:** Next.js 16 App Router, TypeScript 5, React 19, Supabase PostgreSQL/RLS/pgTAP, Zod 4, `jose` 6, Vitest 4, Playwright 1.61, Azure Container Apps, GitHub REST API version `2026-03-10`.
+
+## Global Constraints
+
+- Collection is read-only: no repository, issue, workflow, ruleset, or administration writes.
+- CI and unit/integration tests make no live GitHub calls; every response comes from sanitised fixtures or injected fetch fakes.
+- A GitHub `unknown` or unavailable result must never become `pass`.
+- Phase 1 shadow observations must not alter readiness, create evidence, create/resolve findings, send Slack alerts, or change MCP compliance answers.
+- GitHub App private keys, client secrets, user tokens, installation tokens, webhook secrets, response headers, source-code bodies, and unnecessary member data must never enter PostgreSQL, logs, browser bundles, or thrown error messages.
+- GitHub user access tokens used to verify an installation are discarded immediately after the callback.
+- Every new tenant row uses split RLS policies, composite tenant foreign keys, the existing tenant-validation pattern, and `capture_audit_event` where mutable business state is involved.
+- Collection is idempotent by GitHub delivery ID, collection request key, and observation fingerprint.
+- Repository reads are paginated with `per_page=100`, bounded to 100 selected repositories per installation, and stopped on rate-limit diagnostics.
+- Timestamps are UTC ISO strings; user-facing dates remain `en-GB`; scheduled display semantics use `Europe/London`.
+- Existing personal Azure staging remains the only deployment target for this release; `.github/workflows/deploy-azure-adtecher-staging.yml` and `infra/azure/foundation*.bicep` are not executed or extended.
+
+---
+
+### Task 1: Provider-neutral observation and rule contracts
+
+**Files:**
+- Create: `src/features/github/domain/observation.ts`
+- Create: `src/features/github/domain/rules.ts`
+- Test: `src/features/github/domain/rules.test.ts`
+
+**Interfaces:**
+- Consumes: no network or database APIs.
+- Produces: `GitHubFactSet`, `GitHubObservation`, `ObservationResult`, `DiagnosticCode`, `RULE_PACK_VERSION`, `evaluateGitHubRepository(facts, context)`.
+
+- [ ] **Step 1: Write the failing evaluator tests**
+
+Create table-driven tests that prove pass, fail, unknown, and not-applicable behaviour and stable identifiers:
+
+```ts
+import { describe, expect, it } from "vitest";
+import { evaluateGitHubRepository, RULE_PACK_VERSION } from "./rules";
+import type { GitHubFactSet } from "./observation";
+
+const complete: GitHubFactSet = {
+  repository: { id: 101, owner: "adtecher", name: "portal", visibility: "private", archived: false, defaultBranch: "main", url: "https://github.com/adtecher/portal" },
+  branchProtection: { state: "available", value: { forcePushesBlocked: true, deletionsBlocked: true, approvingReviews: 2, dismissesStaleReviews: true, codeOwnerReviews: true, requiredStatusChecks: ["test"] } },
+  dependabot: { state: "available", value: { openHigh: 0, openCritical: 0 } },
+  codeScanning: { state: "available", value: { openHigh: 0, openCritical: 0 } },
+  secretScanning: { state: "available", value: { enabled: true, pushProtectionEnabled: true, openAlerts: 0 } },
+  securityWorkflows: { state: "available", value: [{ name: "CodeQL", active: true, latestConclusion: "success" }] },
+  administration: { state: "available", value: { outsideCollaboratorAdmins: 0 } },
+};
+
+describe("evaluateGitHubRepository", () => {
+  it("emits stable versioned passing observations", () => {
+    const first = evaluateGitHubRepository(complete, { runId: "run-1", observedAt: "2026-08-17T12:00:00.000Z" });
+    const second = evaluateGitHubRepository(complete, { runId: "run-2", observedAt: "2026-08-17T13:00:00.000Z" });
+    expect(first.find((item) => item.checkId === "github.branch.force_pushes")?.result).toBe("pass");
+    expect(first.map((item) => item.observationKey)).toEqual(second.map((item) => item.observationKey));
+    expect(first.every((item) => item.ruleVersion === RULE_PACK_VERSION)).toBe(true);
+  });
+
+  it("never converts denied data into a pass", () => {
+    const observations = evaluateGitHubRepository({
+      ...complete,
+      dependabot: { state: "unavailable", diagnosticCode: "permission_denied" },
+    }, { runId: "run-3", observedAt: "2026-08-17T12:00:00.000Z" });
+    expect(observations.find((item) => item.checkId === "github.dependabot.high_critical")?.result).toBe("unknown");
+  });
+
+  it("marks runtime controls not applicable for archived repositories", () => {
+    const observations = evaluateGitHubRepository({
+      ...complete,
+      repository: { ...complete.repository, archived: true },
+    }, { runId: "run-4", observedAt: "2026-08-17T12:00:00.000Z" });
+    expect(observations.find((item) => item.checkId === "github.workflow.security")?.result).toBe("not_applicable");
+  });
+});
+```
+
+- [ ] **Step 2: Run the focused test and confirm RED**
+
+Run: `npm test -- src/features/github/domain/rules.test.ts`
+
+Expected: FAIL because `./rules` and `./observation` do not exist.
+
+- [ ] **Step 3: Define the observation contract**
+
+Implement the following public types in `observation.ts`:
+
+```ts
+export type ObservationResult = "pass" | "fail" | "unknown" | "not_applicable";
+export type ObservationSeverity = "low" | "medium" | "high" | "critical";
+export type DiagnosticCode = "permission_denied" | "feature_unavailable" | "not_found" | "rate_limited" | "provider_unavailable" | "invalid_response";
+export type DataState<T> = { state: "available"; value: T } | { state: "unavailable"; diagnosticCode: DiagnosticCode };
+
+export type GitHubFactSet = {
+  repository: { id: number; owner: string; name: string; visibility: "public" | "private" | "internal"; archived: boolean; defaultBranch: string; url: string };
+  branchProtection: DataState<{ forcePushesBlocked: boolean; deletionsBlocked: boolean; approvingReviews: number; dismissesStaleReviews: boolean; codeOwnerReviews: boolean; requiredStatusChecks: string[] }>;
+  dependabot: DataState<{ openHigh: number; openCritical: number }>;
+  codeScanning: DataState<{ openHigh: number; openCritical: number }>;
+  secretScanning: DataState<{ enabled: boolean; pushProtectionEnabled: boolean; openAlerts: number }>;
+  securityWorkflows: DataState<Array<{ name: string; active: boolean; latestConclusion: string | null }>>;
+  administration: DataState<{ outsideCollaboratorAdmins: number }>;
+};
+
+export type GitHubObservation = {
+  observationKey: string;
+  runId: string;
+  repositoryId: number;
+  checkId: string;
+  ruleVersion: string;
+  subjectType: "github_repository";
+  subjectId: string;
+  result: ObservationResult;
+  severity: ObservationSeverity | null;
+  title: string;
+  explanation: string;
+  remediation: string | null;
+  observedAt: string;
+  freshUntil: string;
+  sourceUrl: string;
+  fingerprint: string;
+  diagnosticCode: DiagnosticCode | null;
+};
+```
+
+- [ ] **Step 4: Implement deterministic rules**
+
+Set `RULE_PACK_VERSION = "github-repository-v1"`; implement explicit rules for repository visibility/archive state, force pushes, deletions, approving reviews, stale approvals, code-owner review, status checks, high/critical Dependabot alerts, high/critical code-scanning alerts, secret scanning, push protection, open secret alerts, approved security workflow state, and outside-collaborator administrators. Use `node:crypto` SHA-256 over canonical JSON for `fingerprint`, use `owner/name/checkId/RULE_PACK_VERSION` for `observationKey`, and set `freshUntil` to `observedAt + 36 hours`.
+
+The evaluator must route unavailable inputs through this helper:
+
+```ts
+function unknown(input: RuleContext, diagnosticCode: DiagnosticCode): GitHubObservation {
+  return observation(input, {
+    result: "unknown",
+    severity: null,
+    explanation: "GitHub did not provide enough verified information for this check.",
+    remediation: "Restore the required GitHub App permission or feature, then run collection again.",
+    diagnosticCode,
+  });
+}
+```
+
+- [ ] **Step 5: Run domain tests and commit**
+
+Run: `npm test -- src/features/github/domain/rules.test.ts`
+
+Expected: PASS with all four result states covered.
+
+```bash
+git add src/features/github/domain
+git commit -m "feat(github): define deterministic repository rules"
+```
+
+### Task 2: GitHub App authentication and bounded REST client
+
+**Files:**
+- Create: `src/features/github/application/github-app-auth.ts`
+- Create: `src/features/github/application/github-api.ts`
+- Test: `src/features/github/application/github-app-auth.test.ts`
+- Test: `src/features/github/application/github-api.test.ts`
+
+**Interfaces:**
+- Consumes: `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, injected `fetch`, selected numeric repository IDs.
+- Produces: `createAppJwt(config, now)`, `createInstallationToken(input)`, `githubRequest(input)`, `collectInstallationRepositories(input)`.
+
+- [ ] **Step 1: Write failing authentication tests**
+
+Cover RS256 JWT claims (`iat = now - 60`, `exp = now + 540`, `iss = appId`), PEM newline normalisation, missing configuration, a token request restricted to `repository_ids`, no assumptions about token length, and safe errors that contain neither response bodies nor credentials.
+
+```ts
+it("requests a short-lived token restricted to selected repository IDs", async () => {
+  const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+    token: "ghs_APPID_JWT_example",
+    expires_at: "2026-08-17T13:00:00Z",
+  }), { status: 201 }));
+  const result = await createInstallationToken({ installationId: 77, repositoryIds: [101, 102], fetchImpl, appJwt: "signed" });
+  expect(result.expiresAt).toBe("2026-08-17T13:00:00Z");
+  expect(JSON.parse(String(fetchImpl.mock.calls[0][1]?.body))).toEqual({ repository_ids: [101, 102] });
+});
+```
+
+- [ ] **Step 2: Run the focused tests and confirm RED**
+
+Run: `npm test -- src/features/github/application/github-app-auth.test.ts src/features/github/application/github-api.test.ts`
+
+Expected: FAIL because the adapter files do not exist.
+
+- [ ] **Step 3: Implement GitHub App JWT and installation-token exchange**
+
+Use `importPKCS8` and `SignJWT` from `jose`; reject empty app IDs/keys; allow 1–100 unique positive repository IDs; POST only to `https://api.github.com/app/installations/{id}/access_tokens`; and request no broader permission than:
+
+```ts
+const READ_PERMISSIONS = {
+  actions: "read",
+  administration: "read",
+  dependabot_alerts: "read",
+  metadata: "read",
+  security_events: "read",
+} as const;
+```
+
+Never return the token from a route or persist it; keep it only inside the collection call stack.
+
+- [ ] **Step 4: Implement the allowlisted REST client**
+
+`githubRequest` accepts path segments rather than a URL, encodes every segment, enforces the `api.github.com` origin, adds `Accept: application/vnd.github+json` and `X-GitHub-Api-Version: 2026-03-10`, uses `AbortSignal.timeout(15_000)`, and maps statuses as follows:
+
+```ts
+export function diagnosticForStatus(status: number): DiagnosticCode | null {
+  if (status === 401 || status === 403) return "permission_denied";
+  if (status === 404) return "not_found";
+  if (status === 429) return "rate_limited";
+  if (status >= 500) return "provider_unavailable";
+  return null;
+}
+```
+
+Pagination follows only an RFC 8288 `rel="next"` URL whose origin is `https://api.github.com`, caps at 100 pages, and requests `per_page=100`.
+
+- [ ] **Step 5: Run adapter tests and commit**
+
+Run: `npm test -- src/features/github/application/github-app-auth.test.ts src/features/github/application/github-api.test.ts`
+
+Expected: PASS, including pagination, timeout, hostile `Link`, rate-limit, and redaction cases.
+
+```bash
+git add src/features/github/application/github-app-auth.ts src/features/github/application/github-api.ts src/features/github/application/*.test.ts
+git commit -m "feat(github): add bounded GitHub App client"
+```
+
+### Task 3: Tenant-safe GitHub installation and shadow-observation schema
+
+**Files:**
+- Create: `supabase/migrations/20260817010000_github_collection_foundation.sql`
+- Create: `supabase/tests/database/063_github_collection_foundation.sql`
+
+**Interfaces:**
+- Consumes: existing `organisations`, `memberships`, `capture_audit_event`, `is_organisation_member`, `is_organisation_operator`.
+- Produces: `github_installations`, `github_repositories`, `github_collection_runs`, `github_observations`, `github_webhook_deliveries`, and `claim_github_installation(...)`.
+
+- [ ] **Step 1: Write the failing pgTAP contract**
+
+The database test must assert:
+
+```sql
+select has_table('public', 'github_installations');
+select has_table('public', 'github_repositories');
+select has_table('public', 'github_collection_runs');
+select has_table('public', 'github_observations');
+select has_table('public', 'github_webhook_deliveries');
+select col_is_pk('public', 'github_installations', 'id');
+select has_unique('public', 'github_installations', 'github_installations_provider_id_key');
+select has_fk('public', 'github_repositories', 'github_repositories_installation_tenant_fk');
+select has_fk('public', 'github_observations', 'github_observations_repository_tenant_fk');
+```
+
+Add Owner/Admin/Member/outsider and cross-tenant SELECT/INSERT/UPDATE/DELETE assertions. Browser-authenticated users may read safe installation/repository/run/observation summaries in their own workspace; only the verified server boundary may insert installations, runs, observations, and delivery records. Only workspace operators may change `github_repositories.selected` through a security-definer RPC that checks membership.
+
+- [ ] **Step 2: Run the database test and confirm RED**
+
+Run: `npm run test:db -- 063_github_collection_foundation.sql`
+
+Expected: FAIL because the tables are absent.
+
+- [ ] **Step 3: Add the schema and invariants**
+
+Use these core shapes:
+
+```sql
+create type public.github_installation_status as enum ('active', 'suspended', 'revoked', 'needs_attention');
+create type public.github_collection_status as enum ('running', 'succeeded', 'partial', 'failed', 'rate_limited');
+create type public.github_observation_result as enum ('pass', 'fail', 'unknown', 'not_applicable');
+
+create table public.github_installations (
+  id uuid primary key default extensions.gen_random_uuid(),
+  organisation_id uuid not null references public.organisations(id) on delete cascade,
+  provider_installation_id bigint not null unique check (provider_installation_id > 0),
+  account_id bigint not null check (account_id > 0),
+  account_login text not null check (account_login ~ '^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$'),
+  account_type text not null check (account_type in ('Organization', 'User')),
+  repository_selection text not null check (repository_selection in ('all', 'selected')),
+  status public.github_installation_status not null default 'active',
+  connected_by uuid,
+  permissions jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  revoked_at timestamptz,
+  unique (id, organisation_id),
+  constraint github_installations_connector_tenant_fk foreign key (organisation_id, connected_by)
+    references public.memberships(organisation_id, user_id) on delete set null (connected_by)
+);
+```
+
+`github_repositories` stores provider ID, owner, name, full name, safe HTML URL, visibility, default branch, archive state, `selected boolean default false`, and `last_seen_at`. `github_collection_runs` stores trigger (`initial`, `scheduled`, `manual`, `webhook`), request key, status, safe diagnostic code, timestamps, and counts. `github_observations` stores every field in `GitHubObservation`, uses `(collection_run_id, observation_key)` as the immutable uniqueness boundary, and never stores raw provider payloads. `github_webhook_deliveries` stores delivery ID, event name, payload SHA-256, safe repository/installation IDs, status, received/processed timestamps, and no raw body.
+
+- [ ] **Step 4: Add RLS, grants, audit triggers, and safe RPCs**
+
+Use split policies and explicit column grants. The service role receives the minimum SELECT/INSERT/UPDATE needed for collection and no DELETE on shadow history. `set_github_repository_selected(repository_id uuid, selected boolean)` must derive the organisation from the row, require `is_organisation_operator`, cap selected repositories at 100, and audit the change through the repository update trigger.
+
+- [ ] **Step 5: Reset and test the database, then commit**
+
+Run: `npx supabase db reset && npm run test:db`
+
+Expected: all migrations apply from empty and all pgTAP files pass.
+
+```bash
+git add supabase/migrations/20260817010000_github_collection_foundation.sql supabase/tests/database/063_github_collection_foundation.sql
+git commit -m "feat(github): add tenant-safe shadow collection schema"
+```
+
+### Task 4: Verified installation claim flow
+
+**Files:**
+- Create: `src/features/github/application/github-user-oauth.ts`
+- Create: `src/features/github/application/installation-claim.ts`
+- Create: `src/app/api/github/setup/route.ts`
+- Create: `src/app/api/github/callback/route.ts`
+- Test: `src/features/github/application/github-user-oauth.test.ts`
+- Test: `src/features/github/application/installation-claim.test.ts`
+- Test: `src/app/api/github/setup/route.test.ts`
+- Test: `src/app/api/github/callback/route.test.ts`
+
+**Interfaces:**
+- Consumes: authenticated workspace Owner/Admin context, `installation_id` from GitHub setup redirect, GitHub App user OAuth with PKCE, app JWT verification, service-role RPC/write boundary.
+- Produces: one verified `github_installations` record and repository inventory; no retained user token.
+
+- [ ] **Step 1: Write failing setup and callback tests**
+
+Prove that setup rejects unauthenticated/non-operator callers and malformed IDs; creates a 32-byte state and PKCE verifier; stores them in `HttpOnly`, `Secure`, `SameSite=Lax`, ten-minute cookies; and redirects to GitHub OAuth. Prove that callback rejects missing/mismatched/expired state, exchanges `code` with `code_verifier`, confirms the installation appears in `GET /user/installations`, confirms app metadata through `GET /app/installations/{id}`, checks the required read permissions, imports repository inventory, clears cookies, and redirects to `/app/integrations?github=connected`.
+
+- [ ] **Step 2: Run route and application tests and confirm RED**
+
+Run: `npm test -- src/features/github/application/github-user-oauth.test.ts src/features/github/application/installation-claim.test.ts src/app/api/github/setup/route.test.ts src/app/api/github/callback/route.test.ts`
+
+Expected: FAIL because the claim flow does not exist.
+
+- [ ] **Step 3: Implement OAuth state, PKCE, and user-token exchange**
+
+Read `GITHUB_APP_CLIENT_ID` and `GITHUB_APP_CLIENT_SECRET` only server-side. Build the authorize URL with `client_id`, exact `redirect_uri`, random `state`, `code_challenge`, `code_challenge_method=S256`, `allow_signup=false`, and `prompt=select_account`. Exchange the callback code using `application/json`; validate with Zod; never log or return `access_token`, `refresh_token`, or response bodies.
+
+- [ ] **Step 4: Verify and claim the installation**
+
+`claimInstallation` must require all three independently verified inputs:
+
+```ts
+export type VerifiedInstallationClaim = {
+  organisationId: string;
+  actorId: string;
+  requestedInstallationId: number;
+  userInstallationIds: number[];
+  appInstallation: {
+    id: number;
+    account: { id: number; login: string; type: "Organization" | "User" };
+    repositorySelection: "all" | "selected";
+    permissions: Record<string, string>;
+  };
+  repositories: Array<{ id: number; owner: string; name: string; fullName: string; htmlUrl: string; visibility: "public" | "private" | "internal"; archived: boolean; defaultBranch: string }>;
+};
+```
+
+Reject unless the requested ID is present in `userInstallationIds`, equals `appInstallation.id`, and the permission set is read-only and contains the required reads. Persist only through the service client after the user-scoped operator check. Discard the user token when the function returns.
+
+- [ ] **Step 5: Run tests and commit**
+
+Run: `npm test -- src/features/github/application/github-user-oauth.test.ts src/features/github/application/installation-claim.test.ts src/app/api/github/setup/route.test.ts src/app/api/github/callback/route.test.ts`
+
+Expected: PASS with spoofed installation, cross-workspace, state replay, and token-redaction tests green.
+
+```bash
+git add src/features/github/application src/app/api/github
+git commit -m "feat(github): verify and claim GitHub App installations"
+```
+
+### Task 5: Sanitised repository fact collector
+
+**Files:**
+- Create: `src/features/github/application/collect-repository-facts.ts`
+- Test: `src/features/github/application/collect-repository-facts.test.ts`
+- Create: `src/features/github/application/fixtures/repository-complete.json`
+- Create: `src/features/github/application/fixtures/repository-denied.json`
+- Create: `src/features/github/application/fixtures/repository-unlicensed.json`
+
+**Interfaces:**
+- Consumes: `githubRequest`, selected repository identity, short-lived installation token.
+- Produces: exactly one `GitHubFactSet`; source responses are discarded after mapping.
+
+- [ ] **Step 1: Write failing fixture-driven tests**
+
+Assert exact requests and output for:
+
+- `GET /repos/{owner}/{repo}`
+- `GET /repos/{owner}/{repo}/branches/{default_branch}/protection`
+- `GET /repos/{owner}/{repo}/rulesets?includes_parents=true`
+- `GET /repos/{owner}/{repo}/dependabot/alerts?state=open&severity=high,critical&per_page=100`
+- `GET /repos/{owner}/{repo}/code-scanning/alerts?state=open&severity=high,critical&per_page=100`
+- `GET /repos/{owner}/{repo}/secret-scanning/alerts?state=open&per_page=100`
+- `GET /repos/{owner}/{repo}/actions/workflows?per_page=100`
+- latest run lookup only for configured security workflow names
+- `GET /repos/{owner}/{repo}/collaborators?affiliation=outside&permission=admin&per_page=100`
+
+Tests must prove that 403/404/429 become explicit unavailable states, malformed JSON becomes `invalid_response`, pagination is bounded, member names are reduced to a count, and no file contents are requested.
+
+- [ ] **Step 2: Run the collector test and confirm RED**
+
+Run: `npm test -- src/features/github/application/collect-repository-facts.test.ts`
+
+Expected: FAIL because the collector does not exist.
+
+- [ ] **Step 3: Implement endpoint-specific Zod schemas and safe mapping**
+
+Keep each response schema inside `collect-repository-facts.ts`, `.passthrough()` provider objects, and expose only fields used by `GitHubFactSet`. An endpoint failure affects only its corresponding `DataState`; repository metadata failure aborts the repository because the stable subject cannot be verified.
+
+- [ ] **Step 4: Run tests and commit**
+
+Run: `npm test -- src/features/github/application/collect-repository-facts.test.ts src/features/github/domain/rules.test.ts`
+
+Expected: PASS and fixture snapshots contain no tokens, headers, source bodies, or member identities.
+
+```bash
+git add src/features/github/application/collect-repository-facts.ts src/features/github/application/collect-repository-facts.test.ts src/features/github/application/fixtures
+git commit -m "feat(github): collect sanitised repository security facts"
+```
+
+### Task 6: Idempotent shadow collection orchestration
+
+**Files:**
+- Create: `src/features/github/application/run-collection.ts`
+- Create: `src/features/github/application/collection-deps.ts`
+- Test: `src/features/github/application/run-collection.test.ts`
+- Test: `src/features/github/application/collection-deps.test.ts`
+- Create: `src/app/api/cron/github-collect/route.ts`
+- Test: `src/app/api/cron/github-collect/route.test.ts`
+- Modify: `.github/workflows/azure-maintenance.yml`
+- Modify: `docs/deployment.md`
+
+**Interfaces:**
+- Consumes: active installations, selected repositories, Tasks 1/2/5, service-role persistence.
+- Produces: `runGitHubCollection(deps, request)` and authenticated `POST /api/cron/github-collect`.
+
+- [ ] **Step 1: Write failing orchestration tests**
+
+Use injected fakes to prove one failed repository does not starve another; a duplicate request key returns the existing run; complete observations are inserted once; partial runs contain only complete per-check results; rate limiting stops the installation and records `rate_limited`; no phase-2 dependency is called.
+
+```ts
+expect(summary).toEqual({
+  installationsChecked: 1,
+  repositoriesChecked: 1,
+  observationsStored: 15,
+  repositoriesFailed: 1,
+  runsPartial: 1,
+});
+expect(deps.createEvidence).not.toHaveBeenCalled();
+expect(deps.saveFinding).not.toHaveBeenCalled();
+expect(deps.deliverSlack).not.toHaveBeenCalled();
+```
+
+- [ ] **Step 2: Run orchestration tests and confirm RED**
+
+Run: `npm test -- src/features/github/application/run-collection.test.ts src/features/github/application/collection-deps.test.ts src/app/api/cron/github-collect/route.test.ts`
+
+Expected: FAIL because the runner and route do not exist.
+
+- [ ] **Step 3: Implement the pure runner and Supabase adapter**
+
+Use this boundary:
+
+```ts
+export type CollectionRequest = { trigger: "initial" | "scheduled" | "manual" | "webhook"; requestKey: string; installationId?: string; repositoryId?: string };
+export type CollectionDependencies = {
+  listTargets(request: CollectionRequest): Promise<CollectionTarget[]>;
+  reserveRun(target: CollectionTarget, request: CollectionRequest): Promise<{ id: string; duplicate: boolean }>;
+  collectFacts(target: CollectionTarget): Promise<GitHubFactSet>;
+  evaluate(facts: GitHubFactSet, context: { runId: string; observedAt: string }): GitHubObservation[];
+  saveObservations(runId: string, organisationId: string, repositoryId: string, observations: GitHubObservation[]): Promise<number>;
+  finaliseRun(runId: string, result: RunResult): Promise<void>;
+  now(): Date;
+};
+```
+
+Database writes use insert-on-conflict/no-op for the request key and `(run, observation_key)`. Collection history is append-only; repository inventory fields may refresh; a failure never extends observation freshness.
+
+- [ ] **Step 4: Add the cron route and personal-Azure schedule**
+
+The route uses `isAuthorisedCron`, `createSupabaseServiceClient`, a 300-second maximum duration, safe structured logging, and returns counts only. Add `github-collect` to `workflow_dispatch`; schedule it at `29 5 * * *` so collection completes before existing 06:07 daily maintenance and 07:13 monitoring. The scheduled workflow invokes `${SITE_URL}/api/cron/github-collect` with `CRON_SECRET`.
+
+- [ ] **Step 5: Run tests and commit**
+
+Run: `npm test -- src/features/github/application src/app/api/cron/github-collect/route.test.ts && npm run typecheck`
+
+Expected: PASS; the workflow parser accepts `github-collect`; no Adtecher migration workflow changes.
+
+```bash
+git add src/features/github/application src/app/api/cron/github-collect .github/workflows/azure-maintenance.yml docs/deployment.md
+git commit -m "feat(github): run idempotent shadow collection"
+```
+
+### Task 7: Signed webhook intake and replay-safe rechecks
+
+**Files:**
+- Create: `src/features/github/application/webhook.ts`
+- Test: `src/features/github/application/webhook.test.ts`
+- Create: `src/app/api/github/webhook/route.ts`
+- Test: `src/app/api/github/webhook/route.test.ts`
+
+**Interfaces:**
+- Consumes: raw UTF-8 request bytes, `X-Hub-Signature-256`, `X-GitHub-Delivery`, `X-GitHub-Event`, `GITHUB_WEBHOOK_SECRET`.
+- Produces: verified delivery record and a scoped webhook collection request; no direct compliance writes.
+
+- [ ] **Step 1: Write failing signature and replay tests**
+
+Use GitHub's published vector (`secret = "It's a Secret to Everybody"`, payload `Hello, World!`, expected `sha256=757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17`). Prove missing/invalid signatures return 401, duplicate delivery returns 202 without reprocessing, unsupported events return 202/ignored, malformed payload returns 400 after signature verification, and installation/repository events create only a scoped request.
+
+- [ ] **Step 2: Run webhook tests and confirm RED**
+
+Run: `npm test -- src/features/github/application/webhook.test.ts src/app/api/github/webhook/route.test.ts`
+
+Expected: FAIL because webhook handling does not exist.
+
+- [ ] **Step 3: Implement constant-time verification and allowlisted events**
+
+Read `request.arrayBuffer()` before JSON parsing; calculate HMAC-SHA256; compare equal-length buffers with `timingSafeEqual`; cap body size at 1 MiB; hash but do not store the body. Allow `installation`, `installation_repositories`, `repository`, `branch_protection_rule`, `repository_ruleset`, `workflow_run`, `dependabot_alert`, `code_scanning_alert`, and `secret_scanning_alert`. Treat sender/repository names as untrusted text and retain only validated numeric IDs for routing.
+
+- [ ] **Step 4: Run tests and commit**
+
+Run: `npm test -- src/features/github/application/webhook.test.ts src/app/api/github/webhook/route.test.ts`
+
+Expected: PASS with duplicate, malformed, hostile-text, and signature-vector cases green.
+
+```bash
+git add src/features/github/application/webhook.ts src/features/github/application/webhook.test.ts src/app/api/github/webhook
+git commit -m "feat(github): accept replay-safe signed webhooks"
+```
+
+### Task 8: Owner repository scope and shadow-status UI
+
+**Files:**
+- Modify: `src/app/app/integrations/page.tsx`
+- Modify: `src/app/app/integrations/connections-catalog.tsx`
+- Modify: `src/app/app/integrations/actions.ts`
+- Create: `src/features/github/components/github-installation-panel.tsx`
+- Test: `src/features/github/components/github-installation-panel.test.tsx`
+- Modify: `src/app/app/integrations/page.test.tsx`
+- Modify: `src/app/app/integrations/actions.test.ts`
+
+**Interfaces:**
+- Consumes: safe installation/repository/run summaries and `set_github_repository_selected` RPC.
+- Produces: Owner/Admin install link, repository selection controls, manual shadow recheck, and explicit health text.
+
+- [ ] **Step 1: Write failing UI and action tests**
+
+Prove operators see the private GitHub App panel; Members do not; install uses `/api/github/setup`; selection requires an operator and validated UUID/boolean; 101st selected repository is rejected; manual recheck uses a random request key; status distinguishes Active, Needs attention, Suspended, Partial collection, Never collected, and Stale; no observation can be approved or made readiness-affecting in this release.
+
+- [ ] **Step 2: Run UI tests and confirm RED**
+
+Run: `npm test -- src/features/github/components/github-installation-panel.test.tsx src/app/app/integrations/page.test.tsx src/app/app/integrations/actions.test.ts`
+
+Expected: FAIL because the panel and actions do not exist.
+
+- [ ] **Step 3: Implement safe queries, actions, and accessible controls**
+
+Page projections must exclude permissions JSON beyond a derived `permissions_ok` boolean and exclude every credential by construction. Repository controls use native checkboxes with labels containing the full repository name; status text uses `role="status"`; the manual recheck button is disabled while pending and reports counts without raw errors.
+
+- [ ] **Step 4: Run UI tests and commit**
+
+Run: `npm test -- src/features/github/components/github-installation-panel.test.tsx src/app/app/integrations/page.test.tsx src/app/app/integrations/actions.test.ts && npm run typecheck`
+
+Expected: PASS with axe-compatible labels and operator boundaries.
+
+```bash
+git add src/app/app/integrations src/features/github/components
+git commit -m "feat(github): manage repository shadow collection"
+```
+
+### Task 9: Configuration, full verification, and personal Azure staging rollout
+
+**Files:**
+- Modify: `.env.example`
+- Modify: `docs/deployment.md`
+- Modify: `docs/release-checklist.md`
+- Modify: `.github/workflows/deploy-azure-staging.yml`
+- Modify: `scripts/azure/rollout-container-app.sh`
+- Modify: `src/features/mcp/azure-deployment-contract.test.ts`
+- Create: `e2e/github-shadow-collection.spec.ts`
+
+**Interfaces:**
+- Consumes: GitHub App registration values and the existing rollback-safe personal Azure deployment.
+- Produces: documented, secret-safe deployment and recorded shadow-collection proof for one dedicated test repository.
+
+- [ ] **Step 1: Write failing deployment-contract and E2E tests**
+
+Require these server-only variables/secrets: `GITHUB_APP_ID`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET`, and `GITHUB_APP_SLUG`. Assert none is a Docker build arg, `NEXT_PUBLIC_*` value, workflow log line, health response, or client bundle reference. E2E covers mocked install inventory, selecting one test repository, manual collection, and viewing shadow results without any readiness delta.
+
+- [ ] **Step 2: Run focused tests and confirm RED**
+
+Run: `npm test -- src/features/mcp/azure-deployment-contract.test.ts && npx playwright test e2e/github-shadow-collection.spec.ts --workers=1`
+
+Expected: FAIL because the secret-slot contract and E2E flow are absent.
+
+- [ ] **Step 3: Extend rollback-safe secret slots and documentation**
+
+Add GitHub App values to inactive-slot staging and revision activation in `rollout-container-app.sh`; preserve the previous revision's values during rollback; pass only secret references to Container Apps. Document GitHub App registration as private, Adtecher-only, read-only; exact callback `/api/github/callback`; setup `/api/github/setup`; webhook `/api/github/webhook`; subscribed events from Task 7; and the dedicated test-repository requirement.
+
+- [ ] **Step 4: Run complete local verification**
+
+Run:
+
+```bash
+npx supabase db reset
+npm run test:db
+npm run lint
+npm run typecheck
+npm test
+npm run build
+npx playwright test e2e/github-shadow-collection.spec.ts --workers=1
+```
+
+Expected: every command exits 0; no live GitHub request occurs.
+
+- [ ] **Step 5: Commit the release configuration**
+
+```bash
+git add .env.example docs/deployment.md docs/release-checklist.md .github/workflows/deploy-azure-staging.yml scripts/azure/rollout-container-app.sh src/features/mcp/azure-deployment-contract.test.ts e2e/github-shadow-collection.spec.ts
+git commit -m "chore(github): prepare personal Azure shadow rollout"
+```
+
+- [ ] **Step 6: Perform the external registration checkpoint**
+
+In GitHub, create or update the private App with the documented URLs and read-only permissions. Add its secrets to the existing personal Azure staging GitHub environment. Do not add them to `.env.local`, repository secrets visible to forks, application tables, or the Adtecher Azure environment.
+
+- [ ] **Step 7: Deploy with the existing personal Azure workflow**
+
+Run the `Deploy Azure staging` workflow with `deploy=true`. Confirm the immutable image digest, new Container Apps revision, health check, OAuth/MCP contract check, and rollback target. Do not run `Deploy Azure Adtecher staging`.
+
+- [ ] **Step 8: Execute and record the shadow proof**
+
+Install the App on one dedicated Adtecher test repository, select it in ComplianceHub, run collection, and record:
+
+- installation/account safe identifiers;
+- selected repository safe identifier;
+- collection run ID, start/end time, status, and counts;
+- manual comparison of each observation with GitHub settings;
+- proof that readiness, existing evidence/findings, MCP answers, and Slack delivery did not change;
+- proof that a repeated run creates no duplicate request or observations.
+
+Store the redacted proof in `docs/deployment/github-shadow-pilot.md` and commit it. Stop before enabling evidence or findings; that is the second release plan.
+
+## Plan boundary and follow-up releases
+
+This plan completes rollout stages 1–3 of the approved design: live GitHub App connection, one dedicated repository, shadow collection, and manual comparison. The following work receives separate implementation plans after the shadow proof passes:
+
+1. Mapping approval plus evidence/finding lifecycle, including fresh-pass-only resolution and extended finding states.
+2. MCP/Slack/web consumption, confirmation-gated GitHub Issue creation, and the ten-business-day pilot.
+
