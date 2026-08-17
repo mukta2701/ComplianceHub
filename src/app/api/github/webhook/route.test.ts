@@ -51,6 +51,31 @@ describe("POST /api/github/webhook", () => {
     expect(hoisted.createClient).not.toHaveBeenCalled();
   });
 
+  it("accepts an exact one-MiB signed JSON body", async () => {
+    const prefix = '{"installation":{"id":71},"repository":{"id":91},"padding":"';
+    const suffix = '"}';
+    const body = `${prefix}${"a".repeat(1024 * 1024 - prefix.length - suffix.length)}${suffix}`;
+    expect(new TextEncoder().encode(body)).toHaveLength(1024 * 1024);
+    const { POST } = await import("./route");
+    const response = await POST(signedRequest("repository", body, { contentLength: "1048576", delivery: "delivery:exact-limit" }));
+    expect(response.status).toBe(202);
+  });
+
+  it("rejects malformed or understated Content-Length without trusting it as the stream bound", async () => {
+    const { POST } = await import("./route");
+    expect((await POST(signedRequest("repository", "{}", { contentLength: "1e2" }))).status).toBe(400);
+    const oversized = "x".repeat(1024 * 1024 + 1);
+    expect((await POST(signedRequest("repository", oversized, { contentLength: "1" }))).status).toBe(413);
+    expect(hoisted.createClient).not.toHaveBeenCalled();
+  });
+
+  it("checks the signature before untrusted delivery headers or JSON routing", async () => {
+    const { POST } = await import("./route");
+    const response = await POST(signedRequest("repository", "{", { delivery: "has space", signature: "sha256=bad" }));
+    expect(response.status).toBe(401);
+    expect(hoisted.createClient).not.toHaveBeenCalled();
+  });
+
   it("persists an unsupported signed event as terminal ignored without parsing routing", async () => {
     const insert = vi.fn().mockResolvedValue({ error: null });
     hoisted.service.from.mockReturnValue({ insert });
@@ -72,7 +97,7 @@ describe("POST /api/github/webhook", () => {
     const insert = vi.fn().mockResolvedValue({ error: null });
     hoisted.service.from.mockReturnValue({ insert });
     const body = JSON.stringify({ installation: { id: 71 }, repository: { id: 91 }, sender: { login: "ignore" } });
-    const delivery = randomUUID();
+    const delivery = "delivery:retry/v2!";
     const { POST } = await import("./route");
     const response = await POST(signedRequest("repository", body, { delivery }));
     expect(response.status).toBe(202);
@@ -84,6 +109,14 @@ describe("POST /api/github/webhook", () => {
       provider_repository_id: 91,
     });
     expect(JSON.stringify(insert.mock.calls)).not.toContain("ignore");
+  });
+
+  it("rejects whitespace and control characters in a delivery ID", async () => {
+    const { POST } = await import("./route");
+    const body = JSON.stringify({ installation: { id: 71 }, repository: { id: 91 } });
+    expect((await POST(signedRequest("repository", body, { delivery: "has space" }))).status).toBe(400);
+    expect((await POST(signedRequest("repository", body, { delivery: "has\ttab" }))).status).toBe(400);
+    expect(hoisted.createClient).not.toHaveBeenCalled();
   });
 
   it("returns 400 for signed malformed JSON or invalid routing IDs", async () => {
@@ -102,5 +135,22 @@ describe("POST /api/github/webhook", () => {
     const body = JSON.stringify({ installation: { id: 71 }, repository: { id: 91 } });
     expect((await POST(signedRequest("repository", body))).status).toBe(202);
     expect((await POST(signedRequest("repository", body))).status).toBe(503);
+  });
+
+  it("accepts concurrent insert-only replays of the same provider delivery", async () => {
+    const insert = vi.fn()
+      .mockResolvedValueOnce({ error: null })
+      .mockResolvedValueOnce({ error: { code: "23505", message: "unique replay" } });
+    hoisted.service.from.mockReturnValue({ insert });
+    const { POST } = await import("./route");
+    const body = JSON.stringify({ installation: { id: 71 }, repository: { id: 91 } });
+    const delivery = "delivery:concurrent/retry";
+    const [first, second] = await Promise.all([
+      POST(signedRequest("repository", body, { delivery })),
+      POST(signedRequest("repository", body, { delivery })),
+    ]);
+    expect([first.status, second.status]).toEqual([202, 202]);
+    expect(insert).toHaveBeenCalledTimes(2);
+    expect(hoisted.service.from).toHaveBeenCalledTimes(2);
   });
 });

@@ -104,20 +104,48 @@ describe("drainGitHubWebhookDeliveries", () => {
     expect(JSON.stringify(input.finalise.mock.calls)).not.toContain("token body");
   });
 
-  it("rejects a claimed row whose delivery key is not the UUID accepted at intake", async () => {
-    const service = {
-      rpc: vi.fn().mockResolvedValue({ data: [{
+  it("parses claimed rows independently so malformed legacy data cannot poison a valid neighbour", async () => {
+    const claimedRows = { data: [
+      {
         id: row().id,
-        provider_delivery_id: "hostile:key",
+        provider_delivery_id: "has space",
         attempt_count: 1,
         provider_installation_id: 71,
         provider_repository_id: 91,
         installation_id: installationId,
         repository_id: repositoryId,
-      }], error: null }),
+      },
+      {
+        id: "44444444-4444-4444-8444-444444444444",
+        provider_delivery_id: "delivery:retry/v2!",
+        attempt_count: 1,
+        provider_installation_id: 71,
+        provider_repository_id: 92,
+        installation_id: installationId,
+        repository_id: "55555555-5555-4555-8555-555555555555",
+      },
+    ], error: null };
+    const service = {
+      rpc: vi.fn().mockResolvedValueOnce(claimedRows).mockResolvedValue({ data: true, error: null }),
     };
     const built = buildWebhookWorkerDependencies(service, {} as never);
-    await expect(built.claim(20)).rejects.toThrow("GitHub webhook persistence failed");
+    built.runCollection = vi.fn().mockResolvedValue({
+      installationsChecked: 1,
+      repositoriesChecked: 1,
+      observationsStored: 15,
+      repositoriesFailed: 0,
+      repositoriesDeferred: 0,
+      runsPartial: 0,
+    });
+    const result = await drainGitHubWebhookDeliveries(built, { limit: 5 });
+    expect(result).toEqual({ claimed: 2, processed: 1, ignored: 0, failed: 1, ownershipLost: 0 });
+    expect(built.runCollection).toHaveBeenCalledOnce();
+    expect(built.runCollection).toHaveBeenCalledWith(expect.objectContaining({ requestKey: "webhook:delivery:retry/v2!" }));
+    expect(service.rpc).toHaveBeenCalledWith("finalize_github_webhook_delivery_server", expect.objectContaining({
+      target_delivery_id: row().id,
+      target_status: "failed",
+      target_diagnostic_code: "invalid_response",
+    }));
   });
 
   it("fails closed on a malformed collection summary", async () => {
@@ -133,5 +161,30 @@ describe("drainGitHubWebhookDeliveries", () => {
     const result = await drainGitHubWebhookDeliveries(input, { limit: 20 });
     expect(result.failed).toBe(1);
     expect(input.finalise).toHaveBeenCalledWith(expect.anything(), "failed", "invalid_response");
+  });
+
+  it("does not start an already-aborted delivery and leaves it retryable", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const input = deps([row()]);
+    const result = await drainGitHubWebhookDeliveries(input, { limit: 5, signal: controller.signal });
+    expect(input.runCollection).not.toHaveBeenCalled();
+    expect(input.finalise).toHaveBeenCalledWith(row(), "failed", "internal_error");
+    expect(result).toEqual({ claimed: 1, processed: 0, ignored: 0, failed: 1, ownershipLost: 0 });
+  });
+
+  it("checks abort after each delivery and never marks aborted work processed", async () => {
+    const controller = new AbortController();
+    const second = row({ id: "44444444-4444-4444-8444-444444444444", providerDeliveryId: "delivery-two" });
+    const input = deps([row(), second]);
+    input.runCollection.mockImplementationOnce(async () => {
+      controller.abort();
+      return { installationsChecked: 1, repositoriesChecked: 1, observationsStored: 15, repositoriesFailed: 0, repositoriesDeferred: 0, runsPartial: 0 };
+    });
+    const result = await drainGitHubWebhookDeliveries(input, { limit: 5, signal: controller.signal });
+    expect(input.runCollection).toHaveBeenCalledOnce();
+    expect(input.finalise).toHaveBeenNthCalledWith(1, row(), "failed", "internal_error");
+    expect(input.finalise).toHaveBeenNthCalledWith(2, second, "failed", "internal_error");
+    expect(result).toEqual({ claimed: 2, processed: 0, ignored: 0, failed: 2, ownershipLost: 0 });
   });
 });

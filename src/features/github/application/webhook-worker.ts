@@ -16,12 +16,14 @@ export type ClaimedWebhookDelivery = {
   repositoryId: string | null;
 };
 
+export type WebhookDeliveryLease = Pick<ClaimedWebhookDelivery, "id" | "attemptCount">;
+
 export type WebhookOutcome = "processed" | "ignored" | "failed";
 export type WebhookDiagnostic = DiagnosticCode | "invalid_payload" | "unsupported_event" | "internal_error";
 
 export type WebhookWorkerDependencies = {
-  claim(limit: number): Promise<ClaimedWebhookDelivery[]>;
-  finalise(delivery: ClaimedWebhookDelivery, outcome: WebhookOutcome, diagnosticCode: WebhookDiagnostic | null): Promise<boolean>;
+  claim(limit: number): Promise<unknown[]>;
+  finalise(delivery: WebhookDeliveryLease, outcome: WebhookOutcome, diagnosticCode: WebhookDiagnostic | null): Promise<boolean>;
   runCollection(request: CollectionRequest): Promise<CollectionSummary>;
 };
 
@@ -39,13 +41,14 @@ type SupabaseServiceClient = { rpc(name: string, args: Record<string, unknown>):
 const uuid = z.string().uuid();
 const claimedSchema = z.object({
   id: uuid,
-  provider_delivery_id: uuid,
-  attempt_count: z.number().int().min(1).max(10),
-  provider_installation_id: z.number().int().positive().safe(),
-  provider_repository_id: z.number().int().positive().safe().nullable(),
-  installation_id: uuid.nullable(),
-  repository_id: uuid.nullable(),
-}).passthrough();
+  providerDeliveryId: z.string().regex(/^[!-~]{1,100}$/),
+  attemptCount: z.number().int().min(1).max(10),
+  providerInstallationId: z.number().int().positive().safe(),
+  providerRepositoryId: z.number().int().positive().safe().nullable(),
+  installationId: uuid.nullable(),
+  repositoryId: uuid.nullable(),
+}).strict();
+const leaseSchema = claimedSchema.pick({ id: true, attemptCount: true }).passthrough();
 const collectionSummarySchema = z.object({
   installationsChecked: z.number().int().nonnegative(),
   repositoriesChecked: z.number().int().nonnegative(),
@@ -68,17 +71,19 @@ export function buildWebhookWorkerDependencies(
     async claim(limit) {
       const { data, error } = await service.rpc("claim_github_webhook_deliveries_server", { target_limit: limit });
       if (error || !Array.isArray(data)) throw safeFailure();
-      const parsed = z.array(claimedSchema).safeParse(data);
-      if (!parsed.success) throw safeFailure();
-      return parsed.data.map((row) => ({
-        id: row.id,
-        providerDeliveryId: row.provider_delivery_id,
-        attemptCount: row.attempt_count,
-        providerInstallationId: row.provider_installation_id,
-        providerRepositoryId: row.provider_repository_id,
-        installationId: row.installation_id,
-        repositoryId: row.repository_id,
-      }));
+      return data.map((value) => {
+        if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
+        const row = value as Record<string, unknown>;
+        return {
+          id: row.id,
+          providerDeliveryId: row.provider_delivery_id,
+          attemptCount: row.attempt_count,
+          providerInstallationId: row.provider_installation_id,
+          providerRepositoryId: row.provider_repository_id,
+          installationId: row.installation_id,
+          repositoryId: row.repository_id,
+        };
+      });
     },
     async finalise(delivery, outcome, diagnosticCode) {
       const { data, error } = await service.rpc("finalize_github_webhook_delivery_server", {
@@ -107,7 +112,32 @@ export async function drainGitHubWebhookDeliveries(
   if (deliveries.length > input.limit) throw safeFailure();
   const summary: WebhookDrainSummary = { claimed: deliveries.length, processed: 0, ignored: 0, failed: 0, ownershipLost: 0 };
 
-  for (const delivery of deliveries) {
+  for (const value of deliveries) {
+    const lease = leaseSchema.safeParse(value);
+    if (!lease.success) {
+      summary.ownershipLost += 1;
+      continue;
+    }
+    if (input.signal?.aborted) {
+      try {
+        if (await deps.finalise(lease.data, "failed", "internal_error")) summary.failed += 1;
+        else summary.ownershipLost += 1;
+      } catch {
+        summary.ownershipLost += 1;
+      }
+      continue;
+    }
+    const parsed = claimedSchema.safeParse(value);
+    if (!parsed.success) {
+      try {
+        if (await deps.finalise(lease.data, "failed", "invalid_response")) summary.failed += 1;
+        else summary.ownershipLost += 1;
+      } catch {
+        summary.ownershipLost += 1;
+      }
+      continue;
+    }
+    const delivery = parsed.data;
     let outcome: WebhookOutcome = "processed";
     let diagnosticCode: WebhookDiagnostic | null = null;
     try {
@@ -133,6 +163,11 @@ export async function drainGitHubWebhookDeliveries(
     } catch (error) {
       outcome = "failed";
       diagnosticCode = diagnosticFor(error);
+    }
+
+    if (input.signal?.aborted && outcome === "processed") {
+      outcome = "failed";
+      diagnosticCode = "internal_error";
     }
 
     try {

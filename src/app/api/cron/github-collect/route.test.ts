@@ -36,7 +36,10 @@ beforeEach(() => {
   hoisted.logError.mockReset().mockResolvedValue(undefined);
 });
 
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllEnvs();
+});
 
 describe("POST /api/cron/github-collect", () => {
   it("rejects unauthorised callers before constructing dependencies", async () => {
@@ -53,14 +56,44 @@ describe("POST /api/cron/github-collect", () => {
     vi.setSystemTime(new Date("2026-08-17T23:59:00.000Z"));
     const { POST } = await import("./route");
     const response = await POST(request());
-    expect(hoisted.drainWebhooks).toHaveBeenCalledWith(expect.anything(), { limit: 20, signal: expect.any(AbortSignal) });
+    expect(hoisted.drainWebhooks).toHaveBeenCalledWith(expect.anything(), { limit: 5, signal: expect.any(AbortSignal) });
     expect(hoisted.run).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ trigger: "scheduled", requestKey: "scheduled:2026-08-17", signal: expect.any(AbortSignal) }));
     expect(hoisted.drainWebhooks.mock.invocationCallOrder[0]).toBeLessThan(hoisted.run.mock.invocationCallOrder[0]);
     expect(await response.json()).toEqual({
       webhooks: { claimed: 2, processed: 1, ignored: 1, failed: 0, ownershipLost: 0 },
       collection: { installationsChecked: 1, repositoriesChecked: 1, observationsStored: 15, repositoriesFailed: 0, repositoriesDeferred: 0, runsPartial: 0 },
     });
-    vi.useRealTimers();
+  });
+
+  it("reserves separate 20-second drain and fresh 240-second scheduled budgets", async () => {
+    vi.useFakeTimers();
+    const { POST } = await import("./route");
+    await POST(request());
+    const drainSignal = hoisted.drainWebhooks.mock.calls[0][1].signal as AbortSignal;
+    const scheduledSignal = hoisted.run.mock.calls[0][1].signal as AbortSignal;
+    expect(drainSignal).not.toBe(scheduledSignal);
+    expect(drainSignal.aborted).toBe(false);
+    expect(scheduledSignal.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(drainSignal.aborted).toBe(true);
+    expect(scheduledSignal.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(220_000);
+    expect(scheduledSignal.aborted).toBe(true);
+  });
+
+  it("continues scheduled reconciliation with a fresh signal when webhook drain throws", async () => {
+    const privateMarker = `opaque-${Date.now()}`;
+    hoisted.drainWebhooks.mockRejectedValue(new Error(privateMarker));
+    const { POST } = await import("./route");
+    const response = await POST(request());
+    expect(response.status).toBe(200);
+    expect(hoisted.run).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ trigger: "scheduled", signal: expect.any(AbortSignal) }));
+    expect(await response.json()).toEqual({
+      webhooks: { claimed: 0, processed: 0, ignored: 0, failed: 1, ownershipLost: 0 },
+      collection: { installationsChecked: 1, repositoriesChecked: 1, observationsStored: 15, repositoriesFailed: 0, repositoriesDeferred: 0, runsPartial: 0 },
+    });
+    expect(hoisted.logError).toHaveBeenCalledWith("cron", "GitHub webhook drain failed", undefined, { stage: "webhook_drain" });
+    expect(JSON.stringify(hoisted.logError.mock.calls)).not.toContain(privateMarker);
   });
 
   it("logs a fixed redacted message and never the thrown provider error", async () => {

@@ -3,11 +3,11 @@ import { NextResponse } from "next/server";
 import {
   GitHubWebhookInputError,
   isSupportedGitHubWebhookEvent,
-  parseGitHubWebhookPayload,
+  parseDeliveryRouting,
   readBoundedRequestBytes,
   sha256Hex,
-  validateGitHubWebhookHeaders,
-  verifyGitHubWebhookSignature,
+  validateDeliveryMetadata,
+  verifyDeliverySignature,
 } from "@/features/github/application/webhook";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
@@ -26,15 +26,15 @@ export async function POST(request: Request) {
   if (!secret) return response(503);
 
   try {
-    const { deliveryId, eventName } = validateGitHubWebhookHeaders(
+    const body = await readBoundedRequestBytes(request.body, request.headers.get("content-length"));
+    if (!verifyDeliverySignature(body, request.headers.get("x-hub-signature-256"), secret)) return response(401);
+    const { deliveryId, eventName } = validateDeliveryMetadata(
       request.headers.get("x-github-delivery"),
       request.headers.get("x-github-event"),
     );
-    const body = await readBoundedRequestBytes(request.body, request.headers.get("content-length"));
-    if (!verifyGitHubWebhookSignature(body, request.headers.get("x-hub-signature-256"), secret)) return response(401);
 
     const supported = isSupportedGitHubWebhookEvent(eventName);
-    const routing = supported ? parseGitHubWebhookPayload(eventName, body) : null;
+    const routing = supported ? parseDeliveryRouting(eventName, body) : null;
     const row: Record<string, unknown> = {
       provider_delivery_id: deliveryId,
       event_name: eventName,

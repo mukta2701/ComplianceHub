@@ -18,7 +18,7 @@ const supportedEvents = new Set([
 
 const installationScopedEvents = new Set(["installation", "installation_repositories"]);
 const signaturePattern = /^sha256=([0-9a-f]{64})$/;
-const deliveryPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const deliveryPattern = /^[!-~]{1,100}$/;
 const eventPattern = /^[a-z][a-z0-9_]{0,99}$/;
 
 export class GitHubWebhookInputError extends Error {
@@ -31,7 +31,7 @@ export class GitHubWebhookInputError extends Error {
   }
 }
 
-export type GitHubWebhookRouting = {
+export type DeliveryRouting = {
   providerInstallationId: number;
   providerRepositoryId: number | null;
 };
@@ -40,14 +40,14 @@ export function isSupportedGitHubWebhookEvent(eventName: string): boolean {
   return supportedEvents.has(eventName);
 }
 
-export function validateGitHubWebhookHeaders(deliveryId: string | null, eventName: string | null): { deliveryId: string; eventName: string } {
+export function validateDeliveryMetadata(deliveryId: string | null, eventName: string | null): { deliveryId: string; eventName: string } {
   if (!deliveryId || !deliveryPattern.test(deliveryId) || !eventName || !eventPattern.test(eventName)) {
     throw new GitHubWebhookInputError(400);
   }
   return { deliveryId, eventName };
 }
 
-export function verifyGitHubWebhookSignature(body: Uint8Array, signature: string | null, secret: string): boolean {
+export function verifyDeliverySignature(body: Uint8Array, signature: string | null, secret: string): boolean {
   if (secret.length < 1 || !signature) return false;
   const match = signaturePattern.exec(signature);
   if (!match) return false;
@@ -107,11 +107,11 @@ function record(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-export function parseGitHubWebhookPayload(eventName: string, body: Uint8Array): GitHubWebhookRouting {
+export function parseDeliveryRouting(eventName: string, bytes: Uint8Array): DeliveryRouting {
   if (!supportedEvents.has(eventName)) throw new GitHubWebhookInputError(400);
   let parsed: unknown;
   try {
-    const text = new TextDecoder("utf-8", { fatal: true }).decode(body);
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
     parsed = JSON.parse(text);
   } catch {
     throw new GitHubWebhookInputError(400);
@@ -120,6 +120,9 @@ export function parseGitHubWebhookPayload(eventName: string, body: Uint8Array): 
   const installation = record(payload.installation);
   const providerInstallationId = positiveSafeInteger(installation.id);
   if (installationScopedEvents.has(eventName)) return { providerInstallationId, providerRepositoryId: null };
+  if (eventName === "repository_ruleset" && !("repository" in payload)) {
+    return { providerInstallationId, providerRepositoryId: null };
+  }
   const repository = record(payload.repository);
   return { providerInstallationId, providerRepositoryId: positiveSafeInteger(repository.id) };
 }
