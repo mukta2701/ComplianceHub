@@ -11,6 +11,24 @@ import type {
 
 export const RULE_PACK_VERSION = "github-repository-v1";
 
+export const EXPECTED_GITHUB_CHECK_IDS = [
+  "github.repository.visibility",
+  "github.repository.archived",
+  "github.branch.force_pushes",
+  "github.branch.deletions",
+  "github.branch.approving_reviews",
+  "github.branch.stale_approvals",
+  "github.branch.code_owner_reviews",
+  "github.branch.status_checks",
+  "github.dependabot.high_critical",
+  "github.code_scanning.high_critical",
+  "github.secret_scanning.enabled",
+  "github.secret_scanning.push_protection",
+  "github.secret_scanning.open_alerts",
+  "github.workflow.security",
+  "github.administration.outside_collaborator_admins",
+] as const;
+
 type EvaluationContext = {
   runId: string;
   observedAt: string;

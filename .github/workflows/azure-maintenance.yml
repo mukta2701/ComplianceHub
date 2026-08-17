@@ -2,6 +2,7 @@ name: Azure scheduled maintenance
 
 on:
   schedule:
+    - cron: "29 5 * * *"
     - cron: "7 6 * * *"
     - cron: "13 7 * * *"
   workflow_dispatch:
@@ -11,6 +12,7 @@ on:
         required: true
         type: choice
         options:
+          - github-collect
           - daily
           - monitor
 
@@ -34,12 +36,19 @@ jobs:
           EVENT_SCHEDULE: ${{ github.event.schedule }}
           REQUESTED_ROUTE: ${{ inputs.route }}
         run: |
+          set -euo pipefail
           if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-            route="$REQUESTED_ROUTE"
-          elif [[ "$EVENT_SCHEDULE" == "7 6 * * *" ]]; then
-            route="daily"
+            case "$REQUESTED_ROUTE" in
+              github-collect|daily|monitor) route="$REQUESTED_ROUTE" ;;
+              *) echo "Unknown maintenance route" >&2; exit 1 ;;
+            esac
           else
-            route="monitor"
+            case "$EVENT_SCHEDULE" in
+              "29 5 * * *") route="github-collect" ;;
+              "7 6 * * *") route="daily" ;;
+              "13 7 * * *") route="monitor" ;;
+              *) echo "Unknown maintenance schedule" >&2; exit 1 ;;
+            esac
           fi
           echo "route=$route" >> "$GITHUB_OUTPUT"
 
@@ -49,6 +58,7 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           ROUTE: ${{ steps.route.outputs.route }}
         run: |
+          set -euo pipefail
           curl --request POST \
             --fail-with-body \
             --retry 2 \

@@ -1,5 +1,25 @@
 # Deployment / Go-live runbook
 
+## GitHub shadow collection maintenance
+
+The personal Azure staging environment runs the read-only GitHub shadow collector
+at `05:29 UTC`, before the existing daily and monitoring maintenance jobs. The
+same job can be started with the `github-collect` workflow-dispatch option. Its
+request key is the UTC day (`scheduled:YYYY-MM-DD`), so workflow retries reserve
+the same per-repository run instead of duplicating history.
+
+The route has a 270-second cancellation deadline inside the 300-second Container
+Apps request ceiling. The initial pilot is intentionally limited operationally to
+one selected repository. Do not expand it until batching and sharding have been
+measured. This route returns aggregate counts and writes only GitHub shadow
+inventory, runs, and observations; it does not create evidence or findings,
+change readiness/MCP answers, or deliver Slack messages.
+
+Personal staging requires `CRON_SECRET`, `GITHUB_APP_ID`,
+`GITHUB_APP_PRIVATE_KEY`, and `GITHUB_APPROVED_SECURITY_WORKFLOW_IDS`. Keep the
+private key and all GitHub tokens out of application tables, logs, build output,
+and client-visible environment variables.
+
 This is the concrete checklist to take ComplianceHub from the local build to a live
 site. Steps marked **(you)** need account creation or secret entry that only the
 account owner can do; everything else is already prepared in the repo.
@@ -100,7 +120,10 @@ Application environment variables (names must match `.env.example`):
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | yes | Supabase anon (public) key |
 | `SUPABASE_SERVICE_ROLE_KEY` | yes | **Server-only.** Used by cron routes and the MCP daily-digest delivery boundary only after user-scoped Owner, current-fact, and message validation. Never expose it to the client. |
 | `NEXT_PUBLIC_SITE_URL` | yes | Your real site origin, e.g. `https://app.example.com`. It is the canonical origin for invitation and Auth redirects; production fails closed if it is absent. |
-| `CRON_SECRET` | yes | High-entropy random string; gates both cron routes. |
+| `CRON_SECRET` | yes | High-entropy random string; gates all maintenance cron routes. |
+| `GITHUB_APP_ID` | for GitHub shadow pilot | **Server-only.** Numeric identifier of the approved private GitHub App. |
+| `GITHUB_APP_PRIVATE_KEY` | for GitHub shadow pilot | **Server-only.** PEM private key for short-lived App JWT signing; never expose or persist it. |
+| `GITHUB_APPROVED_SECURITY_WORKFLOW_IDS` | for GitHub shadow pilot | Comma-separated numeric workflow IDs approved for the dedicated pilot repository. |
 | `RESEND_API_KEY` | for invitation delivery | **Server-only.** Resend API key with sending access. Never use a `NEXT_PUBLIC_` variable for it. If absent, invitations remain retryable with status `not_configured` and no mail request is made. |
 | `INVITATION_FROM_EMAIL` | for invitation delivery | **Server-only.** Verified sender, e.g. `ComplianceHub <invites@notify.example.com>`. |
 | `GOOGLE_AUTH_ENABLED` | after Google setup | Server-side flag. Leave unset until the Google + Supabase checkpoints below are complete, then set to `1`. |
@@ -116,10 +139,11 @@ Application environment variables (names must match `.env.example`):
 
 ## 3. Cron automation (GitHub Actions calling Azure)
 
-`.github/workflows/azure-maintenance.yml` declares two UTC schedules and calls
+`.github/workflows/azure-maintenance.yml` declares three UTC schedules and calls
 the Azure origin with `CRON_SECRET` from the protected `azure-staging`
 environment:
 
+- `POST /api/cron/github-collect` — `29 5 * * *` (05:29 UTC daily). Runs the lease-protected, read-only GitHub shadow collector before any downstream maintenance. During the first pilot, select exactly one dedicated repository.
 - `POST /api/cron/daily` — `7 6 * * *` (06:07 UTC daily). First classifies digest reservations left in-flight for more than 15 minutes as `unknown` for human review (never automatic retry), collects evidence, runs integration sync, and then performs the evidence-freshness + policy-review sweep. Notifications are deduplicated per day and a new task is opened only when none is already open for that item, so retries and manual runs are safe.
 - `POST /api/cron/monitor` — `13 7 * * *` (07:13 UTC daily). Checks every organisation's configured monitoring sources, reconciles findings, and sends enabled finding alerts. Non-zero minutes avoid GitHub Actions' highest scheduled-load window.
 
@@ -128,6 +152,7 @@ Integration sync is folded into the 06:07 UTC daily pipeline. The compatibility 
 The workflow sends `Authorization: Bearer <CRON_SECRET>`; each route rejects any request whose bearer token does not match. Manual invocation in development:
 
 ```bash
+curl -i -X POST http://localhost:3000/api/cron/github-collect -H "Authorization: Bearer $CRON_SECRET"
 curl -i -X POST http://localhost:3000/api/cron/daily   -H "Authorization: Bearer $CRON_SECRET"
 curl -i -X POST http://localhost:3000/api/cron/monitor -H "Authorization: Bearer $CRON_SECRET"
 ```

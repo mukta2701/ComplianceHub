@@ -122,8 +122,8 @@ select ok(not has_table_privilege('authenticated', 'public.github_oauth_states',
 select ok(not has_column_privilege('service_role', 'public.github_installations', 'provider_installation_id', 'INSERT'), 'service boundary cannot bypass the transactional installation claim');
 select ok(not has_column_privilege('service_role', 'public.github_repositories', 'provider_repository_id', 'INSERT'), 'service boundary cannot bypass transactional repository reconciliation');
 select ok(not has_column_privilege('service_role', 'public.github_repositories', 'selected', 'UPDATE'), 'service boundary cannot bypass operator repository selection');
-select ok(has_column_privilege('service_role', 'public.github_collection_runs', 'status', 'UPDATE'), 'service boundary may finalise collection runs');
-select ok(has_column_privilege('service_role', 'public.github_observations', 'observation_key', 'INSERT'), 'service boundary may append observations');
+select ok(not has_column_privilege('service_role', 'public.github_collection_runs', 'status', 'UPDATE'), 'service boundary cannot bypass collection finalization CAS');
+select ok(not has_column_privilege('service_role', 'public.github_observations', 'observation_key', 'INSERT'), 'service boundary cannot bypass lease-checked observation persistence');
 select ok(not has_table_privilege('service_role', 'public.github_observations', 'UPDATE'), 'service boundary cannot update observation history');
 select ok(has_column_privilege('service_role', 'public.github_webhook_deliveries', 'provider_delivery_id', 'INSERT'), 'service boundary may reserve verified webhook deliveries');
 select ok(not has_column_privilege('service_role', 'public.github_webhook_deliveries', 'organisation_id', 'INSERT'), 'webhook intake cannot assert a resolved tenant directly');
@@ -258,11 +258,13 @@ insert into public.github_oauth_states(
 );
 reset role;
 insert into public.github_collection_runs(
-  id, organisation_id, installation_id, repository_id, trigger_type, request_key, status
+  id, organisation_id, installation_id, repository_id, provider_repository_id,
+  trigger_type, request_key, status, lease_token, lease_expires_at, attempt
 ) values (
   '8b000000-0000-4000-8000-000000000301', current_setting('app.github_org')::uuid,
   '8b000000-0000-4000-8000-000000000101', '8b000000-0000-4000-8000-000000000201',
-  'scheduled', '2026-08-17T05:29:00Z', 'running'
+  83001, 'scheduled', '2026-08-17T05:29:00Z', 'running',
+  '8b000000-0000-4000-8000-000000000302', now() + interval '2 minutes', 1
 );
 insert into public.github_observations(
   id, organisation_id, installation_id, repository_id, provider_repository_id,
@@ -468,8 +470,8 @@ select throws_ok(
   '23503', null, 'a repository cannot cross an installation tenant boundary'
 );
 select throws_ok(
-  $$ insert into public.github_collection_runs(organisation_id, installation_id, repository_id, trigger_type, request_key)
-     values (current_setting('app.github_org')::uuid, '8b000000-0000-4000-8000-000000000102', '8b000000-0000-4000-8000-000000000201', 'scheduled', 'wrong-installation') $$,
+  $$ insert into public.github_collection_runs(organisation_id, installation_id, repository_id, provider_repository_id, trigger_type, request_key, lease_token, lease_expires_at, attempt)
+     values (current_setting('app.github_org')::uuid, '8b000000-0000-4000-8000-000000000102', '8b000000-0000-4000-8000-000000000201', 83001, 'scheduled', 'wrong-installation', extensions.gen_random_uuid(), now() + interval '2 minutes', 1) $$,
   '23503', null, 'a run cannot attach a repository from another installation in the same tenant'
 );
 select throws_ok(
@@ -478,13 +480,13 @@ select throws_ok(
   '23503', null, 'an observation cannot attach a different repository to an existing run'
 );
 select throws_ok(
-  $$ insert into public.github_collection_runs(organisation_id, installation_id, repository_id, trigger_type, request_key)
-     values (current_setting('app.github_org')::uuid, '8b000000-0000-4000-8000-000000000101', '8b000000-0000-4000-8000-000000000201', 'scheduled', '2026-08-17T05:29:00Z') $$,
+  $$ insert into public.github_collection_runs(organisation_id, installation_id, repository_id, provider_repository_id, trigger_type, request_key, lease_token, lease_expires_at, attempt)
+     values (current_setting('app.github_org')::uuid, '8b000000-0000-4000-8000-000000000101', '8b000000-0000-4000-8000-000000000201', 83001, 'scheduled', '2026-08-17T05:29:00Z', extensions.gen_random_uuid(), now() + interval '2 minutes', 1) $$,
   '23505', null, 'one request key reserves only one run per repository'
 );
 select lives_ok(
-  $$ insert into public.github_collection_runs(organisation_id, installation_id, repository_id, trigger_type, request_key)
-     values (current_setting('app.github_org')::uuid, '8b000000-0000-4000-8000-000000000101', '8b000000-0000-4000-8000-000000000202', 'scheduled', '2026-08-17T05:29:00Z') $$,
+  $$ insert into public.github_collection_runs(organisation_id, installation_id, repository_id, provider_repository_id, trigger_type, request_key, lease_token, lease_expires_at, attempt)
+     values (current_setting('app.github_org')::uuid, '8b000000-0000-4000-8000-000000000101', '8b000000-0000-4000-8000-000000000202', 83002, 'scheduled', '2026-08-17T05:29:00Z', extensions.gen_random_uuid(), now() + interval '2 minutes', 1) $$,
   'the same scheduled request may reserve a run for another repository'
 );
 select throws_ok(
