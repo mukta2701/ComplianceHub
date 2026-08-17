@@ -328,12 +328,12 @@ git commit -m "feat(github): add tenant-safe shadow collection schema"
 - Test: `src/app/api/github/callback/route.test.ts`
 
 **Interfaces:**
-- Consumes: authenticated workspace Owner/Admin context, `installation_id` from GitHub setup redirect, GitHub App user OAuth with PKCE, app JWT verification, service-role RPC/write boundary.
+- Consumes: authenticated workspace Owner/Admin context, immutable configured `GITHUB_ALLOWED_ACCOUNT_ID`, `installation_id` from GitHub setup redirect, GitHub App user OAuth with PKCE, app JWT verification, service-only transactional claim RPC.
 - Produces: one verified `github_installations` record and reconciled repository inventory; no retained user token.
 
 - [ ] **Step 1: Write failing setup and callback tests**
 
-Prove that setup rejects unauthenticated/non-operator callers and malformed IDs. Without `installation_id`, it redirects only to `https://github.com/apps/${GITHUB_APP_SLUG}/installations/new`. With `installation_id`, it creates a 32-byte state and PKCE verifier; stores the verifier, pending installation ID, original organisation ID, and original actor ID in integrity-protected `HttpOnly`, `Secure`, `SameSite=Lax`, ten-minute cookies scoped to `/api/github`; stores only the state SHA-256 and complete binding in the service-only replay ledger; and redirects to GitHub OAuth. Prove that callback rejects missing/mismatched/expired/already-consumed state or changed actor/workspace, atomically consumes the matching state hash once before token exchange, exchanges `code` with `code_verifier`, confirms the installation appears in `GET /user/installations`, confirms app metadata through `GET /app/installations/{id}`, checks the required read permissions, imports repository inventory from paginated `GET /user/installations/{id}/repositories`, preserves selection for still-present repositories, marks omitted repositories unavailable, refuses to move an existing provider installation to another tenant, clears all flow cookies on every terminal path, and redirects to `/app/integrations?github=connected`.
+Prove that setup rejects unauthenticated/non-operator callers and malformed or duplicate query inputs. Without `installation_id`, it redirects only to `https://github.com/apps/${GITHUB_APP_SLUG}/installations/new`. With `installation_id`, it creates a 32-byte base64url state and PKCE verifier; stores the verifier, pending installation ID, original organisation ID, and original actor ID in one strict versioned integrity-protected `HttpOnly`, `Secure`, `SameSite=Lax`, ten-minute cookie scoped to `/api/github`; stores only the state SHA-256 and complete binding in the service-only replay ledger; and redirects to GitHub OAuth. Prove that callback rejects missing/mismatched/expired/already-consumed state, duplicate parameters, or changed/demoted actor/workspace; only one parallel callback atomically consumes the matching state hash before token exchange; the cookie is cleared before awaited auth/provider work on every terminal path; the code exchange uses `code_verifier`; the installation appears in `GET /user/installations`; app metadata through `GET /app/installations/{id}` matches the requested ID, is not suspended, belongs to the configured Organization account ID, and has exactly the required read permissions; inventory from paginated `GET /user/installations/{id}/repositories` is at most 100 unique canonical repositories owned by that account; a reconnect preserves selection for present repositories and marks omitted repositories unavailable; an existing provider installation cannot move tenants; the user token is discarded; and success redirects exactly to `/app/integrations?github=connected`.
 
 - [ ] **Step 2: Run route and application tests and confirm RED**
 
@@ -343,7 +343,7 @@ Expected: FAIL because the claim flow does not exist.
 
 - [ ] **Step 3: Implement OAuth state, PKCE, and user-token exchange**
 
-Read `GITHUB_APP_CLIENT_ID` and `GITHUB_APP_CLIENT_SECRET` only server-side. Build the authorize URL with `client_id`, exact `redirect_uri`, random `state`, `code_challenge`, `code_challenge_method=S256`, `allow_signup=false`, and `prompt=select_account`. Exchange the callback code with `POST https://github.com/login/oauth/access_token`, `Accept: application/json`, and a `URLSearchParams` body containing `client_id`, `client_secret`, `code`, exact `redirect_uri`, and `code_verifier`; validate the JSON response with Zod; never log or return `access_token`, `refresh_token`, or response bodies.
+Read `GITHUB_APP_CLIENT_ID` and `GITHUB_APP_CLIENT_SECRET` only server-side. Derive a domain-separated cookie MAC key; reject malformed, oversized, or version-mismatched flow cookies. Build the callback URL only from validated `siteUrl()` and the authorize URL with `client_id`, exact `redirect_uri`, random `state`, `code_challenge`, `code_challenge_method=S256`, `allow_signup=false`, and `prompt=select_account`. Exchange the callback code with `POST https://github.com/login/oauth/access_token`, `Accept: application/json`, and a `URLSearchParams` body containing `client_id`, `client_secret`, `code`, exact `redirect_uri`, and `code_verifier`; all provider calls use a 15-second timeout, `cache: "no-store"`, `redirect: "error"`, and trusted-origin bounded pagination. Validate the JSON response and exact token type with Zod; never log or return tokens, secrets, codes, verifiers, provider error strings, or response bodies. Rate-limit setup and callback by actor and source class and return only canonical `303` redirects with no-store, no-referrer, and noindex headers.
 
 - [ ] **Step 4: Verify and claim the installation**
 
@@ -360,12 +360,13 @@ export type VerifiedInstallationClaim = {
     account: { id: number; login: string; type: "Organization" | "User" };
     repositorySelection: "all" | "selected";
     permissions: Record<string, string>;
+    suspendedAt: string | null;
   };
   repositories: Array<{ id: number; owner: string; name: string; fullName: string; htmlUrl: string; visibility: "public" | "private" | "internal"; archived: boolean; defaultBranch: string }>;
 };
 ```
 
-Reject unless the requested ID is present in `userInstallationIds`, equals `appInstallation.id`, `repositorySelection` is `selected`, and the permission set is read-only and contains every `READ_PERMISSIONS` key. Reject any unexpected permission with a `write` or `admin` value. Persist only through the service client after re-checking the original actor, workspace, and operator capability. Discard the user token when the function returns.
+Reject unless the requested ID is present in `userInstallationIds`, equals `appInstallation.id`, `repositorySelection` is `selected`, `account.type` is `Organization`, numeric `account.id` equals `GITHUB_ALLOWED_ACCOUNT_ID`, the installation is not suspended, and the permission keys and values exactly match `READ_PERMISSIONS`. Treat login as display-only. Canonicalize repositories: positive unique IDs, owner matching the installation account case-insensitively, consistent owner/name/full-name fields, and a rebuilt safe `https://github.com/{owner}/{name}` URL. Then call `claim_github_installation_server(...)`: it advisory-locks the provider installation ID, re-checks current operator membership in the transaction, attributes audit events to that actor with transaction-local claims, enforces immutable tenant ownership, upserts installation metadata and permissions, reconciles at most 100 repositories atomically, preserves selection for present repositories, and marks omitted repositories unavailable. Discard the user token when the function returns.
 
 - [ ] **Step 5: Run tests and commit**
 
@@ -609,7 +610,7 @@ git commit -m "feat(github): manage repository shadow collection"
 
 - [ ] **Step 1: Write failing deployment-contract and E2E tests**
 
-Require these server-only variables/secrets: `GITHUB_APP_ID`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET`, and `GITHUB_APP_SLUG`. Assert none is a Docker build arg, `NEXT_PUBLIC_*` value, workflow log line, health response, or client bundle reference. E2E covers mocked install inventory, selecting one test repository, manual collection, and viewing shadow results without any readiness delta.
+Require these server-only variables/secrets: `GITHUB_APP_ID`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_SLUG`, and `GITHUB_ALLOWED_ACCOUNT_ID`. Assert none is a Docker build arg, `NEXT_PUBLIC_*` value, workflow log line, health response, or client bundle reference. E2E covers mocked install inventory, selecting one test repository, manual collection, and viewing shadow results without any readiness delta.
 
 - [ ] **Step 2: Run focused tests and confirm RED**
 
@@ -619,7 +620,7 @@ Expected: FAIL because the secret-slot contract and E2E flow are absent.
 
 - [ ] **Step 3: Extend rollback-safe secret slots and documentation**
 
-Extend the existing inactive-slot staging and revision activation steps in `.github/workflows/deploy-azure-staging.yml` and the corresponding secret references in `infra/azure/application.bicep`; preserve the previous revision's values during rollback; pass only secret references to Container Apps. Document GitHub App registration as private, Adtecher-only, read-only; exact callback `/api/github/callback`; setup `/api/github/setup`; webhook `/api/github/webhook`; subscribed events from Task 7; and the dedicated test-repository requirement.
+Extend the existing inactive-slot staging and revision activation steps in `.github/workflows/deploy-azure-staging.yml` and the corresponding secret references in `infra/azure/application.bicep`; preserve the previous revision's values during rollback; pass only secret references to Container Apps. Document GitHub App registration as private, Adtecher-only, read-only; set `GITHUB_ALLOWED_ACCOUNT_ID` to the immutable numeric Adtecher organisation ID; leave GitHub's `Request user authorization (OAuth) during installation` option disabled because it prevents the setup-URL flow; use exact callback `/api/github/callback`, setup `/api/github/setup`, and webhook `/api/github/webhook`; subscribe only to the events from Task 7; and use one dedicated test repository.
 
 - [ ] **Step 4: Run complete local verification**
 
