@@ -3,18 +3,26 @@ import { resolveEvidenceProvider } from "./evidence-registry";
 import { decryptSecret } from "@/lib/security/secrets";
 import { toEvidenceRow } from "../domain/evidence-collection";
 import type { EvidenceProviderKind } from "../domain/evidence-provider";
+import { collectIdPages } from "@/lib/supabase/paginate";
 
 export async function collectEvidence(supabase: SupabaseClient): Promise<{ collected: number; refreshed: number; failed: number }> {
   // Active sources across every org — collection is a global sweep, tenant-scoped
   // per row by each source's organisation_id (mirrors integrations-sync).
-  const { data: sources, error } = await supabase.from("evidence_sources")
-    .select("id,organisation_id,provider,config,access_token,connected_by")
-    .is("revoked_at", null);
-  if (error) throw error;
+  const sources = await collectIdPages(async (afterId, limit) => {
+    let query = supabase.from("evidence_sources")
+      .select("id,organisation_id,provider,config,access_token,connected_by")
+      .is("revoked_at", null)
+      .order("id", { ascending: true })
+      .limit(limit);
+    if (afterId) query = query.gt("id", afterId);
+    const { data, error } = await query;
+    if (error) throw error;
+    return data ?? [];
+  });
   let collected = 0;
   let refreshed = 0;
   let failed = 0;
-  for (const source of sources ?? []) {
+  for (const source of sources) {
     // One provider (or one org's mis-config) must not starve the rest of the
     // sweep — isolate each source, count failures, and keep going.
     try {

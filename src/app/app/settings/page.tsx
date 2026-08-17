@@ -5,6 +5,8 @@ import { SubTabs } from "@/components/sub-tabs";
 import { one } from "@/lib/supabase/one";
 import { inviteMemberAction, changeMemberRoleAction, removeMemberAction, resendInvitationAction, revokeInvitationAction, updateMemberJobTitleAction } from "../actions";
 import { canInviteRole, canManageMembership, hasCapability, roleLabel, type MembershipRole } from "@/features/organisations/domain/access";
+import { listUserOAuthGrants } from "@/features/auth/application/oauth-grants";
+import { ConnectedApplications } from "./connected-applications";
 
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -41,6 +43,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       .order("created_at", { ascending: false })
     : { data: null };
   const pendingInvites = invites ?? [];
+  const oauthGrantState = await listUserOAuthGrants(supabase);
   const statusMessage = inviteStatus && inviteStatus in invitationStatusMessage
     ? invitationStatusMessage[inviteStatus as keyof typeof invitationStatusMessage]
     : null;
@@ -142,6 +145,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           <div className="security-row"><Icon name="lock" /><span><b>Row-level access controls</b><small>Your organisation&rsquo;s data is isolated at the database layer, so members only ever see this workspace.</small></span><Pill tone="green">Enabled</Pill></div>
           <div className="security-row"><Icon name="file" /><span><b>Audit trail</b><small>Important changes are recorded on the Activity page without storing sensitive evidence content.</small></span><Pill tone="green">Enabled</Pill></div>
         </Card>
+        <ConnectedApplications state={oauthGrantState} />
       </div>
     </div>
   </>;

@@ -4,7 +4,7 @@ import { signInAction, signInWithOAuthAction } from "../actions";
 
 export default async function SignInPage({ searchParams }: { searchParams: Promise<{ message?: string; next?: string }> }) {
   const { message, next: requestedNext } = await searchParams;
-  const next = safePostAuthPath(requestedNext);
+  const next = safePostAuthPath(requestedNext, { allowOAuthConsent: true });
   const invitationContinuation = next === "/invite";
   const googleEnabled = process.env.GOOGLE_AUTH_ENABLED === "1";
   const microsoftEnabled = process.env.MICROSOFT_AUTH_ENABLED === "1";

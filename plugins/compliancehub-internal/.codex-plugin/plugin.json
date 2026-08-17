@@ -1,0 +1,26 @@
+{
+  "name": "compliancehub-internal",
+  "version": "0.1.0",
+  "description": "Inspect ComplianceHub status, prepare a verified brief, and post it only with explicit delivery intent.",
+  "author": {
+    "name": "ComplianceHub"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "ComplianceHub Internal",
+    "shortDescription": "Verified compliance status and daily Slack briefs",
+    "longDescription": "Securely inspect internal ComplianceHub readiness, risks, evidence health, monitoring findings, and leadership reports. Preparing is read-only by default. An Owner can deliver one fact-checked daily brief to the configured Slack channel only after explicit delivery intent or from the trusted hosted scheduled-post task.",
+    "developerName": "ComplianceHub",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Prepare today's verified compliance brief without posting.",
+      "Post today's verified compliance brief to the configured Slack channel.",
+      "Show the compliance items needing attention and the latest leadership report."
+    ]
+  },
+  "apps": "./.app.json"
+}

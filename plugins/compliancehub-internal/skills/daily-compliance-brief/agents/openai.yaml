@@ -1,0 +1,4 @@
+interface:
+  display_name: "Daily Compliance Brief"
+  short_description: "Prepare or explicitly post a verified digest"
+  default_prompt: "Use $daily-compliance-brief to prepare today’s verified ComplianceHub digest without posting."

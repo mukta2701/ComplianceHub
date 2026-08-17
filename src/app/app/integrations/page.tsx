@@ -2,6 +2,7 @@ import { Card, PageIntro } from "@/components/ui";
 import { SubTabs } from "@/components/sub-tabs";
 import { hasCapability } from "@/features/organisations/domain/access";
 import { requireAppContext } from "@/lib/app-context";
+import { canShowDeveloperTools } from "@/lib/security/developer-tools";
 import {
   addConnectionAction,
   addEvidenceSourceAction,
@@ -11,6 +12,7 @@ import {
   ConnectionsCatalog,
   type AlertChannelSummary,
   type ConnectionSummary,
+  type DailyDigestDeliverySummary,
 } from "./connections-catalog";
 
 type Connection = ConnectionSummary & {
@@ -89,19 +91,26 @@ export default async function IntegrationsPage() {
     </>;
   }
 
-  const [connectionsResult, alertChannelsResult] = await Promise.all([
+  const [connectionsResult, alertChannelsResult, deliveryResult] = await Promise.all([
     supabase.from("integration_connections")
       .select("id,provider,label,config,connection_mode,enabled,created_at,revoked_at")
       .eq("organisation_id", organisation.id)
       .order("created_at", { ascending: false }),
     // The encrypted destination is deliberately excluded from this projection.
     supabase.from("alert_channels")
-      .select("id,type,label,min_severity,enabled,created_at,revoked_at")
+      .select("id,type,label,min_severity,enabled,daily_digest_enabled,created_at,revoked_at")
       .eq("organisation_id", organisation.id)
       .order("created_at", { ascending: false }),
+    membership.role === "owner"
+      ? supabase.from("daily_digest_deliveries")
+        .select("id,digest_on,channel_id,status,attempt_count,error_code,last_attempted_at,delivered_at")
+        .eq("organisation_id", organisation.id)
+        .order("digest_on", { ascending: false })
+        .limit(10)
+      : Promise.resolve({ data: [] as DailyDigestDeliverySummary[], error: null }),
   ]);
 
-  if (connectionsResult.error || alertChannelsResult.error) {
+  if (connectionsResult.error || alertChannelsResult.error || deliveryResult.error) {
     throw new Error("Could not load connection settings");
   }
 
@@ -109,16 +118,23 @@ export default async function IntegrationsPage() {
     .filter((connection) => !connection.revoked_at);
   const alertChannels = ((alertChannelsResult.data ?? []) as AlertChannel[])
     .filter((channel) => !channel.revoked_at);
+  const showDeveloperTools = canShowDeveloperTools({
+    nodeEnv: process.env.NODE_ENV,
+    enabled: process.env.E2E_TEST_TOOLS_ENABLED === "1",
+    siteUrl: process.env.NEXT_PUBLIC_SITE_URL,
+  });
 
   return <>
     <ConnectionsCatalog
       connections={connections}
       alertChannels={alertChannels}
+      canManageDailyDigest={membership.role === "owner"}
+      digestDeliveries={(deliveryResult.data ?? []) as DailyDigestDeliverySummary[]}
       navigation={<SubTabs tabs={[
         { href: "/app/settings", label: "Settings" },
         { href: "/app/integrations", label: "Connections" },
       ]} />}
     />
-    {process.env.NODE_ENV === "development" && <DeveloperConnectionTools />}
+    {showDeveloperTools && <DeveloperConnectionTools />}
   </>;
 }

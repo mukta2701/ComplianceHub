@@ -38,6 +38,21 @@ npm run test:db
 npm run test:e2e
 ```
 
+`npm run test:db` runs ordinary pgTAP against the current local schema and does
+not reset the database. The historical migration-upgrade harness is deliberately
+separate because it destroys all data in the local Supabase instance: it resets
+to migration `20260807047000`, loads legacy fixtures, applies the remaining
+migration, verifies the result, and finally resets to a fresh current schema
+without seed data. It always uses `--local` and never a linked or hosted project.
+Run it only when losing every local record is acceptable:
+
+```bash
+COMPLIANCEHUB_ALLOW_LOCAL_DB_RESET=1 npm run test:db:upgrade
+```
+
+Without that exact acknowledgement (or `CI=true` in an isolated CI job), the
+upgrade harness exits before invoking Supabase.
+
 ## Deployment
 
 The reference beta deployment uses Vercel and managed Supabase. See `docs/deployment.md`. The application remains portable because schema changes are SQL migrations and core domain logic is framework-independent TypeScript.

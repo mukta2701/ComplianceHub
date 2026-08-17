@@ -41,6 +41,7 @@ import {
   revokeMonitorSourceAction,
   setIntegrationConnectionEnabledAction,
   setAlertChannelEnabledAction,
+  setDailyDigestChannelAction,
   setMonitorSourceEnabledAction,
   startProviderAuthorizationAction,
 } from "./actions";
@@ -557,6 +558,49 @@ describe("integration connection access", () => {
 
     expect(from).toHaveBeenCalledWith(table);
     expect(builder.eq).toHaveBeenCalledWith("organisation_id", ORGANISATION_ID);
+  });
+
+  it("lets only an Owner atomically select the daily digest channel", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: true, error: null });
+    const form = new FormData();
+    form.set("channelId", "10000000-0000-4000-8000-000000000099");
+    hoisted.ctx = {
+      supabase: { rpc }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
+    };
+
+    await setDailyDigestChannelAction(form);
+
+    expect(rpc).toHaveBeenCalledWith("set_daily_digest_channel", {
+      target_organisation_id: ORGANISATION_ID,
+      target_channel_id: "10000000-0000-4000-8000-000000000099",
+    });
+    expect(hoisted.revalidatePath).toHaveBeenCalledWith("/app/integrations");
+
+    hoisted.ctx = {
+      supabase: { rpc }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "admin" },
+    };
+    await expect(setDailyDigestChannelAction(form)).rejects.toThrow("Only a workspace Owner");
+    expect(rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it("maps an empty digest destination to null and rejects unsuccessful RPC outcomes", async () => {
+    const form = new FormData();
+    form.set("channelId", "");
+    const rpc = vi.fn().mockResolvedValue({ data: true, error: null });
+    hoisted.ctx = {
+      supabase: { rpc }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
+    };
+
+    await setDailyDigestChannelAction(form);
+    expect(rpc).toHaveBeenCalledWith("set_daily_digest_channel", {
+      target_organisation_id: ORGANISATION_ID,
+      target_channel_id: null,
+    });
+
+    rpc.mockResolvedValueOnce({ data: false, error: null });
+    await expect(setDailyDigestChannelAction(form)).rejects.toThrow("Could not update the daily digest channel");
+    rpc.mockResolvedValueOnce({ data: null, error: { message: "private database detail" } });
+    await expect(setDailyDigestChannelAction(form)).rejects.toThrow("Could not update the daily digest channel");
   });
 
   it.each([

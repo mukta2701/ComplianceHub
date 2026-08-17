@@ -48,6 +48,7 @@ const invitationSecurityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  output: "standalone",
   poweredByHeader: false,
   // Dev-only: the e2e suite and local browsers reach the dev server via
   // 127.0.0.1, which Next.js treats as a disallowed dev origin and rejects

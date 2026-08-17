@@ -27,6 +27,9 @@ const toggleSchema = z.object({
   id: z.uuid(),
   enabled: z.enum(["true", "false"]).transform((value) => value === "true"),
 });
+const digestChannelSchema = z.object({
+  channelId: z.union([z.literal(""), z.uuid()]).transform((value) => value || null),
+});
 const monitorSourceSchema = z.object({
   owner: z.string().trim().min(1, "GitHub owner is required").max(120),
   repo: z.string().trim().min(1, "Repository is required").max(120),
@@ -46,6 +49,14 @@ async function requireConnectionManager() {
   const context = await requireAppContext();
   if (!hasCapability(context.membership.role, "manage_connections")) {
     throw new Error("Only workspace operators can manage integrations");
+  }
+  return context;
+}
+
+async function requireDigestOwner() {
+  const context = await requireAppContext();
+  if (context.membership.role !== "owner") {
+    throw new Error("Only a workspace Owner can select the daily digest channel");
   }
   return context;
 }
@@ -275,6 +286,17 @@ export async function setAlertChannelEnabledAction(formData: FormData) {
     .eq("id", parsed.id).eq("organisation_id", organisation.id)
     .select("id").maybeSingle();
   if (error || !data) throw new Error("Alert channel was not found in this workspace");
+  revalidatePath("/app/integrations");
+}
+
+export async function setDailyDigestChannelAction(formData: FormData) {
+  const { supabase, organisation } = await requireDigestOwner();
+  const parsed = digestChannelSchema.parse(Object.fromEntries(formData));
+  const { data, error } = await supabase.rpc("set_daily_digest_channel", {
+    target_organisation_id: organisation.id,
+    target_channel_id: parsed.channelId,
+  });
+  if (error || data !== true) throw new Error("Could not update the daily digest channel");
   revalidatePath("/app/integrations");
 }
 

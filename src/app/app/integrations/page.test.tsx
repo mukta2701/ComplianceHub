@@ -5,6 +5,7 @@ const hoisted = vi.hoisted(() => ({
   selectCalls: [] as Array<{ table: string; columns: string }>,
   filterCalls: [] as Array<{ table: string; column: string; value: string }>,
   errors: {} as Record<string, { message: string } | undefined>,
+  role: "admin" as "owner" | "admin" | "member",
   rows: {
     integration_connections: [{
       id: "connection-1", provider: "github", label: "GitHub", config: { owner: "acme", repo: "isms" },
@@ -15,10 +16,15 @@ const hoisted = vi.hoisted(() => ({
     }],
     alert_channels: [{
       id: "channel-1", type: "slack", label: "#compliance-alerts", min_severity: "high",
-      enabled: true, created_at: "2026-07-14T00:00:00Z", revoked_at: null,
+      enabled: true, daily_digest_enabled: false, created_at: "2026-07-14T00:00:00Z", revoked_at: null,
     }, {
       id: "revoked-channel", type: "slack", label: "#old-alerts", min_severity: "high",
-      enabled: false, created_at: "2026-07-13T00:00:00Z", revoked_at: "2026-07-14T00:00:00Z",
+      enabled: false, daily_digest_enabled: false, created_at: "2026-07-13T00:00:00Z", revoked_at: "2026-07-14T00:00:00Z",
+    }],
+    daily_digest_deliveries: [{
+      id: "delivery-1", digest_on: "2026-08-07", channel_id: "channel-1", status: "delivered",
+      attempt_count: 1, error_code: null, last_attempted_at: "2026-08-07T08:00:00Z", delivered_at: "2026-08-07T08:00:01Z",
+      message: { text: "must never be selected" },
     }],
   } as Record<string, unknown[]>,
 }));
@@ -43,7 +49,7 @@ vi.mock("@/lib/app-context", () => ({
   requireAppContext: () => Promise.resolve({
     supabase: { from: (table: string) => query(table) },
     organisation: { id: "org-1", name: "Example Ltd" },
-    membership: { role: "admin" },
+    membership: { role: hoisted.role },
     user: { id: "user-1", email: "admin@example.test" },
   }),
 }));
@@ -56,6 +62,7 @@ describe("Settings Connections page", () => {
     hoisted.selectCalls = [];
     hoisted.filterCalls = [];
     hoisted.errors = {};
+    hoisted.role = "admin";
   });
 
   it("renders the focused provider catalogue without the removed production sections", async () => {
@@ -78,7 +85,7 @@ describe("Settings Connections page", () => {
 
     const expectedColumns: Record<string, string> = {
       integration_connections: "id,provider,label,config,connection_mode,enabled,created_at,revoked_at",
-      alert_channels: "id,type,label,min_severity,enabled,created_at,revoked_at",
+      alert_channels: "id,type,label,min_severity,enabled,daily_digest_enabled,created_at,revoked_at",
     };
     expect(hoisted.selectCalls).toHaveLength(2);
     for (const call of hoisted.selectCalls) {
@@ -99,5 +106,21 @@ describe("Settings Connections page", () => {
     hoisted.errors[table] = { message: "query unavailable" };
 
     await expect(IntegrationsPage()).rejects.toThrow("Could not load connection settings");
+  });
+
+  it("loads bounded delivery metadata for Owners without selecting message contents", async () => {
+    hoisted.role = "owner";
+
+    await IntegrationsPage();
+
+    expect(hoisted.selectCalls).toContainEqual({
+      table: "daily_digest_deliveries",
+      columns: "id,digest_on,channel_id,status,attempt_count,error_code,last_attempted_at,delivered_at",
+    });
+    expect(hoisted.filterCalls).toContainEqual({
+      table: "daily_digest_deliveries",
+      column: "organisation_id",
+      value: "org-1",
+    });
   });
 });

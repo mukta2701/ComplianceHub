@@ -8,6 +8,25 @@ permissions:
   contents: read
 
 jobs:
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build production container
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          platforms: linux/amd64
+          build-args: |
+            NEXT_PUBLIC_SUPABASE_URL=https://example.supabase.co
+            NEXT_PUBLIC_SUPABASE_ANON_KEY=ci-anon-key-placeholder-long
+            NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=ci-publishable-key-placeholder-long
+            NEXT_PUBLIC_SITE_URL=https://compliancehub-staging.example
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   application:
     runs-on: ubuntu-latest
     steps:
@@ -21,11 +40,10 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
-      - run: npm run build
       - run: npx playwright install --with-deps chromium
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: 2.109.0
       - run: supabase start
       - name: Configure local application environment
         run: |
@@ -38,12 +56,17 @@ jobs:
           # skipping to a vacuous pass) and so secret-encryption paths have a key.
           echo "CRON_SECRET=ci-test-cron-secret" >> "$GITHUB_ENV"
           echo "APP_ENCRYPTION_KEY=$(openssl rand -base64 32)" >> "$GITHUB_ENV"
+          echo "E2E_TEST_TOOLS_ENABLED=1" >> "$GITHUB_ENV"
+      # Build only after the same local Supabase environment used by the
+      # browser suite is available. Playwright starts this artifact with
+      # `next start`, so CI exercises production routing and bundling.
+      - run: npm run build
       # Non-hermetic integration tests: run only now that the DB stack is up and
       # its env (incl. the service-role key) is provisioned. Excluded from the
       # earlier `npm test` on purpose.
       - run: npm run test:integration
       # Run BOTH Playwright projects (desktop chromium + mobile) so mobile-viewport
-      # regressions are caught in CI, not just locally.
+      # regressions are caught against the production build, not just locally.
       - run: npm run test:e2e
 
   secrets:
@@ -52,7 +75,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
+      - uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   database:
     runs-on: ubuntu-latest
@@ -60,6 +85,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: 2.109.0
       - run: supabase start
+      - run: bash scripts/test-db-upgrade.sh
       - run: supabase test db

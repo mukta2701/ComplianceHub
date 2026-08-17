@@ -8,17 +8,18 @@ export type WorkspaceCapability =
   | "manage_connections"
   | "manage_frameworks"
   | "manage_trust_center"
+  | "manage_imports"
   | "manage_members"
   | "manage_owners";
 
 const capabilities: Record<MembershipRole, ReadonlySet<WorkspaceCapability>> = {
   owner: new Set([
     "run_monitoring", "manage_monitoring", "manage_policies",
-    "manage_connections", "manage_frameworks", "manage_trust_center", "manage_members", "manage_owners",
+    "manage_connections", "manage_frameworks", "manage_trust_center", "manage_imports", "manage_members", "manage_owners",
   ]),
   admin: new Set([
     "run_monitoring", "manage_monitoring", "manage_policies",
-    "manage_connections", "manage_frameworks", "manage_trust_center", "manage_members",
+    "manage_connections", "manage_frameworks", "manage_trust_center", "manage_imports", "manage_members",
   ]),
   member: new Set(),
 };

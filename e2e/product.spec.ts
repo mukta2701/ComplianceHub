@@ -23,6 +23,24 @@ function localEnvironment(name: string): string {
   return line.slice(name.length + 1);
 }
 
+async function confirmE2eUser(email: string): Promise<void> {
+  const admin = createClient(
+    localEnvironment("NEXT_PUBLIC_SUPABASE_URL"),
+    localEnvironment("SUPABASE_SERVICE_ROLE_KEY"),
+    { auth: { persistSession: false, autoRefreshToken: false } },
+  );
+  let userId: string | null = null;
+  for (let page = 1; page <= 10 && userId === null; page += 1) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 1_000 });
+    if (error) throw error;
+    userId = data.users.find((user) => user.email === email)?.id ?? null;
+    if (data.users.length < 1_000) break;
+  }
+  if (!userId) throw new Error("Synthetic E2E user was not found for confirmation");
+  const { error } = await admin.auth.admin.updateUserById(userId, { email_confirm: true });
+  if (error) throw error;
+}
+
 async function createWorkspaceOwner(
   page: Page,
   testInfo: TestInfo,
@@ -42,6 +60,7 @@ async function createWorkspaceOwner(
     page.waitForURL(/\/sign-in/),
     page.getByRole("button", { name: "Create account" }).click(),
   ]);
+  await confirmE2eUser(email);
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
@@ -135,6 +154,7 @@ async function createInvitedLocalMember(input: {
     options: { data: { display_name: "Framework Member" } },
   });
   expect(memberSignUpError, "the local invited Member account should be created").toBeNull();
+  await confirmE2eUser(input.memberEmail);
   const { error: memberSignInError } = await member.auth.signInWithPassword({
     email: input.memberEmail,
     password: input.memberPassword,
@@ -306,6 +326,7 @@ test("a treatment plan spawns an owned, dated task", async ({ page }, testInfo) 
   await page.getByRole("button", { name: "Create account" }).click();
 
   await page.waitForURL(/\/sign-in/);
+  await confirmE2eUser(email);
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
@@ -341,6 +362,7 @@ test("a treatment plan spawns an owned, dated task", async ({ page }, testInfo) 
 });
 
 test("an audit runs from plan through checklist to a corrective-action task", async ({ page, browser }, testInfo) => {
+  test.setTimeout(90_000);
   const suffix = `${Date.now()}-${testInfo.project.name}`;
   const email = `aud-${suffix}@example.test`;
   const password = createTestPassword(suffix);
@@ -353,6 +375,7 @@ test("an audit runs from plan through checklist to a corrective-action task", as
   await page.getByRole("button", { name: "Create account" }).click();
 
   await page.waitForURL(/\/sign-in/);
+  await confirmE2eUser(email);
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
@@ -629,6 +652,7 @@ test("an asset workbook can be imported through the wizard", async ({ page }, te
   await page.getByRole("button", { name: "Create account" }).click();
 
   await page.waitForURL(/\/sign-in/);
+  await confirmE2eUser(email);
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
@@ -775,6 +799,7 @@ test("a minted auditor link exposes a read-only view to an unauthenticated visit
   await page.getByRole("button", { name: "Create account" }).click();
 
   await page.waitForURL(/\/sign-in/);
+  await confirmE2eUser(email);
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
@@ -964,6 +989,7 @@ test("a task is pushed to a sandbox tracker, polled to In Progress, then the con
   await page.getByRole("button", { name: "Create account" }).click();
 
   await page.waitForURL(/\/sign-in/);
+  await confirmE2eUser(email);
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
@@ -1234,6 +1260,7 @@ test("an owner enables a public Trust Center that leaks nothing sensitive", asyn
   await page.getByRole("button", { name: "Create account" }).click();
 
   await page.waitForURL(/\/sign-in/);
+  await confirmE2eUser(email);
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();

@@ -1,11 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { memoizeOwners } from "@/features/automation/application/owner-resolver";
 import { decryptSecret } from "@/lib/security/secrets";
+import { postSlackIncomingWebhook } from "@/lib/integrations/slack-incoming-webhook";
 import { resolveMonitorProvider } from "./monitor-registry";
 import { deliverAlert, type AlertChannel, type AlertFinding, type DeliverPorts } from "./deliver";
 import { findingKey, type MonitorDependencies, type MonitorSource } from "./monitor-run";
 import { createTwilioWhatsAppPort } from "./twilio-whatsapp";
 import type { MonitorProviderKind, CheckSeverity } from "../domain/monitor-provider";
+import { collectIdPages, collectStringCursorPages } from "@/lib/supabase/paginate";
 
 // A finding key is `checkId::subjectId`; both halves are opaque strings, so split
 // on the first delimiter only.
@@ -20,6 +22,13 @@ function notificationKind(severity: CheckSeverity): "policy_violation" | "contro
   return severity === "critical" || severity === "high" ? "policy_violation" : "control_drift";
 }
 
+export async function postMonitoringSlackWebhook(webhookUrl: string, payload: unknown): Promise<void> {
+  const result = await postSlackIncomingWebhook(webhookUrl, payload);
+  if (result.kind !== "response" || result.status < 200 || result.status >= 300) {
+    throw new Error("Slack webhook delivery failed");
+  }
+}
+
 // Build the real (Supabase + fetch) dependency port for runMonitoring. Shared by
 // the hourly cron (every org) and the "Run checks now" action (one org, opts.
 // organisationId). Requires a SERVICE-ROLE client: monitoring_findings and
@@ -31,19 +40,23 @@ export function buildMonitorDependencies(
   const today = new Date().toISOString().slice(0, 10);
 
   const resolveOperators = memoizeOwners(async (organisationId) => {
-    const { data, error } = await supabase.from("memberships")
-      .select("user_id").eq("organisation_id", organisationId).in("role", ["owner", "admin"]);
-    if (error) throw error;
-    return (data ?? []).map((row) => row.user_id as string);
+    const rows = await collectStringCursorPages(async (afterUserId, limit) => {
+      let query = supabase.from("memberships")
+        .select("user_id")
+        .eq("organisation_id", organisationId)
+        .in("role", ["owner", "admin"])
+        .order("user_id", { ascending: true })
+        .limit(limit);
+      if (afterUserId) query = query.gt("user_id", afterUserId);
+      const { data, error } = await query;
+      if (error) throw error;
+      return data ?? [];
+    }, (row) => row.user_id as string);
+    return rows.map((row) => row.user_id as string);
   });
 
   const ports: DeliverPorts = {
-    postSlack: async (webhookUrl, payload) => {
-      const res = await fetch(webhookUrl, {
-        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload),
-      });
-      if (!res.ok) throw new Error(`Slack webhook failed: ${res.status}`);
-    },
+    postSlack: postMonitoringSlackWebhook,
     postWhatsApp: createTwilioWhatsAppPort(),
     notifyInApp: async (finding: AlertFinding) => {
       const operators = await resolveOperators(finding.organisationId);
@@ -60,13 +73,19 @@ export function buildMonitorDependencies(
 
   return {
     listActiveSources: async () => {
-      let query = supabase.from("monitor_sources")
-        .select("id,organisation_id,provider,config,access_token,connection_mode,integration_connection_id,broker_connection_id,broker_provider_config_key,integration_connection:integration_connections(id,organisation_id,provider,connection_mode,config,enabled,revoked_at,broker_connection_id,broker_provider_config_key)")
-        .is("revoked_at", null).eq("enabled", true);
-      if (opts.organisationId) query = query.eq("organisation_id", opts.organisationId);
-      const { data, error } = await query;
-      if (error) throw error;
-      return (data ?? []).flatMap((row): MonitorSource[] => {
+      const rows = await collectIdPages(async (afterId, limit) => {
+        let query = supabase.from("monitor_sources")
+          .select("id,organisation_id,provider,config,access_token,connection_mode,integration_connection_id,broker_connection_id,broker_provider_config_key,integration_connection:integration_connections(id,organisation_id,provider,connection_mode,config,enabled,revoked_at,broker_connection_id,broker_provider_config_key)")
+          .is("revoked_at", null).eq("enabled", true)
+          .order("id", { ascending: true })
+          .limit(limit);
+        if (opts.organisationId) query = query.eq("organisation_id", opts.organisationId);
+        if (afterId) query = query.gt("id", afterId);
+        const { data, error } = await query;
+        if (error) throw error;
+        return data ?? [];
+      });
+      return rows.flatMap((row): MonitorSource[] => {
         if (row.connection_mode === "sandbox" && row.integration_connection_id === null) {
           return [{
             id: row.id, organisationId: row.organisation_id, provider: row.provider as MonitorProviderKind,
@@ -100,10 +119,19 @@ export function buildMonitorDependencies(
     },
     runChecks: (source) => resolveMonitorProvider(source).runChecks(source),
     listOpenFindingKeys: async (organisationId) => {
-      const { data, error } = await supabase.from("monitoring_findings")
-        .select("check_id,subject_id").eq("organisation_id", organisationId).in("status", ["open", "acknowledged"]);
-      if (error) throw error;
-      return (data ?? []).map((row) => findingKey(row.check_id as string, row.subject_id as string));
+      const rows = await collectIdPages(async (afterId, limit) => {
+        let query = supabase.from("monitoring_findings")
+          .select("id,check_id,subject_id")
+          .eq("organisation_id", organisationId)
+          .in("status", ["open", "acknowledged"])
+          .order("id", { ascending: true })
+          .limit(limit);
+        if (afterId) query = query.gt("id", afterId);
+        const { data, error } = await query;
+        if (error) throw error;
+        return data ?? [];
+      });
+      return rows.map((row) => findingKey(row.check_id as string, row.subject_id as string));
     },
     saveFinding: async (finding) => {
       // Upsert on the (organisation_id, check_id, subject_id) dedup key: inserts a
@@ -133,11 +161,21 @@ export function buildMonitorDependencies(
       return resolved;
     },
     listExternalChannels: async (organisationId) => {
-      const { data, error } = await supabase.from("alert_channels")
-        .select("id,type,config,min_severity")
-        .eq("organisation_id", organisationId).is("revoked_at", null).eq("enabled", true).in("type", ["slack", "whatsapp"]);
-      if (error) throw error;
-      return (data ?? []).map((row): AlertChannel => {
+      const rows = await collectIdPages(async (afterId, limit) => {
+        let query = supabase.from("alert_channels")
+          .select("id,type,config,min_severity")
+          .eq("organisation_id", organisationId)
+          .is("revoked_at", null)
+          .eq("enabled", true)
+          .in("type", ["slack", "whatsapp"])
+          .order("id", { ascending: true })
+          .limit(limit);
+        if (afterId) query = query.gt("id", afterId);
+        const { data, error } = await query;
+        if (error) throw error;
+        return data ?? [];
+      });
+      return rows.map((row): AlertChannel => {
         // The webhook is stored encrypted; decrypt it so the delivery adapter can POST.
         const rawConfig = (row.config ?? {}) as Record<string, unknown>;
         const config = typeof rawConfig.webhookUrl === "string"
