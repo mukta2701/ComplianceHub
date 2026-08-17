@@ -18,6 +18,14 @@ param mcpJwtAlgorithms string = 'RS256,ES256'
 param supabaseRefName string
 param encryptionRefName string
 param cronRefName string
+param githubAppIdRefName string
+param githubAppClientIdRefName string
+param githubAppClientCredentialRefName string
+param githubAppPrivateKeyRefName string
+param githubWebhookHmacRefName string
+param githubAppSlugRefName string
+param githubAllowedAccountIdRefName string
+param githubApprovedSecurityWorkflowIdsRefName string
 
 resource environment 'Microsoft.App/managedEnvironments@2024-03-01' existing = {
   name: managedEnvironmentName
@@ -62,6 +70,14 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
             { name: 'SUPABASE_SERVICE_ROLE_KEY', secretRef: supabaseRefName }
             { name: 'APP_ENCRYPTION_KEY', secretRef: encryptionRefName }
             { name: 'CRON_SECRET', secretRef: cronRefName }
+            { name: 'GITHUB_APP_ID', secretRef: githubAppIdRefName }
+            { name: 'GITHUB_APP_CLIENT_ID', secretRef: githubAppClientIdRefName }
+            { name: 'GITHUB_APP_CLIENT_SECRET', secretRef: githubAppClientCredentialRefName }
+            { name: 'GITHUB_APP_PRIVATE_KEY', secretRef: githubAppPrivateKeyRefName }
+            { name: 'GITHUB_WEBHOOK_SECRET', secretRef: githubWebhookHmacRefName }
+            { name: 'GITHUB_APP_SLUG', secretRef: githubAppSlugRefName }
+            { name: 'GITHUB_ALLOWED_ACCOUNT_ID', secretRef: githubAllowedAccountIdRefName }
+            { name: 'GITHUB_APPROVED_SECURITY_WORKFLOW_IDS', secretRef: githubApprovedSecurityWorkflowIdsRefName }
           ]
           resources: {
             cpu: json('0.5')

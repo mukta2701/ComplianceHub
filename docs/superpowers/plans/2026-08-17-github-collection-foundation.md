@@ -627,7 +627,7 @@ git commit -m "feat(github): manage repository shadow collection"
 
 - [ ] **Step 1: Write failing deployment-contract and E2E tests**
 
-Require these server-only variables/secrets: `GITHUB_APP_ID`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_SLUG`, and `GITHUB_ALLOWED_ACCOUNT_ID`. Assert none is a Docker build arg, `NEXT_PUBLIC_*` value, workflow log line, health response, or client bundle reference. Vitest route/action integration tests use injected provider dependencies to cover callback inventory, repository selection, manual collection, and no readiness delta. Playwright seeds installation/repository inventory through `claim_github_installation_server` and run summaries through the final Task 6 service boundary using globally unique positive provider IDs; it exercises the real selection RPC and proves fresh/partial/stale/never visible states plus unchanged readiness. It does not click manual collection, which would require live GitHub, and never adds a production-toggleable fake GitHub origin.
+Require these eight server-only variables/secrets: `GITHUB_APP_ID`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_SLUG`, `GITHUB_ALLOWED_ACCOUNT_ID`, and `GITHUB_APPROVED_SECURITY_WORKFLOW_IDS`. Assert none is a Docker build arg, `NEXT_PUBLIC_*` value, workflow log line, health response, or client bundle reference. Vitest route/action integration tests use injected provider dependencies to cover callback inventory, repository selection, manual collection, and no readiness delta. Playwright seeds installation/repository inventory through `claim_github_installation_server` and run summaries through the final Task 6 service boundary using globally unique positive provider IDs; it exercises the real selection RPC and proves fresh/partial/stale/never visible states plus unchanged readiness. It does not click manual collection, which would require live GitHub, and never adds a production-toggleable fake GitHub origin.
 
 - [ ] **Step 2: Run focused tests and confirm RED**
 
@@ -637,7 +637,7 @@ Expected: FAIL because the secret-slot contract and E2E flow are absent.
 
 - [ ] **Step 3: Extend rollback-safe secret slots and documentation**
 
-Extend the existing inactive-slot staging and revision activation steps in `.github/workflows/deploy-azure-staging.yml` and the corresponding secret references in `infra/azure/application.bicep`; rotate all seven GitHub values in the same inactive a/b slot group, run silent non-empty preflight checks before mutation, preserve the previous revision's values during rollback, and pass only `secretref:` values to Container Apps. Keep the publish/build job free of deployment-environment secrets and build arguments; document the private key as a one-line escaped-`\n` PEM. After revision copy, capture the exact new revision name, poll it to Ready/Running, assert it is `latestReadyRevisionName`, and only then smoke the canonical site URL; apply the same readiness proof before rollback smoke. Document GitHub App registration as private, Adtecher-only, read-only; set `GITHUB_ALLOWED_ACCOUNT_ID` to the immutable numeric Adtecher organisation ID; leave GitHub's `Request user authorization (OAuth) during installation` option disabled because it prevents the setup-URL flow; use the exact canonical `NEXT_PUBLIC_SITE_URL` origin for callback `/api/github/callback`, setup `/api/github/setup`, and webhook `/api/github/webhook`; keep SSL verification enabled; subscribe only to the events from Task 7; and use one dedicated selected repository.
+Extend the existing inactive-slot staging and revision activation steps in `.github/workflows/deploy-azure-staging.yml` and the corresponding secret references in `infra/azure/application.bicep`; rotate all eight GitHub values in the same inactive a/b slot group, run silent non-empty preflight checks before mutation, preserve the previous revision's values during rollback, and pass only `secretref:` values to Container Apps. Keep the publish/build job free of deployment-environment secrets and build arguments; document the private key as a one-line escaped-`\n` PEM. After revision copy, capture the exact new revision name, poll it to Ready/Running, assert it is `latestReadyRevisionName`, and only then smoke the canonical site URL; apply the same readiness proof before rollback smoke. Document GitHub App registration as private, Adtecher-only, read-only; set `GITHUB_ALLOWED_ACCOUNT_ID` to the immutable numeric Adtecher organisation ID; leave GitHub's `Request user authorization (OAuth) during installation` option disabled because it prevents the setup-URL flow; use the exact canonical `NEXT_PUBLIC_SITE_URL` origin for callback `/api/github/callback`, setup `/api/github/setup`, and webhook `/api/github/webhook`; keep SSL verification enabled; subscribe only to the events from Task 7; and use one dedicated selected repository.
 
 - [ ] **Step 4: Run complete local verification**
 
@@ -646,7 +646,7 @@ Run:
 ```bash
 npx supabase db reset
 npm run test:db
-npm run test:db:upgrade
+COMPLIANCEHUB_ALLOW_LOCAL_DB_RESET=1 npm run test:db:upgrade
 npm run test:integration
 npm run lint
 npm run typecheck
@@ -666,7 +666,7 @@ git commit -m "chore(github): prepare personal Azure shadow rollout"
 
 - [ ] **Step 6: Apply and verify the hosted database migration**
 
-Before deploying the application, confirm the exact personal-staging Supabase project reference, take/verify a backup, compare `supabase migration list`, and apply only the reviewed additive migration through the approved hosted migration path. Verify the new tables, safe view, and RPC signatures directly. Record that the migration remains compatible with the previous app revision because an application rollback does not roll back the database.
+Before deploying the application, confirm the exact personal-staging Supabase project reference, take/verify a backup, compare `supabase migration list`, and apply only the four reviewed additive migrations through the approved hosted migration path. Verify the new tables, safe view, and RPC signatures directly. Record that the migrations remain compatible with the previous app revision because an application rollback does not roll back the database.
 
 - [ ] **Step 7: Perform the external registration checkpoint**
 

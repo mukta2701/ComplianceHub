@@ -89,7 +89,7 @@ jobs:
     if: github.event_name == 'workflow_run' || inputs.deploy
     runs-on: ubuntu-latest
     environment: azure-staging
-    timeout-minutes: 20
+    timeout-minutes: 30
     permissions:
       contents: read
       id-token: write
@@ -108,38 +108,150 @@ jobs:
       - name: Capture rollback revision and select inactive secret slot
         id: rollout
         run: |
+          set -euo pipefail
           previous_revision="$(az containerapp show \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --name "$AZURE_CONTAINER_APP" \
             --query properties.latestReadyRevisionName \
             --output tsv)"
-          current_service_ref=""
-          if [ -n "$previous_revision" ]; then
-            current_service_ref="$(az containerapp revision show \
-              --resource-group "$AZURE_RESOURCE_GROUP" \
-              --name "$AZURE_CONTAINER_APP" \
-              --revision "$previous_revision" \
-              --query 'properties.template.containers[0].env' \
-              --output json | jq -r '.[] | select(.name == "SUPABASE_SERVICE_ROLE_KEY") | .secretRef // empty')"
-          fi
-          if [ "$current_service_ref" = "supabase-service-role-a" ]; then
-            secret_slot="b"
-          else
+          test -n "$previous_revision"
+          current_environment="$(az containerapp revision show \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_CONTAINER_APP" \
+            --revision "$previous_revision" \
+            --query 'properties.template.containers[0].env' \
+            --output json)"
+          current_service_ref="$(jq -r '.[] | select(.name == "SUPABASE_SERVICE_ROLE_KEY") | .secretRef // empty' <<< "$current_environment")"
+          current_encryption_ref="$(jq -r '.[] | select(.name == "APP_ENCRYPTION_KEY") | .secretRef // empty' <<< "$current_environment")"
+          current_cron_ref="$(jq -r '.[] | select(.name == "CRON_SECRET") | .secretRef // empty' <<< "$current_environment")"
+          if [ -z "$current_service_ref" ] && [ -z "$current_encryption_ref" ] && [ -z "$current_cron_ref" ]; then
+            current_slot=""
             secret_slot="a"
+          elif [ "$current_service_ref" = "supabase-service-role-a" ] \
+            && [ "$current_encryption_ref" = "app-encryption-a" ] \
+            && [ "$current_cron_ref" = "cron-secret-a" ]; then
+            current_slot="a"
+            secret_slot="b"
+          elif [ "$current_service_ref" = "supabase-service-role-b" ] \
+            && [ "$current_encryption_ref" = "app-encryption-b" ] \
+            && [ "$current_cron_ref" = "cron-secret-b" ]; then
+            current_slot="b"
+            secret_slot="a"
+          else
+            exit 1
+          fi
+          github_ref_count="$(jq '[.[] | select(.name | startswith("GITHUB_"))] | length' <<< "$current_environment")"
+          github_ref_names="$(jq -r '[.[] | select(.name | startswith("GITHUB_")) | .name] | sort | join(",")' <<< "$current_environment")"
+          expected_github_ref_names="GITHUB_ALLOWED_ACCOUNT_ID,GITHUB_APPROVED_SECURITY_WORKFLOW_IDS,GITHUB_APP_CLIENT_ID,GITHUB_APP_CLIENT_SECRET,GITHUB_APP_ID,GITHUB_APP_PRIVATE_KEY,GITHUB_APP_SLUG,GITHUB_WEBHOOK_SECRET"
+          while IFS=$'\t' read -r variable reference; do
+            [ -z "$variable" ] && continue
+            case "$variable" in
+              GITHUB_APP_ID) expected="github-app-id-$current_slot" ;;
+              GITHUB_APP_CLIENT_ID) expected="github-client-id-$current_slot" ;;
+              GITHUB_APP_CLIENT_SECRET) expected="github-client-secret-$current_slot" ;;
+              GITHUB_APP_PRIVATE_KEY) expected="github-private-key-$current_slot" ;;
+              GITHUB_WEBHOOK_SECRET) expected="github-webhook-secret-$current_slot" ;;
+              GITHUB_APP_SLUG) expected="github-app-slug-$current_slot" ;;
+              GITHUB_ALLOWED_ACCOUNT_ID) expected="github-allowed-account-id-$current_slot" ;;
+              GITHUB_APPROVED_SECURITY_WORKFLOW_IDS) expected="github-approved-workflow-ids-$current_slot" ;;
+              *) exit 1 ;;
+            esac
+            test "$reference" = "$expected"
+          done < <(jq -r '.[] | select(.name | startswith("GITHUB_")) | [.name, (.secretRef // "")] | @tsv' <<< "$current_environment")
+          if [ "$github_ref_count" -eq 0 ]; then
+            test -z "$github_ref_names"
+          elif [ "$github_ref_count" -eq 8 ]; then
+            test "$github_ref_names" = "$expected_github_ref_names"
+          else
+            exit 1
           fi
           {
             echo "previous-revision=$previous_revision"
             echo "service-role-ref=supabase-service-role-$secret_slot"
             echo "encryption-ref=app-encryption-$secret_slot"
             echo "cron-ref=cron-secret-$secret_slot"
+            echo "github-slot=github-app-$secret_slot"
+            echo "github-app-id-ref=github-app-id-$secret_slot"
+            echo "github-client-id-ref=github-client-id-$secret_slot"
+            echo "github-client-secret-ref=github-client-secret-$secret_slot"
+            echo "github-private-key-ref=github-private-key-$secret_slot"
+            echo "github-webhook-secret-ref=github-webhook-secret-$secret_slot"
+            echo "github-app-slug-ref=github-app-slug-$secret_slot"
+            echo "github-allowed-account-id-ref=github-allowed-account-id-$secret_slot"
+            echo "github-approved-workflow-ids-ref=github-approved-workflow-ids-$secret_slot"
           } >> "$GITHUB_OUTPUT"
 
       - name: Stage rollback-safe secret slot
+        id: stage
         env:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           APP_ENCRYPTION_KEY: ${{ secrets.APP_ENCRYPTION_KEY }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          GITHUB_APP_ID: ${{ secrets.AZURE_GITHUB_APP_ID }}
+          GITHUB_APP_CLIENT_ID: ${{ secrets.AZURE_GITHUB_APP_CLIENT_ID }}
+          GITHUB_APP_CLIENT_SECRET: ${{ secrets.AZURE_GITHUB_APP_CLIENT_SECRET }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.AZURE_GITHUB_APP_PRIVATE_KEY }}
+          GITHUB_WEBHOOK_SECRET: ${{ secrets.AZURE_GITHUB_WEBHOOK_SECRET }}
+          GITHUB_APP_SLUG: ${{ secrets.AZURE_GITHUB_APP_SLUG }}
+          GITHUB_ALLOWED_ACCOUNT_ID: ${{ secrets.AZURE_GITHUB_ALLOWED_ACCOUNT_ID }}
+          GITHUB_APPROVED_SECURITY_WORKFLOW_IDS: ${{ secrets.AZURE_GITHUB_APPROVED_SECURITY_WORKFLOW_IDS }}
+          SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+          CANONICAL_SITE_URL: ${{ vars.NEXT_PUBLIC_SITE_URL }}
+          REGISTERED_GITHUB_APP_SITE_URL: ${{ vars.REGISTERED_GITHUB_APP_SITE_URL }}
+          HOSTED_SUPABASE_PROJECT_REF: ${{ vars.HOSTED_SUPABASE_PROJECT_REF }}
+          HOSTED_SUPABASE_MIGRATION_VERSION: ${{ vars.HOSTED_SUPABASE_MIGRATION_VERSION }}
         run: |
+          set -euo pipefail
+          required_values=(
+            "$SUPABASE_SERVICE_ROLE_KEY"
+            "$APP_ENCRYPTION_KEY"
+            "$CRON_SECRET"
+            "$GITHUB_APP_ID"
+            "$GITHUB_APP_CLIENT_ID"
+            "$GITHUB_APP_CLIENT_SECRET"
+            "$GITHUB_APP_PRIVATE_KEY"
+            "$GITHUB_WEBHOOK_SECRET"
+            "$GITHUB_APP_SLUG"
+            "$GITHUB_ALLOWED_ACCOUNT_ID"
+            "$GITHUB_APPROVED_SECURITY_WORKFLOW_IDS"
+            "$SUPABASE_URL"
+            "$CANONICAL_SITE_URL"
+            "$REGISTERED_GITHUB_APP_SITE_URL"
+            "$HOSTED_SUPABASE_PROJECT_REF"
+            "$HOSTED_SUPABASE_MIGRATION_VERSION"
+          )
+          for required_value in "${required_values[@]}"; do
+            test -n "$required_value"
+          done
+          [[ "$HOSTED_SUPABASE_PROJECT_REF" =~ ^[a-z0-9]{20}$ ]]
+          test "$SUPABASE_URL" = "https://$HOSTED_SUPABASE_PROJECT_REF.supabase.co"
+          test "$HOSTED_SUPABASE_MIGRATION_VERSION" = "20260817192458"
+          test "$REGISTERED_GITHUB_APP_SITE_URL" = "$CANONICAL_SITE_URL"
+          container_app_fqdn="$(az containerapp show \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_CONTAINER_APP" \
+            --query properties.configuration.ingress.fqdn \
+            --output tsv)"
+          test -n "$container_app_fqdn"
+          test "$CANONICAL_SITE_URL" = "https://$container_app_fqdn"
+          [[ "$GITHUB_APP_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$GITHUB_ALLOWED_ACCOUNT_ID" =~ ^[1-9][0-9]*$ ]]
+          test "${#GITHUB_ALLOWED_ACCOUNT_ID}" -le 16
+          (( 10#$GITHUB_ALLOWED_ACCOUNT_ID <= 9007199254740991 ))
+          IFS=',' read -r -a approved_workflow_ids <<< "$GITHUB_APPROVED_SECURITY_WORKFLOW_IDS"
+          test "${#approved_workflow_ids[@]}" -ge 1
+          test "${#approved_workflow_ids[@]}" -le 20
+          declare -A seen_workflow_ids=()
+          for workflow_id in "${approved_workflow_ids[@]}"; do
+            [[ "$workflow_id" =~ ^[1-9][0-9]*$ ]]
+            test "${#workflow_id}" -le 16
+            (( 10#$workflow_id <= 9007199254740991 ))
+            test -z "${seen_workflow_ids[$workflow_id]+x}"
+            seen_workflow_ids[$workflow_id]=1
+          done
+          [[ "$GITHUB_APP_PRIVATE_KEY" != *$'\n'* ]]
+          [[ "$GITHUB_APP_PRIVATE_KEY" == '-----BEGIN PRIVATE KEY-----\n'* ]]
+          [[ "$GITHUB_APP_PRIVATE_KEY" == *'\n-----END PRIVATE KEY-----' ]]
           az containerapp secret set \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --name "$AZURE_CONTAINER_APP" \
@@ -147,14 +259,24 @@ jobs:
               "${{ steps.rollout.outputs.service-role-ref }}=$SUPABASE_SERVICE_ROLE_KEY" \
               "${{ steps.rollout.outputs.encryption-ref }}=$APP_ENCRYPTION_KEY" \
               "${{ steps.rollout.outputs.cron-ref }}=$CRON_SECRET" \
+              "${{ steps.rollout.outputs.github-app-id-ref }}=$GITHUB_APP_ID" \
+              "${{ steps.rollout.outputs.github-client-id-ref }}=$GITHUB_APP_CLIENT_ID" \
+              "${{ steps.rollout.outputs.github-client-secret-ref }}=$GITHUB_APP_CLIENT_SECRET" \
+              "${{ steps.rollout.outputs.github-private-key-ref }}=$GITHUB_APP_PRIVATE_KEY" \
+              "${{ steps.rollout.outputs.github-webhook-secret-ref }}=$GITHUB_WEBHOOK_SECRET" \
+              "${{ steps.rollout.outputs.github-app-slug-ref }}=$GITHUB_APP_SLUG" \
+              "${{ steps.rollout.outputs.github-allowed-account-id-ref }}=$GITHUB_ALLOWED_ACCOUNT_ID" \
+              "${{ steps.rollout.outputs.github-approved-workflow-ids-ref }}=$GITHUB_APPROVED_SECURITY_WORKFLOW_IDS" \
             --only-show-errors \
             --output none
+          echo "mutation-started=true" >> "$GITHUB_OUTPUT"
 
       - name: Create rollout revision from the previous healthy revision
         env:
           IMAGE_REFERENCE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.publish.outputs.image-digest }}
         run: |
-          az containerapp revision copy \
+          set -euo pipefail
+          new_revision="$(az containerapp revision copy \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --name "$AZURE_CONTAINER_APP" \
             --from-revision "${{ steps.rollout.outputs.previous-revision }}" \
@@ -176,18 +298,51 @@ jobs:
               "SUPABASE_SERVICE_ROLE_KEY=secretref:${{ steps.rollout.outputs.service-role-ref }}" \
               "APP_ENCRYPTION_KEY=secretref:${{ steps.rollout.outputs.encryption-ref }}" \
               "CRON_SECRET=secretref:${{ steps.rollout.outputs.cron-ref }}" \
+              "GITHUB_APP_ID=secretref:${{ steps.rollout.outputs.github-app-id-ref }}" \
+              "GITHUB_APP_CLIENT_ID=secretref:${{ steps.rollout.outputs.github-client-id-ref }}" \
+              "GITHUB_APP_CLIENT_SECRET=secretref:${{ steps.rollout.outputs.github-client-secret-ref }}" \
+              "GITHUB_APP_PRIVATE_KEY=secretref:${{ steps.rollout.outputs.github-private-key-ref }}" \
+              "GITHUB_WEBHOOK_SECRET=secretref:${{ steps.rollout.outputs.github-webhook-secret-ref }}" \
+              "GITHUB_APP_SLUG=secretref:${{ steps.rollout.outputs.github-app-slug-ref }}" \
+              "GITHUB_ALLOWED_ACCOUNT_ID=secretref:${{ steps.rollout.outputs.github-allowed-account-id-ref }}" \
+              "GITHUB_APPROVED_SECURITY_WORKFLOW_IDS=secretref:${{ steps.rollout.outputs.github-approved-workflow-ids-ref }}" \
             --only-show-errors \
-            --output none
+            --query properties.latestRevisionName \
+            --output tsv)"
+          test "$new_revision" = "${AZURE_CONTAINER_APP}--run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          health_state=""
+          running_state=""
+          for _ in $(seq 1 60); do
+            read -r health_state running_state < <(az containerapp revision show \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --name "$AZURE_CONTAINER_APP" \
+              --revision "$new_revision" \
+              --query '[properties.healthState, properties.runningState]' \
+              --output tsv)
+            if [ "$health_state" = "Healthy" ] && [ "$running_state" = "Running" ]; then
+              break
+            fi
+            sleep 5
+          done
+          test "$health_state" = "Healthy"
+          test "$running_state" = "Running"
+          latest_ready_revision="$(az containerapp show \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_CONTAINER_APP" \
+            --query properties.latestReadyRevisionName \
+            --output tsv)"
+          test "$latest_ready_revision" = "$new_revision"
 
       - name: Verify deployed health and OAuth/MCP contract
         env:
           AUTHORIZATION_SERVER: ${{ vars.SUPABASE_OAUTH_ISSUER }}
+          CANONICAL_SITE_URL: ${{ vars.NEXT_PUBLIC_SITE_URL }}
         run: |
-          fqdn="$(az containerapp show --resource-group "$AZURE_RESOURCE_GROUP" --name "$AZURE_CONTAINER_APP" --query properties.configuration.ingress.fqdn --output tsv)"
-          origin="https://${fqdn}"
-          curl --fail-with-body --retry 5 --retry-all-errors --retry-delay 5 --max-time 120 "$origin/api/health/live"
-          curl --fail-with-body --retry 5 --retry-all-errors --retry-delay 5 --max-time 120 "$origin/api/health"
-          curl --fail-with-body --retry 5 --retry-all-errors --retry-delay 5 --max-time 120 \
+          set -euo pipefail
+          origin="$CANONICAL_SITE_URL"
+          curl --fail-with-body --retry 5 --retry-all-errors --retry-delay 5 --retry-max-time 120 --connect-timeout 10 --max-time 120 "$origin/api/health/live"
+          curl --fail-with-body --retry 5 --retry-all-errors --retry-delay 5 --retry-max-time 120 --connect-timeout 10 --max-time 120 "$origin/api/health"
+          curl --fail-with-body --retry 5 --retry-all-errors --retry-delay 5 --retry-max-time 120 --connect-timeout 10 --max-time 120 \
             "$origin/.well-known/oauth-protected-resource" | jq --exit-status \
             --arg resource "$origin/mcp" \
             --arg authorizationServer "$AUTHORIZATION_SERVER" \
@@ -195,6 +350,8 @@ jobs:
           headers_file="$(mktemp "$RUNNER_TEMP/compliancehub-mcp-headers.XXXXXX")"
           trap 'rm -f "$headers_file"' EXIT
           mcp_status="$(curl --silent --show-error \
+            --connect-timeout 10 \
+            --max-time 120 \
             --output /dev/null \
             --dump-header "$headers_file" \
             --write-out '%{http_code}' \
@@ -207,15 +364,41 @@ jobs:
             "www-authenticate: Bearer resource_metadata=\"$origin/.well-known/oauth-protected-resource\""
 
       - name: Restore the previous healthy revision after a failed rollout
-        if: failure() && steps.rollout.outputs.previous-revision != ''
+        if: (failure() || cancelled()) && steps.rollout.outputs.previous-revision != '' && steps.stage.outputs.mutation-started == 'true'
+        env:
+          CANONICAL_SITE_URL: ${{ vars.NEXT_PUBLIC_SITE_URL }}
         run: |
-          az containerapp revision copy \
+          set -euo pipefail
+          rollback_revision="$(az containerapp revision copy \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --name "$AZURE_CONTAINER_APP" \
             --from-revision "${{ steps.rollout.outputs.previous-revision }}" \
             --revision-suffix "rollback-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
             --only-show-errors \
-            --output none
-          fqdn="$(az containerapp show --resource-group "$AZURE_RESOURCE_GROUP" --name "$AZURE_CONTAINER_APP" --query properties.configuration.ingress.fqdn --output tsv)"
-          curl --fail-with-body --retry 5 --retry-all-errors --retry-delay 5 --max-time 120 "https://${fqdn}/api/health/live"
-          curl --fail-with-body --retry 5 --retry-all-errors --retry-delay 5 --max-time 120 "https://${fqdn}/api/health"
+            --query properties.latestRevisionName \
+            --output tsv)"
+          test "$rollback_revision" = "${AZURE_CONTAINER_APP}--rollback-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          health_state=""
+          running_state=""
+          for _ in $(seq 1 60); do
+            read -r health_state running_state < <(az containerapp revision show \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --name "$AZURE_CONTAINER_APP" \
+              --revision "$rollback_revision" \
+              --query '[properties.healthState, properties.runningState]' \
+              --output tsv)
+            if [ "$health_state" = "Healthy" ] && [ "$running_state" = "Running" ]; then
+              break
+            fi
+            sleep 5
+          done
+          test "$health_state" = "Healthy"
+          test "$running_state" = "Running"
+          latest_ready_revision="$(az containerapp show \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_CONTAINER_APP" \
+            --query properties.latestReadyRevisionName \
+            --output tsv)"
+          test "$latest_ready_revision" = "$rollback_revision"
+          curl --fail-with-body --retry 5 --retry-all-errors --retry-delay 5 --retry-max-time 120 --connect-timeout 10 --max-time 120 "$CANONICAL_SITE_URL/api/health/live"
+          curl --fail-with-body --retry 5 --retry-all-errors --retry-delay 5 --retry-max-time 120 --connect-timeout 10 --max-time 120 "$CANONICAL_SITE_URL/api/health"

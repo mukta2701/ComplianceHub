@@ -18,10 +18,11 @@ change readiness/MCP answers, or deliver Slack messages.
 lease. Callers must treat that response as in-progress work, not as terminal
 success; the deterministic retry key will resolve the same run later.
 
-Personal staging requires `CRON_SECRET`, `GITHUB_APP_ID`,
-`GITHUB_APP_PRIVATE_KEY`, and `GITHUB_APPROVED_SECURITY_WORKFLOW_IDS`. Keep the
-private key and all GitHub tokens out of application tables, logs, build output,
-and client-visible environment variables.
+Personal staging requires `CRON_SECRET` and all eight `GITHUB_*` values listed
+below. They are runtime-only deployment secrets, rotated together through one
+inactive a/b slot. Keep the private key and all GitHub tokens out of application
+tables, logs, build output, client-visible environment variables, and local
+developer environment files.
 
 This is the concrete checklist to take ComplianceHub from the local build to a live
 site. Steps marked **(you)** need account creation or secret entry that only the
@@ -46,6 +47,32 @@ account owner can do; everything else is already prepared in the repo.
 1. Create a managed Supabase project (a UK/EU region where available).
 2. Apply the committed migrations to it (link the project, then `supabase db push`, or run the SQL in order). Do **not** run `db reset` against production.
 3. From the project's API settings, copy: the **Project URL**, the **anon key**, and the **service-role key** (server-only).
+
+### GitHub foundation migration checkpoint
+
+The personal staging project for this rollout is project ref
+`ytenjiyjdcrjkgwmciqw`. Confirm that exact ref in both the Supabase dashboard and
+CLI before linking or applying anything, then take and verify a recoverable
+backup. From the last deployed schema, both `supabase migration list` and
+`supabase db push --dry-run` must show exactly these four pending additive
+migrations, in this order:
+
+1. `20260817010000_github_collection_foundation.sql`
+2. `20260817020000_github_collection_run_leases.sql`
+3. `20260817030000_github_webhook_delivery_ids.sql`
+4. `20260817192458_github_shadow_ui_summary.sql`
+
+Stop if the project ref, ordering, or pending set differs. After the backup is
+verified, apply that reviewed set once with `supabase db push`, rerun
+`supabase migration list`, and verify the GitHub tables, security-invoker summary
+view, and service-only RPC signatures. Only then set the protected environment
+variables `HOSTED_SUPABASE_PROJECT_REF=ytenjiyjdcrjkgwmciqw` and
+`HOSTED_SUPABASE_MIGRATION_VERSION=20260817192458`. The deploy preflight binds
+both attestations to the exact `NEXT_PUBLIC_SUPABASE_URL`; changing the target
+project invalidates the gate. These attestations are not substitutes for the
+list, dry run, backup, or direct verification. The migrations remain compatible
+with the previous application revision; rolling the Container App back does not
+roll the database back.
 
 ## 2. Azure Container Apps staging **(you — external authorization checkpoint)**
 
@@ -82,11 +109,22 @@ an Azure Container Registry. Render, AWS, and Vercel hosting are not used.
    public repository's package inherits public visibility, so Container Apps
    needs no long-lived registry credential. The workflow deploys the immutable
    image digest, not a mutable tag.
-8. Each rollout writes credentials to the secret slot not referenced by the
-   previous healthy revision, creates a new revision even on a rerun, validates
-   liveness, readiness, OAuth resource metadata, and the unauthenticated MCP
-   challenge, then retains the prior slot for rollback. On failure it copies the
-   previous healthy revision and verifies its health.
+8. The first rollout may initialise slot `a` only when all three legacy secret
+   references are absent. Later rollouts write credentials to the opposite slot
+   only after proving the legacy references are coherent and the prior GitHub
+   reference set is either absent (the one-time upgrade) or all eight values in
+   the same slot; partial or mixed state fails closed. It creates a new revision
+   even on a rerun, waits for that exact
+   revision to be Healthy/Running and `latestReadyRevisionName`, then validates
+   that the canonical origin exactly matches the Container App ingress FQDN
+   before checking liveness, readiness, OAuth resource metadata, and the bounded
+   unauthenticated MCP challenge. On failure or cancellation it copies the
+   previous healthy revision and applies the same exact-revision proof before
+   bounded rollback smoke.
+9. Do not merge or deploy this release until the hosted migration checkpoint and
+   GitHub organisation-owner registration checkpoint below are complete. The
+   current environment has no GitHub App values, `main` auto-deploys after CI,
+   and no environment reviewer currently supplies a second approval boundary.
 
 GitHub environment variables:
 
@@ -103,8 +141,16 @@ GitHub environment variables:
 | `SUPABASE_OAUTH_ISSUER` | `https://<project-ref>.supabase.co/auth/v1` |
 | `SUPABASE_OAUTH_JWKS_URL` | `<issuer>/.well-known/jwks.json` |
 | `MCP_JWT_ALGORITHMS` | `RS256,ES256` |
+| `HOSTED_SUPABASE_PROJECT_REF` | `ytenjiyjdcrjkgwmciqw`, only after the exact hosted project, backup, and four-migration checkpoint above pass |
+| `HOSTED_SUPABASE_MIGRATION_VERSION` | `20260817192458`, only after the four-migration checkpoint above passes |
+| `REGISTERED_GITHUB_APP_SITE_URL` | Exact canonical origin registered in GitHub; must equal `NEXT_PUBLIC_SITE_URL` |
 
 GitHub environment secrets:
+
+GitHub Actions does not allow user-defined secret names beginning `GITHUB_`, so
+the protected environment uses the `AZURE_GITHUB_*` source names below. The
+deploy job maps them to the exact `GITHUB_*` Container App runtime names without
+printing their values.
 
 | Secret | Purpose |
 |---|---|
@@ -114,6 +160,23 @@ GitHub environment secrets:
 | `SUPABASE_SERVICE_ROLE_KEY` | Server-only cron and validated digest lifecycle |
 | `APP_ENCRYPTION_KEY` | Stable AES-256-GCM application key |
 | `CRON_SECRET` | Authenticates maintenance workflow calls |
+| `AZURE_GITHUB_APP_ID` | Maps to runtime `GITHUB_APP_ID`; numeric private App ID |
+| `AZURE_GITHUB_APP_CLIENT_ID` | Maps to runtime `GITHUB_APP_CLIENT_ID`; App OAuth client ID |
+| `AZURE_GITHUB_APP_CLIENT_SECRET` | Maps to runtime `GITHUB_APP_CLIENT_SECRET`; App OAuth client secret |
+| `AZURE_GITHUB_APP_PRIVATE_KEY` | Maps to runtime `GITHUB_APP_PRIVATE_KEY`; PKCS#8/PEM key stored as one line with literal escaped `\n` markers |
+| `AZURE_GITHUB_WEBHOOK_SECRET` | Maps to runtime `GITHUB_WEBHOOK_SECRET`; high-entropy webhook HMAC secret |
+| `AZURE_GITHUB_APP_SLUG` | Maps to runtime `GITHUB_APP_SLUG`; exact private App slug |
+| `AZURE_GITHUB_ALLOWED_ACCOUNT_ID` | Maps to runtime `GITHUB_ALLOWED_ACCOUNT_ID`; immutable numeric Adtecher organisation ID |
+| `AZURE_GITHUB_APPROVED_SECURITY_WORKFLOW_IDS` | Maps to runtime `GITHUB_APPROVED_SECURITY_WORKFLOW_IDS`; one to twenty comma-separated numeric workflow IDs for the dedicated pilot repository |
+
+GitHub may download an RSA private key with a `BEGIN RSA PRIVATE KEY` header,
+but the runtime deliberately accepts PKCS#8 only. Convert the downloaded key
+offline with `openssl pkcs8 -topk8 -inform PEM -outform PEM -nocrypt`, confirm
+the converted first line is exactly `-----BEGIN PRIVATE KEY-----`, and then use
+an approved secret-entry tool to replace each newline with the two literal
+characters `\n`. Do not print the converted key, paste it into a shell history,
+or store either key file in this repository. The deployment preflight rejects
+actual newlines, a non-PKCS#8 header, or a missing PKCS#8 footer.
 
 Application environment variables (names must match `.env.example`):
 
@@ -125,8 +188,13 @@ Application environment variables (names must match `.env.example`):
 | `NEXT_PUBLIC_SITE_URL` | yes | Your real site origin, e.g. `https://app.example.com`. It is the canonical origin for invitation and Auth redirects; production fails closed if it is absent. |
 | `CRON_SECRET` | yes | High-entropy random string; gates all maintenance cron routes. |
 | `GITHUB_APP_ID` | for GitHub shadow pilot | **Server-only.** Numeric identifier of the approved private GitHub App. |
-| `GITHUB_APP_PRIVATE_KEY` | for GitHub shadow pilot | **Server-only.** PEM private key for short-lived App JWT signing; never expose or persist it. |
-| `GITHUB_APPROVED_SECURITY_WORKFLOW_IDS` | for GitHub shadow pilot | Comma-separated numeric workflow IDs approved for the dedicated pilot repository. |
+| `GITHUB_APP_CLIENT_ID` | for GitHub shadow pilot | **Server-only.** OAuth client identifier used only by setup/callback routes. |
+| `GITHUB_APP_CLIENT_SECRET` | for GitHub shadow pilot | **Server-only.** OAuth client secret used for PKCE callback exchange and the integrity-protected flow cookie. |
+| `GITHUB_APP_PRIVATE_KEY` | for GitHub shadow pilot | **Server-only.** PEM private key for short-lived App JWT signing. Store it as one line with literal escaped `\n` markers; never expose or persist it. |
+| `GITHUB_WEBHOOK_SECRET` | for GitHub shadow pilot | **Server-only.** High-entropy HMAC secret for signed webhook intake. |
+| `GITHUB_APP_SLUG` | for GitHub shadow pilot | **Server-only.** Exact slug used to construct the installation URL. |
+| `GITHUB_ALLOWED_ACCOUNT_ID` | for GitHub shadow pilot | **Server-only.** Immutable numeric Adtecher organisation ID; never substitute a personal account. |
+| `GITHUB_APPROVED_SECURITY_WORKFLOW_IDS` | for GitHub shadow pilot | **Server-only.** One to twenty unique comma-separated numeric workflow IDs approved for the dedicated pilot repository. |
 | `RESEND_API_KEY` | for invitation delivery | **Server-only.** Resend API key with sending access. Never use a `NEXT_PUBLIC_` variable for it. If absent, invitations remain retryable with status `not_configured` and no mail request is made. |
 | `INVITATION_FROM_EMAIL` | for invitation delivery | **Server-only.** Verified sender, e.g. `ComplianceHub <invites@notify.example.com>`. |
 | `GOOGLE_AUTH_ENABLED` | after Google setup | Server-side flag. Leave unset until the Google + Supabase checkpoints below are complete, then set to `1`. |
@@ -139,6 +207,46 @@ Application environment variables (names must match `.env.example`):
 | `NANGO_SECRET_KEY` | for provider OAuth | **Server-only. Never `NEXT_PUBLIC_*`.** Creates short-lived Connect sessions and authorizes Nango Proxy calls. |
 | `NANGO_GITHUB_INTEGRATION_ID` | for GitHub OAuth | Nango integration ID/unique key configured for the reviewed GitHub OAuth app. |
 | `NANGO_JIRA_INTEGRATION_ID` | for Jira OAuth | Nango integration ID/unique key configured for the reviewed Jira OAuth app. |
+
+### Private GitHub App registration checkpoint
+
+An Adtecher GitHub organisation owner or App manager must create or update this
+as a **private, Adtecher-owned** GitHub App before the branch is merged or the
+personal staging deployment is triggered. Do not use a user-owned App or a
+personal repository as a substitute.
+
+Use the exact origin in `NEXT_PUBLIC_SITE_URL` for every URL below, with no
+preview origin, path prefix, credentials, query, fragment, or trailing slash on
+the origin itself:
+
+- Homepage URL: `${NEXT_PUBLIC_SITE_URL}`
+- Callback URL: `${NEXT_PUBLIC_SITE_URL}/api/github/callback`
+- Setup URL: `${NEXT_PUBLIC_SITE_URL}/api/github/setup`
+- Webhook URL: `${NEXT_PUBLIC_SITE_URL}/api/github/webhook`
+
+Keep **Request user authorization (OAuth) during installation** disabled so the
+setup URL can start the bounded PKCE flow, enable **Redirect on update**, and
+keep webhook SSL verification enabled. Set repository permissions only to
+Actions: read, Administration: read, Dependabot alerts: read, Metadata: read,
+Secret scanning alerts: read, and Code scanning alerts (`security_events`):
+read. Grant no write permission and no organisation/user permission.
+
+Subscribe only to `installation`, `installation_repositories`, `repository`,
+`branch_protection_rule`, `repository_ruleset`, `workflow_run`,
+`dependabot_alert`, `code_scanning_alert`, and `secret_scanning_alert`. Install
+the App with **Only select repositories** and approve exactly one dedicated
+Adtecher pilot repository. Record its numeric organisation account ID as
+`GITHUB_ALLOWED_ACCOUNT_ID`; login text is display-only and is not the trust
+boundary. Record the exact registered origin in the protected environment
+variable `REGISTERED_GITHUB_APP_SITE_URL`. The deploy preflight requires it to
+equal `NEXT_PUBLIC_SITE_URL`, ensuring any canonical URL change pauses rollout
+until the GitHub callback, setup, and webhook registration is updated.
+
+Enter the eight GitHub runtime values only through their `AZURE_GITHUB_*` secret
+aliases in the protected personal `azure-staging` environment. Do not add them to `.env.local`, repository
+variables, Docker build arguments, application tables, workflow output, forks,
+or the unavailable Adtecher Azure environment. The local seeded Playwright proof
+does not require these values and makes no GitHub request.
 
 ## 3. Cron automation (GitHub Actions calling Azure)
 

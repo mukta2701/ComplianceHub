@@ -2,6 +2,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const ORG_ID = "11111111-1111-4111-8111-111111111111";
 const ACTOR_ID = "22222222-2222-4222-8222-222222222222";
+const REPOSITORY = {
+  id: 101,
+  owner: "Adtecher",
+  name: "pilot",
+  fullName: "Adtecher/pilot",
+  htmlUrl: "https://github.com/Adtecher/pilot",
+  visibility: "private" as const,
+  archived: false,
+  defaultBranch: "main",
+};
 const hoisted = vi.hoisted(() => ({
   sequence: [] as string[],
   context: { organisation: { id: "11111111-1111-4111-8111-111111111111" }, user: { id: "22222222-2222-4222-8222-222222222222" }, membership: { role: "admin" } },
@@ -60,7 +70,7 @@ describe("GET /api/github/callback", () => {
     hoisted.listIds.mockResolvedValue([77]);
     hoisted.createAppJwt.mockResolvedValue("app-jwt");
     hoisted.getApp.mockResolvedValue({ id: 77, account: { id: 99, login: "Adtecher", type: "Organization" }, repositorySelection: "selected", permissions: {}, suspendedAt: null });
-    hoisted.collectRepos.mockResolvedValue([]);
+    hoisted.collectRepos.mockResolvedValue([REPOSITORY]);
     hoisted.claim.mockResolvedValue("installation-uuid");
     hoisted.requireContext.mockImplementation(async () => { hoisted.sequence.push("auth"); return hoisted.context; });
   });
@@ -81,6 +91,7 @@ describe("GET /api/github/callback", () => {
     expect(hoisted.claim).toHaveBeenCalledWith(expect.objectContaining({
       organisationId: ORG_ID, actorId: ACTOR_ID, requestedInstallationId: 77,
       userInstallationIds: [77],
+      repositories: [REPOSITORY],
     }));
   });
 
