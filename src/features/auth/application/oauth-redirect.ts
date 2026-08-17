@@ -1,4 +1,8 @@
-const authorizationIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+// Supabase treats authorization IDs as opaque values. Current hosted OAuth
+// requests use lowercase alphanumeric IDs, while older/local fixtures use
+// UUIDs. Keep the accepted surface bounded to URI-unreserved characters and
+// let Supabase perform the authoritative existence/ownership check.
+const authorizationIdPattern = /^[A-Za-z0-9._~-]{16,128}$/;
 const consentMessages = new Set([
   "That authorization request is invalid or expired.",
   "Choose whether to approve or deny access.",
@@ -13,8 +17,12 @@ export function parseOAuthConsentSearchParams(value: Record<string, string | str
   const message = value.message;
   if (message !== undefined && (typeof message !== "string" || message.length > 200 || !consentMessages.has(message))) return null;
   if (authorizationId === undefined) return message === undefined ? null : { message };
-  if (typeof authorizationId !== "string" || !authorizationIdPattern.test(authorizationId)) return null;
+  if (!isOAuthAuthorizationId(authorizationId)) return null;
   return message === undefined ? { authorizationId } : { authorizationId, message };
+}
+
+export function isOAuthAuthorizationId(value: unknown): value is string {
+  return typeof value === "string" && authorizationIdPattern.test(value);
 }
 
 export function safeClientRedirect(value: unknown, registeredRedirect: string): string | null {

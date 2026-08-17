@@ -32,6 +32,11 @@ describe("oauthConsentAction", () => {
     const method = decision === "approve" ? hoisted.client.auth.oauth.approveAuthorization : hoisted.client.auth.oauth.denyAuthorization;
     expect(method).toHaveBeenCalledWith(authorizationId, { skipBrowserRedirect: true });
   });
+  it("submits a bounded opaque Supabase authorization id", async () => {
+    const opaqueId = "elvrapg4j3ab5gvtp4zyya7qi3e6mrhg";
+    await expect(oauthConsentAction(form("approve", opaqueId))).rejects.toThrow(/^REDIRECT:https:\/\/client\.example\/callback/);
+    expect(hoisted.client.auth.oauth.approveAuthorization).toHaveBeenCalledWith(opaqueId, { skipBrowserRedirect: true });
+  });
   it("rejects a redirect that does not match the registered client origin", async () => {
     hoisted.client.auth.oauth.approveAuthorization.mockResolvedValue({ data: { redirect_url: "https://evil.example/steal" }, error: null });
     await expect(oauthConsentAction(form())).rejects.toThrow("REDIRECT:/oauth/consent?message=Could+not+complete+that+authorization+request.");

@@ -2,10 +2,8 @@
 
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { safeClientRedirect } from "@/features/auth/application/oauth-redirect";
+import { isOAuthAuthorizationId, safeClientRedirect } from "@/features/auth/application/oauth-redirect";
 import { validateRequestedIdentityScopes } from "@/features/auth/application/oauth-grants";
-
-const authorizationIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function consentMessage(value: string) {
   return `/oauth/consent?${new URLSearchParams({ message: value })}`;
@@ -14,7 +12,7 @@ function consentMessage(value: string) {
 export async function oauthConsentAction(formData: FormData) {
   const authorizationId = formData.get("authorizationId");
   const decision = formData.get("decision");
-  if (typeof authorizationId !== "string" || authorizationId.length > 64 || !authorizationIdPattern.test(authorizationId)) {
+  if (!isOAuthAuthorizationId(authorizationId)) {
     redirect(consentMessage("That authorization request is invalid or expired."));
   }
   if (decision !== "approve" && decision !== "deny") redirect(consentMessage("Choose whether to approve or deny access."));
