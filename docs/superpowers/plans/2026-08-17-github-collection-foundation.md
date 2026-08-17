@@ -450,6 +450,8 @@ git commit -m "feat(github): collect sanitised repository security facts"
 - Test: `src/features/github/application/collection-deps.test.ts`
 - Create: `src/app/api/cron/github-collect/route.ts`
 - Test: `src/app/api/cron/github-collect/route.test.ts`
+- Create: `supabase/migrations/20260817020000_github_collection_run_leases.sql`
+- Create: `supabase/tests/database/064_github_collection_run_leases.sql`
 - Modify: `.github/workflows/azure-maintenance.yml`
 - Modify: `docs/deployment.md`
 
@@ -459,7 +461,7 @@ git commit -m "feat(github): collect sanitised repository security facts"
 
 - [ ] **Step 1: Write failing orchestration tests**
 
-Use injected fakes to prove one failed repository does not starve another; a duplicate request key returns the existing run; complete observations are inserted once; partial runs contain only complete per-check results; rate limiting stops the installation and records `rate_limited`; no phase-2 dependency is called.
+Use injected fakes and pgTAP to prove one failed repository does not starve another; concurrent duplicate reservation has one lease winner; an active duplicate skips; stale zero-observation work is reclaimed; stale work with a full expected observation set finalizes without recollection; partial/unexpected persisted observations fail safely; a stale lease cannot save or finalize after losing compare-and-set ownership; complete observations are inserted once; compliance failures still produce a successfully collected run; `unknown` makes a complete run partial; interleaved rate-limited installation targets skip only that installation; deterministic scheduled retries collide; malformed/cross-tenant targets fail before GitHub; and no phase-2 dependency is called.
 
 ```ts
 expect(summary).toEqual({
@@ -488,32 +490,33 @@ Use this boundary:
 export type CollectionRequest = { trigger: "initial" | "scheduled" | "manual" | "webhook"; requestKey: string; installationId?: string; repositoryId?: string };
 export type CollectionDependencies = {
   listTargets(request: CollectionRequest): Promise<CollectionTarget[]>;
-  reserveRun(target: CollectionTarget, request: CollectionRequest): Promise<{ id: string; duplicate: boolean }>;
+  reserveRun(target: CollectionTarget, request: CollectionRequest): Promise<RunReservation>;
+  listPersistedObservationKeys(reservation: RunReservation, target: CollectionTarget): Promise<string[]>;
   collectFacts(target: CollectionTarget): Promise<GitHubFactSet>;
   evaluate(facts: GitHubFactSet, context: { runId: string; observedAt: string }): GitHubObservation[];
   refreshRepository(target: CollectionTarget, facts: GitHubFactSet): Promise<void>;
   saveObservations(reservation: RunReservation, target: CollectionTarget, observations: GitHubObservation[]): Promise<number>;
-  finaliseRun(reservation: RunReservation, target: CollectionTarget, result: RunResult): Promise<void>;
+  finaliseRun(reservation: RunReservation, target: CollectionTarget, result: RunResult): Promise<boolean>;
   now(): Date;
 };
 ```
 
-`RunReservation` carries the run ID plus organisation, installation, repository, and provider-repository ancestry returned by the tenant-scoped reservation. Database writes use insert-on-conflict/no-op for `(repository_id, request_key)` and `(collection_run_id, observation_key)`, and every later update repeats the complete ancestry predicate. A scheduled request therefore reserves one run per target repository instead of colliding globally. Collection history is append-only; repository inventory fields refresh only after verified metadata; a failure never extends observation freshness.
+`RunReservation` carries the run ID, unguessable lease token, acquisition state, status, lease expiry, attempt, and organisation/installation/repository/provider-repository ancestry returned by a tenant-scoped service RPC. Add lease columns and service-only claim/save/finalize RPCs: initial reservation inserts `running`; an active running duplicate is skipped; one worker may compare-and-set reclaim an expired lease; a completed duplicate remains immutable. Every observation insert and finalization requires the current lease token and complete ancestry, and finalization succeeds only from `running` with exactly one row updated. If a reclaimed run already has the full immutable expected observation-key set, finalize it without GitHub recollection; if it has none, recollect; any partial/unexpected set fails safely for manual review. The persisted-count result is the complete count for the run, not only newly inserted rows. A scheduled request therefore reserves one run per target repository instead of colliding globally. Collection history is append-only; repository inventory fields refresh only after verified metadata; a failure never extends observation freshness.
 
-`CollectionTarget` must distinguish local UUIDs (`installationId`, `repositoryId`) from GitHub numeric IDs (`providerInstallationId`, `providerRepositoryId`) and also carry `organisationId`, `owner`, and `name`. Validate a complete, distinct observation set before one bulk insert: every observation's `runId` matches the reservation and numeric `repositoryId` matches `providerRepositoryId`. A typed safe `GitHubCollectionError` with `diagnosticCode: "rate_limited"` finalises the current run as rate-limited, skips only the remaining targets for that installation, and continues other installations. A complete set containing any `unknown` finalises as `partial`; `not_applicable` alone remains `succeeded`. Finalisation updates only rows still in `running` state.
+`CollectionTarget` must distinguish local UUIDs (`installationId`, `repositoryId`) from GitHub numeric IDs (`providerInstallationId`, `providerRepositoryId`) and also carry `organisationId`, `owner`, and `name`. Target loading accepts only active, `permissions_ok` installations and selected, available repositories; scoped IDs and complete ancestry must match; duplicate local or provider identities fail before a GitHub call. Export the exact expected check-ID set from the rule pack and validate a complete, distinct observation set before one lease-checked bulk insert: reject missing, duplicate, unexpected, wrong-run, or wrong-provider-repository observations. Group targets explicitly by installation rather than trusting query order. A typed safe `GitHubCollectionError` with `diagnosticCode: "rate_limited"` finalises the current run as rate-limited, skips only the remaining targets for that installation, and continues other installations. A compliance `fail` remains a successfully collected run; any `unknown` makes the run `partial`; `not_applicable` alone remains `succeeded`. Every lease-checked finalization must return and verify `true`.
 
 - [ ] **Step 4: Add the cron route and personal-Azure schedule**
 
-The route uses `isAuthorisedCron`, `createSupabaseServiceClient`, a 300-second maximum duration, safe structured logging, and returns counts only. Never pass raw provider errors to `logError`, because it persists messages and stacks. Add `github-collect` to `workflow_dispatch`; schedule it at `29 5 * * *` so collection completes before existing 06:07 daily maintenance and 07:13 monitoring. Replace the workflow's catch-all route selection with explicit schedule/route cases that fail closed for an unknown value. The scheduled workflow invokes `${SITE_URL}/api/cron/github-collect` with `CRON_SECRET`.
+The route uses `isAuthorisedCron`, `createSupabaseServiceClient`, a deadline below the 300-second maximum with propagated cancellation, safe structured logging, and returns counts only. Unauthorised requests short-circuit before dependency construction. Never pass raw provider/database/configuration errors, tokens, headers, response bodies, or stacks to `logError`, because it persists messages and stacks. Scheduled request keys are deterministic by UTC day (for example `scheduled:2026-08-17`) so workflow retries collide intentionally; manual/webhook keys remain server-generated and scoped. Add `github-collect` to `workflow_dispatch`; schedule it at `29 5 * * *` so collection completes before existing 06:07 daily maintenance and 07:13 monitoring. Replace the workflow's catch-all route selection with explicit schedule/route cases that fail closed for an unknown value. The scheduled workflow invokes `${SITE_URL}/api/cron/github-collect` with `CRON_SECRET`. The first pilot remains one repository; do not claim five-minute support for 100 repositories until batching/sharding is separately proven.
 
 - [ ] **Step 5: Run tests and commit**
 
-Run: `npm test -- src/features/github/application src/app/api/cron/github-collect/route.test.ts && npm run typecheck`
+Run: `npx supabase db reset && npx supabase test db supabase/tests/database/064_github_collection_run_leases.sql && npm test -- src/features/github/application src/app/api/cron/github-collect/route.test.ts src/features/mcp/plugin-contract.test.ts && npm run typecheck`
 
 Expected: PASS; the workflow parser accepts `github-collect`; no Adtecher migration workflow changes.
 
 ```bash
-git add src/features/github/application src/app/api/cron/github-collect .github/workflows/azure-maintenance.yml docs/deployment.md
+git add src/features/github/application src/app/api/cron/github-collect supabase/migrations/20260817020000_github_collection_run_leases.sql supabase/tests/database/064_github_collection_run_leases.sql .github/workflows/azure-maintenance.yml docs/deployment.md
 git commit -m "feat(github): run idempotent shadow collection"
 ```
 
