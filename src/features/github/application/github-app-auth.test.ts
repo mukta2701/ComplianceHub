@@ -70,6 +70,7 @@ describe("GitHub App authentication", () => {
           Accept: "application/vnd.github+json",
           Authorization: "Bearer signed-app-jwt",
           "Content-Type": "application/json",
+          "User-Agent": "ComplianceHub-GitHub-App",
           "X-GitHub-Api-Version": "2026-03-10",
         },
         body: JSON.stringify({
@@ -77,6 +78,7 @@ describe("GitHub App authentication", () => {
           permissions: READ_PERMISSIONS,
         }),
         cache: "no-store",
+        redirect: "error",
       }),
     );
   });

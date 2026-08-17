@@ -79,6 +79,7 @@ export async function createInstallationToken(input: {
           Accept: "application/vnd.github+json",
           Authorization: `Bearer ${parsed.data.appJwt}`,
           "Content-Type": "application/json",
+          "User-Agent": "ComplianceHub-GitHub-App",
           "X-GitHub-Api-Version": "2026-03-10",
         },
         body: JSON.stringify({
@@ -86,6 +87,7 @@ export async function createInstallationToken(input: {
           permissions: READ_PERMISSIONS,
         }),
         cache: "no-store",
+        redirect: "error",
         signal: AbortSignal.timeout(15_000),
       },
     );

@@ -65,9 +65,11 @@ function requestInit(installationToken: string): RequestInit {
     headers: {
       Accept: "application/vnd.github+json",
       Authorization: `Bearer ${installationToken}`,
+      "User-Agent": "ComplianceHub-GitHub-App",
       "X-GitHub-Api-Version": "2026-03-10",
     },
     cache: "no-store",
+    redirect: "error",
     signal: AbortSignal.timeout(15_000),
   };
 }
@@ -132,11 +134,13 @@ function nextLink(linkHeader: string | null): URL | null {
 
     try {
       const url = new URL(entry[1] ?? "");
-      if (url.origin !== API_ORIGIN || url.username || url.password || url.hash) return null;
+      if (url.origin !== API_ORIGIN || url.username || url.password || url.hash) {
+        throw new Error("GitHub returned an invalid repository response");
+      }
       url.searchParams.set("per_page", "100");
       return url;
     } catch {
-      return null;
+      throw new Error("GitHub returned an invalid repository response");
     }
   }
 
@@ -168,19 +172,35 @@ export async function collectInstallationRepositories(input: {
       throw new Error("GitHub returned an invalid repository response");
     }
 
-    repositories.push(...parsed.repositories.map((item) => ({
-      id: item.id,
-      owner: item.owner.login,
-      name: item.name,
-      fullName: item.full_name,
-      htmlUrl: item.html_url,
-      visibility: item.visibility,
-      archived: item.archived,
-      defaultBranch: item.default_branch,
-    })));
+    for (const item of parsed.repositories) {
+      const fullName = `${item.owner.login}/${item.name}`;
+      if (item.full_name !== fullName || item.html_url !== `https://github.com/${fullName}`) {
+        throw new Error("GitHub returned an invalid repository response");
+      }
+      if (
+        repositories.some((repository) => repository.id === item.id)
+        || repositories.some((repository) => repository.fullName.toLowerCase() === fullName.toLowerCase())
+        || repositories.length >= 100
+      ) {
+        throw new Error("GitHub returned an invalid repository response");
+      }
+      repositories.push({
+        id: item.id,
+        owner: item.owner.login,
+        name: item.name,
+        fullName,
+        htmlUrl: `https://github.com/${fullName}`,
+        visibility: item.visibility,
+        archived: item.archived,
+        defaultBranch: item.default_branch,
+      });
+    }
 
     const next = nextLink(response.headers.get("Link"));
-    if (!next || page === MAX_PAGES - 1) break;
+    if (!next) break;
+    if (page === MAX_PAGES - 1) {
+      throw new Error("GitHub returned an invalid repository response");
+    }
     response = await fetchGitHubUrl({
       url: next,
       installationToken: input.installationToken,

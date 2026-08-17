@@ -51,9 +51,11 @@ describe("bounded GitHub REST client", () => {
         headers: {
           Accept: "application/vnd.github+json",
           Authorization: `Bearer ${installationCredential}`,
+          "User-Agent": "ComplianceHub-GitHub-App",
           "X-GitHub-Api-Version": "2026-03-10",
         },
         cache: "no-store",
+        redirect: "error",
         signal: expect.any(AbortSignal),
       },
     );
@@ -153,18 +155,16 @@ describe("bounded GitHub REST client", () => {
     );
   });
 
-  it("does not follow a hostile next link", async () => {
+  it("rejects a hostile next link", async () => {
     const installationCredential = crypto.randomUUID();
     const fetchImpl = vi.fn().mockResolvedValue(repositoryResponse([repository], {
       link: '<http://169.254.169.254/latest/meta-data>; rel="next"',
     }));
 
-    const result = await collectInstallationRepositories({
+    await expect(collectInstallationRepositories({
       installationToken: installationCredential,
       fetchImpl,
-    });
-
-    expect(result).toHaveLength(1);
+    })).rejects.toThrow("GitHub returned an invalid repository response");
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
@@ -174,9 +174,23 @@ describe("bounded GitHub REST client", () => {
       link: '<https://api.github.com/installation/repositories?per_page=100&page=2>; rel="next"',
     })));
 
-    await collectInstallationRepositories({ installationToken: installationCredential, fetchImpl });
+    await expect(collectInstallationRepositories({ installationToken: installationCredential, fetchImpl }))
+      .rejects.toThrow("GitHub returned an invalid repository response");
 
     expect(fetchImpl).toHaveBeenCalledTimes(100);
+  });
+
+  it("rejects duplicate or non-canonical repository inventory", async () => {
+    const installationCredential = crypto.randomUUID();
+    for (const repositories of [
+      [repository, repository],
+      [{ ...repository, full_name: "adtecher/other" }],
+      [{ ...repository, html_url: "https://example.test/adtecher/portal" }],
+    ]) {
+      const fetchImpl = vi.fn().mockResolvedValue(repositoryResponse(repositories));
+      await expect(collectInstallationRepositories({ installationToken: installationCredential, fetchImpl }))
+        .rejects.toThrow("GitHub returned an invalid repository response");
+    }
   });
 
   it("surfaces a rate limit only as a safe diagnostic", async () => {
