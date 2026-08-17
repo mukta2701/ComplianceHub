@@ -3,6 +3,8 @@ import "server-only";
 import { importPKCS8, SignJWT } from "jose";
 import { z } from "zod";
 
+import { throwIfGitHubRateLimited } from "./github-collection-error";
+
 type FetchLike = typeof fetch;
 
 const appConfigSchema = z.object({
@@ -95,6 +97,7 @@ export async function createInstallationToken(input: {
     throw new Error("Could not create GitHub installation token");
   }
 
+  throwIfGitHubRateLimited(response);
   if (!response.ok) throw new Error("Could not create GitHub installation token");
 
   try {

@@ -1,46 +1,181 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const hoisted = vi.hoisted(() => ({
+  createAppJwt: vi.fn().mockResolvedValue("app-jwt"),
+  createInstallationToken: vi.fn().mockResolvedValue({
+    token: ["installation", "credential"].join("-"),
+    expiresAt: "2026-08-17T06:00:00Z",
+  }),
+  collectRepositoryFacts: vi.fn().mockResolvedValue({}),
+}));
+
+vi.mock("./github-app-auth", () => ({
+  createAppJwt: hoisted.createAppJwt,
+  createInstallationToken: hoisted.createInstallationToken,
+}));
+vi.mock("./collect-repository-facts", () => ({ collectRepositoryFacts: hoisted.collectRepositoryFacts }));
 
 import { buildCollectionDependencies } from "./collection-deps";
 
-function queryResult(data: unknown, error: unknown = null) {
-  const promise = Promise.resolve({ data, error });
-  return Object.assign(promise, {
-    select: vi.fn(() => queryResult(data, error)),
-    eq: vi.fn(() => queryResult(data, error)),
-    order: vi.fn(() => queryResult(data, error)),
-  });
+type Row = Record<string, unknown>;
+type Filter = { column: string; value: unknown };
+
+function uuid(value: number): string {
+  return `00000000-0000-4000-8000-${String(value).padStart(12, "0")}`;
 }
 
-describe("buildCollectionDependencies", () => {
-  it("loads only verified selected targets and rejects mismatched ancestry", async () => {
-    const from = vi.fn((table: string) => {
-      if (table === "github_repositories") return queryResult([{ id: "repo", organisation_id: "org", installation_id: "inst", provider_repository_id: 101, owner_login: "adtecher", name: "portal", selected: true, available: true, github_installations: { id: "inst", organisation_id: "other", provider_installation_id: 77, status: "active", permissions_ok: true } }]);
-      throw new Error("unexpected table");
-    });
-    const deps = buildCollectionDependencies({ from, rpc: vi.fn() } as never, { appId: "1", privateKey: "key", approvedSecurityWorkflowIds: [1] });
+function repository(index: number, installationIndex = 1): Row {
+  const installationId = uuid(10_000 + installationIndex);
+  const organisationId = uuid(20_000 + installationIndex);
+  return {
+    id: uuid(30_000 + index),
+    organisation_id: organisationId,
+    installation_id: installationId,
+    provider_repository_id: 40_000 + index,
+    owner_login: `org-${installationIndex}`,
+    name: `repo-${index}`,
+    selected: true,
+    available: true,
+    github_installations: {
+      id: installationId,
+      organisation_id: organisationId,
+      provider_installation_id: 50_000 + installationIndex,
+      status: "active",
+      permissions_ok: true,
+    },
+  };
+}
 
-    await expect(deps.listTargets({ trigger: "scheduled", requestKey: "scheduled:2026-08-17" })).rejects.toThrow("GitHub collection target loading failed");
+function valueAt(row: Row, column: string): unknown {
+  if (column.startsWith("github_installations.")) {
+    return (row.github_installations as Row)[column.slice("github_installations.".length)];
+  }
+  return row[column];
+}
+
+class Query implements PromiseLike<{ data: unknown; error: unknown }> {
+  private filters: Filter[] = [];
+  private maximum: number | null = null;
+  private window: [number, number] | null = null;
+
+  constructor(private readonly rows: Row[], private readonly calls: Array<{ kind: string; values: number[] }>) {}
+
+  eq(column: string, value: unknown) { this.filters.push({ column, value }); return this; }
+  order() { return this; }
+  limit(count: number) { this.maximum = count; this.calls.push({ kind: "limit", values: [count] }); return this; }
+  range(from: number, to: number) { this.window = [from, to]; this.calls.push({ kind: "range", values: [from, to] }); return this; }
+
+  private result() {
+    let rows = this.rows.filter((row) => this.filters.every((filter) => valueAt(row, filter.column) === filter.value));
+    if (this.window) rows = rows.slice(this.window[0], this.window[1] + 1);
+    if (this.maximum !== null) rows = rows.slice(0, this.maximum);
+    return { data: rows, error: null };
+  }
+
+  then<TResult1 = { data: unknown; error: unknown }, TResult2 = never>(
+    onfulfilled?: ((value: { data: unknown; error: unknown }) => TResult1 | PromiseLike<TResult1>) | null,
+    onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+  ): PromiseLike<TResult1 | TResult2> {
+    return Promise.resolve(this.result()).then(onfulfilled, onrejected);
+  }
+}
+
+function client(rows: Row[], rpc = vi.fn().mockResolvedValue({ data: true, error: null })) {
+  const calls: Array<{ kind: string; values: number[] }> = [];
+  return {
+    calls,
+    rpc,
+    from: vi.fn(() => ({ select: () => new Query(rows, calls) })),
+  };
+}
+
+const configuration = { appId: "1", privateKey: "key", approvedSecurityWorkflowIds: [1] };
+
+beforeEach(() => {
+  hoisted.createAppJwt.mockClear();
+  hoisted.createInstallationToken.mockClear();
+  hoisted.collectRepositoryFacts.mockClear();
+});
+
+describe("buildCollectionDependencies", () => {
+  it("loads a verified selected target and scopes one cached token to its installation repositories", async () => {
+    const first = repository(1);
+    const second = repository(2);
+    const service = client([first, second]);
+    const deps = buildCollectionDependencies(service, configuration);
+    const targets = await deps.listTargets({ trigger: "scheduled", requestKey: "scheduled:2026-08-17" });
+
+    expect(targets).toHaveLength(2);
+    await deps.collectFacts(targets[0]!);
+    await deps.collectFacts(targets[1]!);
+    expect(hoisted.createInstallationToken).toHaveBeenCalledTimes(1);
+    expect(hoisted.createInstallationToken).toHaveBeenCalledWith(expect.objectContaining({
+      installationId: 50_001,
+      repositoryIds: [40_001, 40_002],
+      appJwt: "app-jwt",
+    }));
   });
 
-  it("passes the full ancestry and current lease CAS to persistence RPCs", async () => {
-    const rpc = vi.fn().mockResolvedValue({ data: true, error: null });
-    const deps = buildCollectionDependencies({ from: vi.fn(), rpc } as never, { appId: "1", privateKey: "key", approvedSecurityWorkflowIds: [1] });
-    const target = { organisationId: "org", installationId: "inst", repositoryId: "repo", providerInstallationId: 77, providerRepositoryId: 101, owner: "adtecher", name: "portal" };
-    const lease = { runId: "run", leaseToken: "lease", leaseExpiresAt: "2026-08-17T05:31:00.000Z", attempt: 2, acquisitionState: "reclaimed" as const, status: "running" as const, organisationId: "org", installationId: "inst", repositoryId: "repo", providerRepositoryId: 101 };
+  it("paginates all scheduled targets and permits more than 100 across installations", async () => {
+    const rows = Array.from({ length: 1_001 }, (_, index) => repository(index + 1, Math.floor(index / 100) + 1));
+    const service = client(rows);
+    const deps = buildCollectionDependencies(service, configuration);
+    const targets = await deps.listTargets({ trigger: "scheduled", requestKey: "scheduled:2026-08-17" });
 
+    expect(targets).toHaveLength(1_001);
+    expect(service.calls.filter((call) => call.kind === "range")).toEqual([
+      { kind: "range", values: [0, 999] },
+      { kind: "range", values: [1_000, 1_999] },
+    ]);
+  });
+
+  it("rejects 101 repositories in one installation while the query limit remains effective", async () => {
+    const rows = Array.from({ length: 101 }, (_, index) => repository(index + 1));
+    const service = client(rows);
+    const deps = buildCollectionDependencies(service, configuration);
+    await expect(deps.listTargets({ trigger: "manual", requestKey: "manual:too-many", installationId: uuid(10_001) })).rejects.toThrow("GitHub collection target loading failed");
+    expect(service.calls).toContainEqual({ kind: "limit", values: [101] });
+  });
+
+  it.each([
+    {
+      label: "tenant ancestry",
+      mutate: (row: Row) => { (row.github_installations as Row).organisation_id = uuid(99_001); },
+    },
+    {
+      label: "local-to-provider installation mapping",
+      mutate: (row: Row) => { (row.github_installations as Row).provider_installation_id = 99_001; },
+    },
+  ])("rejects malformed $label before provider work", async ({ mutate, label }) => {
+    const first = repository(1);
+    const second = repository(2);
+    mutate(label === "tenant ancestry" ? first : second);
+    const deps = buildCollectionDependencies(client([first, second]), configuration);
+    await expect(deps.listTargets({ trigger: "scheduled", requestKey: "scheduled:2026-08-17" })).rejects.toThrow("GitHub collection target loading failed");
+    expect(hoisted.createInstallationToken).not.toHaveBeenCalled();
+  });
+
+  it("passes full ancestry and the current lease to refresh and finalization RPCs", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: true, error: null });
+    const deps = buildCollectionDependencies(client([], rpc), configuration);
+    const target = { organisationId: uuid(1), installationId: uuid(2), repositoryId: uuid(3), providerInstallationId: 77, providerRepositoryId: 101, owner: "adtecher", name: "portal" };
+    const lease = { runId: uuid(4), leaseToken: uuid(5), leaseExpiresAt: "2026-08-17T05:31:00.000Z", attempt: 2, acquisitionState: "reclaimed" as const, status: "running" as const, organisationId: uuid(1), installationId: uuid(2), repositoryId: uuid(3), providerRepositoryId: 101 };
+    const facts = { repository: { id: 101, owner: "adtecher", name: "renamed", visibility: "private" as const, archived: false, defaultBranch: "trunk", url: "https://github.com/adtecher/renamed" } };
+
+    await deps.refreshRepository(lease, target, facts as never);
     await deps.finaliseRun(lease, target, { status: "failed", diagnosticCode: "invalid_response", observationCount: 0, passedCount: 0, failedCount: 0, unknownCount: 0, notApplicableCount: 0 });
 
-    expect(rpc).toHaveBeenCalledWith("finalise_github_collection_run_server", expect.objectContaining({ target_run_id: "run", target_organisation_id: "org", target_installation_id: "inst", target_repository_id: "repo", target_provider_repository_id: 101, target_lease_token: "lease", target_attempt: 2 }));
+    expect(rpc).toHaveBeenCalledWith("refresh_github_repository_server", expect.objectContaining({ target_run_id: uuid(4), target_organisation_id: uuid(1), target_installation_id: uuid(2), target_repository_id: uuid(3), target_provider_repository_id: 101, target_lease_token: uuid(5), target_attempt: 2 }));
+    expect(rpc).toHaveBeenCalledWith("finalise_github_collection_run_server", expect.objectContaining({ target_run_id: uuid(4), target_lease_token: uuid(5), target_attempt: 2 }));
   });
 
   it("fails closed when a scoped local target does not resolve", async () => {
-    const from = vi.fn(() => queryResult([]));
-    const deps = buildCollectionDependencies({ from, rpc: vi.fn() }, { appId: "1", privateKey: "key", approvedSecurityWorkflowIds: [1] });
-    await expect(deps.listTargets({ trigger: "manual", requestKey: "manual:missing", repositoryId: "30000000-0000-4000-8000-000000000001" })).rejects.toThrow("GitHub collection target loading failed");
+    const deps = buildCollectionDependencies(client([]), configuration);
+    await expect(deps.listTargets({ trigger: "manual", requestKey: "manual:missing", repositoryId: uuid(30_001) })).rejects.toThrow("GitHub collection target loading failed");
   });
 
   it("never exposes phase-two evidence, finding, or Slack dependencies", () => {
-    const deps = buildCollectionDependencies({ from: vi.fn(), rpc: vi.fn() } as never, { appId: "1", privateKey: "key", approvedSecurityWorkflowIds: [1] });
+    const deps = buildCollectionDependencies(client([]), configuration);
     expect(deps).not.toHaveProperty("createEvidence");
     expect(deps).not.toHaveProperty("saveFinding");
     expect(deps).not.toHaveProperty("deliverSlack");

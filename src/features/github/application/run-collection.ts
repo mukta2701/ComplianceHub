@@ -1,6 +1,6 @@
 import type { DiagnosticCode, GitHubFactSet, GitHubObservation } from "../domain/observation";
 import { EXPECTED_GITHUB_CHECK_IDS } from "../domain/rules";
-import { GitHubCollectionError } from "./collect-repository-facts";
+import { GitHubCollectionError } from "./github-collection-error";
 
 export type CollectionRequest = {
   trigger: "initial" | "scheduled" | "manual" | "webhook";
@@ -47,10 +47,10 @@ export type RunResult = {
 export type CollectionDependencies = {
   listTargets(request: CollectionRequest): Promise<CollectionTarget[]>;
   reserveRun(target: CollectionTarget, request: CollectionRequest): Promise<RunReservation>;
-  listPersistedObservationKeys(reservation: RunReservation, target: CollectionTarget): Promise<string[]>;
+  listPersistedObservations(reservation: RunReservation, target: CollectionTarget): Promise<Array<{ observationKey: string; result: GitHubObservation["result"] }>>;
   collectFacts(target: CollectionTarget, signal?: AbortSignal): Promise<GitHubFactSet>;
   evaluate(facts: GitHubFactSet, context: { runId: string; observedAt: string }): GitHubObservation[];
-  refreshRepository(target: CollectionTarget, facts: GitHubFactSet): Promise<void>;
+  refreshRepository(reservation: RunReservation, target: CollectionTarget, facts: GitHubFactSet): Promise<void>;
   saveObservations(reservation: RunReservation, target: CollectionTarget, observations: GitHubObservation[]): Promise<number>;
   finaliseRun(reservation: RunReservation, target: CollectionTarget, result: RunResult): Promise<boolean>;
   now(): Date;
@@ -61,6 +61,7 @@ export type CollectionSummary = {
   repositoriesChecked: number;
   observationsStored: number;
   repositoriesFailed: number;
+  repositoriesDeferred: number;
   runsPartial: number;
 };
 
@@ -85,11 +86,12 @@ function validateRequest(request: CollectionRequest): void {
 }
 
 function validateTargets(targets: CollectionTarget[], request: CollectionRequest): void {
-  if (targets.length > 100) throw new GitHubCollectionTargetError();
   const localRepositories = new Set<string>();
   const providerRepositories = new Set<number>();
   const installationAncestry = new Map<string, string>();
+  const localProviderInstallations = new Map<string, number>();
   const providerInstallationAncestry = new Map<number, string>();
+  const installationCounts = new Map<string, number>();
 
   for (const target of targets) {
     if (
@@ -109,13 +111,19 @@ function validateTargets(targets: CollectionTarget[], request: CollectionRequest
     ) throw new GitHubCollectionTargetError();
 
     const installationOwner = installationAncestry.get(target.installationId);
+    const mappedProviderInstallation = localProviderInstallations.get(target.installationId);
     const providerOwner = providerInstallationAncestry.get(target.providerInstallationId);
     if (
       (installationOwner !== undefined && installationOwner !== target.organisationId)
+      || (mappedProviderInstallation !== undefined && mappedProviderInstallation !== target.providerInstallationId)
       || (providerOwner !== undefined && providerOwner !== `${target.organisationId}/${target.installationId}`)
     ) throw new GitHubCollectionTargetError();
+    const count = (installationCounts.get(target.installationId) ?? 0) + 1;
+    if (count > 100) throw new GitHubCollectionTargetError();
     installationAncestry.set(target.installationId, target.organisationId);
+    localProviderInstallations.set(target.installationId, target.providerInstallationId);
     providerInstallationAncestry.set(target.providerInstallationId, `${target.organisationId}/${target.installationId}`);
+    installationCounts.set(target.installationId, count);
     localRepositories.add(target.repositoryId);
     providerRepositories.add(target.providerRepositoryId);
   }
@@ -136,8 +144,9 @@ function expectedObservationKeys(target: CollectionTarget): Set<string> {
   return new Set(EXPECTED_GITHUB_CHECK_IDS.map((checkId) => `${target.owner}/${target.name}/${checkId}/github-repository-v1`));
 }
 
-function isCompletePersistedSet(keys: string[], target: CollectionTarget): boolean {
+function isCompletePersistedSet(rows: Array<{ observationKey: string }>, target: CollectionTarget): boolean {
   const expected = expectedObservationKeys(target);
+  const keys = rows.map((row) => row.observationKey);
   return keys.length === expected.size && new Set(keys).size === keys.length && keys.every((key) => expected.has(key));
 }
 
@@ -181,7 +190,7 @@ export async function runGitHubCollection(deps: CollectionDependencies, request:
   const targets = await deps.listTargets(request);
   validateTargets(targets, request);
   const groups = groupByInstallation(targets);
-  const summary: CollectionSummary = { installationsChecked: groups.length, repositoriesChecked: 0, observationsStored: 0, repositoriesFailed: 0, runsPartial: 0 };
+  const summary: CollectionSummary = { installationsChecked: groups.length, repositoriesChecked: 0, observationsStored: 0, repositoriesFailed: 0, repositoriesDeferred: 0, runsPartial: 0 };
 
   for (const group of groups) {
     let installationRateLimited = false;
@@ -194,36 +203,55 @@ export async function runGitHubCollection(deps: CollectionDependencies, request:
       let reservation: RunReservation | undefined;
       try {
         reservation = await deps.reserveRun(target, request);
-        if (reservation.acquisitionState === "active_duplicate" || reservation.acquisitionState === "completed_duplicate") continue;
+        if (reservation.acquisitionState === "active_duplicate") {
+          summary.repositoriesDeferred += 1;
+          continue;
+        }
+        if (reservation.acquisitionState === "completed_duplicate") continue;
         summary.repositoriesChecked += 1;
-        const persistedKeys = await deps.listPersistedObservationKeys(reservation, target);
-        if (persistedKeys.length > 0) {
-          if (!isCompletePersistedSet(persistedKeys, target)) {
-            await finaliseOrThrow(deps, reservation, target, { status: "failed", diagnosticCode: "invalid_response", ...emptyCounts, observationCount: persistedKeys.length, deriveCountsFromPersisted: true });
+        const persisted = await deps.listPersistedObservations(reservation, target);
+        if (persisted.length > 0) {
+          if (!isCompletePersistedSet(persisted, target)) {
+            await finaliseOrThrow(deps, reservation, target, { status: "failed", diagnosticCode: "invalid_response", ...emptyCounts, observationCount: persisted.length, deriveCountsFromPersisted: true });
             summary.repositoriesFailed += 1;
             continue;
           }
-          await finaliseOrThrow(deps, reservation, target, { status: "succeeded", ...emptyCounts, observationCount: persistedKeys.length, deriveCountsFromPersisted: true });
-          summary.observationsStored += persistedKeys.length;
+          const recoveredCounts = {
+            observationCount: persisted.length,
+            passedCount: persisted.filter((row) => row.result === "pass").length,
+            failedCount: persisted.filter((row) => row.result === "fail").length,
+            unknownCount: persisted.filter((row) => row.result === "unknown").length,
+            notApplicableCount: persisted.filter((row) => row.result === "not_applicable").length,
+          };
+          const recoveredStatus = recoveredCounts.unknownCount > 0 ? "partial" : "succeeded";
+          await finaliseOrThrow(deps, reservation, target, { status: recoveredStatus, ...recoveredCounts, deriveCountsFromPersisted: true });
+          summary.observationsStored += persisted.length;
+          if (recoveredStatus === "partial") summary.runsPartial += 1;
           continue;
         }
 
         const collectedAt = deps.now();
         if (!Number.isFinite(collectedAt.getTime())) throw new GitHubCollectionTargetError();
         const facts = await deps.collectFacts(target, request.signal);
+        if (facts.repository.id !== target.providerRepositoryId) throw new GitHubCollectionTargetError();
+        const effectiveTarget: CollectionTarget = {
+          ...target,
+          owner: facts.repository.owner,
+          name: facts.repository.name,
+        };
         if (
-          facts.repository.id !== target.providerRepositoryId
-          || facts.repository.owner !== target.owner
-          || facts.repository.name !== target.name
+          !login.test(effectiveTarget.owner)
+          || !repoName.test(effectiveTarget.name)
+          || facts.repository.url !== `https://github.com/${effectiveTarget.owner}/${effectiveTarget.name}`
         ) throw new GitHubCollectionTargetError();
         const rows = deps.evaluate(facts, { runId: reservation.runId, observedAt: collectedAt.toISOString() });
-        validateObservations(rows, target, reservation.runId);
-        await deps.refreshRepository(target, facts);
-        const persistedCount = await deps.saveObservations(reservation, target, rows);
+        validateObservations(rows, effectiveTarget, reservation.runId);
+        await deps.refreshRepository(reservation, target, facts);
+        const persistedCount = await deps.saveObservations(reservation, effectiveTarget, rows);
         if (persistedCount !== rows.length) throw new GitHubCollectionTargetError();
         const resultCounts = counts(rows);
         const status = resultCounts.unknownCount > 0 ? "partial" : "succeeded";
-        await finaliseOrThrow(deps, reservation, target, { status, ...resultCounts });
+        await finaliseOrThrow(deps, reservation, effectiveTarget, { status, ...resultCounts });
         summary.observationsStored += persistedCount;
         if (status === "partial") summary.runsPartial += 1;
       } catch (error) {

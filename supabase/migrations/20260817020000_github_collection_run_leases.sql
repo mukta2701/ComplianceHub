@@ -421,10 +421,13 @@ grant execute on function public.finalise_github_collection_run_server(uuid,uuid
   to service_role;
 
 create or replace function public.refresh_github_repository_server(
+  target_run_id uuid,
   target_organisation_id uuid,
   target_installation_id uuid,
   target_repository_id uuid,
   target_provider_repository_id bigint,
+  target_lease_token uuid,
+  target_attempt integer,
   target_owner_login text,
   target_name text,
   target_html_url text,
@@ -438,8 +441,26 @@ security definer
 set search_path = ''
 as $$
 declare
+  collection_run public.github_collection_runs;
   changed integer;
 begin
+  select run.* into collection_run
+  from public.github_collection_runs run
+  where run.id = target_run_id
+    and run.organisation_id = target_organisation_id
+    and run.installation_id = target_installation_id
+    and run.repository_id = target_repository_id
+    and run.provider_repository_id = target_provider_repository_id
+  for update;
+  if not found
+    or collection_run.status <> 'running'
+    or collection_run.lease_token <> target_lease_token
+    or collection_run.attempt <> target_attempt
+    or collection_run.lease_expires_at <= pg_catalog.now()
+  then
+    return false;
+  end if;
+
   update public.github_repositories repository
   set owner_login = target_owner_login,
       name = target_name,
@@ -461,12 +482,31 @@ begin
     and installation.status = 'active'
     and installation.permissions_ok;
   get diagnostics changed = row_count;
-  return changed = 1;
+  if changed <> 1 then return false; end if;
+
+  update public.github_collection_runs run
+  set lease_expires_at = greatest(
+    run.lease_expires_at,
+    pg_catalog.now() + interval '120 seconds'
+  )
+  where run.id = target_run_id
+    and run.organisation_id = target_organisation_id
+    and run.installation_id = target_installation_id
+    and run.repository_id = target_repository_id
+    and run.provider_repository_id = target_provider_repository_id
+    and run.status = 'running'
+    and run.lease_token = target_lease_token
+    and run.attempt = target_attempt;
+  get diagnostics changed = row_count;
+  if changed <> 1 then
+    raise exception 'GitHub repository refresh lease changed concurrently' using errcode = '40001';
+  end if;
+  return true;
 end;
 $$;
 
-alter function public.refresh_github_repository_server(uuid,uuid,uuid,bigint,text,text,text,text,text,boolean) owner to postgres;
-revoke all on function public.refresh_github_repository_server(uuid,uuid,uuid,bigint,text,text,text,text,text,boolean)
+alter function public.refresh_github_repository_server(uuid,uuid,uuid,uuid,bigint,uuid,integer,text,text,text,text,text,boolean) owner to postgres;
+revoke all on function public.refresh_github_repository_server(uuid,uuid,uuid,uuid,bigint,uuid,integer,text,text,text,text,text,boolean)
   from public, anon, authenticated, service_role;
-grant execute on function public.refresh_github_repository_server(uuid,uuid,uuid,bigint,text,text,text,text,text,boolean)
+grant execute on function public.refresh_github_repository_server(uuid,uuid,uuid,uuid,bigint,uuid,integer,text,text,text,text,text,boolean)
   to service_role;

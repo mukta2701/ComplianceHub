@@ -86,7 +86,7 @@ function dependencies(items: CollectionTarget[]) {
   const deps: CollectionDependencies = {
     listTargets: vi.fn().mockResolvedValue(items),
     reserveRun: vi.fn(async (item) => reservations.get(item.repositoryId)!),
-    listPersistedObservationKeys: vi.fn().mockResolvedValue([]),
+    listPersistedObservations: vi.fn().mockResolvedValue([]),
     collectFacts: vi.fn(async (item) => facts(item)),
     evaluate: vi.fn((input, context) => observations(items.find((item) => item.providerRepositoryId === input.repository.id)!, context.runId)),
     refreshRepository: vi.fn().mockResolvedValue(undefined),
@@ -109,7 +109,7 @@ describe("runGitHubCollection", () => {
 
     const summary = await runGitHubCollection(deps, { trigger: "manual", requestKey: "manual:opaque" });
 
-    expect(summary).toEqual({ installationsChecked: 1, repositoriesChecked: 1, observationsStored: 15, repositoriesFailed: 0, runsPartial: 0 });
+    expect(summary).toEqual({ installationsChecked: 1, repositoriesChecked: 1, observationsStored: 15, repositoriesFailed: 0, repositoriesDeferred: 0, runsPartial: 0 });
     expect(deps.finaliseRun).toHaveBeenCalledWith(expect.anything(), item, expect.objectContaining({ status: "succeeded", failedCount: 15 }));
   });
 
@@ -166,7 +166,7 @@ describe("runGitHubCollection", () => {
     const deps = dependencies([item]);
     const lease = reservation(item, { acquisitionState: "reclaimed", attempt: 2 });
     vi.mocked(deps.reserveRun).mockResolvedValue(lease);
-    vi.mocked(deps.listPersistedObservationKeys).mockResolvedValue(observations(item, lease.runId).map((row) => row.observationKey));
+    vi.mocked(deps.listPersistedObservations).mockResolvedValue(observations(item, lease.runId).map((row) => ({ observationKey: row.observationKey, result: row.result })));
 
     const summary = await runGitHubCollection(deps, { trigger: "manual", requestKey: "manual:retry" });
 
@@ -179,7 +179,7 @@ describe("runGitHubCollection", () => {
     const item = target();
     const deps = dependencies([item]);
     vi.mocked(deps.reserveRun).mockResolvedValue(reservation(item, { acquisitionState: "reclaimed", attempt: 2 }));
-    vi.mocked(deps.listPersistedObservationKeys).mockResolvedValue(["unexpected"]);
+    vi.mocked(deps.listPersistedObservations).mockResolvedValue([{ observationKey: "unexpected", result: "pass" }]);
 
     const summary = await runGitHubCollection(deps, { trigger: "manual", requestKey: "manual:retry" });
 
@@ -206,5 +206,48 @@ describe("runGitHubCollection", () => {
     const summary = await runGitHubCollection(deps, { trigger: "manual", requestKey: "manual:lost-lease" });
 
     expect(summary.repositoriesFailed).toBe(1);
+  });
+
+  it("uses verified provider identity after a repository rename or case change", async () => {
+    const item = target({ owner: "Adtecher", name: "Portal" });
+    const deps = dependencies([item]);
+    vi.mocked(deps.collectFacts).mockResolvedValue(facts({ ...item, owner: "adtecher", name: "portal-renamed" }));
+    vi.mocked(deps.evaluate).mockImplementation((_facts, context) => observations({ ...item, owner: "adtecher", name: "portal-renamed" }, context.runId));
+
+    const summary = await runGitHubCollection(deps, { trigger: "manual", requestKey: "manual:rename" });
+
+    expect(summary.repositoriesFailed).toBe(0);
+    expect(deps.refreshRepository).toHaveBeenCalledWith(expect.anything(), item, expect.objectContaining({ repository: expect.objectContaining({ id: 101, owner: "adtecher", name: "portal-renamed" }) }));
+    expect(deps.saveObservations).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ owner: "adtecher", name: "portal-renamed" }), expect.anything());
+  });
+
+  it("reports active duplicates as deferred work", async () => {
+    const item = target();
+    const deps = dependencies([item]);
+    vi.mocked(deps.reserveRun).mockResolvedValue(reservation(item, { acquisitionState: "active_duplicate" }));
+    const summary = await runGitHubCollection(deps, { trigger: "webhook", requestKey: "webhook:delivery" });
+    expect(summary.repositoriesDeferred).toBe(1);
+    expect(summary.repositoriesChecked).toBe(0);
+  });
+
+  it("counts recovered unknown observations as a partial run without recollection", async () => {
+    const item = target();
+    const deps = dependencies([item]);
+    const lease = reservation(item, { acquisitionState: "reclaimed", attempt: 2 });
+    vi.mocked(deps.reserveRun).mockResolvedValue(lease);
+    const recovered = observations(item, lease.runId).map((row, index) => ({ observationKey: row.observationKey, result: index === 0 ? "unknown" as const : "pass" as const }));
+    vi.mocked(deps.listPersistedObservations).mockResolvedValue(recovered);
+    const summary = await runGitHubCollection(deps, { trigger: "manual", requestKey: "manual:recover-unknown" });
+    expect(summary.runsPartial).toBe(1);
+    expect(deps.finaliseRun).toHaveBeenCalledWith(lease, item, expect.objectContaining({ status: "partial", unknownCount: 1, deriveCountsFromPersisted: true }));
+    expect(deps.collectFacts).not.toHaveBeenCalled();
+  });
+
+  it("rejects one local installation mapped to multiple provider installations", async () => {
+    const first = target();
+    const second = target({ repositoryId: "30000000-0000-4000-8000-000000000002", providerRepositoryId: 102, providerInstallationId: 88, name: "api" });
+    const deps = dependencies([first, second]);
+    await expect(runGitHubCollection(deps, { trigger: "scheduled", requestKey: "scheduled:2026-08-17" })).rejects.toBeInstanceOf(GitHubCollectionTargetError);
+    expect(deps.reserveRun).not.toHaveBeenCalled();
   });
 });

@@ -24,7 +24,7 @@ beforeEach(() => {
   vi.stubEnv("GITHUB_APPROVED_SECURITY_WORKFLOW_IDS", "101");
   hoisted.createClient.mockReset().mockReturnValue({});
   hoisted.build.mockReset().mockReturnValue({});
-  hoisted.run.mockReset().mockResolvedValue({ installationsChecked: 1, repositoriesChecked: 1, observationsStored: 15, repositoriesFailed: 0, runsPartial: 0 });
+  hoisted.run.mockReset().mockResolvedValue({ installationsChecked: 1, repositoriesChecked: 1, observationsStored: 15, repositoriesFailed: 0, repositoriesDeferred: 0, runsPartial: 0 });
   hoisted.logError.mockReset().mockResolvedValue(undefined);
 });
 
@@ -45,7 +45,7 @@ describe("POST /api/cron/github-collect", () => {
     const { POST } = await import("./route");
     const response = await POST(request());
     expect(hoisted.run).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ trigger: "scheduled", requestKey: "scheduled:2026-08-17", signal: expect.any(AbortSignal) }));
-    expect(await response.json()).toEqual({ installationsChecked: 1, repositoriesChecked: 1, observationsStored: 15, repositoriesFailed: 0, runsPartial: 0 });
+    expect(await response.json()).toEqual({ installationsChecked: 1, repositoriesChecked: 1, observationsStored: 15, repositoriesFailed: 0, repositoriesDeferred: 0, runsPartial: 0 });
     vi.useRealTimers();
   });
 

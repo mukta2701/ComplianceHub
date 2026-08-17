@@ -3,7 +3,14 @@ import "server-only";
 import { z } from "zod";
 
 import { githubRequest, GitHubApiError } from "./github-api";
+import {
+  GitHubCollectionError,
+  GitHubRateLimitError,
+  throwIfGitHubRateLimited,
+} from "./github-collection-error";
 import type { DataState, DiagnosticCode, GitHubFactSet } from "../domain/observation";
+
+export { GitHubCollectionError, GitHubRateLimitError } from "./github-collection-error";
 
 type FetchLike = typeof fetch;
 
@@ -112,25 +119,6 @@ type Endpoint =
   | "workflow_runs"
   | "administration";
 
-export class GitHubCollectionError extends Error {
-  constructor(public readonly diagnosticCode: DiagnosticCode) {
-    super("GitHub collection failed");
-    this.name = "GitHubCollectionError";
-  }
-}
-
-export class GitHubRateLimitError extends GitHubCollectionError {
-  readonly retryAfterSeconds?: number;
-  readonly resetAtEpochSeconds?: number;
-
-  constructor(metadata: { retryAfterSeconds?: number; resetAtEpochSeconds?: number }) {
-    super("rate_limited");
-    this.name = "GitHubRateLimitError";
-    this.retryAfterSeconds = metadata.retryAfterSeconds;
-    this.resetAtEpochSeconds = metadata.resetAtEpochSeconds;
-  }
-}
-
 type RequestContext = {
   installationToken: string;
   fetchImpl: FetchLike;
@@ -148,17 +136,7 @@ function boundedInteger(value: string | null, maximum: number): number | undefin
 }
 
 function checkRateLimit(response: Response): void {
-  const retryAfterPresent = response.headers.has("retry-after");
-  const exhausted = response.status === 403 && response.headers.get("x-ratelimit-remaining") === "0";
-  if (response.status !== 429 && !retryAfterPresent && !exhausted) return;
-
-  throw new GitHubRateLimitError({
-    retryAfterSeconds: boundedInteger(response.headers.get("retry-after"), 86_400),
-    resetAtEpochSeconds: boundedInteger(
-      response.headers.get("x-ratelimit-reset"),
-      Number.MAX_SAFE_INTEGER,
-    ),
-  });
+  throwIfGitHubRateLimited(response);
 }
 
 function diagnosticForEndpoint(response: Response, endpoint: Endpoint): DiagnosticCode | null {

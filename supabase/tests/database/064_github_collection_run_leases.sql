@@ -8,7 +8,7 @@ select has_column('public', 'github_collection_runs', 'attempt', 'runs carry lea
 select has_function('public', 'reserve_github_collection_run_server', array['uuid','uuid','uuid','bigint','text','text','integer']);
 select has_function('public', 'save_github_observations_server', array['uuid','uuid','uuid','uuid','bigint','uuid','integer','jsonb']);
 select has_function('public', 'finalise_github_collection_run_server', array['uuid','uuid','uuid','uuid','bigint','uuid','integer','text','text']);
-select has_function('public', 'refresh_github_repository_server', array['uuid','uuid','uuid','bigint','text','text','text','text','text','boolean']);
+select has_function('public', 'refresh_github_repository_server', array['uuid','uuid','uuid','uuid','bigint','uuid','integer','text','text','text','text','text','boolean']);
 select function_privs_are('public', 'reserve_github_collection_run_server', array['uuid','uuid','uuid','bigint','text','text','integer'], 'service_role', array['EXECUTE']);
 select function_privs_are('public', 'save_github_observations_server', array['uuid','uuid','uuid','uuid','bigint','uuid','integer','jsonb'], 'service_role', array['EXECUTE']);
 
@@ -115,6 +115,48 @@ select is(
   false,
   'a stale lease cannot finalize after losing ownership'
 );
+update public.github_collection_runs
+set lease_expires_at = pg_catalog.now() + interval '30 seconds'
+where id = (select run_id from reclaimed_reservation);
+create temp table pre_refresh_lease as
+select lease_expires_at from public.github_collection_runs
+where id = (select run_id from reclaimed_reservation);
+select is(
+  public.refresh_github_repository_server(
+    (select run_id from first_reservation),
+    '9c000000-0000-4000-8000-000000000010',
+    '9c000000-0000-4000-8000-000000000020',
+    '9c000000-0000-4000-8000-000000000030', 93001,
+    (select lease_token from first_reservation), 1,
+    'Lease-Co', 'stale-name', 'https://github.com/Lease-Co/stale-name',
+    'private', 'main', false
+  ),
+  false,
+  'a stale lease cannot refresh repository identity after losing ownership'
+);
+select is(
+  public.refresh_github_repository_server(
+    (select run_id from reclaimed_reservation),
+    '9c000000-0000-4000-8000-000000000010',
+    '9c000000-0000-4000-8000-000000000020',
+    '9c000000-0000-4000-8000-000000000030', 93001,
+    (select lease_token from reclaimed_reservation), 2,
+    'lease-co', 'alpha-renamed', 'https://github.com/lease-co/alpha-renamed',
+    'private', 'trunk', false
+  ),
+  true,
+  'the current lease safely refreshes stable provider identity before save'
+);
+select is(
+  (select full_name from public.github_repositories where id = '9c000000-0000-4000-8000-000000000030'),
+  'lease-co/alpha-renamed',
+  'verified rename and case changes become the canonical repository identity'
+);
+select ok(
+  (select lease_expires_at from public.github_collection_runs where id = (select run_id from reclaimed_reservation))
+    > (select lease_expires_at from pre_refresh_lease),
+  'lease-bound refresh renews enough time for immutable save and finalization'
+);
 
 select is(
   public.save_github_observations_server(
@@ -125,11 +167,11 @@ select is(
     (select lease_token from reclaimed_reservation), 2,
     (
       select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
-        'observation_key', 'Lease-Co/alpha/' || check_id || '/github-repository-v1',
+        'observation_key', 'lease-co/alpha-renamed/' || check_id || '/github-repository-v1',
         'check_id', check_id,
         'rule_version', 'github-repository-v1',
         'subject_type', 'github_repository',
-        'subject_id', 'Lease-Co/alpha',
+        'subject_id', 'lease-co/alpha-renamed',
         'result', case when check_id = 'github.repository.visibility' then 'unknown' else 'pass' end,
         'severity', null,
         'title', check_id,
@@ -137,7 +179,7 @@ select is(
         'remediation', null,
         'observed_at', '2026-08-17T05:29:00.000Z',
         'fresh_until', '2026-08-18T17:29:00.000Z',
-        'source_url', 'https://github.com/Lease-Co/alpha',
+        'source_url', 'https://github.com/lease-co/alpha-renamed',
         'fingerprint', repeat('a', 64),
         'diagnostic_code', case when check_id = 'github.repository.visibility' then 'permission_denied' else null end
       ))

@@ -9,6 +9,7 @@ import {
   createInstallationToken,
   READ_PERMISSIONS,
 } from "./github-app-auth";
+import { GitHubRateLimitError } from "./github-collection-error";
 
 let privateKeyPem: string;
 let publicKeyPem: string;
@@ -130,6 +131,27 @@ describe("GitHub App authentication", () => {
     expect(String(error)).toContain("Could not create GitHub installation token");
     expect(String(error)).not.toContain(responseDetail);
     expect(String(error)).not.toContain(appJwt);
+  });
+
+  it.each([
+    { status: 429, headers: { "retry-after": "60" } },
+    { status: 403, headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1786969000" } },
+    { status: 403, headers: { "retry-after": "30" } },
+  ])("surfaces token-exchange rate limiting as a safe typed signal", async ({ status, headers }) => {
+    const providerBody = crypto.randomUUID();
+    const responseHeaders = new Headers();
+    for (const [name, value] of Object.entries(headers)) {
+      if (value !== undefined) responseHeaders.set(name, value);
+    }
+    const error = await createInstallationToken({
+      installationId: 77,
+      repositoryIds: [101],
+      fetchImpl: vi.fn().mockResolvedValue(new Response(providerBody, { status, headers: responseHeaders })),
+      appJwt: "signed-app-jwt",
+    }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(GitHubRateLimitError);
+    expect((error as GitHubRateLimitError).diagnosticCode).toBe("rate_limited");
+    expect(String(error)).not.toContain(providerBody);
   });
 
   it("redacts malformed token response values", async () => {

@@ -19,6 +19,7 @@ type QueryBuilder = PromiseLike<QueryResult> & {
   eq(column: string, value: unknown): QueryBuilder;
   order(column: string, options: { ascending: boolean }): QueryBuilder;
   limit(count: number): QueryBuilder;
+  range(from: number, to: number): QueryBuilder;
 };
 type SourceBuilder = {
   select(columns: string): QueryBuilder;
@@ -67,6 +68,8 @@ const reservationSchema = z.object({
   repository_id: uuidSchema,
   provider_repository_id: safeId,
 }).strict();
+const PAGE_SIZE = 1_000;
+const MAX_TARGET_PAGES = 100;
 
 function fail(): Error {
   return new Error("GitHub collection persistence failed");
@@ -108,26 +111,52 @@ export function buildCollectionDependencies(
 
   async function listTargets(request: CollectionRequest): Promise<CollectionTarget[]> {
     try {
-      let query = service
-        .from("github_repositories")
-        .select("id,organisation_id,installation_id,provider_repository_id,owner_login,name,selected,available,github_installations!inner(id,organisation_id,provider_installation_id,status,permissions_ok)")
-        .eq("selected", true)
-        .eq("available", true)
-        .eq("github_installations.status", "active")
-        .eq("github_installations.permissions_ok", true)
-        .order("installation_id", { ascending: true })
-        .order("id", { ascending: true })
-        .limit(101);
-      if (request.installationId) query = query.eq("installation_id", request.installationId);
-      if (request.repositoryId) query = query.eq("id", request.repositoryId);
-      const { data, error } = await query;
-      if (error || !Array.isArray(data) || data.length > 100) throw targetLoadingFailure();
-      if ((request.installationId || request.repositoryId) && data.length === 0) throw targetLoadingFailure();
+      const baseQuery = () => {
+        let query = service
+          .from("github_repositories")
+          .select("id,organisation_id,installation_id,provider_repository_id,owner_login,name,selected,available,github_installations!inner(id,organisation_id,provider_installation_id,status,permissions_ok)")
+          .eq("selected", true)
+          .eq("available", true)
+          .eq("github_installations.status", "active")
+          .eq("github_installations.permissions_ok", true)
+          .order("installation_id", { ascending: true })
+          .order("id", { ascending: true });
+        if (request.installationId) query = query.eq("installation_id", request.installationId);
+        if (request.repositoryId) query = query.eq("id", request.repositoryId);
+        return query;
+      };
+      const values: unknown[] = [];
+      if (request.repositoryId) {
+        const { data, error } = await baseQuery().limit(2);
+        if (error || !Array.isArray(data) || data.length !== 1) throw targetLoadingFailure();
+        values.push(...data);
+      } else if (request.installationId) {
+        const { data, error } = await baseQuery().limit(101);
+        if (error || !Array.isArray(data) || data.length < 1 || data.length > 100) throw targetLoadingFailure();
+        values.push(...data);
+      } else {
+        for (let page = 0; page < MAX_TARGET_PAGES; page += 1) {
+          const from = page * PAGE_SIZE;
+          const { data, error } = await baseQuery().range(from, from + PAGE_SIZE - 1);
+          if (error || !Array.isArray(data)) throw targetLoadingFailure();
+          values.push(...data);
+          if (data.length < PAGE_SIZE) break;
+          if (page === MAX_TARGET_PAGES - 1) throw targetLoadingFailure();
+        }
+      }
 
-      const rows = data.map((value) => repositorySchema.parse(value));
+      const rows = values.map((value) => repositorySchema.parse(value));
+      const installationProviders = new Map<string, number>();
+      const installationCounts = new Map<string, number>();
       const targets = rows.map((row): CollectionTarget => {
         const installation = row.github_installations;
         if (installation.id !== row.installation_id || installation.organisation_id !== row.organisation_id) throw targetLoadingFailure();
+        const existingProvider = installationProviders.get(row.installation_id);
+        if (existingProvider !== undefined && existingProvider !== installation.provider_installation_id) throw targetLoadingFailure();
+        const count = (installationCounts.get(row.installation_id) ?? 0) + 1;
+        if (count > 100) throw targetLoadingFailure();
+        installationProviders.set(row.installation_id, installation.provider_installation_id);
+        installationCounts.set(row.installation_id, count);
         return {
           organisationId: row.organisation_id,
           installationId: row.installation_id,
@@ -175,7 +204,7 @@ export function buildCollectionDependencies(
         target_provider_repository_id: target.providerRepositoryId,
         target_trigger_type: request.trigger,
         target_request_key: request.requestKey,
-        target_lease_seconds: 120,
+        target_lease_seconds: 180,
       });
       if (error) throw fail();
       const result = toReservation(data);
@@ -187,10 +216,10 @@ export function buildCollectionDependencies(
       ) throw fail();
       return result;
     },
-    async listPersistedObservationKeys(reservation, target) {
+    async listPersistedObservations(reservation, target) {
       const { data, error } = await service
         .from("github_observations")
-        .select("observation_key")
+        .select("observation_key,result")
         .eq("collection_run_id", reservation.runId)
         .eq("organisation_id", target.organisationId)
         .eq("installation_id", target.installationId)
@@ -199,9 +228,12 @@ export function buildCollectionDependencies(
         .order("observation_key", { ascending: true })
         .limit(16);
       if (error || !Array.isArray(data)) throw fail();
-      const parsed = z.array(z.object({ observation_key: z.string().min(1).max(500) }).strict()).safeParse(data);
+      const parsed = z.array(z.object({
+        observation_key: z.string().min(1).max(500),
+        result: z.enum(["pass", "fail", "unknown", "not_applicable"]),
+      }).strict()).safeParse(data);
       if (!parsed.success) throw fail();
-      return parsed.data.map((row) => row.observation_key);
+      return parsed.data.map((row) => ({ observationKey: row.observation_key, result: row.result }));
     },
     async collectFacts(target, signal) {
       return collectRepositoryFacts({
@@ -213,12 +245,15 @@ export function buildCollectionDependencies(
       });
     },
     evaluate: evaluateGitHubRepository,
-    async refreshRepository(target, facts) {
+    async refreshRepository(reservation, target, facts) {
       const { data, error } = await service.rpc("refresh_github_repository_server", {
+        target_run_id: reservation.runId,
         target_organisation_id: target.organisationId,
         target_installation_id: target.installationId,
         target_repository_id: target.repositoryId,
         target_provider_repository_id: target.providerRepositoryId,
+        target_lease_token: reservation.leaseToken,
+        target_attempt: reservation.attempt,
         target_owner_login: facts.repository.owner,
         target_name: facts.repository.name,
         target_html_url: facts.repository.url,

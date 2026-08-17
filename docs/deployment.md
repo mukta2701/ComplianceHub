@@ -14,6 +14,9 @@ one selected repository. Do not expand it until batching and sharding have been
 measured. This route returns aggregate counts and writes only GitHub shadow
 inventory, runs, and observations; it does not create evidence or findings,
 change readiness/MCP answers, or deliver Slack messages.
+`repositoriesDeferred` is non-zero when another worker still owns an active
+lease. Callers must treat that response as in-progress work, not as terminal
+success; the deterministic retry key will resolve the same run later.
 
 Personal staging requires `CRON_SECRET`, `GITHUB_APP_ID`,
 `GITHUB_APP_PRIVATE_KEY`, and `GITHUB_APPROVED_SECURITY_WORKFLOW_IDS`. Keep the
