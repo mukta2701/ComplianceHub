@@ -201,6 +201,7 @@ const READ_PERMISSIONS = {
   administration: "read",
   dependabot_alerts: "read",
   metadata: "read",
+  secret_scanning_alerts: "read",
   security_events: "read",
 } as const;
 ```
@@ -242,7 +243,7 @@ git commit -m "feat(github): add bounded GitHub App client"
 
 **Interfaces:**
 - Consumes: existing `organisations`, `memberships`, `capture_audit_event`, `is_organisation_member`, `is_organisation_operator`.
-- Produces: `github_installations`, `github_repositories`, `github_collection_runs`, `github_observations`, `github_webhook_deliveries`, and `claim_github_installation(...)`.
+- Produces: `github_installations`, `github_repositories`, `github_collection_runs`, `github_observations`, `github_webhook_deliveries`, and `set_github_repository_selected(...)`.
 
 - [ ] **Step 1: Write the failing pgTAP contract**
 
@@ -332,7 +333,7 @@ git commit -m "feat(github): add tenant-safe shadow collection schema"
 
 - [ ] **Step 1: Write failing setup and callback tests**
 
-Prove that setup rejects unauthenticated/non-operator callers and malformed IDs; creates a 32-byte state and PKCE verifier; stores them in `HttpOnly`, `Secure`, `SameSite=Lax`, ten-minute cookies; and redirects to GitHub OAuth. Prove that callback rejects missing/mismatched/expired state, exchanges `code` with `code_verifier`, confirms the installation appears in `GET /user/installations`, confirms app metadata through `GET /app/installations/{id}`, checks the required read permissions, imports repository inventory, clears cookies, and redirects to `/app/integrations?github=connected`.
+Prove that setup rejects unauthenticated/non-operator callers and malformed IDs. Without `installation_id`, it redirects only to `https://github.com/apps/${GITHUB_APP_SLUG}/installations/new`. With `installation_id`, it creates a 32-byte state and PKCE verifier; stores state, verifier, pending installation ID, original organisation ID, and original actor ID in integrity-protected `HttpOnly`, `Secure`, `SameSite=Lax`, ten-minute cookies scoped to `/api/github`; and redirects to GitHub OAuth. Prove that callback rejects missing/mismatched/expired state or changed actor/workspace, consumes state once, exchanges `code` with `code_verifier`, confirms the installation appears in `GET /user/installations`, confirms app metadata through `GET /app/installations/{id}`, checks the required read permissions, imports repository inventory from paginated `GET /user/installations/{id}/repositories`, clears all flow cookies on every terminal path, and redirects to `/app/integrations?github=connected`.
 
 - [ ] **Step 2: Run route and application tests and confirm RED**
 
@@ -342,7 +343,7 @@ Expected: FAIL because the claim flow does not exist.
 
 - [ ] **Step 3: Implement OAuth state, PKCE, and user-token exchange**
 
-Read `GITHUB_APP_CLIENT_ID` and `GITHUB_APP_CLIENT_SECRET` only server-side. Build the authorize URL with `client_id`, exact `redirect_uri`, random `state`, `code_challenge`, `code_challenge_method=S256`, `allow_signup=false`, and `prompt=select_account`. Exchange the callback code using `application/json`; validate with Zod; never log or return `access_token`, `refresh_token`, or response bodies.
+Read `GITHUB_APP_CLIENT_ID` and `GITHUB_APP_CLIENT_SECRET` only server-side. Build the authorize URL with `client_id`, exact `redirect_uri`, random `state`, `code_challenge`, `code_challenge_method=S256`, `allow_signup=false`, and `prompt=select_account`. Exchange the callback code with `POST https://github.com/login/oauth/access_token`, `Accept: application/json`, and a `URLSearchParams` body containing `client_id`, `client_secret`, `code`, exact `redirect_uri`, and `code_verifier`; validate the JSON response with Zod; never log or return `access_token`, `refresh_token`, or response bodies.
 
 - [ ] **Step 4: Verify and claim the installation**
 
@@ -364,7 +365,7 @@ export type VerifiedInstallationClaim = {
 };
 ```
 
-Reject unless the requested ID is present in `userInstallationIds`, equals `appInstallation.id`, and the permission set is read-only and contains the required reads. Persist only through the service client after the user-scoped operator check. Discard the user token when the function returns.
+Reject unless the requested ID is present in `userInstallationIds`, equals `appInstallation.id`, `repositorySelection` is `selected`, and the permission set is read-only and contains every `READ_PERMISSIONS` key. Reject any unexpected permission with a `write` or `admin` value. Persist only through the service client after re-checking the original actor, workspace, and operator capability. Discard the user token when the function returns.
 
 - [ ] **Step 5: Run tests and commit**
 
@@ -584,7 +585,7 @@ git commit -m "feat(github): manage repository shadow collection"
 - Modify: `docs/deployment.md`
 - Modify: `docs/release-checklist.md`
 - Modify: `.github/workflows/deploy-azure-staging.yml`
-- Modify: `scripts/azure/rollout-container-app.sh`
+- Modify: `infra/azure/application.bicep`
 - Modify: `src/features/mcp/azure-deployment-contract.test.ts`
 - Create: `e2e/github-shadow-collection.spec.ts`
 
@@ -604,7 +605,7 @@ Expected: FAIL because the secret-slot contract and E2E flow are absent.
 
 - [ ] **Step 3: Extend rollback-safe secret slots and documentation**
 
-Add GitHub App values to inactive-slot staging and revision activation in `rollout-container-app.sh`; preserve the previous revision's values during rollback; pass only secret references to Container Apps. Document GitHub App registration as private, Adtecher-only, read-only; exact callback `/api/github/callback`; setup `/api/github/setup`; webhook `/api/github/webhook`; subscribed events from Task 7; and the dedicated test-repository requirement.
+Extend the existing inactive-slot staging and revision activation steps in `.github/workflows/deploy-azure-staging.yml` and the corresponding secret references in `infra/azure/application.bicep`; preserve the previous revision's values during rollback; pass only secret references to Container Apps. Document GitHub App registration as private, Adtecher-only, read-only; exact callback `/api/github/callback`; setup `/api/github/setup`; webhook `/api/github/webhook`; subscribed events from Task 7; and the dedicated test-repository requirement.
 
 - [ ] **Step 4: Run complete local verification**
 
@@ -625,7 +626,7 @@ Expected: every command exits 0; no live GitHub request occurs.
 - [ ] **Step 5: Commit the release configuration**
 
 ```bash
-git add .env.example docs/deployment.md docs/release-checklist.md .github/workflows/deploy-azure-staging.yml scripts/azure/rollout-container-app.sh src/features/mcp/azure-deployment-contract.test.ts e2e/github-shadow-collection.spec.ts
+git add .env.example docs/deployment.md docs/release-checklist.md .github/workflows/deploy-azure-staging.yml infra/azure/application.bicep src/features/mcp/azure-deployment-contract.test.ts e2e/github-shadow-collection.spec.ts
 git commit -m "chore(github): prepare personal Azure shadow rollout"
 ```
 
@@ -656,4 +657,3 @@ This plan completes rollout stages 1–3 of the approved design: live GitHub App
 
 1. Mapping approval plus evidence/finding lifecycle, including fresh-pass-only resolution and extended finding states.
 2. MCP/Slack/web consumption, confirmation-gated GitHub Issue creation, and the ten-business-day pilot.
-
