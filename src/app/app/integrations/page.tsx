@@ -112,11 +112,11 @@ export default async function IntegrationsPage({
       .eq("organisation_id", organisation.id)
       .order("created_at", { ascending: false }),
     supabase.from("github_installations")
-      .select("id,account_login,status,repository_selection,permissions_ok,updated_at,revoked_at")
+      .select("id,account_login,status,repository_selection,permissions_ok")
       .eq("organisation_id", organisation.id)
       .order("updated_at", { ascending: false }),
     supabase.from("github_repository_shadow_summaries")
-      .select("repository_id,installation_id,full_name,html_url,visibility,default_branch,archived,selected,available,last_seen_at,latest_run_id,latest_trigger_type,latest_status,latest_diagnostic_code,latest_started_at,latest_completed_at,latest_observation_count,latest_passed_count,latest_failed_count,latest_unknown_count,latest_not_applicable_count,last_completed_collection_at")
+      .select("repository_id,installation_id,full_name,html_url,visibility,default_branch,archived,selected,available,latest_run_id,latest_status,latest_failed_count,last_completed_collection_at")
       .eq("organisation_id", organisation.id)
       .order("full_name", { ascending: true }),
     membership.role === "owner"

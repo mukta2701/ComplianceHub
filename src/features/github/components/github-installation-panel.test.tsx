@@ -28,8 +28,6 @@ const installation: GitHubInstallationSummary = {
   status: "active",
   repository_selection: "selected",
   permissions_ok: true,
-  updated_at: "2026-08-17T18:00:00Z",
-  revoked_at: null,
 };
 
 function repository(overrides: Partial<GitHubRepositoryShadowSummary> = {}): GitHubRepositoryShadowSummary {
@@ -43,18 +41,9 @@ function repository(overrides: Partial<GitHubRepositoryShadowSummary> = {}): Git
     archived: false,
     selected: true,
     available: true,
-    last_seen_at: "2026-08-17T18:00:00Z",
     latest_run_id: "10000000-0000-4000-8000-000000000012",
-    latest_trigger_type: "scheduled",
     latest_status: "succeeded",
-    latest_diagnostic_code: null,
-    latest_started_at: "2026-08-17T17:59:00Z",
-    latest_completed_at: "2026-08-17T18:00:00Z",
-    latest_observation_count: 15,
-    latest_passed_count: 13,
     latest_failed_count: 2,
-    latest_unknown_count: 0,
-    latest_not_applicable_count: 0,
     last_completed_collection_at: "2026-08-17T18:00:00Z",
     ...overrides,
   };
@@ -88,7 +77,6 @@ describe("GitHubInstallationPanel", () => {
           full_name: "Adtecher/running",
           html_url: "https://github.com/Adtecher/running",
           latest_status: "running",
-          latest_completed_at: null,
           last_completed_collection_at: "2026-08-16T08:00:00Z",
         }),
         repository({
@@ -134,15 +122,8 @@ describe("GitHubInstallationPanel", () => {
           full_name: "Adtecher/new-repository",
           html_url: "https://github.com/Adtecher/new-repository",
           latest_run_id: null,
-          latest_trigger_type: null,
           latest_status: null,
-          latest_started_at: null,
-          latest_completed_at: null,
-          latest_observation_count: null,
-          latest_passed_count: null,
           latest_failed_count: null,
-          latest_unknown_count: null,
-          latest_not_applicable_count: null,
           last_completed_collection_at: null,
         }),
       ]}
@@ -159,7 +140,7 @@ describe("GitHubInstallationPanel", () => {
     render(<GitHubInstallationPanel
       installations={[
         { ...installation, id: "10000000-0000-4000-8000-000000000061", account_login: "Suspended-Co", status: "suspended" },
-        { ...installation, id: "10000000-0000-4000-8000-000000000062", account_login: "Revoked-Co", status: "revoked", revoked_at: "2026-08-17T12:00:00Z" },
+        { ...installation, id: "10000000-0000-4000-8000-000000000062", account_login: "Revoked-Co", status: "revoked" },
         { ...installation, id: "10000000-0000-4000-8000-000000000063", account_login: "Permission-Co", permissions_ok: false },
       ]}
       repositories={[]}
@@ -208,6 +189,57 @@ describe("GitHubInstallationPanel", () => {
     expect(first).toBeEnabled();
     expect(screen.getByRole("status")).toHaveTextContent("Could not update repository scope. Please try again.");
     expect(screen.getAllByRole("status")).toHaveLength(1);
+  });
+
+  it("rolls a failed second toggle back to the last locally confirmed selection", async () => {
+    const user = userEvent.setup();
+    hoisted.selectRepository
+      .mockResolvedValueOnce({ ok: true, message: "Repository scope updated." })
+      .mockResolvedValueOnce({ ok: false, message: "Could not update repository scope. Please try again." });
+    render(<GitHubInstallationPanel
+      installations={[installation]}
+      repositories={[repository({ selected: false })]}
+      nowIso="2026-08-17T20:00:00Z"
+    />);
+
+    const checkbox = screen.getByRole("checkbox", { name: "Select Adtecher/compliancehub for shadow collection" });
+    await user.click(checkbox);
+    await waitFor(() => expect(checkbox).toBeEnabled());
+    expect(checkbox).toBeChecked();
+
+    await user.click(checkbox);
+    await waitFor(() => expect(checkbox).toBeChecked());
+    expect(hoisted.selectRepository.mock.calls.map(([formData]) =>
+      Object.fromEntries(formData as FormData).selected,
+    )).toEqual(["true", "false"]);
+  });
+
+  it("retires a confirmed override when refreshed props catch up", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<GitHubInstallationPanel
+      installations={[installation]}
+      repositories={[repository({ selected: false })]}
+      nowIso="2026-08-17T20:00:00Z"
+    />);
+    const checkbox = screen.getByRole("checkbox", { name: "Select Adtecher/compliancehub for shadow collection" });
+
+    await user.click(checkbox);
+    await waitFor(() => expect(checkbox).toBeEnabled());
+    expect(checkbox).toBeChecked();
+
+    rerender(<GitHubInstallationPanel
+      installations={[installation]}
+      repositories={[repository({ selected: true })]}
+      nowIso="2026-08-17T20:00:00Z"
+    />);
+    expect(checkbox).toBeChecked();
+
+    rerender(<GitHubInstallationPanel
+      installations={[installation]}
+      repositories={[repository({ selected: false })]}
+      nowIso="2026-08-17T20:00:00Z"
+    />);
+    expect(checkbox).not.toBeChecked();
   });
 
   it("disables unavailable repositories with an explanation and keeps their full accessible label", () => {

@@ -28,17 +28,14 @@ const hoisted = vi.hoisted(() => ({
     }],
     github_installations: [{
       id: "10000000-0000-4000-8000-000000000010", account_login: "Adtecher", status: "active",
-      repository_selection: "selected", permissions_ok: true, updated_at: "2026-08-17T18:00:00Z", revoked_at: null,
+      repository_selection: "selected", permissions_ok: true,
     }],
     github_repository_shadow_summaries: [{
       repository_id: "10000000-0000-4000-8000-000000000011",
       installation_id: "10000000-0000-4000-8000-000000000010",
       full_name: "Adtecher/compliancehub", html_url: "https://github.com/Adtecher/compliancehub",
       visibility: "private", default_branch: "main", archived: false, selected: true, available: true,
-      last_seen_at: "2026-08-17T18:00:00Z", latest_run_id: null, latest_trigger_type: null,
-      latest_status: null, latest_diagnostic_code: null, latest_started_at: null, latest_completed_at: null,
-      latest_observation_count: null, latest_passed_count: null, latest_failed_count: null,
-      latest_unknown_count: null, latest_not_applicable_count: null, last_completed_collection_at: null,
+      latest_run_id: null, latest_status: null, latest_failed_count: null, last_completed_collection_at: null,
     }],
   } as Record<string, unknown[]>,
 }));
@@ -102,8 +99,8 @@ describe("Settings Connections page", () => {
     const expectedColumns: Record<string, string> = {
       integration_connections: "id,provider,label,config,connection_mode,enabled,created_at,revoked_at",
       alert_channels: "id,type,label,min_severity,enabled,daily_digest_enabled,created_at,revoked_at",
-      github_installations: "id,account_login,status,repository_selection,permissions_ok,updated_at,revoked_at",
-      github_repository_shadow_summaries: "repository_id,installation_id,full_name,html_url,visibility,default_branch,archived,selected,available,last_seen_at,latest_run_id,latest_trigger_type,latest_status,latest_diagnostic_code,latest_started_at,latest_completed_at,latest_observation_count,latest_passed_count,latest_failed_count,latest_unknown_count,latest_not_applicable_count,last_completed_collection_at",
+      github_installations: "id,account_login,status,repository_selection,permissions_ok",
+      github_repository_shadow_summaries: "repository_id,installation_id,full_name,html_url,visibility,default_branch,archived,selected,available,latest_run_id,latest_status,latest_failed_count,last_completed_collection_at",
     };
     expect(hoisted.selectCalls).toHaveLength(4);
     for (const call of hoisted.selectCalls) {

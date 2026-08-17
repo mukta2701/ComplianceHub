@@ -4,7 +4,6 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { Pill } from "@/components/ui";
-import type { CollectionRequest } from "@/features/github/application/run-collection";
 import {
   recheckGitHubInstallationAction,
   setGitHubRepositorySelectedAction,
@@ -16,8 +15,6 @@ export type GitHubInstallationSummary = {
   status: "active" | "suspended" | "revoked" | "needs_attention";
   repository_selection: "all" | "selected";
   permissions_ok: boolean;
-  updated_at: string;
-  revoked_at: string | null;
 };
 
 export type GitHubRepositoryShadowSummary = {
@@ -30,20 +27,39 @@ export type GitHubRepositoryShadowSummary = {
   archived: boolean;
   selected: boolean;
   available: boolean;
-  last_seen_at: string;
   latest_run_id: string | null;
-  latest_trigger_type: CollectionRequest["trigger"] | null;
   latest_status: "running" | "succeeded" | "partial" | "failed" | "rate_limited" | null;
-  latest_diagnostic_code: string | null;
-  latest_started_at: string | null;
-  latest_completed_at: string | null;
-  latest_observation_count: number | null;
-  latest_passed_count: number | null;
   latest_failed_count: number | null;
-  latest_unknown_count: number | null;
-  latest_not_applicable_count: number | null;
   last_completed_collection_at: string | null;
 };
+
+type SelectionState = {
+  serverSelections: Record<string, boolean>;
+  overrides: Record<string, boolean>;
+};
+
+function selectionSnapshot(repositories: GitHubRepositoryShadowSummary[]): Record<string, boolean> {
+  return Object.fromEntries(repositories.map((repository) => [repository.repository_id, repository.selected]));
+}
+
+function sameSelections(left: Record<string, boolean>, right: Record<string, boolean>): boolean {
+  const leftIds = Object.keys(left);
+  const rightIds = Object.keys(right);
+  return leftIds.length === rightIds.length && leftIds.every((id) => right[id] === left[id]);
+}
+
+function reconcileSelectionState(
+  state: SelectionState,
+  serverSelections: Record<string, boolean>,
+): SelectionState {
+  const overrides = { ...state.overrides };
+  for (const [repositoryId, selected] of Object.entries(overrides)) {
+    if (!(repositoryId in serverSelections) || serverSelections[repositoryId] === selected) {
+      delete overrides[repositoryId];
+    }
+  }
+  return { serverSelections, overrides };
+}
 
 function installationHealth(installation: GitHubInstallationSummary): { label: string; tone: string } {
   if (installation.status === "suspended") return { label: "Suspended", tone: "amber" };
@@ -89,15 +105,26 @@ export function GitHubInstallationPanel({
   nowIso: string;
 }) {
   const router = useRouter();
-  const [selections, setSelections] = useState<Record<string, boolean>>({});
+  const serverSelections = selectionSnapshot(repositories);
+  const [selectionState, setSelectionState] = useState<SelectionState>(() => ({
+    serverSelections,
+    overrides: {},
+  }));
+  if (!sameSelections(selectionState.serverSelections, serverSelections)) {
+    setSelectionState(reconcileSelectionState(selectionState, serverSelections));
+  }
   const [pendingRepositories, setPendingRepositories] = useState<Set<string>>(() => new Set());
   const [recheckingInstallations, setRecheckingInstallations] = useState<Set<string>>(() => new Set());
   const [message, setMessage] = useState("");
 
   async function changeRepository(repository: GitHubRepositoryShadowSummary, selected: boolean) {
     if (!repository.available || pendingRepositories.has(repository.repository_id)) return;
+    const previousSelected = selectionState.overrides[repository.repository_id] ?? repository.selected;
     setMessage("");
-    setSelections((current) => ({ ...current, [repository.repository_id]: selected }));
+    setSelectionState((current) => ({
+      ...current,
+      overrides: { ...current.overrides, [repository.repository_id]: selected },
+    }));
     setPendingRepositories((current) => new Set(current).add(repository.repository_id));
     const formData = new FormData();
     formData.set("repositoryId", repository.repository_id);
@@ -106,20 +133,18 @@ export function GitHubInstallationPanel({
       const result = await setGitHubRepositorySelectedAction(formData);
       setMessage(result.message);
       if (!result.ok) {
-        setSelections((current) => {
-          const next = { ...current };
-          delete next[repository.repository_id];
-          return next;
-        });
+        setSelectionState((current) => ({
+          ...current,
+          overrides: { ...current.overrides, [repository.repository_id]: previousSelected },
+        }));
       } else {
         router.refresh();
       }
     } catch {
-      setSelections((current) => {
-        const next = { ...current };
-        delete next[repository.repository_id];
-        return next;
-      });
+      setSelectionState((current) => ({
+        ...current,
+        overrides: { ...current.overrides, [repository.repository_id]: previousSelected },
+      }));
       setMessage("Could not update repository scope. Please try again.");
     } finally {
       setPendingRepositories((current) => {
@@ -200,7 +225,7 @@ export function GitHubInstallationPanel({
                   <label>
                     <input
                       type="checkbox"
-                      checked={selections[repository.repository_id] ?? repository.selected}
+                      checked={selectionState.overrides[repository.repository_id] ?? repository.selected}
                       disabled={!repository.available || pending}
                       onChange={(event) => void changeRepository(repository, event.target.checked)}
                     />
