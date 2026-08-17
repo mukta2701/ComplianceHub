@@ -302,7 +302,7 @@ create table public.github_installations (
 
 - [ ] **Step 4: Add RLS, grants, audit triggers, and safe RPCs**
 
-Use split policies and explicit column grants. The service role receives the minimum SELECT/INSERT/UPDATE needed for collection and no DELETE on shadow history. `set_github_repository_selected(repository_id uuid, selected boolean)` must derive the organisation from the row, require `is_organisation_operator`, reject selecting unavailable repositories, cap selected repositories at 100, and audit the change through the repository update trigger. The OAuth replay ledger has no browser-readable policy and its conditional consume updates only an unconsumed, unexpired row whose complete binding matches.
+Use split policies and explicit column grants. The service role receives the minimum SELECT/INSERT/UPDATE needed for collection and no DELETE on shadow history. `set_github_repository_selected(repository_id uuid, selected boolean)` must derive the organisation and installation from the row, require `is_organisation_operator`, reject selecting unavailable repositories, lock and cap selected repositories at 100 per installation, and audit the change through the repository update trigger. The OAuth replay ledger has no browser-readable policy and its conditional consume updates only an unconsumed, unexpired row whose complete binding matches.
 
 - [ ] **Step 5: Reset and test the database, then commit**
 
@@ -492,13 +492,13 @@ export type CollectionDependencies = {
   collectFacts(target: CollectionTarget): Promise<GitHubFactSet>;
   evaluate(facts: GitHubFactSet, context: { runId: string; observedAt: string }): GitHubObservation[];
   refreshRepository(target: CollectionTarget, facts: GitHubFactSet): Promise<void>;
-  saveObservations(runId: string, organisationId: string, repositoryId: string, observations: GitHubObservation[]): Promise<number>;
-  finaliseRun(runId: string, result: RunResult): Promise<void>;
+  saveObservations(reservation: RunReservation, target: CollectionTarget, observations: GitHubObservation[]): Promise<number>;
+  finaliseRun(reservation: RunReservation, target: CollectionTarget, result: RunResult): Promise<void>;
   now(): Date;
 };
 ```
 
-Database writes use insert-on-conflict/no-op for `(repository_id, request_key)` and `(collection_run_id, observation_key)`. A scheduled request therefore reserves one run per target repository instead of colliding globally. Collection history is append-only; repository inventory fields refresh only after verified metadata; a failure never extends observation freshness.
+`RunReservation` carries the run ID plus organisation, installation, repository, and provider-repository ancestry returned by the tenant-scoped reservation. Database writes use insert-on-conflict/no-op for `(repository_id, request_key)` and `(collection_run_id, observation_key)`, and every later update repeats the complete ancestry predicate. A scheduled request therefore reserves one run per target repository instead of colliding globally. Collection history is append-only; repository inventory fields refresh only after verified metadata; a failure never extends observation freshness.
 
 `CollectionTarget` must distinguish local UUIDs (`installationId`, `repositoryId`) from GitHub numeric IDs (`providerInstallationId`, `providerRepositoryId`) and also carry `organisationId`, `owner`, and `name`. Validate a complete, distinct observation set before one bulk insert: every observation's `runId` matches the reservation and numeric `repositoryId` matches `providerRepositoryId`. A typed safe `GitHubCollectionError` with `diagnosticCode: "rate_limited"` finalises the current run as rate-limited, skips only the remaining targets for that installation, and continues other installations. A complete set containing any `unknown` finalises as `partial`; `not_applicable` alone remains `succeeded`. Finalisation updates only rows still in `running` state.
 
@@ -577,7 +577,7 @@ git commit -m "feat(github): accept replay-safe signed webhooks"
 
 - [ ] **Step 1: Write failing UI and action tests**
 
-Prove operators see the private GitHub App panel; Members do not; install uses `/api/github/setup`; selection requires an operator and validated UUID/boolean; 101st selected repository is rejected; manual recheck uses a random request key; status distinguishes Active, Needs attention, Suspended, Partial collection, Never collected, and Stale; `Stale` means the latest completed collection is older than the domain's 36-hour observation-freshness boundary; no observation can be approved or made readiness-affecting in this release.
+Prove operators see the private GitHub App panel; Members do not; install uses `/api/github/setup`; selection requires an operator and validated UUID/boolean; the 101st selected repository for one installation is rejected without affecting another installation; manual recheck uses a random request key; status distinguishes Active, Needs attention, Suspended, Partial collection, Never collected, and Stale; `Stale` means the latest completed collection is older than the domain's 36-hour observation-freshness boundary; no observation can be approved or made readiness-affecting in this release.
 
 - [ ] **Step 2: Run UI tests and confirm RED**
 
