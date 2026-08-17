@@ -1,0 +1,7 @@
+{
+  "status": 404,
+  "body": {
+    "message": "Advanced Security is not enabled for this repository",
+    "secret_location": "config/private.key"
+  }
+}

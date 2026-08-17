@@ -76,6 +76,22 @@ describe("bounded GitHub REST client", () => {
     timeout.mockRestore();
   });
 
+  it("propagates caller cancellation alongside the per-request timeout", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const fetchImpl = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+      expect(init?.signal?.aborted).toBe(true);
+      throw new DOMException("Aborted", "AbortError");
+    });
+
+    await expect(githubRequest({
+      installationToken: crypto.randomUUID(),
+      pathSegments: ["repos", "adtecher", "portal"],
+      fetchImpl,
+      signal: controller.signal,
+    })).rejects.toMatchObject({ diagnosticCode: "provider_unavailable" });
+  });
+
   it.each(["", ".", ".."])("rejects unsafe path segment %j before fetch", async (segment) => {
     const installationCredential = crypto.randomUUID();
     const fetchImpl = vi.fn();

@@ -34,11 +34,9 @@ export type GitHubFactSet = {
   }>;
   dependabot: DataState<{ openHigh: number; openCritical: number }>;
   codeScanning: DataState<{ openHigh: number; openCritical: number }>;
-  secretScanning: DataState<{
-    enabled: boolean;
-    pushProtectionEnabled: boolean;
-    openAlerts: number;
-  }>;
+  secretScanningConfiguration: DataState<{ enabled: boolean }>;
+  secretScanningPushProtection: DataState<{ enabled: boolean }>;
+  secretScanningAlerts: DataState<{ openAlerts: number }>;
   securityWorkflows: DataState<
     Array<{ name: string; approved: boolean; active: boolean; latestConclusion: string | null }>
   >;

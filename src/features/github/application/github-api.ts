@@ -59,7 +59,7 @@ export function diagnosticForStatus(status: number): DiagnosticCode | null {
   return null;
 }
 
-function requestInit(installationToken: string): RequestInit {
+function requestInit(installationToken: string, signal?: AbortSignal): RequestInit {
   return {
     method: "GET",
     headers: {
@@ -70,7 +70,9 @@ function requestInit(installationToken: string): RequestInit {
     },
     cache: "no-store",
     redirect: "error",
-    signal: AbortSignal.timeout(15_000),
+    signal: signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(15_000)])
+      : AbortSignal.timeout(15_000),
   };
 }
 
@@ -78,6 +80,7 @@ async function fetchGitHubUrl(input: {
   url: URL;
   installationToken: string;
   fetchImpl: FetchLike;
+  signal?: AbortSignal;
 }): Promise<Response> {
   if (
     input.url.origin !== API_ORIGIN
@@ -89,7 +92,10 @@ async function fetchGitHubUrl(input: {
   }
 
   try {
-    return await input.fetchImpl(input.url.toString(), requestInit(input.installationToken));
+    return await input.fetchImpl(
+      input.url.toString(),
+      requestInit(input.installationToken, input.signal),
+    );
   } catch (error) {
     if (error instanceof GitHubApiError) throw error;
     throw new GitHubApiError("provider_unavailable");
@@ -101,6 +107,7 @@ export async function githubRequest(input: {
   pathSegments: readonly string[];
   query?: Record<string, string>;
   fetchImpl?: FetchLike;
+  signal?: AbortSignal;
 }): Promise<Response> {
   const parsed = requestSchema.safeParse({
     installationToken: input.installationToken,
@@ -119,6 +126,7 @@ export async function githubRequest(input: {
     url,
     installationToken: parsed.data.installationToken,
     fetchImpl: input.fetchImpl ?? fetch,
+    signal: input.signal,
   });
 }
 

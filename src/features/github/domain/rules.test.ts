@@ -25,10 +25,9 @@ const complete: GitHubFactSet = {
   },
   dependabot: { state: "available", value: { openHigh: 0, openCritical: 0 } },
   codeScanning: { state: "available", value: { openHigh: 0, openCritical: 0 } },
-  secretScanning: {
-    state: "available",
-    value: { enabled: true, pushProtectionEnabled: true, openAlerts: 0 },
-  },
+  secretScanningConfiguration: { state: "available", value: { enabled: true } },
+  secretScanningPushProtection: { state: "available", value: { enabled: true } },
+  secretScanningAlerts: { state: "available", value: { openAlerts: 0 } },
   securityWorkflows: {
     state: "available",
     value: [{ name: "CodeQL", approved: true, active: true, latestConclusion: "success" }],
@@ -145,5 +144,16 @@ describe("evaluateGitHubRepository", () => {
     const observations = evaluateGitHubRepository(facts, context);
 
     expect(observations.find((item) => item.checkId === checkId)?.result).toBe(result);
+  });
+
+  it("does not let an unavailable secret-alert list hide known-disabled configuration", () => {
+    const observations = evaluateGitHubRepository({
+      ...complete,
+      secretScanningConfiguration: { state: "available", value: { enabled: false } },
+      secretScanningAlerts: { state: "unavailable", diagnosticCode: "feature_unavailable" },
+    }, context);
+
+    expect(observations.find((item) => item.checkId === "github.secret_scanning.enabled")?.result).toBe("fail");
+    expect(observations.find((item) => item.checkId === "github.secret_scanning.open_alerts")?.result).toBe("unknown");
   });
 });

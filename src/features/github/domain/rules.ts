@@ -278,7 +278,7 @@ export function evaluateGitHubRepository(
           ? pass("No high or critical code-scanning alerts are open.")
           : fail("high", "High or critical code-scanning alerts are open.", "Resolve or formally triage high and critical code-scanning alerts."),
     }),
-    evaluateDataRule(facts, normalizedContext, facts.secretScanning, {
+    evaluateDataRule(facts, normalizedContext, facts.secretScanningConfiguration, {
       checkId: "github.secret_scanning.enabled",
       title: "Secret scanning is enabled",
       evaluate: (value) =>
@@ -286,15 +286,15 @@ export function evaluateGitHubRepository(
           ? pass("Secret scanning is enabled.")
           : fail("critical", "Secret scanning is disabled.", "Enable GitHub secret scanning for this repository."),
     }),
-    evaluateDataRule(facts, normalizedContext, facts.secretScanning, {
+    evaluateDataRule(facts, normalizedContext, facts.secretScanningPushProtection, {
       checkId: "github.secret_scanning.push_protection",
       title: "Secret-scanning push protection is enabled",
       evaluate: (value) =>
-        value.pushProtectionEnabled
+        value.enabled
           ? pass("Secret-scanning push protection is enabled.")
           : fail("critical", "Secret-scanning push protection is disabled.", "Enable push protection for GitHub secret scanning."),
     }),
-    evaluateDataRule(facts, normalizedContext, facts.secretScanning, {
+    evaluateDataRule(facts, normalizedContext, facts.secretScanningAlerts, {
       checkId: "github.secret_scanning.open_alerts",
       title: "No secret-scanning alerts are open",
       evaluate: (value) =>
