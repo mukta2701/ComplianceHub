@@ -38,8 +38,14 @@ type RuleDefinition<T> = {
 };
 
 const FRESHNESS_MS = 36 * 60 * 60 * 1000;
+const ISO_8601_DATE_TIME_WITH_ZONE =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 
 function normalizeEvaluationContext(context: EvaluationContext): EvaluationContext {
+  if (!ISO_8601_DATE_TIME_WITH_ZONE.test(context.observedAt)) {
+    throw new TypeError("observedAt must be a valid ISO 8601 timestamp");
+  }
+
   const observedAt = new Date(context.observedAt);
 
   if (!Number.isFinite(observedAt.getTime())) {

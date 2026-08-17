@@ -73,6 +73,19 @@ describe("evaluateGitHubRepository", () => {
   });
 
   it.each([
+    { timestamp: "August 17, 2026 12:00:00" },
+    { timestamp: "2026-08-17 12:00:00" },
+    { timestamp: "2026-08-17T12:00:00" },
+  ])("rejects non-ISO or offset-free observation timestamp $timestamp", ({ timestamp }) => {
+    expect(() =>
+      evaluateGitHubRepository(complete, {
+        runId: "run-non-iso",
+        observedAt: timestamp,
+      }),
+    ).toThrowError("observedAt must be a valid ISO 8601 timestamp");
+  });
+
+  it.each([
     { approved: true, result: "pass" },
     { approved: false, result: "fail" },
   ])("returns $result when a successful active security workflow has approved=$approved", ({ approved, result }) => {
