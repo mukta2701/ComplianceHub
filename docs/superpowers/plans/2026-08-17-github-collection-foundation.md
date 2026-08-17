@@ -530,6 +530,8 @@ git commit -m "feat(github): run idempotent shadow collection"
 - Test: `src/features/github/application/webhook-worker.test.ts`
 - Create: `src/app/api/github/webhook/route.ts`
 - Test: `src/app/api/github/webhook/route.test.ts`
+- Create: `supabase/migrations/20260817030000_github_webhook_delivery_ids.sql`
+- Create: `supabase/tests/database/065_github_webhook_delivery_ids.sql`
 - Modify: `src/app/api/cron/github-collect/route.ts`
 - Modify: `src/app/api/cron/github-collect/route.test.ts`
 
@@ -560,7 +562,7 @@ Run: `npm test -- src/features/github/application/webhook.test.ts src/features/g
 Expected: PASS with duplicate, malformed, hostile-text, and signature-vector cases green.
 
 ```bash
-git add src/features/github/application/webhook.ts src/features/github/application/webhook.test.ts src/features/github/application/webhook-worker.ts src/features/github/application/webhook-worker.test.ts src/app/api/github/webhook src/app/api/cron/github-collect
+git add src/features/github/application/webhook.ts src/features/github/application/webhook.test.ts src/features/github/application/webhook-worker.ts src/features/github/application/webhook-worker.test.ts src/app/api/github/webhook src/app/api/cron/github-collect supabase/migrations/20260817030000_github_webhook_delivery_ids.sql supabase/tests/database/065_github_webhook_delivery_ids.sql
 git commit -m "feat(github): accept replay-safe signed webhooks"
 ```
 
@@ -570,8 +572,8 @@ git commit -m "feat(github): accept replay-safe signed webhooks"
 - Modify: `src/app/app/integrations/page.tsx`
 - Modify: `src/app/app/integrations/connections-catalog.tsx`
 - Modify: `src/app/app/integrations/actions.ts`
-- Create: `supabase/migrations/20260817030000_github_shadow_ui_summary.sql`
-- Create: `supabase/tests/database/065_github_shadow_ui_summary.sql`
+- Create: `supabase/migrations/20260817040000_github_shadow_ui_summary.sql`
+- Create: `supabase/tests/database/066_github_shadow_ui_summary.sql`
 - Create: `src/features/github/components/github-installation-panel.tsx`
 - Test: `src/features/github/components/github-installation-panel.test.tsx`
 - Modify: `src/app/app/integrations/page.test.tsx`
@@ -599,12 +601,12 @@ Repository controls use native labelled checkboxes; unavailable repositories are
 
 - [ ] **Step 4: Run UI tests and commit**
 
-Run: `npx supabase db reset && npx supabase test db supabase/tests/database/065_github_shadow_ui_summary.sql && npm test -- src/features/github/components/github-installation-panel.test.tsx src/app/app/integrations/page.test.tsx src/app/app/integrations/actions.test.ts && npm run typecheck`
+Run: `npx supabase db reset && npx supabase test db supabase/tests/database/066_github_shadow_ui_summary.sql && npm test -- src/features/github/components/github-installation-panel.test.tsx src/app/app/integrations/page.test.tsx src/app/app/integrations/actions.test.ts && npm run typecheck`
 
 Expected: PASS with axe-compatible labels and operator boundaries.
 
 ```bash
-git add src/app/app/integrations src/features/github/components supabase/migrations/20260817030000_github_shadow_ui_summary.sql supabase/tests/database/065_github_shadow_ui_summary.sql
+git add src/app/app/integrations src/features/github/components supabase/migrations/20260817040000_github_shadow_ui_summary.sql supabase/tests/database/066_github_shadow_ui_summary.sql
 git commit -m "feat(github): manage repository shadow collection"
 ```
 
