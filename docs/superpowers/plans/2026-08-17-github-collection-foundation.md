@@ -384,6 +384,8 @@ git commit -m "feat(github): verify and claim GitHub App installations"
 **Files:**
 - Create: `src/features/github/application/collect-repository-facts.ts`
 - Test: `src/features/github/application/collect-repository-facts.test.ts`
+- Modify: `src/features/github/application/github-api.ts`
+- Modify: `src/features/github/application/github-api.test.ts`
 - Modify: `src/features/github/domain/observation.ts`
 - Modify: `src/features/github/domain/rules.ts`
 - Modify: `src/features/github/domain/rules.test.ts`
@@ -401,15 +403,16 @@ Assert exact requests and output for:
 
 - `GET /repos/{owner}/{repo}`
 - `GET /repos/{owner}/{repo}/rules/branches/{default_branch}?per_page=100`
+- `GET /repos/{owner}/{repo}/branches/{default_branch}/protection`
 - `GET /repos/{owner}/{repo}/dependabot/alerts?state=open&severity=high,critical&per_page=100`
 - `GET /repos/{owner}/{repo}/code-scanning/alerts?state=open&severity=high&per_page=100`
 - `GET /repos/{owner}/{repo}/code-scanning/alerts?state=open&severity=critical&per_page=100`
 - `GET /repos/{owner}/{repo}/secret-scanning/alerts?state=open&per_page=100`
 - `GET /repos/{owner}/{repo}/actions/workflows?per_page=100`
-- latest run lookup only for server-configured approved security workflow numeric IDs
+- latest completed default-branch run lookup only for at most 20 unique positive server-configured approved security workflow numeric IDs
 - `GET /repos/{owner}/{repo}/collaborators?affiliation=outside&permission=admin&per_page=100`
 
-Tests must prove endpoint-aware status semantics: repository metadata 404 aborts; ordinary 401/403 becomes `permission_denied`; code-scanning 403 and secret-alert 404 become `feature_unavailable`; 429 becomes a typed rate-limit stop; 5xx becomes `provider_unavailable`; malformed JSON becomes `invalid_response`; pagination is bounded; member names are reduced to a count; and no file contents are requested. If the 100-page cap is reached while a next link remains, the corresponding fact is unavailable rather than a partial count.
+Tests must prove response-aware rate limiting precedes endpoint semantics: 429, a response with `Retry-After`, or a 403 with `X-RateLimit-Remaining: 0` becomes a typed rate-limit stop carrying only bounded numeric retry/reset metadata; ordinary 401/403 becomes `permission_denied`; code-scanning 403 and secret-alert 404 become `feature_unavailable`; repository metadata 404 aborts; classic branch-protection 404 means no classic protection after repository identity is verified; 5xx becomes `provider_unavailable`; malformed JSON becomes `invalid_response`; pagination is bounded; member names are reduced to a deduplicated count; and no file contents are requested. If the 100-page cap is reached while a next link remains, the corresponding fact is unavailable rather than a partial count.
 
 - [ ] **Step 2: Run the collector test and confirm RED**
 
@@ -419,9 +422,13 @@ Expected: FAIL because the collector does not exist.
 
 - [ ] **Step 3: Implement endpoint-specific Zod schemas and safe mapping**
 
-Keep each response schema inside `collect-repository-facts.ts`, `.passthrough()` provider objects, and expose only fields used by `GitHubFactSet`. An endpoint failure affects only its corresponding `DataState`; repository metadata failure aborts the repository because the stable subject cannot be verified. Verify the returned numeric repository ID matches the selected target. Read secret-scanning and push-protection enablement from repository metadata's `security_and_analysis` block; the alert list establishes only the alert count. Refactor the Task 1 fact contract and rules so configuration, push protection, and alert count have separate `DataState` values—known-disabled configuration must fail even when the alert list is unavailable, and no unavailable alert list may become a zero-alert pass.
+Keep each response schema inside `collect-repository-facts.ts`, `.passthrough()` provider objects, and expose only fields used by `GitHubFactSet`. An endpoint failure affects only its corresponding `DataState`; repository metadata failure aborts the repository because the stable subject cannot be verified. Verify the returned numeric repository ID matches the selected target, validate owner/name/full-name consistency, accept rename/case refresh only because the stable ID matches, and rebuild the safe GitHub HTML URL rather than trusting `html_url`. Missing/null `security_and_analysis` fields are unavailable, not disabled. Read secret-scanning and push-protection enablement from that block; the alert list establishes only the alert count. Refactor the Task 1 fact contract and rules so configuration, push protection, and alert count have separate `DataState` values—known-disabled configuration must fail even when the alert list is unavailable, and no unavailable alert list may become a zero-alert pass.
 
-`collectRepositoryFacts` accepts `approvedSecurityWorkflowIds: readonly number[]`. Treat numeric workflow IDs as the reviewed allowlist; never approve a mutable display name. List workflows, retain only allowlisted IDs, then request `GET /repos/{owner}/{repo}/actions/workflows/{workflowId}/runs?per_page=1`. Empty runs yield `latestConclusion: null`; a failed approved-workflow lookup makes the workflow fact unavailable.
+Merge classic branch protection with active effective rulesets: force-push/deletion blocking is true when either source blocks it; approval count is the maximum; stale-review/code-owner requirements are ORed; required status checks are a deduplicated union. Recognized malformed rule parameters make the whole branch-protection fact `invalid_response`; unknown future rule types may be ignored; an empty valid result is available with false/zero controls. For the combined Dependabot query, parse each alert's advisory severity and count high and critical separately. Code-scanning high/critical calls form one atomic fact—discard both counts if either call fails or truncates. Deduplicate stable alert/collaborator identifiers across pages.
+
+`collectRepositoryFacts` accepts `approvedSecurityWorkflowIds: readonly number[]`. Validate at most 20 unique positive safe integers and treat them as the reviewed allowlist; never approve a mutable display name. List workflows, retain only allowlisted IDs, then request `GET /repos/{owner}/{repo}/actions/workflows/{workflowId}/runs?branch={verified_default_branch}&status=completed&per_page=1`. Empty runs yield `latestConclusion: null`; workflow-list truncation or any approved-workflow lookup failure makes the workflow fact unavailable.
+
+Add a stable `User-Agent` to the shared GitHub client. Bound total collector wall time/request budget (target no more than 90 seconds per repository), avoid launching every endpoint at once, stop immediately on a detected rate limit, and mark unfinished facts unavailable. Archived repositories may short-circuit after verified metadata because runtime controls evaluate as not applicable. Recursive redaction tests must prove facts/errors contain no installation token, Authorization value, secret location/value, response body, collaborator identity, or raw response headers.
 
 - [ ] **Step 4: Run tests and commit**
 
@@ -430,7 +437,7 @@ Run: `npm test -- src/features/github/application/collect-repository-facts.test.
 Expected: PASS and fixture snapshots contain no tokens, headers, source bodies, or member identities.
 
 ```bash
-git add src/features/github/application/collect-repository-facts.ts src/features/github/application/collect-repository-facts.test.ts src/features/github/application/fixtures src/features/github/domain
+git add src/features/github/application/collect-repository-facts.ts src/features/github/application/collect-repository-facts.test.ts src/features/github/application/fixtures src/features/github/application/github-api.ts src/features/github/application/github-api.test.ts src/features/github/domain
 git commit -m "feat(github): collect sanitised repository security facts"
 ```
 
