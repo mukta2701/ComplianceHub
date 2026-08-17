@@ -2,3 +2,7 @@ export function playwrightWebServerCommand(input: { ci: boolean; port: number })
   const script = input.ci ? "start" : "dev";
   return `npm run ${script} -- --port ${input.port}`;
 }
+
+export function playwrightWorkerCount(input: { ci: boolean }): number | undefined {
+  return input.ci ? undefined : 1;
+}
