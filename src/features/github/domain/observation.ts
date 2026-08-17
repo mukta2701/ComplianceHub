@@ -40,7 +40,7 @@ export type GitHubFactSet = {
     openAlerts: number;
   }>;
   securityWorkflows: DataState<
-    Array<{ name: string; active: boolean; latestConclusion: string | null }>
+    Array<{ name: string; approved: boolean; active: boolean; latestConclusion: string | null }>
   >;
   administration: DataState<{ outsideCollaboratorAdmins: number }>;
 };

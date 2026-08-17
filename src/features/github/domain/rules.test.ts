@@ -31,7 +31,7 @@ const complete: GitHubFactSet = {
   },
   securityWorkflows: {
     state: "available",
-    value: [{ name: "CodeQL", active: true, latestConclusion: "success" }],
+    value: [{ name: "CodeQL", approved: true, active: true, latestConclusion: "success" }],
   },
   administration: { state: "available", value: { outsideCollaboratorAdmins: 0 } },
 };
@@ -48,7 +48,46 @@ describe("evaluateGitHubRepository", () => {
 
     expect(first.find((item) => item.checkId === "github.branch.force_pushes")?.result).toBe("pass");
     expect(first.map((item) => item.observationKey)).toEqual(second.map((item) => item.observationKey));
+    expect(RULE_PACK_VERSION).toBe("github-repository-v1");
+    expect(first.every((item) => item.ruleVersion === "github-repository-v1")).toBe(true);
     expect(first.every((item) => item.ruleVersion === RULE_PACK_VERSION)).toBe(true);
+  });
+
+  it("normalizes the observation timestamp to UTC and sets freshness 36 hours later", () => {
+    const observations = evaluateGitHubRepository(complete, {
+      runId: "run-offset",
+      observedAt: "2026-08-17T13:00:00+01:00",
+    });
+
+    expect(observations[0]?.observedAt).toBe("2026-08-17T12:00:00.000Z");
+    expect(observations[0]?.freshUntil).toBe("2026-08-19T00:00:00.000Z");
+  });
+
+  it("rejects an invalid observation timestamp before evaluating rules", () => {
+    expect(() =>
+      evaluateGitHubRepository(complete, {
+        runId: "run-invalid",
+        observedAt: "not-a-timestamp",
+      }),
+    ).toThrowError("observedAt must be a valid ISO 8601 timestamp");
+  });
+
+  it.each([
+    { approved: true, result: "pass" },
+    { approved: false, result: "fail" },
+  ])("returns $result when a successful active security workflow has approved=$approved", ({ approved, result }) => {
+    const observations = evaluateGitHubRepository(
+      {
+        ...complete,
+        securityWorkflows: {
+          state: "available",
+          value: [{ name: "Security workflow", approved, active: true, latestConclusion: "success" }],
+        },
+      },
+      context,
+    );
+
+    expect(observations.find((item) => item.checkId === "github.workflow.security")?.result).toBe(result);
   });
 
   it.each([
