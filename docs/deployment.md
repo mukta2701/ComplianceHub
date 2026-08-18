@@ -40,7 +40,7 @@ account owner can do; everything else is already prepared in the repo.
   linked or hosted project. Outside CI it refuses to invoke Supabase unless the
   operator explicitly sets `COMPLIANCEHUB_ALLOW_LOCAL_DB_RESET=1`; use that
   override only when all local data can be permanently discarded.
-- The full Playwright e2e suite passes against a **production build** (`next build && next start`), confirming the deployed artifact serves the whole app end-to-end. (Locally run e2e with `--workers=1` or `--workers=2` — full parallelism overwhelms the single local Supabase with concurrent sign-ups.)
+- The full Playwright e2e suite passes against a **production build** (`npm run build` followed by `scripts/playwright-production-server.sh`), confirming the deployed artifact serves the whole app end-to-end. (Locally run e2e with `--workers=1` or `--workers=2` — full parallelism overwhelms the single local Supabase with concurrent sign-ups.)
 
 ## 1. Hosted Supabase **(you)**
 

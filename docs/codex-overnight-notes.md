@@ -6,17 +6,20 @@
 ## Current handoff — 2026-08-18
 
 - Branch: `codex/github-collection-foundation`; the reviewed baseline for this
-  handoff is `8197e9a` (`test: verify export parity and production e2e runtime`)
-  plus the follow-up worker, Slack-validation, and documentation changes in the
-  current release commit.
+  handoff is `c120a42`, including the additive Explain-and-Act/automation unit,
+  retry-safe provenance persistence, and one-proposal-per-signal uniqueness.
 - Local application health: `/api/health` returns HTTP 200 with `db: ok`.
-- Local verification baseline: `npm run verify` passed lint, typecheck, 173 test
-  files / 1,291 tests, and the Next production build. `npm run test:db` passed
-  66 pgTAP files / 1,170 tests.
+- Local verification baseline: `npm test -- --run` passed lint-adjacent unit
+  coverage with 189 test files / 1,333 tests; typecheck and the Next production
+  build also passed. The disposable CI database gate is the authoritative check
+  for the newly added automation migrations.
 - Browser evidence: the complete production matrix passed **56/56** across
   Chromium and mobile with `E2E_TEST_TOOLS_ENABLED=1` and the two-worker cap.
 - Integration evidence: `npm run test:integration` passed 3 files / 5 tests;
   the production GitHub shadow spec passed on Chromium and mobile (2/2).
+- Remote CI evidence: run `32092764553` for `0785299` passed secrets, container,
+  database upgrade/pgTAP, application build, integration, and 56/56 Playwright
+  desktop/mobile tests.
 - MCP evidence: local DCR + S256 PKCE, authorization-code exchange, refresh,
   authenticated initialize/tools/list, and revocation all passed. The local
   audience row is configured for `http://127.0.0.1:3000/mcp` only.
