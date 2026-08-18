@@ -44,6 +44,7 @@ export async function revokeAutomationConnectionAction(formData: FormData) {
   if (revokeError) throw new Error("Could not disconnect the automation system");
   const { error: sourceRevokeError } = await supabase.from("evidence_sources")
     .update({ revoked_at: now, access_token: null, refresh_token: null })
+    .eq("organisation_id", organisation.id)
     .contains("config", { automationConnectionId: connection.id });
   if (sourceRevokeError) throw new Error("Could not revoke the linked evidence source");
   const service = createSupabaseServiceClient();

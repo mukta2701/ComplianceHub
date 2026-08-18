@@ -12,8 +12,8 @@ const areas = [
 ] as const;
 
 export default async function AutomationSetupPage() {
-  const { supabase, user, membership } = await requireAppContext();
-  const { data: members } = await supabase.from("memberships").select("user_id,profiles(display_name)");
+  const { supabase, user, membership, organisation } = await requireAppContext();
+  const { data: members } = await supabase.from("memberships").select("user_id,profiles(display_name)").eq("organisation_id", organisation.id);
   const isOwner = membership.role === "owner";
   return <>
     <PageIntro eyebrow="AUTOMATION SETUP" title="Connect the systems that already know your work" body="ComplianceHub will collect bounded evidence and prepare reviewable drafts. It will never mark you compliant or make a final GRC decision." />

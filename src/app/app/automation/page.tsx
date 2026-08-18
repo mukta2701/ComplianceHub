@@ -11,10 +11,10 @@ export default async function AutomationPage({ searchParams }: { searchParams: P
   const { supabase, user, membership, organisation } = await requireAppContext();
   const { message } = await searchParams;
   const [{ data: connections }, { data: proposals }, { data: aiSettings }, { data: aiDrafts }] = await Promise.all([
-    supabase.from("connector_connections").select("id,provider,label,status,last_collected_at,last_error_at").order("created_at", { ascending: false }),
-    supabase.from("automation_proposals").select("id,target_type,assigned_to,status,output,source_references,created_at,automation_signals(signal_type,summary,confidence,occurred_at,connector_connections(label,provider))").order("created_at", { ascending: false }).limit(100),
+    supabase.from("connector_connections").select("id,provider,label,status,last_collected_at,last_error_at").eq("organisation_id", organisation.id).order("created_at", { ascending: false }),
+    supabase.from("automation_proposals").select("id,target_type,assigned_to,status,output,source_references,created_at,automation_signals(signal_type,summary,confidence,occurred_at,connector_connections(label,provider))").eq("organisation_id", organisation.id).order("created_at", { ascending: false }).limit(100),
     supabase.from("ai_workspace_settings").select("enabled").eq("organisation_id", organisation.id).maybeSingle(),
-    supabase.from("ai_suggestions").select("target_id,output,status,created_at").eq("target_type", "automation_proposal").order("created_at", { ascending: false }),
+    supabase.from("ai_suggestions").select("target_id,output,status,created_at").eq("organisation_id", organisation.id).eq("target_type", "automation_proposal").order("created_at", { ascending: false }),
   ]);
   const drafts = (proposals ?? []).filter((proposal) => proposal.status === "draft");
   const mine = drafts.filter((proposal) => proposal.assigned_to === user.id);

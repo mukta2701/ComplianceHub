@@ -50,24 +50,24 @@ export async function POST(request: Request) {
     suggestionType = "soa_rationale";
     context = buildSoaAiContext({ item: { id: item.id, controlCode: item.control_code, controlTitle: item.control_title, applicable: item.applicable, status: item.status } });
   } else if (parsed.data.targetType === "audit") {
-    const { data: audit } = await supabase.from("audits").select("id,reference,title,status").eq("id", parsed.data.targetId).maybeSingle();
+    const { data: audit } = await supabase.from("audits").select("id,reference,title,status").eq("id", parsed.data.targetId).eq("organisation_id", organisation.id).maybeSingle();
     if (!audit) return NextResponse.json({ error: "Audit not found" }, { status: 404 });
     targetId = audit.id;
     suggestionType = "audit_preparation";
     context = buildAuditAiContext({ audit });
   } else if (parsed.data.targetType === "readiness_report") {
-    const report = buildReadinessReport(await loadReadinessInput(supabase));
+    const report = buildReadinessReport(await loadReadinessInput(supabase, organisation.id));
     targetId = organisation.id;
     suggestionType = "readiness_summary";
     context = buildReadinessAiContext({ organisationId: organisation.id, soaPercent: report.soaPercent, tasksOpen: report.tasksOpen, tasksOverdue: report.tasksOverdue, evidenceExpired: report.evidence.expired, openFindings: report.openNonConformities });
   } else if (parsed.data.targetType === "task") {
-    const { data: task } = await supabase.from("tasks").select("id,title,status,source,due_on").eq("id", parsed.data.targetId).maybeSingle();
+    const { data: task } = await supabase.from("tasks").select("id,title,status,source,due_on").eq("id", parsed.data.targetId).eq("organisation_id", organisation.id).maybeSingle();
     if (!task) return NextResponse.json({ error: "Task not found" }, { status: 404 });
     targetId = task.id;
     suggestionType = "task_remediation";
     context = buildTaskAiContext({ task: { id: task.id, title: task.title, status: task.status, source: task.source, dueOn: task.due_on } });
   } else if (parsed.data.targetType === "evidence") {
-    const { data: evidence } = await supabase.from("evidence").select("id,title,kind,status,collected_on,valid_until").eq("id", parsed.data.targetId).maybeSingle();
+    const { data: evidence } = await supabase.from("evidence").select("id,title,kind,status,collected_on,valid_until").eq("id", parsed.data.targetId).eq("organisation_id", organisation.id).maybeSingle();
     if (!evidence) return NextResponse.json({ error: "Evidence not found" }, { status: 404 });
     targetId = evidence.id;
     suggestionType = "evidence_review";

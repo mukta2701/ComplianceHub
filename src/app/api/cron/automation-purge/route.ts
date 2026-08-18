@@ -1,20 +1,12 @@
-import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { purgeContentReference, shouldPurgeSourceObject } from "@/features/automation/domain/retention";
+import { isAuthorisedCron } from "@/lib/security/cron-auth";
 
 export const dynamic = "force-dynamic";
 
-function authorised(request: Request): boolean {
-  const secret = process.env.CRON_SECRET;
-  if (!secret) return false;
-  const expected = Buffer.from(`Bearer ${secret}`);
-  const received = Buffer.from(request.headers.get("authorization") ?? "");
-  return expected.length === received.length && timingSafeEqual(expected, received);
-}
-
 async function purge(request: Request) {
-  if (!authorised(request)) return NextResponse.json({ error: "unauthorised" }, { status: 401 });
+  if (!isAuthorisedCron(request)) return NextResponse.json({ error: "unauthorised" }, { status: 401 });
   const supabase = createSupabaseServiceClient();
   const now = new Date();
   const { data: objects, error } = await supabase.from("source_objects")

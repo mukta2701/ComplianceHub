@@ -18,6 +18,7 @@ const navGroups = [
   ] },
   { label: "Operate", items: [
     ["/app/monitoring", "activity", "Monitoring"],
+    ["/app/automation", "activity", "Automation inbox"],
     ["/app/policies", "file", "Policies"],
     ["/app/audits", "shield", "Internal audits"],
     ["/app/kpis", "check", "Performance"],
@@ -58,6 +59,8 @@ const EXTRA_TITLES: Array<[string, string]> = [
   ["/app/policies/new", "Author a policy"],
   ["/app/onboarding", "Workspace setup"],
   ["/app/invitations", "Invitation"],
+  ["/app/automation", "Automation inbox"],
+  ["/app/setup", "Automation setup"],
 ];
 const TITLE_ROUTES: Array<[string, string]> = [
   ...navGroups.flatMap((g) => g.items.map(([href, , label]) => [href, label] as [string, string])),

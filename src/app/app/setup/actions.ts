@@ -20,7 +20,7 @@ export async function saveAutomationSetupAction(formData: FormData) {
     complianceOwnerId: formData.get("complianceOwnerId"),
   });
   const selections = buildSetupSelections(setup);
-  const { data: members, error: memberError } = await supabase.from("memberships").select("user_id");
+  const { data: members, error: memberError } = await supabase.from("memberships").select("user_id").eq("organisation_id", organisation.id);
   if (memberError) throw new Error("Could not load workspace members");
   const memberIds = new Set((members ?? []).map((item) => item.user_id));
   if (selections.assignments.some((assignment) => !memberIds.has(assignment.ownerId))) throw new Error("Automation owners must be current workspace members");
@@ -32,7 +32,7 @@ export async function saveAutomationSetupAction(formData: FormData) {
   if (assignmentError) throw new Error("Could not assign automation owners");
 
   const { data: existing, error: existingError } = await supabase.from("connector_connections")
-    .select("id,provider").neq("status", "revoked");
+    .select("id,provider").eq("organisation_id", organisation.id).neq("status", "revoked");
   if (existingError) throw new Error("Could not load automation connections");
   const existingProviders = new Set((existing ?? []).map((connection) => connection.provider));
 

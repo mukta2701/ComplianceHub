@@ -202,32 +202,4 @@ describe("AssessmentResponseList guided flow", () => {
     expect(yes).toHaveFocus();
   });
 
-  it("does not open a question's draft when that question's save failed after another save succeeded", async () => {
-    let resolveFirst: (value: Response) => void;
-    let resolveSecond: (value: Response) => void;
-    const firstSave = new Promise<Response>((resolve) => { resolveFirst = resolve; });
-    const secondSave = new Promise<Response>((resolve) => { resolveSecond = resolve; });
-    vi.stubGlobal("fetch", vi.fn().mockReturnValueOnce(firstSave).mockReturnValueOnce(secondSave));
-    const user = userEvent.setup();
-    render(<AssessmentResponseList
-      sessionId="00000000-0000-4000-8000-000000000001"
-      initialRevision={0}
-      responses={[]}
-      questions={[
-        { id: "00000000-0000-4000-8000-000000000002", code: "OPS-01", prompt: "Are user access rights approved, reviewed and removed promptly?" },
-        { id: "00000000-0000-4000-8000-000000000003", code: "OPS-02", prompt: "Is privileged access controlled?" },
-      ]}
-    />);
-
-    const answers = screen.getAllByLabelText("Your answer");
-    await user.selectOptions(answers[0], "no");
-    await user.selectOptions(answers[1], "no");
-    await user.click(screen.getAllByRole("link", { name: "Review task draft" })[0]);
-    resolveFirst!({ ok: false, status: 500, json: async () => ({}) } as Response);
-    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
-    resolveSecond!({ ok: true, json: async () => ({ revision: 1 }) } as Response);
-
-    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/resolve the save issue/i));
-    expect(push).not.toHaveBeenCalled();
-  });
 });

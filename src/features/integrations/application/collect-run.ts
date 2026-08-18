@@ -4,6 +4,7 @@ import { decryptSecret } from "@/lib/security/secrets";
 import { toEvidenceRow } from "../domain/evidence-collection";
 import type { EvidenceProviderKind } from "../domain/evidence-provider";
 import { collectIdPages } from "@/lib/supabase/paginate";
+import { persistCollectedAutomation } from "@/features/automation/application/collector-persistence";
 
 export async function collectEvidence(supabase: SupabaseClient): Promise<{ collected: number; refreshed: number; failed: number }> {
   // Active sources across every org — collection is a global sweep, tenant-scoped
@@ -55,6 +56,20 @@ export async function collectEvidence(supabase: SupabaseClient): Promise<{ colle
         });
         if (insertError) throw insertError;
         collected += 1;
+      }
+      for (const item of items) {
+        try {
+          await persistCollectedAutomation({
+            supabase,
+            organisationId: source.organisation_id,
+            provider: source.provider as EvidenceProviderKind,
+            config: (source.config ?? {}) as Record<string, unknown>,
+            collected: item,
+          });
+        } catch {
+          // Evidence collection remains useful even if the optional automation
+          // provenance mapping needs attention; the next run can retry it.
+        }
       }
     } catch {
       failed += 1;

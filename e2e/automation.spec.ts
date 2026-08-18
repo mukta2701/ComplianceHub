@@ -17,8 +17,7 @@ test("a workspace turns selected systems into reviewable automation evidence", a
   await page.getByRole("button", { name: "Sign in" }).click();
   await page.getByLabel("Organisation name").fill(`Automation Workspace ${suffix}`);
   await page.getByRole("button", { name: "Create workspace" }).click();
-  await expect(page.getByRole("link", { name: "Explore integrations" })).toBeVisible();
-  await page.getByRole("link", { name: "Explore integrations" }).click();
+  await page.goto("/app/setup");
   await expect(page.getByRole("heading", { name: "Connect the systems that already know your work" })).toBeVisible();
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await page.getByRole("button", { name: "Save setup and open Automation" }).click();
