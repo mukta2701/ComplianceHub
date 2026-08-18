@@ -35,10 +35,10 @@ Add SoA readiness breakdown by category and owner,Break the readiness score down
 Add an auditor audit-pack export bundle,"Bundle all registers, the finalised SoA snapshot and the evidence index into a single export for auditors.",Backlog,High,phase-b;export;enhancement
 Add XLSX import round-trip (Phase B.5),Deliver the planned import and column-mapping wizard so exported workbooks re-import cleanly.,Done,High,phase-b;export;enhancement;phase-b.5
 Produce styled branded XLSX exports,"Add formatted header rows, sensible column widths and auto-filters so exports can replace the workbooks.",Backlog,Low,phase-b;export;enhancement
-Rate-limit and audit the export endpoints,Apply rate limiting and audit logging to the export route handlers as the create actions already have.,Backlog,Medium,phase-b;export;hardening;security
+Rate-limit and audit the export endpoints,Apply rate limiting and audit logging to the export route handlers as the create actions already have.,Done,Medium,phase-b;export;hardening;security
 Harden CSV export against formula injection,"Neutralise leading =, +, - and @ in CSV cells so exported free text cannot execute as a spreadsheet formula.",Done,High,phase-b;hardening;security;export
 Add an XLSX export content assertion,Add a round-trip read-back assertion instead of only checking the workbook container exists.,Done,Medium,phase-b;hardening;test-coverage;export
-Resolve dual lockfiles and pick one package manager,Choose a single package manager and verify a frozen-lockfile install passes before deploy.,Backlog,High,phase-b;hardening;go-live;build
+Resolve dual lockfiles and pick one package manager,Choose a single package manager and verify a frozen-lockfile install passes before deploy.,Done,High,phase-b;hardening;go-live;build
 Pin updated_by in the risk_matrix_config update policy,Re-assert updated_by equals auth.uid() in the RLS with-check for the risk matrix config update policy.,Done,Medium,phase-b;hardening;security;risks
 Stop swallowing the DB error in the RTP delete action,Surface delete failures in deleteRtpAction instead of discarding the error.,Done,Low,phase-b;hardening;risks
 Add server-side owner-membership check in reviewSoaItemAction,Re-validate the chosen SoA owner is an org member server-side rather than relying on the FK alone.,Done,Medium,phase-b;hardening;security;soa
@@ -65,7 +65,7 @@ Revisit single-org assumption in risk-matrix-config read,Replace the maybeSingle
 "KPI trend charts + RAG + edit UI","Trend over time, threshold status, and an edit form","Backlog","Medium","enhancement;kpi"
 "Auditor-view access log","Record each auditor-token read for accountability","Backlog","Medium","enhancement;auditor;security"
 "Auditor link single-use store","Replace 60s flash cookie with a single-use server store","Backlog","Low","hardening;auditor;security"
-"Escape evidence-pack filename","Escape audit.reference in Content-Disposition","Backlog","Low","hardening;export"
+"Escape evidence-pack filename","Escape audit.reference in Content-Disposition","Done","Low","hardening;export"
 "5th risk-band tone in reports","Distinguish high vs very-high visually","Backlog","Low","enhancement;reporting"
 "Policy starter templates","10 original starter policies selectable from the authoring form","Done","High","enhancement;policies;onboarding"
 "Rich-text policy body","Markdown/rich-text editing + rendering + table of contents","Backlog","Medium","enhancement;policies"
@@ -76,4 +76,4 @@ Revisit single-org assumption in risk-matrix-config read,Replace the maybeSingle
 "Slack/Teams notifications","Post re-accept/overdue/finding alerts to chat","Backlog","Medium","enhancement;integrations"
 "Push-to-tracker from findings/risks","Raise tickets from findings and risks, not only tasks","Backlog","Medium","enhancement;integrations"
 "Integration tokens in Vault","Move access/refresh tokens to Supabase Vault","Backlog","High","hardening;integrations;security;go-live"
-"Rate-limit policy evidence actions","Add rate limit + policyId scope to link/unlink","Backlog","Low","hardening;policies"
+"Rate-limit policy evidence actions","Add rate limit + policyId scope to link/unlink","Done","Low","hardening;policies"

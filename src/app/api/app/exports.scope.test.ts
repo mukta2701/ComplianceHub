@@ -11,11 +11,14 @@ const SNAPSHOT_ID = "77777777-7777-4777-8777-777777777777";
 const hoisted = vi.hoisted(() => ({
   requireContext: vi.fn(),
   createClient: vi.fn(),
+  protectExport: vi.fn(),
+  recordExportAudit: vi.fn(),
   queries: [] as Array<{ table: string; column: string; value: unknown }>,
 }));
 
 vi.mock("@/lib/app-context", () => ({ requireAppContext: hoisted.requireContext }));
 vi.mock("@/lib/supabase/server", () => ({ createSupabaseServerClient: hoisted.createClient }));
+vi.mock("@/features/exports/export-audit", () => ({ protectExport: hoisted.protectExport, recordExportAudit: hoisted.recordExportAudit }));
 
 type Row = Record<string, unknown>;
 
@@ -89,6 +92,8 @@ beforeEach(() => {
   hoisted.queries.length = 0;
   const activeContext = context();
   hoisted.requireContext.mockResolvedValue(activeContext);
+  hoisted.protectExport.mockResolvedValue(undefined);
+  hoisted.recordExportAudit.mockResolvedValue(undefined);
   hoisted.createClient.mockResolvedValue({
     ...activeContext.supabase,
     auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: USER_ID } } }) },
@@ -125,6 +130,26 @@ describe("active-organisation export boundaries", () => {
     expect(response.status).toBe(200);
     expect(body).not.toContain(siblingValue);
     expect(hoisted.queries).toContainEqual({ table: resource, column: "organisation_id", value: ORGANISATION_ID });
+  });
+
+  it("protects and audits an authenticated export in the active workspace", async () => {
+    const { GET } = await import("./risks/export/route");
+
+    const response = await GET(new Request("http://localhost/api/app/risks/export?format=csv"));
+
+    expect(response.status).toBe(200);
+    expect(hoisted.protectExport).toHaveBeenCalledWith({
+      organisationId: ORGANISATION_ID,
+      userId: USER_ID,
+      resource: "risks",
+      format: "csv",
+    });
+    expect(hoisted.recordExportAudit).toHaveBeenCalledWith({
+      organisationId: ORGANISATION_ID,
+      userId: USER_ID,
+      resource: "risks",
+      format: "csv",
+    });
   });
 
   it("labels evidence with no owner as Unassigned", async () => {

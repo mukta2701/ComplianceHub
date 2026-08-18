@@ -7,6 +7,7 @@ import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { buildMonitorDependencies } from "@/features/monitoring/application/monitor-deps";
 import { runMonitoring } from "@/features/monitoring/application/monitor-run";
 import { hasCapability } from "@/features/organisations/domain/access";
+import { enforceRateLimit } from "@/lib/security/rate-limit";
 
 async function requireOperator() {
   const ctx = await requireAppContext();
@@ -66,7 +67,8 @@ export async function raiseTaskFromFindingAction(formData: FormData) {
 // scoped to just this org. Uses the service client (findings + notifications are
 // service-role-insert only) but restricts every query to the caller's org.
 export async function runMonitoringNowAction() {
-  const { organisation } = await requireOperator();
+  const { organisation, user } = await requireOperator();
+  await enforceRateLimit(`monitoring:${organisation.id}:${user.id}`, { limit: 5, windowMs: 60_000 });
   const service = createSupabaseServiceClient();
   await runMonitoring(buildMonitorDependencies(service, { organisationId: organisation.id }));
   revalidatePath("/app/monitoring");

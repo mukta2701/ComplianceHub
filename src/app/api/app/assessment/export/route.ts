@@ -1,14 +1,17 @@
 import { NextResponse } from "next/server";
 import { requireAppContext } from "@/lib/app-context";
 import { toCsv, toXlsx, type ExportColumn } from "@/features/exports/exports";
+import { protectExport, recordExportAudit } from "@/features/exports/export-audit";
 
 type Row = { code: string; prompt: string; answer: string; evidence_note: string };
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const format = url.searchParams.get("format") === "csv" ? "csv" : "xlsx";
+  const format: "csv" | "xlsx" = url.searchParams.get("format") === "csv" ? "csv" : "xlsx";
   const requestedSessionId = url.searchParams.get("sessionId");
-  const { supabase, organisation } = await requireAppContext();
+  const { supabase, organisation, user } = await requireAppContext();
+  const auditContext = { organisationId: organisation.id, userId: user.id, resource: "assessment" as const, format };
+  await protectExport(auditContext);
   let sessionId = requestedSessionId;
   let catalogueVersionId: string | null = null;
   if (sessionId) {
@@ -37,7 +40,11 @@ export async function GET(request: Request) {
     { header: "Answer", value: (q) => q.answer },
     { header: "Evidence Note", value: (q) => q.evidence_note },
   ];
-  if (format === "csv") return new NextResponse(toCsv(columns, rows), { headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": 'attachment; filename="assessment.csv"', "cache-control": "private, no-store" } });
+  if (format === "csv") {
+    await recordExportAudit(auditContext);
+    return new NextResponse(toCsv(columns, rows), { headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": 'attachment; filename="assessment.csv"', "cache-control": "private, no-store" } });
+  }
   const buffer = await toXlsx("Assessment", columns, rows);
+  await recordExportAudit(auditContext);
   return new NextResponse(new Uint8Array(buffer), { headers: { "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "content-disposition": 'attachment; filename="assessment.xlsx"', "cache-control": "private, no-store" } });
 }

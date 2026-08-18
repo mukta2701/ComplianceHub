@@ -100,13 +100,11 @@ Phase B took every compliance workflow that a 10–20 person organisation used t
 - Add an audit-pack export that bundles all registers, the finalised SoA snapshot and the evidence index into a single workbook or zip for auditors.
 - Add an XLSX import round-trip (the planned Phase B.5) so exported workbooks re-import cleanly.
 - Produce styled, branded XLSX output (formatted header row, sensible column widths, auto-filters) so the export can genuinely replace the workbooks.
-- Rate-limit and audit the export route handlers (create actions are already rate-limited; the export endpoints only auth-check).
+- Rate-limit and audit the export route handlers (closed: every authenticated CSV/XLSX/PDF/DOCX export now has a per-workspace/user limiter and durable audit event).
 
 ## Deferred hardening
 
-The following review items remain open:
-
-The following previously reported items are now closed and tracked as `Done` in `docs/feature-backlog.csv`: CSV formula-injection protection, XLSX import round-trip, XLSX content round-trip coverage, risk-matrix policy identity and active-workspace reads, RTP delete errors, asset-link empty-id guards, category position collision, export filename/button coverage, evidence owner fallback, and server-side SoA owner-membership validation.
+The following previously reported items are now closed and tracked as `Done` in `docs/feature-backlog.csv`: CSV formula-injection protection, XLSX import round-trip, XLSX content round-trip coverage, risk-matrix policy identity and active-workspace reads, RTP delete errors, asset-link empty-id guards, category position collision, export filename/button coverage, export rate-limit/audit coverage, evidence owner fallback, policy-evidence rate limiting and policy-scoped unlinking, and server-side SoA owner-membership validation.
 
 ---
 
@@ -156,7 +154,7 @@ The following previously reported items are now closed and tracked as `Done` in 
 - Push-to-tracker from findings and risks (not only tasks); bulk-push overdue remediation.
 - Move integration tokens to Supabase Vault / an encrypted column before any real connection (go-live hardening, already flagged on the connect checklist).
 
-**Deferred hardening (from the whole-branch review):** policy evidence link/unlink actions lack the rate-limit the other policy actions carry and `unlink` deletes by `linkId` without re-scoping to `policyId` (RLS still org-scopes it); `024` pgTAP omits an UPDATE-verb assertion (evidence_links has no UPDATE path); poll-cron per-ticket errors now isolated (returns `{synced, failed}`) but failures are counted, not logged per-row.
+**Deferred hardening (from the whole-branch review):** `024` pgTAP omits an UPDATE-verb assertion (evidence_links has no UPDATE path); poll-cron per-ticket errors now isolated (returns `{synced, failed}`) but failures are counted, not logged per-row.
 
 ## Internal MCP + daily Slack digest (shipped)
 

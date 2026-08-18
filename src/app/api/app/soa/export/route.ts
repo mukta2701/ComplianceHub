@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAppContext } from "@/lib/app-context";
 import { toCsv, toXlsx, type ExportColumn } from "@/features/exports/exports";
+import { protectExport, recordExportAudit } from "@/features/exports/export-audit";
 import { SOA_STATUS_LABEL, type SoaStatus } from "@/features/soa/domain/soa";
 import { one } from "@/lib/supabase/one";
 
@@ -8,9 +9,11 @@ type Row = { control_code: string; control_title: string; applicable: boolean; s
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const format = url.searchParams.get("format") === "csv" ? "csv" : "xlsx";
+  const format: "csv" | "xlsx" = url.searchParams.get("format") === "csv" ? "csv" : "xlsx";
   const requestedRegisterId = url.searchParams.get("registerId");
-  const { supabase, organisation } = await requireAppContext();
+  const { supabase, organisation, user } = await requireAppContext();
+  const auditContext = { organisationId: organisation.id, userId: user.id, resource: "soa" as const, format };
+  await protectExport(auditContext);
   let registerId = requestedRegisterId;
   if (!registerId) {
     const { data: latest } = await supabase.from("soa_registers").select("id").eq("organisation_id", organisation.id).order("updated_at", { ascending: false }).limit(1).maybeSingle();
@@ -37,7 +40,11 @@ export async function GET(request: Request) {
     { header: "Owner", value: (i) => (i.owner_id ? ownerName.get(i.owner_id) ?? "" : "") },
     { header: "Comments", value: (i) => i.evidence },
   ];
-  if (format === "csv") return new NextResponse(toCsv(columns, rows), { headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": 'attachment; filename="statement-of-applicability.csv"', "cache-control": "private, no-store" } });
+  if (format === "csv") {
+    await recordExportAudit(auditContext);
+    return new NextResponse(toCsv(columns, rows), { headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": 'attachment; filename="statement-of-applicability.csv"', "cache-control": "private, no-store" } });
+  }
   const buffer = await toXlsx("SoA", columns, rows);
+  await recordExportAudit(auditContext);
   return new NextResponse(new Uint8Array(buffer), { headers: { "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "content-disposition": 'attachment; filename="statement-of-applicability.xlsx"', "cache-control": "private, no-store" } });
 }

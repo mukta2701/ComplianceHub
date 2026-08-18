@@ -2,12 +2,15 @@ import { NextResponse } from "next/server";
 import { requireAppContext } from "@/lib/app-context";
 import { generateSoaDocx, generateSoaPdf, type SoaExportView } from "@/features/soa/application/export";
 import { one } from "@/lib/supabase/one";
+import { protectExport, recordExportAudit } from "@/features/exports/export-audit";
 
 export async function GET(_: Request, { params }: { params: Promise<{ snapshotId: string; format: string }> }) {
   const { snapshotId, format } = await params;
   if (!new Set(["pdf", "docx"]).has(format)) return NextResponse.json({ error: "Unsupported format" }, { status: 404 });
 
-  const { supabase, organisation } = await requireAppContext();
+  const { supabase, organisation, user } = await requireAppContext();
+  const auditContext = { organisationId: organisation.id, userId: user.id, resource: "soa_snapshot" as const, format: format as "pdf" | "docx" };
+  await protectExport(auditContext);
   const { data } = await supabase
     .from("soa_snapshots")
     .select("id,title,version,organisation_name,finalised_at,finalised_by,assessment_session_id,items,catalogue_versions(version)")
@@ -35,6 +38,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ snapshotId
     })),
   };
   const buffer = format === "pdf" ? await generateSoaPdf(view) : await generateSoaDocx(view);
+  await recordExportAudit(auditContext);
   return new NextResponse(new Uint8Array(buffer), {
     headers: {
       "content-type": format === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document",

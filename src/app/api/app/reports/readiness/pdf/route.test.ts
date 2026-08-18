@@ -5,6 +5,8 @@ const hoisted = vi.hoisted(() => ({
   snapshot: null as null | Record<string, unknown>,
   loadReadinessInput: vi.fn().mockResolvedValue({}),
   generateReadinessPdf: vi.fn().mockResolvedValue(Buffer.from("pdf")),
+  protectExport: vi.fn(),
+  recordExportAudit: vi.fn(),
   from: vi.fn(),
 }));
 
@@ -13,17 +15,21 @@ vi.mock("@/lib/app-context", () => ({
     supabase: { from: hoisted.from },
     organisation: { id: "org-1", name: "Live organisation name" },
     membership: { role: hoisted.role },
+    user: { id: "user-1" },
   }),
 }));
 vi.mock("@/features/reports/application/load-readiness", () => ({ loadReadinessInput: hoisted.loadReadinessInput }));
 vi.mock("@/features/reports/domain/readiness-report", () => ({ buildReadinessReport: vi.fn(() => ({ soaTotal: 99 })) }));
 vi.mock("@/features/reports/application/readiness-pdf", () => ({ generateReadinessPdf: hoisted.generateReadinessPdf }));
+vi.mock("@/features/exports/export-audit", () => ({ protectExport: hoisted.protectExport, recordExportAudit: hoisted.recordExportAudit }));
 
 import { GET } from "./route";
 
 describe("readiness PDF role source", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    hoisted.protectExport.mockResolvedValue(undefined);
+    hoisted.recordExportAudit.mockResolvedValue(undefined);
     hoisted.snapshot = null;
     const result = () => Promise.resolve({ data: hoisted.snapshot, error: null });
     const chain = { select: vi.fn(), eq: vi.fn(), order: vi.fn(), limit: vi.fn(), maybeSingle: vi.fn(result) };
@@ -45,6 +51,8 @@ describe("readiness PDF role source", () => {
     expect(hoisted.loadReadinessInput).not.toHaveBeenCalled();
     expect(hoisted.generateReadinessPdf).toHaveBeenCalledWith(payload, "Published organisation name");
     expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(hoisted.protectExport).toHaveBeenCalledWith({ organisationId: "org-1", userId: "user-1", resource: "readiness", format: "pdf" });
+    expect(hoisted.recordExportAudit).toHaveBeenCalledWith({ organisationId: "org-1", userId: "user-1", resource: "readiness", format: "pdf" });
   });
 
   it("returns a private 404 when no Member snapshot has been published", async () => {
@@ -65,5 +73,7 @@ describe("readiness PDF role source", () => {
     expect(response.status).toBe(200);
     expect(hoisted.loadReadinessInput).toHaveBeenCalledWith(expect.anything(), "org-1");
     expect(hoisted.generateReadinessPdf).toHaveBeenCalledWith({ soaTotal: 99 }, "Live organisation name");
+    expect(hoisted.protectExport).toHaveBeenCalledWith({ organisationId: "org-1", userId: "user-1", resource: "readiness", format: "pdf" });
+    expect(hoisted.recordExportAudit).toHaveBeenCalledWith({ organisationId: "org-1", userId: "user-1", resource: "readiness", format: "pdf" });
   });
 });

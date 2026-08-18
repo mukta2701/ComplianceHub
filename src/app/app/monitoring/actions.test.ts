@@ -44,7 +44,7 @@ describe("runMonitoringNowAction", () => {
 
   for (const role of ["owner", "admin"] as const) {
     it(`allows ${role}s to run monitoring`, async () => {
-      hoisted.ctx = { membership: { role }, organisation: { id: "20000000-0000-4000-8000-000000000001" } };
+      hoisted.ctx = { membership: { role }, user: { id: "user-1" }, organisation: { id: "20000000-0000-4000-8000-000000000001" } };
       hoisted.createServiceClient.mockReturnValue({ service: true });
       hoisted.runMonitoring.mockResolvedValue(undefined);
 
@@ -52,6 +52,10 @@ describe("runMonitoringNowAction", () => {
 
       expect(hoisted.createServiceClient).toHaveBeenCalledOnce();
       expect(hoisted.runMonitoring).toHaveBeenCalledOnce();
+      expect(hoisted.enforceRateLimit).toHaveBeenCalledWith(
+        "monitoring:20000000-0000-4000-8000-000000000001:user-1",
+        { limit: 5, windowMs: 60_000 },
+      );
     });
   }
 });

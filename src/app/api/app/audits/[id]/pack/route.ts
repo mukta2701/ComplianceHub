@@ -1,14 +1,17 @@
 import { NextResponse } from "next/server";
 import { requireAppContext } from "@/lib/app-context";
 import { toCsv, toXlsx, type ExportColumn } from "@/features/exports/exports";
+import { protectExport, recordExportAudit } from "@/features/exports/export-audit";
 import { CHECKLIST_RESULT_LABEL, FINDING_SEVERITY_LABEL, FINDING_STATUS_LABEL, type ChecklistResult, type FindingSeverity, type FindingStatus } from "@/features/audits/domain/audits";
 
 type PackRow = { section: string; ref: string; item: string; result: string; detail: string };
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const format = new URL(request.url).searchParams.get("format") === "csv" ? "csv" : "xlsx";
-  const { supabase, organisation } = await requireAppContext();
+  const format: "csv" | "xlsx" = new URL(request.url).searchParams.get("format") === "csv" ? "csv" : "xlsx";
+  const { supabase, organisation, user } = await requireAppContext();
+  const auditContext = { organisationId: organisation.id, userId: user.id, resource: "audits" as const, format };
+  await protectExport(auditContext);
   const { data: audit } = await supabase.from("audits").select("reference,title").eq("id", id).eq("organisation_id", organisation.id).maybeSingle();
   if (!audit) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const [{ data: items }, { data: findings }] = await Promise.all([
@@ -23,15 +26,17 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     { header: "Section", value: (r) => r.section }, { header: "Reference", value: (r) => r.ref },
     { header: "Item", value: (r) => r.item }, { header: "Result", value: (r) => r.result }, { header: "Detail", value: (r) => r.detail },
   ];
-  const safeReference = audit.reference.replace(/["\r\n]/g, "");
+  const safeReference = audit.reference.replace(/[^A-Za-z0-9._ -]/g, "").trim() || "audit";
   const filename = `audit-pack-${safeReference}`;
   const encodedFilename = encodeURIComponent(`audit-pack-${audit.reference}`);
   if (format === "csv") {
+    await recordExportAudit(auditContext);
     return new NextResponse(toCsv(columns, rows), { headers: {
       "content-type": "text/csv; charset=utf-8",
       "content-disposition": `attachment; filename="${filename}.csv"; filename*=UTF-8''${encodedFilename}.csv`, "cache-control": "private, no-store" } });
   }
   const buffer = await toXlsx("Audit pack", columns, rows);
+  await recordExportAudit(auditContext);
   return new NextResponse(new Uint8Array(buffer), { headers: {
     "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "content-disposition": `attachment; filename="${filename}.xlsx"; filename*=UTF-8''${encodedFilename}.xlsx`, "cache-control": "private, no-store" } });

@@ -137,7 +137,7 @@ describe("policy evidence unlink workspace boundary", () => {
     const form = new FormData();
     form.set("policyId", POLICY_ID);
     form.set("linkId", LINK_ID);
-    await expect(unlinkPolicyEvidenceAction(form)).resolves.toBeUndefined();
+    await expect(unlinkPolicyEvidenceAction(form)).rejects.toThrow("Evidence link was not found in this policy");
     expect(hoisted.writes).toEqual([]);
   });
 });
