@@ -20,7 +20,12 @@ vi.mock("@/features/ai/domain/context", () => ({ buildAutomationProposalAiContex
 vi.mock("@/lib/security/secrets", () => ({ decryptSecret: vi.fn() }));
 vi.mock("next/cache", () => ({ revalidatePath: hoisted.revalidatePath }));
 
-import { generateAutomationExplanationAction, reviewAutomationProposalAction } from "./actions";
+import { createSupabaseServiceClient } from "@/lib/supabase/service";
+import {
+  generateAutomationExplanationAction,
+  reviewAutomationProposalAction,
+  revokeAutomationConnectionAction,
+} from "./actions";
 
 const organisation = { id: "00000000-0000-4000-8000-000000000001" };
 const user = { id: "00000000-0000-4000-8000-000000000002" };
@@ -103,5 +108,52 @@ describe("reviewAutomationProposalAction workspace boundary", () => {
 
     await expect(reviewAutomationProposalAction(form)).rejects.toThrow("Automation draft not found");
     expect(rpc).not.toHaveBeenCalled();
+  });
+});
+
+describe("revokeAutomationConnectionAction workspace boundary", () => {
+  it("keeps the active organisation predicate on the connector mutation", async () => {
+    const connectorUpdateFilters: [string, unknown][] = [];
+    const builder = (table: string) => {
+      let updating = false;
+      const chain: Record<string, unknown> = {
+        select() { return chain; },
+        update() { updating = true; return chain; },
+        eq(column: string, value: unknown) {
+          if (table === "connector_connections" && updating) {
+            connectorUpdateFilters.push([column, value]);
+          }
+          return chain;
+        },
+        contains() { return chain; },
+        neq() { return chain; },
+        maybeSingle() { return Promise.resolve({ data: { id: "connection-1" }, error: null }); },
+        then(onfulfilled: (value: { data: unknown[]; error: null }) => unknown) {
+          return Promise.resolve(onfulfilled({ data: [], error: null }));
+        },
+      };
+      return chain;
+    };
+    const supabase = {
+      from(table: string) {
+        if (table === "connector_connections") {
+          const chain = builder(table);
+          const originalEq = chain.eq as (column: string, value: unknown) => unknown;
+          chain.eq = (column: string, value: unknown) => {
+            return originalEq(column, value);
+          };
+          return chain;
+        }
+        return builder(table);
+      },
+    };
+    const service = { from: (table: string) => builder(table) };
+    vi.mocked(createSupabaseServiceClient).mockReturnValue(service as never);
+    hoisted.ctx = { supabase, user, organisation, membership: { role: "owner" } };
+
+    const form = formData("connection-1");
+    await revokeAutomationConnectionAction(form);
+
+    expect(connectorUpdateFilters).toContainEqual(["organisation_id", organisation.id]);
   });
 });

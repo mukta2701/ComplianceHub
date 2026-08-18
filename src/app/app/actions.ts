@@ -145,7 +145,18 @@ export async function createSoaAction(formData: FormData) {
 export async function reviewSoaItemAction(formData: FormData) {
   const { supabase, organisation } = await requireAppContext();
   const parsed = soaItemReviewSchema.parse({ itemId: formData.get("itemId"), status: formData.get("status"), applicable: formData.get("applicable") === "true", justification: formData.get("justification"), evidence: formData.get("evidence") });
-  const ownerId = String(formData.get("ownerId")) || null;
+  const rawOwnerId = formData.get("ownerId");
+  const ownerId = rawOwnerId ? z.uuid().parse(String(rawOwnerId)) : null;
+  if (ownerId) {
+    const { data: owner, error: ownerError } = await supabase
+      .from("memberships")
+      .select("user_id")
+      .eq("organisation_id", organisation.id)
+      .eq("user_id", ownerId)
+      .maybeSingle();
+    if (ownerError) throw new Error("Could not verify SoA item owner");
+    if (!owner) throw new Error("SoA owner must be a member of the active workspace");
+  }
   const { data: updated, error } = await supabase
     .from("soa_items")
     .update({ status: parsed.status, applicable: parsed.applicable, justification: parsed.justification, evidence: parsed.evidence, owner_id: ownerId })

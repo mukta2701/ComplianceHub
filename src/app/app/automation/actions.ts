@@ -96,7 +96,9 @@ export async function revokeAutomationConnectionAction(formData: FormData) {
   if (readError || !connection) throw new Error("Automation connection not found");
   const now = new Date().toISOString();
   const { error: revokeError } = await supabase.from("connector_connections")
-    .update({ status: "revoked", revoked_at: now }).eq("id", connection.id);
+    .update({ status: "revoked", revoked_at: now })
+    .eq("id", connection.id)
+    .eq("organisation_id", organisation.id);
   if (revokeError) throw new Error("Could not disconnect the automation system");
   const { error: sourceRevokeError } = await supabase.from("evidence_sources")
     .update({ revoked_at: now, access_token: null, refresh_token: null })

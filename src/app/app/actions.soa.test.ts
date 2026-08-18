@@ -15,6 +15,7 @@ vi.mock("next/navigation", () => ({ redirect: hoisted.redirect }));
 type Row = Record<string, unknown>;
 type Store = {
   assessment_sessions: Row[];
+  memberships: Row[];
   soa_registers: Row[];
   soa_items: Row[];
   requirement_control_mappings: Row[];
@@ -109,6 +110,7 @@ const ITEM_ID = "00000000-0000-4000-8000-000000000005";
 const REQUIREMENT_ID = "00000000-0000-4000-8000-000000000006";
 const CONTROL_ID = "00000000-0000-4000-8000-000000000007";
 const OWNER_ID = "00000000-0000-4000-8000-000000000008";
+const OTHER_OWNER_ID = "00000000-0000-4000-8000-000000000010";
 
 function formData() {
   const data = new FormData();
@@ -144,6 +146,7 @@ function context(client: ReturnType<typeof fakeSupabase>["client"]) {
 function reviewedStore(): Store {
   return {
     assessment_sessions: [{ id: ASSESSMENT_ID, organisation_id: ORG_ID }],
+    memberships: [{ organisation_id: ORG_ID, user_id: OWNER_ID }],
     soa_registers: [{ id: REGISTER_ID, organisation_id: ORG_ID }],
     soa_items: [{
       id: ITEM_ID,
@@ -287,5 +290,24 @@ describe("reviewSoaItemAction tenant scope", () => {
 
     await expect(reviewSoaItemAction(reviewFormData("00000000-0000-4000-8000-000000000099")))
       .rejects.toThrow("SoA item not found in the active workspace");
+  });
+
+  it("rejects an owner who is not a member of the active organisation", async () => {
+    const store = reviewedStore();
+    store.memberships = [{ organisation_id: OTHER_ORG_ID, user_id: OTHER_OWNER_ID }];
+    const fake = fakeSupabase(store);
+    hoisted.ctx = context(fake.client);
+    const { reviewSoaItemAction } = await import("./actions");
+
+    await expect(reviewSoaItemAction(reviewFormData(ITEM_ID))).rejects.toThrow(
+      "SoA owner must be a member of the active workspace",
+    );
+    expect(store.soa_items[0].status).toBe("operational");
+    expect(fake.queries).toContainEqual({
+      table: "memberships",
+      operation: "eq",
+      column: "organisation_id",
+      value: ORG_ID,
+    });
   });
 });

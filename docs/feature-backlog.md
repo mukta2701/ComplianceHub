@@ -106,9 +106,7 @@ Phase B took every compliance workflow that a 10–20 person organisation used t
 
 The following review items remain open:
 
-- **`reviewSoaItemAction` lacks server-side owner-membership re-validation** — the composite FK backstops it and the UI is unreachable for a non-member, but there is no explicit server check (Task 7 minor).
-
-The following previously reported items are now closed and tracked as `Done` in `docs/feature-backlog.csv`: CSV formula-injection protection, XLSX content round-trip coverage, risk-matrix policy identity and active-workspace reads, RTP delete errors, asset-link empty-id guards, category position collision, export filename/button coverage, and the evidence owner fallback.
+The following previously reported items are now closed and tracked as `Done` in `docs/feature-backlog.csv`: CSV formula-injection protection, XLSX import round-trip, XLSX content round-trip coverage, risk-matrix policy identity and active-workspace reads, RTP delete errors, asset-link empty-id guards, category position collision, export filename/button coverage, evidence owner fallback, and server-side SoA owner-membership validation.
 
 ---
 
