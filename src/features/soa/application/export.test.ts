@@ -1,3 +1,5 @@
+import { inflateRawSync, inflateSync } from "node:zlib";
+import yauzl from "yauzl";
 import { describe, expect, it } from "vitest";
 import { buildSoaExportView, generateSoaDocx, generateSoaPdf } from "./export";
 import type { SoaSnapshot } from "../domain/soa";
@@ -6,6 +8,67 @@ const snapshot: SoaSnapshot = {
   assessmentId: "assessment-1", version: 2, finalisedAt: "2026-07-02T08:00:00.000Z", finalisedBy: "Alex Owner",
   items: [{ questionId: "A.1", suggestedStatus: "operational", status: "operational", reviewed: true, justification: "Required for operations", evidence: "Policy-01" }],
 };
+
+function extractPdfText(buffer: Buffer): string {
+  const source = buffer.toString("latin1");
+  const chunks: string[] = [];
+  let cursor = 0;
+  while (true) {
+    const streamStart = source.indexOf("stream", cursor);
+    if (streamStart < 0) break;
+    const dataStart = source.charCodeAt(streamStart + 6) === 13 && source.charCodeAt(streamStart + 7) === 10
+      ? streamStart + 8
+      : streamStart + 7;
+    const streamEnd = source.indexOf("endstream", dataStart);
+    if (streamEnd < 0) break;
+    const compressed = buffer.subarray(dataStart, streamEnd);
+    try {
+      chunks.push(inflateSync(compressed).toString("latin1"));
+    } catch {
+      try {
+        chunks.push(inflateRawSync(compressed).toString("latin1"));
+      } catch {
+        // Ignore non-content streams such as metadata and continue reading.
+      }
+    }
+    cursor = streamEnd + 9;
+  }
+  return chunks.join("\n").replace(/<([0-9a-fA-F]+)>/g, (_match, hex: string) => Buffer.from(hex, "hex").toString("latin1"));
+}
+
+function extractDocxText(buffer: Buffer): Promise<string> {
+  return new Promise((resolve, reject) => {
+    yauzl.fromBuffer(buffer, { lazyEntries: true }, (error, archive) => {
+      if (error || !archive) {
+        reject(error ?? new Error("DOCX archive could not be opened"));
+        return;
+      }
+      archive.readEntry();
+      archive.on("entry", (entry) => {
+        if (entry.fileName !== "word/document.xml") {
+          archive.readEntry();
+          return;
+        }
+        archive.openReadStream(entry, (streamError, stream) => {
+          if (streamError || !stream) {
+            archive.close();
+            reject(streamError ?? new Error("DOCX document stream could not be opened"));
+            return;
+          }
+          const chunks: Buffer[] = [];
+          stream.on("data", (chunk: Buffer) => chunks.push(chunk));
+          stream.on("error", reject);
+          stream.on("end", () => {
+            archive.close();
+            resolve(Buffer.concat(chunks).toString("utf8"));
+          });
+        });
+      });
+      archive.on("end", () => reject(new Error("DOCX document.xml entry was not found")));
+      archive.on("error", reject);
+    });
+  });
+}
 
 describe("SoA exports", () => {
   it("builds one deterministic view model used by every format", () => {
@@ -23,5 +86,16 @@ describe("SoA exports", () => {
   it("generates a valid DOCX archive", async () => {
     const buffer = await generateSoaDocx(buildSoaExportView(snapshot, { organisationName: "Acme Ltd", catalogueVersion: "2022-v1" }));
     expect(buffer.subarray(0, 2).toString()).toBe("PK");
+  });
+
+  it("keeps the finalised snapshot identity in both exports", async () => {
+    const view = buildSoaExportView(snapshot, { organisationName: "Acme Ltd", catalogueVersion: "2022-v1" });
+    const [pdf, docx] = await Promise.all([generateSoaPdf(view), generateSoaDocx(view)]);
+    const pdfText = extractPdfText(pdf);
+    const docxText = await extractDocxText(docx);
+
+    expect(pdfText).toContain("Assessment:");
+    expect(pdfText).toContain("assessment-1");
+    expect(docxText).toContain("Assessment: assessment-1");
   });
 });

@@ -1,6 +1,6 @@
 export function playwrightWebServerCommand(input: { ci: boolean; port: number }): string {
-  const script = input.ci ? "start" : "dev";
-  return `npm run ${script} -- --port ${input.port}`;
+  if (input.ci) return `bash scripts/playwright-production-server.sh ${input.port}`;
+  return `npm run dev -- --port ${input.port}`;
 }
 
 export function playwrightWorkerCount(input: { ci: boolean }): number | undefined {

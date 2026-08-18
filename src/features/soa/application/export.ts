@@ -26,7 +26,7 @@ export function generateSoaPdf(view: SoaExportView): Promise<Buffer> {
     document.on("end", () => resolve(Buffer.concat(chunks)));
     document.on("error", reject);
     document.fontSize(20).text(view.title).moveDown();
-    document.fontSize(10).text(`Organisation: ${view.organisationName}`).text(`Catalogue: ${view.catalogueVersion}`).text(`Version: ${view.version}`).text(`Finalised: ${view.finalisedAt} by ${view.finalisedBy}`).moveDown();
+    document.fontSize(10).text(`Organisation: ${view.organisationName}`).text(`Catalogue: ${view.catalogueVersion}`).text(`Version: ${view.version}`).text(`Assessment: ${view.assessmentId}`).text(`Finalised: ${view.finalisedAt} by ${view.finalisedBy}`).moveDown();
     for (const item of view.items) {
       if (document.y > 700) document.addPage();
       document.fontSize(12).text(`${item.reference} — ${item.statusLabel}`, { continued: false });
@@ -44,7 +44,7 @@ export async function generateSoaDocx(view: SoaExportView): Promise<Buffer> {
   const document = new Document({ sections: [{ children: [
     new Paragraph({ text: view.title, heading: HeadingLevel.TITLE }),
     new Paragraph(`Organisation: ${view.organisationName}`), new Paragraph(`Catalogue: ${view.catalogueVersion}`),
-    new Paragraph(`Version: ${view.version}`), new Paragraph(`Finalised: ${view.finalisedAt} by ${view.finalisedBy}`),
+    new Paragraph(`Version: ${view.version}`), new Paragraph(`Assessment: ${view.assessmentId}`), new Paragraph(`Finalised: ${view.finalisedAt} by ${view.finalisedBy}`),
     new Table({ rows }),
   ] }] });
   return Packer.toBuffer(document);
