@@ -142,7 +142,18 @@ jobs:
           fi
           github_ref_count="$(jq '[.[] | select(.name | startswith("GITHUB_"))] | length' <<< "$current_environment")"
           github_ref_names="$(jq -r '[.[] | select(.name | startswith("GITHUB_")) | .name] | sort | join(",")' <<< "$current_environment")"
-          expected_github_ref_names="GITHUB_ALLOWED_ACCOUNT_ID,GITHUB_APPROVED_SECURITY_WORKFLOW_IDS,GITHUB_APP_CLIENT_ID,GITHUB_APP_CLIENT_SECRET,GITHUB_APP_ID,GITHUB_APP_PRIVATE_KEY,GITHUB_APP_SLUG,GITHUB_WEBHOOK_SECRET"
+          expected_github_ref_names="$(
+            printf '%s,' \
+              GITHUB_ALLOWED_ACCOUNT_ID \
+              GITHUB_APPROVED_SECURITY_WORKFLOW_IDS \
+              GITHUB_APP_CLIENT_ID \
+              GITHUB_APP_CLIENT_SECRET \
+              GITHUB_APP_ID \
+              GITHUB_APP_PRIVATE_KEY \
+              GITHUB_APP_SLUG \
+              GITHUB_WEBHOOK_SECRET \
+            | sed 's/,$//'
+          )"
           while IFS=$'\t' read -r variable reference; do
             [ -z "$variable" ] && continue
             case "$variable" in

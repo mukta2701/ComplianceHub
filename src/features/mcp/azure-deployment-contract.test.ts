@@ -97,7 +97,8 @@ describe("Azure staging deployment contract", () => {
       "GITHUB_APP_SLUG",
       "GITHUB_WEBHOOK_SECRET",
     ].join(",");
-    expect(deploy).toContain(`expected_github_ref_names="${expectedGithubRefNames}"`);
+    for (const name of expectedGithubRefNames.split(",")) expect(deploy).toContain(name);
+    expect(deploy).toMatch(/expected_github_ref_names="\$\(\s*printf '%s,'[\s\S]*\| sed 's\/\,\$\/\/'\s*\)/);
     expect(deploy).toContain('test "$github_ref_names" = "$expected_github_ref_names"');
     expect(deploy).toMatch(/for required_value in[\s\S]*test -n "\$required_value"[\s\S]*az containerapp secret set/);
     expect(deploy).toMatch(/approved_workflow_ids[\s\S]*-le 20[\s\S]*seen_workflow_ids/);
