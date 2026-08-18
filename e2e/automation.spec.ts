@@ -1,22 +1,76 @@
-import { expect, test } from "@playwright/test";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { createClient } from "@supabase/supabase-js";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { AxeBuilder } from "@axe-core/playwright";
+
+function createTestPassword(seed: string): string {
+  const digest = createHash("sha256").update(`playwright:${seed}`).digest("hex").slice(0, 24);
+  return `E2e-${digest}-Aa1!`;
+}
+
+function localEnvironment(name: string): string {
+  if (process.env[name]) return process.env[name] as string;
+  const line = readFileSync(path.join(process.cwd(), ".env.local"), "utf8")
+    .split("\n")
+    .find((candidate) => candidate.startsWith(`${name}=`));
+  if (!line) throw new Error(`${name} is required for this end-to-end test`);
+  return line.slice(name.length + 1);
+}
+
+async function confirmLocalUser(email: string): Promise<void> {
+  const admin = createClient(
+    localEnvironment("NEXT_PUBLIC_SUPABASE_URL"),
+    localEnvironment("SUPABASE_SERVICE_ROLE_KEY"),
+    { auth: { persistSession: false, autoRefreshToken: false } },
+  );
+  let userId: string | null = null;
+  for (let page = 1; page <= 10 && userId === null; page += 1) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 1_000 });
+    if (error) throw error;
+    userId = data.users.find((user) => user.email === email)?.id ?? null;
+    if (data.users.length < 1_000) break;
+  }
+  if (!userId) throw new Error("Synthetic automation user was not found for confirmation");
+  const { error } = await admin.auth.admin.updateUserById(userId, { email_confirm: true });
+  if (error) throw error;
+}
+
+async function completeE2eSignUp(page: Page, email: string, password: string): Promise<void> {
+  await Promise.all([
+    page.waitForURL((url) => ["/sign-in", "/app", "/app/onboarding"].includes(url.pathname)),
+    page.getByRole("button", { name: "Create account" }).click(),
+  ]);
+  await confirmLocalUser(email);
+  if (new URL(page.url()).pathname === "/sign-in") {
+    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Password").fill(password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+  }
+  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
+}
+
+async function submitServerAction(page: Page, button: Locator, pathname: string): Promise<void> {
+  const responsePromise = page.waitForResponse((response) =>
+    response.request().method() === "POST" && new URL(response.url()).pathname === pathname,
+  );
+  const [response] = await Promise.all([responsePromise, button.click()]);
+  expect(response.status()).toBeLessThan(400);
+}
 
 test("a workspace turns selected systems into reviewable automation evidence", async ({ page }, testInfo) => {
   const suffix = `${Date.now()}-${testInfo.project.name}`;
   const email = `automation-${suffix}@example.test`;
-  const password = `${suffix}-AutomationA1!`;
+  const password = createTestPassword(suffix);
   await page.goto("/sign-up");
   await page.getByLabel("Name").fill("Automation Owner");
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
-  await page.getByRole("button", { name: "Create account" }).click();
-  await page.waitForURL(/\/sign-in/);
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await completeE2eSignUp(page, email, password);
   await page.getByLabel("Organisation name").fill(`Automation Workspace ${suffix}`);
-  await page.getByRole("button", { name: "Create workspace" }).click();
+  await submitServerAction(page, page.getByRole("button", { name: "Create workspace" }), "/app");
   await page.goto("/app/setup");
   await expect(page.getByRole("heading", { name: "Connect the systems that already know your work" })).toBeVisible();
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);

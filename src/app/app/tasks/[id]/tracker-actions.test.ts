@@ -7,6 +7,7 @@ const TASK_ID = "20000000-0000-4000-8000-000000000004";
 
 const hoisted = vi.hoisted(() => ({
   ctx: null as unknown,
+  serviceClient: null as unknown,
   createTicket: vi.fn(),
   enforceRateLimit: vi.fn(),
   revalidatePath: vi.fn(),
@@ -16,6 +17,7 @@ const hoisted = vi.hoisted(() => ({
 vi.mock("@/lib/app-context", () => ({ requireAppContext: () => Promise.resolve(hoisted.ctx) }));
 vi.mock("@/lib/security/rate-limit", () => ({ enforceRateLimit: hoisted.enforceRateLimit }));
 vi.mock("@/lib/security/secrets", () => ({ decryptSecret: (value: string | null) => value }));
+vi.mock("@/lib/supabase/service", () => ({ createSupabaseServiceClient: () => hoisted.serviceClient }));
 vi.mock("@/features/integrations/application/registry", () => ({
   resolveTicketProvider: hoisted.resolve,
 }));
@@ -63,8 +65,12 @@ describe("pushTaskToTrackerAction", () => {
     });
     const taskQuery = readableRow({ id: TASK_ID, title: "Fix drift", detail: "Protect main", source: "monitoring", controls: { code: "A.8.32" } });
     const insert = vi.fn().mockResolvedValue({ error: null });
-    const from = vi.fn((table: string) => {
+    const serviceFrom = vi.fn((table: string) => {
       if (table === "integration_connections") return connectionQuery;
+      throw new Error(`Unexpected service table ${table}`);
+    });
+    hoisted.serviceClient = { from: serviceFrom };
+    const from = vi.fn((table: string) => {
       if (table === "tasks") return taskQuery;
       if (table === "task_tickets") return { insert };
       throw new Error(`Unexpected table ${table}`);
@@ -75,6 +81,8 @@ describe("pushTaskToTrackerAction", () => {
 
     await pushTaskToTrackerAction(form());
 
+    expect(serviceFrom).toHaveBeenCalledWith("integration_connections");
+    expect(from).not.toHaveBeenCalledWith("integration_connections");
     expect(connectionQuery.select).toHaveBeenCalledWith(
       "id,provider,config,access_token,connection_mode,broker_connection_id,broker_provider_config_key",
     );
