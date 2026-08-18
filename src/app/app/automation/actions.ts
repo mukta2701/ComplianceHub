@@ -11,6 +11,7 @@ import { purgeContentReference } from "@/features/automation/domain/retention";
 import { configuredAiProvider } from "@/features/ai/application/openai-compatible";
 import { generateAiSuggestion } from "@/features/ai/application/suggestion";
 import { buildAutomationProposalAiContext } from "@/features/ai/domain/context";
+import { decryptSecret } from "@/lib/security/secrets";
 
 export async function reviewAutomationProposalAction(formData: FormData) {
   const { supabase, user } = await requireAppContext();
@@ -29,6 +30,58 @@ export async function reviewAutomationProposalAction(formData: FormData) {
   revalidatePath("/app/automation");
   revalidatePath("/app/evidence");
   revalidatePath("/app/tasks");
+}
+
+export async function createAutomationTaskDraftAction(formData: FormData) {
+  const { supabase, user, organisation } = await requireAppContext();
+  await enforceRateLimit(`automation-task-draft:${user.id}`, { limit: 20, windowMs: 60_000 });
+  const proposalId = String(formData.get("id") ?? "");
+  const { data: proposal, error: proposalError } = await supabase.from("automation_proposals")
+    .select("id,target_type,assigned_to,status,output,automation_signals(summary)")
+    .eq("id", proposalId).eq("organisation_id", organisation.id).eq("assigned_to", user.id).eq("status", "draft").maybeSingle();
+  if (proposalError || !proposal) throw new Error("Automation draft not found or already reviewed");
+  const output = proposal.output && typeof proposal.output === "object" ? proposal.output as { title?: unknown; why?: unknown; recommendedAction?: unknown } : {};
+  const title = typeof output.title === "string" && output.title.trim() ? output.title.trim() : "Automation remediation review";
+  const marker = `[automation-proposal:${proposal.id}]`;
+  const { data: existing, error: existingError } = await supabase.from("tasks").select("id").eq("organisation_id", organisation.id).eq("created_by", user.id).eq("detail", marker).maybeSingle();
+  if (existingError) throw new Error("Could not check for an existing task draft");
+  if (!existing) {
+    const { error } = await supabase.from("tasks").insert({
+      organisation_id: organisation.id,
+      title: `Draft remediation: ${title}`.slice(0, 200),
+      detail: marker,
+      status: "open",
+      owner_id: user.id,
+      source: "system",
+      created_by: user.id,
+    });
+    if (error && error.code !== "23505") throw new Error("Could not create the task draft");
+  }
+  revalidatePath("/app/automation");
+  revalidatePath("/app/tasks");
+}
+
+export async function recollectAutomationProposalAction(formData: FormData) {
+  const { supabase, user, organisation } = await requireAppContext();
+  await enforceRateLimit(`automation-recollect:${user.id}`, { limit: 3, windowMs: 60_000 });
+  const proposalId = String(formData.get("id") ?? "");
+  const { data: proposal, error: proposalError } = await supabase.from("automation_proposals")
+    .select("id,assigned_to,status,automation_signals(connection_id)")
+    .eq("id", proposalId).eq("organisation_id", organisation.id).eq("assigned_to", user.id).eq("status", "draft").maybeSingle();
+  const signal = Array.isArray(proposal?.automation_signals) ? proposal?.automation_signals[0] : proposal?.automation_signals;
+  if (proposalError || !proposal || !signal?.connection_id) throw new Error("Automation draft source not found");
+  const service = createSupabaseServiceClient();
+  const { data: connection, error: connectionError } = await service.from("connector_connections")
+    .select("id,provider,status").eq("id", signal.connection_id).eq("organisation_id", organisation.id).maybeSingle();
+  if (connectionError || !connection || connection.status === "revoked") throw new Error("Automation connection is not available");
+  const { data: source, error: sourceError } = await service.from("evidence_sources")
+    .select("provider,config,access_token").eq("organisation_id", organisation.id).eq("provider", connection.provider).contains("config", { automationConnectionId: connection.id }).is("revoked_at", null).maybeSingle();
+  if (sourceError || !source) throw new Error("No recollection source is configured for this connection");
+  const config = (source.config ?? {}) as Record<string, unknown>;
+  const provider = resolveEvidenceProvider(source.provider as EvidenceProviderKind);
+  const collected = await provider.collect({ id: connection.id, provider: source.provider as EvidenceProviderKind, config, accessToken: decryptSecret(source.access_token) ?? "" });
+  for (const item of collected) await persistCollectedAutomation({ supabase: service, organisationId: organisation.id, provider: source.provider as EvidenceProviderKind, config, collected: item });
+  revalidatePath("/app/automation");
 }
 
 export async function revokeAutomationConnectionAction(formData: FormData) {
@@ -72,7 +125,7 @@ export async function generateAutomationBaselineAction() {
     if (!automationConnectionId(config)) continue;
     try {
       const provider = resolveEvidenceProvider(source.provider as EvidenceProviderKind);
-      const collected = await provider.collect({ id: source.id, provider: source.provider as EvidenceProviderKind, config, accessToken: source.access_token ?? "" });
+      const collected = await provider.collect({ id: source.id, provider: source.provider as EvidenceProviderKind, config, accessToken: decryptSecret(source.access_token) ?? "" });
       for (const item of collected) await persistCollectedAutomation({ supabase: service, organisationId: organisation.id, provider: source.provider as EvidenceProviderKind, config, collected: item });
     } catch {
       // Individual connector failures are reflected by the scheduled collector;

@@ -1,12 +1,14 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
 
 function localEnvironment(name: string): string {
   if (process.env[name]) return process.env[name] as string;
-  const line = readFileSync(path.join(process.cwd(), ".env.local"), "utf8")
+  const envPath = path.join(process.cwd(), ".env.local");
+  if (!existsSync(envPath)) throw new Error(`${name} is required for the digest administration end-to-end test`);
+  const line = readFileSync(envPath, "utf8")
     .split("\n")
     .find((candidate) => candidate.startsWith(`${name}=`));
   if (!line) throw new Error(`${name} is required for the digest administration end-to-end test`);

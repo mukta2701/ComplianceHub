@@ -1,7 +1,7 @@
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { expect, request, test, type Locator, type Page, type TestInfo } from "@playwright/test";
@@ -16,7 +16,9 @@ function createTestPassword(seed: string): string {
 // test process does not load Next's env file). Used only by test infrastructure.
 function localEnvironment(name: string): string {
   if (process.env[name]) return process.env[name] as string;
-  const line = readFileSync(path.join(process.cwd(), ".env.local"), "utf8")
+  const envPath = path.join(process.cwd(), ".env.local");
+  if (!existsSync(envPath)) throw new Error(`${name} is required for this end-to-end test`);
+  const line = readFileSync(envPath, "utf8")
     .split("\n")
     .find((candidate) => candidate.startsWith(`${name}=`));
   if (!line) throw new Error(`${name} is required for this end-to-end test`);

@@ -446,3 +446,42 @@ a.heat-cell:hover{outline:2px solid var(--ink);outline-offset:-2px}
 .github-shadow-status{min-height:20px;margin:0;padding:0 var(--ch-space-6) var(--ch-space-4);color:var(--ch-text-muted);font-size:12px}
 .github-shadow-panel button:focus-visible,.github-shadow-panel input:focus-visible,.github-shadow-panel a:focus-visible{outline:none;box-shadow:var(--ch-focus-ring)}
 @media(max-width:760px){.github-shadow-panel-head{align-items:stretch;flex-direction:column}.github-shadow-panel-head .button{width:100%}.github-installation-head{grid-template-columns:1fr}.github-installation-head .button{width:100%}.github-repository{grid-template-columns:1fr}.github-repository-health{justify-content:flex-start;min-width:0}}
+
+/* Automation inbox — review-first presentation */
+.automation-inbox{display:grid;gap:var(--ch-space-4)}
+.automation-inbox-toolbar{display:flex;align-items:end;justify-content:space-between;gap:var(--ch-space-4);padding:var(--ch-space-4);border:1px solid var(--ch-border);border-radius:10px;background:var(--ch-canvas)}
+.automation-inbox-toolbar label{display:grid;gap:6px;color:var(--ch-text-muted);font-size:11px;font-weight:750;letter-spacing:.03em;text-transform:uppercase}
+.automation-inbox-toolbar select{min-height:40px;min-width:210px;padding:8px 10px;border:1px solid var(--ch-border);border-radius:7px;background:var(--ch-surface);color:var(--ch-text);font:inherit;text-transform:none}
+.automation-inbox-note{max-width:45ch;color:var(--ch-text-muted);font-size:11.5px;line-height:1.45;text-align:right}
+.automation-draft-selection{padding:11px 13px;border:1px solid color-mix(in srgb,var(--ch-provider-github) 28%,var(--ch-border));border-radius:8px;background:color-mix(in srgb,var(--ch-provider-github) 7%,var(--ch-surface));color:var(--ch-text);font-size:12px}
+.automation-inbox-empty{margin:0;padding:20px;border:1px dashed var(--ch-border);border-radius:10px;color:var(--ch-text-muted);font-size:13px}
+.automation-inbox-list{display:grid;gap:12px}
+.automation-draft-card{display:grid;gap:12px;padding:18px;border:1px solid var(--ch-border);border-radius:12px;background:var(--ch-surface);box-shadow:0 2px 8px color-mix(in srgb,var(--ch-ink) 4%,transparent)}
+.automation-draft-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+.automation-draft-heading h3{margin:5px 0 0;font-size:16px;letter-spacing:-.01em}
+.automation-confidence{display:inline-flex;flex:none;padding:5px 8px;border-radius:999px;background:var(--ch-canvas);color:var(--ch-text-muted);font-size:10.5px;font-weight:750;text-transform:capitalize}
+.automation-confidence.high{background:var(--ch-confirmed-soft);color:var(--green)}
+.automation-confidence.medium{background:var(--ch-attention-soft);color:var(--amber)}
+.automation-draft-why{margin:0;color:var(--ch-text);font-size:13px;line-height:1.55}
+.automation-draft-only{margin:0;padding:9px 11px;border-left:3px solid var(--amber);background:var(--ch-attention-soft);color:var(--ch-text);font-size:11.5px;line-height:1.45}
+.automation-provenance{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:0;padding:12px 0;border-top:1px solid var(--ch-border);border-bottom:1px solid var(--ch-border)}
+.automation-provenance div{min-width:0}
+.automation-provenance dt{margin-bottom:4px;color:var(--ch-text-muted);font-size:10px;font-weight:750;letter-spacing:.04em;text-transform:uppercase}
+.automation-provenance dd{display:grid;gap:4px;margin:0;color:var(--ch-text);font-size:11.5px;line-height:1.4;overflow-wrap:anywhere}
+.automation-provenance a{color:var(--ch-provider-github);font-size:10.5px;font-weight:700;text-decoration:none}
+.automation-mappings{display:grid;gap:7px;color:var(--ch-text-muted);font-size:11.5px}
+.automation-mappings>div{display:flex;gap:6px;flex-wrap:wrap}
+.automation-mappings span{padding:4px 7px;border:1px solid var(--ch-border);border-radius:5px;background:var(--ch-canvas);color:var(--ch-text);font-size:10.5px;font-weight:700}
+.automation-limitations{color:var(--ch-text-muted);font-size:11.5px}
+.automation-limitations summary{cursor:pointer;font-weight:750;color:var(--ch-text)}
+.automation-limitations p{max-width:80ch;margin:7px 0 0;line-height:1.5}
+.automation-ai{display:grid;gap:5px;padding:12px;border:1px solid color-mix(in srgb,var(--ch-ai-text) 25%,var(--ch-border));border-left:3px solid var(--ch-ai-text);border-radius:8px;background:var(--ch-ai-soft);color:var(--ch-ai-text);font-size:12px;line-height:1.5}
+.automation-ai p,.automation-ai small{margin:0}
+.automation-ai small{font-size:10.5px}
+.automation-draft-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-top:2px}
+.automation-draft-actions form{display:flex;gap:8px;align-items:center}
+.automation-draft-actions .button{min-height:40px}
+.automation-dismiss-form{flex:1 1 280px}
+.automation-dismiss-form input{min-width:0;flex:1 1 200px;min-height:40px}
+@media(max-width:760px){.automation-inbox-toolbar{align-items:stretch;flex-direction:column}.automation-inbox-note{text-align:left}.automation-provenance{grid-template-columns:1fr 1fr}.automation-draft-heading{flex-direction:column}.automation-draft-actions{align-items:stretch;flex-direction:column}.automation-draft-actions form,.automation-draft-actions .button{width:100%}.automation-dismiss-form{align-items:stretch;flex-direction:column}.automation-dismiss-form input{width:100%;flex-basis:auto}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}

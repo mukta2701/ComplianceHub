@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Locator, type Page } from "@playwright/test";
@@ -12,7 +12,9 @@ function isoDate(offsetDays: number): string {
 
 function localEnvironment(name: string): string {
   if (process.env[name]) return process.env[name];
-  const line = readFileSync(path.join(process.cwd(), ".env.local"), "utf8")
+  const envFile = path.join(process.cwd(), ".env.local");
+  if (!existsSync(envFile)) throw new Error(`${name} is required for the Phase 1 end-to-end test`);
+  const line = readFileSync(envFile, "utf8")
     .split("\n")
     .find((candidate) => candidate.startsWith(`${name}=`));
   if (!line) throw new Error(`${name} is required for the Phase 1 end-to-end test`);

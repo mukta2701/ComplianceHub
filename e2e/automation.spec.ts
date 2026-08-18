@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { expect, test, type Locator, type Page } from "@playwright/test";
@@ -12,7 +12,9 @@ function createTestPassword(seed: string): string {
 
 function localEnvironment(name: string): string {
   if (process.env[name]) return process.env[name] as string;
-  const line = readFileSync(path.join(process.cwd(), ".env.local"), "utf8")
+  const envPath = path.join(process.cwd(), ".env.local");
+  if (!existsSync(envPath)) throw new Error(`${name} is required for this end-to-end test`);
+  const line = readFileSync(envPath, "utf8")
     .split("\n")
     .find((candidate) => candidate.startsWith(`${name}=`));
   if (!line) throw new Error(`${name} is required for this end-to-end test`);
@@ -76,10 +78,16 @@ test("a workspace turns selected systems into reviewable automation evidence", a
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await page.getByRole("button", { name: "Save setup and open Automation" }).click();
   await expect(page.getByRole("heading", { name: "Review the work your systems prepared" })).toBeVisible();
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   await page.getByRole("button", { name: "Generate baseline" }).click();
   await expect(page.getByRole("heading", { name: "Review GitHub branch protection evidence" })).toBeVisible();
   const githubDraft = page.getByLabel("Automation draft: Review GitHub branch protection evidence");
+  await githubDraft.getByRole("button", { name: "Use as draft" }).click();
+  await expect(page.getByRole("status").filter({ hasText: /selected as a draft/i })).toBeVisible();
   await githubDraft.getByRole("button", { name: "Accept as evidence" }).click();
+  await expect(githubDraft.getByRole("button", { name: "Confirm acceptance" })).toBeVisible();
+  await githubDraft.getByRole("button", { name: "Confirm acceptance" }).click({ force: true });
   await expect(page.getByRole("status").filter({ hasText: "Evidence accepted" })).toContainText("Review GitHub branch protection evidence");
   await expect(githubDraft).toHaveCount(0);
   await page.goto("/app/evidence");

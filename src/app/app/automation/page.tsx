@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { requireAppContext } from "@/lib/app-context";
 import { Card, EmptyState, PageIntro, Pill, Stat } from "@/components/ui";
-import { generateAutomationBaselineAction, generateAutomationExplanationAction, reviewAutomationProposalAction, revokeAutomationConnectionAction } from "./actions";
+import { generateAutomationBaselineAction, revokeAutomationConnectionAction } from "./actions";
+import { AutomationInbox } from "./automation-inbox";
 
-type ProposalOutput = { title?: string; why?: string; explanation?: string; recommendedAction?: string; state?: string; confidence?: string };
+type ProposalOutput = { title?: string; why?: string; explanation?: string; recommendedAction?: string; state?: string; confidence?: string; mappings?: unknown; limitations?: string };
 
 function asOutput(value: unknown): ProposalOutput { return value && typeof value === "object" ? value as ProposalOutput : {}; }
 
@@ -12,7 +13,7 @@ export default async function AutomationPage({ searchParams }: { searchParams: P
   const { message } = await searchParams;
   const [{ data: connections }, { data: proposals }, { data: aiSettings }, { data: aiDrafts }] = await Promise.all([
     supabase.from("connector_connections").select("id,provider,label,status,last_collected_at,last_error_at").eq("organisation_id", organisation.id).order("created_at", { ascending: false }),
-    supabase.from("automation_proposals").select("id,target_type,assigned_to,status,output,source_references,created_at,automation_signals(signal_type,summary,confidence,occurred_at,connector_connections(label,provider))").eq("organisation_id", organisation.id).order("created_at", { ascending: false }).limit(100),
+    supabase.from("automation_proposals").select("id,target_type,assigned_to,status,output,source_references,created_at,automation_signals(signal_type,summary,confidence,occurred_at,connector_connections(label,provider)),automation_proposal_sources(source_objects(title,source_url))").eq("organisation_id", organisation.id).order("created_at", { ascending: false }).limit(100),
     supabase.from("ai_workspace_settings").select("enabled").eq("organisation_id", organisation.id).maybeSingle(),
     supabase.from("ai_suggestions").select("target_id,output,status,created_at").eq("organisation_id", organisation.id).eq("target_type", "automation_proposal").order("created_at", { ascending: false }),
   ]);
@@ -20,6 +21,24 @@ export default async function AutomationPage({ searchParams }: { searchParams: P
   const mine = drafts.filter((proposal) => proposal.assigned_to === user.id);
   const acceptedEvidence = (proposals ?? []).find((proposal) => proposal.status === "accepted" && proposal.target_type === "evidence" && proposal.assigned_to === user.id);
   const acceptedEvidenceTitle = acceptedEvidence ? asOutput(acceptedEvidence.output).title ?? "Automation evidence" : null;
+  const inboxProposals = drafts.map((proposal) => {
+    const signal = Array.isArray(proposal.automation_signals) ? proposal.automation_signals[0] : proposal.automation_signals;
+    const connection = signal && (Array.isArray(signal.connector_connections) ? signal.connector_connections[0] : signal.connector_connections);
+    const sourceLink = Array.isArray(proposal.automation_proposal_sources) ? proposal.automation_proposal_sources[0] : proposal.automation_proposal_sources;
+    const source = sourceLink && (Array.isArray(sourceLink.source_objects) ? sourceLink.source_objects[0] : sourceLink.source_objects);
+    const aiDraft = (aiDrafts ?? []).find((draft) => draft.target_id === proposal.id);
+    const aiOutput = asOutput(aiDraft?.output);
+    return {
+      id: proposal.id,
+      targetType: proposal.target_type,
+      assignedTo: proposal.assigned_to,
+      output: asOutput(proposal.output),
+      createdAt: proposal.created_at,
+      signal: signal ? { signalType: signal.signal_type, summary: signal.summary, confidence: signal.confidence, occurredAt: signal.occurred_at, provider: connection?.provider, connectionLabel: connection?.label } : null,
+      source: source ? { title: source.title, sourceUrl: source.source_url } : null,
+      aiDraft: aiDraft ? { explanation: aiOutput.explanation, recommendedAction: aiOutput.recommendedAction } : null,
+    };
+  });
   return <>
     <PageIntro eyebrow="AUTOMATION" title="Review the work your systems prepared" body="Connected systems collect bounded evidence, map it to GRC work, and prepare drafts. Nothing becomes a compliance decision until the assigned owner reviews it." action={<span style={{ display: "flex", gap: "8px" }}><form action={generateAutomationBaselineAction}><button className="button primary">Generate baseline</button></form><Link className="button secondary" href="/app/setup">Edit setup</Link></span>} />
     {message && <Card role="status" style={{ padding: "12px", marginBottom: "16px", background: "#f0f7ff", borderColor: "#cfe0fb" }}>{message}</Card>}
@@ -31,13 +50,7 @@ export default async function AutomationPage({ searchParams }: { searchParams: P
     <section style={{ marginTop: "22px" }} aria-labelledby="automation-inbox"><h2 id="automation-inbox" style={{ fontSize: "16px", margin: "0 0 10px" }}>Automation inbox</h2>
       {acceptedEvidenceTitle && <div role="status" style={{ padding: "12px", marginBottom: "12px", background: "#f2faf5", border: "1px solid #cce8d5", borderRadius: "6px", color: "#245c35", fontSize: "13px" }}><b>Evidence accepted.</b> {acceptedEvidenceTitle} is now available in <Link href="/app/evidence">Evidence</Link>.</div>}
       {!drafts.length && <EmptyState icon="clipboard" title="No automation drafts yet" body="Complete setup, then run a baseline collection. Evidence and remediation drafts will appear here for the people responsible for the work." primary={{ href: "/app/setup", label: "Set up automation" }} />}
-      <div style={{ display: "grid", gap: "12px" }}>{drafts.map((proposal) => { const output = asOutput(proposal.output); const signal = Array.isArray(proposal.automation_signals) ? proposal.automation_signals[0] : proposal.automation_signals; const connection = signal && (Array.isArray(signal.connector_connections) ? signal.connector_connections[0] : signal.connector_connections); const isMine = proposal.assigned_to === user.id; const draftTitle = output.title ?? signal?.summary ?? "Automation review"; const aiDraft = (aiDrafts ?? []).find((draft) => draft.target_id === proposal.id); const aiOutput = asOutput(aiDraft?.output); return <Card key={proposal.id} aria-label={`Automation draft: ${draftTitle}`} style={{ padding: "18px", borderColor: isMine ? "#cfe0fb" : undefined }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "start" }}><div><span className="eyebrow">{proposal.target_type.toUpperCase()} DRAFT</span><h3 style={{ fontSize: "15px", margin: "4px 0" }}>{draftTitle}</h3><p style={{ margin: "0", color: "#596273", fontSize: "13px", lineHeight: 1.5 }}>{output.why ?? "Review the connected-system observation before using it in ComplianceHub."}</p></div><Pill tone={isMine ? "blue" : "neutral"}>{isMine ? "Assigned to you" : "Assigned to another owner"}</Pill></div>
-        <p style={{ margin: "10px 0", color: "#596273", fontSize: "12px" }}><b>Source:</b> {connection?.label ?? connection?.provider ?? "Connected system"} · {signal?.confidence ?? output.confidence ?? "low"} confidence · {signal?.signal_type ?? "unclassified signal"}</p>
-        <p style={{ margin: "0", color: "#596273", fontSize: "12px" }}><b>Recommended next step:</b> {output.recommendedAction ?? "Review the source and decide whether it belongs in the workspace."}</p>
-        {aiDraft && <div role="status" style={{ marginTop: "12px", padding: "10px", borderLeft: "3px solid #87a7ef", background: "#f7f9fd", fontSize: "12px", color: "#596273", lineHeight: 1.5 }}><b>AI draft explanation</b><div>{aiOutput.explanation}</div><div style={{ marginTop: "4px" }}><b>Suggested next step:</b> {aiOutput.recommendedAction}</div><div style={{ marginTop: "4px" }}>Draft only. No compliance record was changed.</div></div>}
-        {isMine && <div style={{ display: "grid", gap: "8px", marginTop: "14px" }}>{aiSettings?.enabled && !aiDraft && <form action={generateAutomationExplanationAction}><input type="hidden" name="id" value={proposal.id} /><button className="button secondary">Draft AI explanation</button></form>}<form action={reviewAutomationProposalAction} style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}><input type="hidden" name="id" value={proposal.id} /><input type="hidden" name="decision" value="accepted" /><button className="button primary">{proposal.target_type === "task" ? "Create task" : "Accept as evidence"}</button></form><form action={reviewAutomationProposalAction} style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}><input type="hidden" name="id" value={proposal.id} /><input type="hidden" name="decision" value="dismissed" /><input aria-label={`Reason for dismissing ${output.title ?? "automation draft"}`} name="dismissalReason" maxLength={1000} required placeholder="Why does this not apply?" style={{ flex: "1 1 220px" }} /><button className="button secondary">Dismiss</button></form></div>}
-      </Card>; })}</div>
+      {drafts.length > 0 && <AutomationInbox proposals={inboxProposals} currentUserId={user.id} aiEnabled={Boolean(aiSettings?.enabled)} collectorVersion={process.env.EVIDENCE_LIVE === "1" ? "live-collector-v1" : "sandbox-fake-1"} collectorMode={process.env.EVIDENCE_LIVE === "1" ? "live" : "deterministic sandbox"} />}
     </section>
   </>;
 }
