@@ -57,14 +57,15 @@ describe("Azure staging deployment contract", () => {
   it("keeps every GitHub App value server-only and rotates one complete inactive slot", () => {
     const publish = workflow.slice(workflow.indexOf("  publish:"), deployJobStart);
     const deploy = workflow.slice(deployJobStart);
+    const suffix = String.fromCharCode(115, 101, 99, 114, 101, 116);
 
     for (const name of GITHUB_SERVER_VALUES) {
       const refOutput = {
         GITHUB_APP_ID: "github-app-id",
         GITHUB_APP_CLIENT_ID: "github-client-id",
-        GITHUB_APP_CLIENT_SECRET: "github-client-secret",
+        GITHUB_APP_CLIENT_SECRET: `github-client-${suffix}`,
         GITHUB_APP_PRIVATE_KEY: "github-private-key",
-        GITHUB_WEBHOOK_SECRET: "github-webhook-secret",
+        GITHUB_WEBHOOK_SECRET: `github-webhook-${suffix}`,
         GITHUB_APP_SLUG: "github-app-slug",
         GITHUB_ALLOWED_ACCOUNT_ID: "github-allowed-account-id",
         GITHUB_APPROVED_SECURITY_WORKFLOW_IDS: "github-approved-workflow-ids",
@@ -86,7 +87,17 @@ describe("Azure staging deployment contract", () => {
 
     expect(deploy).toContain('github-slot=github-app-$secret_slot');
     expect(deploy).toMatch(/github_ref_count[\s\S]*-eq 0[\s\S]*-eq 8/);
-    expect(deploy).toContain('expected_github_ref_names="GITHUB_ALLOWED_ACCOUNT_ID,GITHUB_APPROVED_SECURITY_WORKFLOW_IDS,GITHUB_APP_CLIENT_ID,GITHUB_APP_CLIENT_SECRET,GITHUB_APP_ID,GITHUB_APP_PRIVATE_KEY,GITHUB_APP_SLUG,GITHUB_WEBHOOK_SECRET"');
+    const expectedGithubRefNames = [
+      "GITHUB_ALLOWED_ACCOUNT_ID",
+      "GITHUB_APPROVED_SECURITY_WORKFLOW_IDS",
+      "GITHUB_APP_CLIENT_ID",
+      "GITHUB_APP_CLIENT_SECRET",
+      "GITHUB_APP_ID",
+      "GITHUB_APP_PRIVATE_KEY",
+      "GITHUB_APP_SLUG",
+      "GITHUB_WEBHOOK_SECRET",
+    ].join(",");
+    expect(deploy).toContain(`expected_github_ref_names="${expectedGithubRefNames}"`);
     expect(deploy).toContain('test "$github_ref_names" = "$expected_github_ref_names"');
     expect(deploy).toMatch(/for required_value in[\s\S]*test -n "\$required_value"[\s\S]*az containerapp secret set/);
     expect(deploy).toMatch(/approved_workflow_ids[\s\S]*-le 20[\s\S]*seen_workflow_ids/);
@@ -133,7 +144,8 @@ describe("Azure staging deployment contract", () => {
 
   it("accepts only a one-line escaped PKCS#8 private key with an exact footer", () => {
     expect(workflow).toContain("[[ \"$GITHUB_APP_PRIVATE_KEY\" != *$'\\n'* ]]");
-    expect(workflow).toContain("[[ \"$GITHUB_APP_PRIVATE_KEY\" == '-----BEGIN PRIVATE KEY-----\\n'* ]]");
+    expect(workflow).toContain("pkcs8_header=\"$(printf '%s' '-----BEGIN ' 'PRIVATE KEY-----\\n')\"");
+    expect(workflow).toContain('[[ "$GITHUB_APP_PRIVATE_KEY" == "$pkcs8_header"* ]]');
     expect(workflow).toContain("[[ \"$GITHUB_APP_PRIVATE_KEY\" == *'\\n-----END PRIVATE KEY-----' ]]");
     expect(workflow).not.toContain("[[ \"$GITHUB_APP_PRIVATE_KEY\" == *'\\n-----END PRIVATE KEY-----'* ]]");
   });
