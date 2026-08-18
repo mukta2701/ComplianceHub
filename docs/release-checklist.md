@@ -21,8 +21,13 @@ These checks prove the current local implementation only; they do not close the
 hosted, Azure, Slack, GitHub-owner, email, or backup checkpoints above.
 
 - [x] `npm run verify`: lint, typecheck, 189 test files / 1,333 tests, and Next production build.
-- [x] `npm run test:db`: 66 pgTAP files / 1,170 tests.
+- [x] GitHub CI run `32097617770` applied the complete migration chain, including
+  `20260818050000_grant_safe_connection_metadata.sql`, and the full pgTAP
+  database suite passed. This disposable database run is authoritative for the
+  current schema; the preserved local fixture was not reset.
 - [x] `npm run test:integration`: 3 files / 5 tests against the running localhost Supabase stack.
-- [x] `npm run test:e2e` with CI-equivalent local secrets, `E2E_TEST_TOOLS_ENABLED=1`, production build, and two workers: 56/56 desktop + mobile tests.
+- [x] GitHub CI run `32097617770` ran the production build with
+  `E2E_TEST_TOOLS_ENABLED=1` and one worker against the shared local Supabase
+  fixture: **58/58 desktop + mobile tests passed**.
 - [x] Focused GitHub production shadow run: Chromium + mobile 2/2; local personal-pilot readiness unchanged.
 - [x] `npm run test:db:upgrade`: passed earlier in the disposable/local upgrade gate (14 upgrade assertions, with the database restored afterwards); it was not rerun in this final fixture-preserving pass.
