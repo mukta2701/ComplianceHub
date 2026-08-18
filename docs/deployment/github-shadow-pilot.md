@@ -13,7 +13,7 @@ or Slack output.
       intended owner account and repository. Record only the repository name,
       installation ID, and reviewed permission/event set; never record keys.
 - [ ] Verify the hosted Supabase backup and the complete pending migration set
-      through `20260818110000` before setting the protected schema attestation.
+      through `20260818120000` before setting the protected schema attestation.
 - [ ] Confirm all eight server-only `AZURE_GITHUB_*` values are present in the
       protected environment, with the private key in escaped-newline PKCS#8
       form. Do not copy values into this document or build inputs.

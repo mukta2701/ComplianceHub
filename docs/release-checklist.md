@@ -3,7 +3,7 @@
 - [ ] Project owner has reviewed and approved every assessment question and remediation.
 - [ ] Legal, privacy, certification, and open-source disclaimers are visible and accurate.
 - [ ] Production Supabase project uses the intended region and all migrations pass.
-- [ ] Hosted Supabase personal staging project ref `ytenjiyjdcrjkgwmciqw` has a verified backup; `supabase migration list` and `supabase db push --dry-run` showed exactly the eleven reviewed migrations through `20260818110000` in order; they were verified before any application deployment; and `HOSTED_SUPABASE_PROJECT_REF` plus `HOSTED_SUPABASE_MIGRATION_VERSION` were set only afterwards and match `NEXT_PUBLIC_SUPABASE_URL`.
+- [ ] Hosted Supabase personal staging project ref `ytenjiyjdcrjkgwmciqw` has a verified backup; `supabase migration list` and `supabase db push --dry-run` showed exactly the twelve reviewed migrations through `20260818120000` in order; they were verified before any application deployment; and `HOSTED_SUPABASE_PROJECT_REF` plus `HOSTED_SUPABASE_MIGRATION_VERSION` were set only afterwards and match `NEXT_PUBLIC_SUPABASE_URL`.
 - [ ] Cross-tenant RLS tests, immutable-record tests, and stale-write tests pass.
 - [ ] Service-role and cron credentials are server-only, rotated, and stored in deployment secrets.
 - [ ] An Adtecher organisation owner approved the private GitHub App, one dedicated selected repository, exact read-only permissions/events, SSL verification, OAuth-during-install disabled, Redirect-on-update enabled, and the callback/setup/webhook URLs at the canonical origin.
@@ -37,7 +37,7 @@ hosted, Azure, Slack, GitHub-owner, email, or backup checkpoints above.
 - [x] GitHub CI run `32149626188`: **58/58 desktop + mobile tests passed**
   against the disposable CI fixture with one worker.
 - [x] Local `/api/health` returned HTTP 200 with `db: ok`; the running local
-  stack reports 98 applied migrations and the expected GitHub/automation/MCP
+  stack reports 99 applied migrations and the expected GitHub/automation/MCP
   tables are present.
 - [x] Focused GitHub production shadow run: Chromium + mobile 2/2; local
   personal-pilot readiness unchanged.
