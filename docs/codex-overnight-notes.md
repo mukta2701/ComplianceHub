@@ -6,15 +6,16 @@
 ## Current handoff — 2026-08-18
 
 - Branch: `codex/github-collection-foundation`; the reviewed baseline for this
-  handoff is `5670a19`, including retry-safe automation provenance, scheduled
+  handoff is `11c9815`, including retry-safe automation provenance, scheduled
   retention purging, owner-gated AI drafting, replay-safe automation reviews,
   stable automation sign-up/tracker
   E2E paths, the safe connector-metadata grant, and active-workspace isolation
   across policies, imports, autosave, automation, invitations, AI, audits,
-  legacy registers, exports, SoA owner assignment, and deployment attestation.
+  legacy registers, exports, SoA owner assignment, deployment attestation, and
+  active-workspace GitHub repository selection.
 - Local application health: `/api/health` returns HTTP 200 with `db: ok`.
 - Local verification baseline: the current release verification passed lint,
-  typecheck, **207 test files / 1,453 tests**, and the Next production build.
+  typecheck, **207 test files / 1,454 tests**, and the Next production build.
   The disposable CI
   database gate is the authoritative check for the newly added automation,
   export, policy-evidence, monitoring, and workspace-hardening migrations.
@@ -24,7 +25,7 @@
   evidence.
 - Integration evidence: `npm run test:integration` passed 3 files / 5 tests;
   the production GitHub shadow spec passed on Chromium and mobile (2/2).
-- Remote CI evidence: run `32145071257` for `5670a19` completed successfully.
+- Remote CI evidence: run `32149626188` for `11c9815` completed successfully.
   Gitleaks, container, database upgrade/full pgTAP, application
   lint/typecheck/unit/build, integration, and 58/58 Playwright desktop/mobile
   tests all passed.
