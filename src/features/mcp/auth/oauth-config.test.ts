@@ -35,9 +35,9 @@ describe("parseMcpOAuthEnvironment", () => {
     expect(() => parseMcpOAuthEnvironment({ ...production, ...override })).toThrow("MCP OAuth environment is invalid");
   });
 
-  it("uses fixed localhost defaults outside production", () => {
+  it("uses fixed loopback defaults outside production", () => {
     const value = parseMcpOAuthEnvironment({ NODE_ENV: "test" });
-    expect(value.resource).toBe("http://localhost:3000/mcp");
+    expect(value.resource).toBe("http://127.0.0.1:3000/mcp");
     expect(value.authorizationServer).toBe("http://127.0.0.1:54321/auth/v1");
   });
 });

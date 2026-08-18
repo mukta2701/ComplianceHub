@@ -5,5 +5,5 @@
 -- Safe local-only audience. Hosted environments populate their exact canonical
 -- HTTPS MCP URL explicitly after migrations are applied.
 insert into private.mcp_oauth_config(config_key, audience)
-values ('resource', 'http://localhost:3000/mcp')
+values ('resource', 'http://127.0.0.1:3000/mcp')
 on conflict (config_key) do update set audience=excluded.audience, updated_at=now();
