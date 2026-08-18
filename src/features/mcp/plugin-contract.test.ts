@@ -109,10 +109,13 @@ describe("private ComplianceHub plugin safety contract", () => {
     expect(workflow).not.toMatch(/version: latest/);
     expect(maintenanceWorkflow).toMatch(/cron: ["']7 6 \* \* \*["']/);
     expect(maintenanceWorkflow).toMatch(/cron: ["']13 7 \* \* \*["']/);
+    expect(maintenanceWorkflow).toMatch(/cron: ["']29 7 \* \* \*["']/);
     expect(maintenanceWorkflow).toMatch(/cron: ["']29 5 \* \* \*["']/);
     expect(maintenanceWorkflow).toMatch(/options:[\s\S]*- github-collect/);
+    expect(maintenanceWorkflow).toMatch(/options:[\s\S]*- automation-purge/);
     expect(maintenanceWorkflow).toMatch(/Unknown maintenance (?:route|schedule)/);
     expect(deployment).toMatch(/`POST \/api\/cron\/github-collect`.*`29 5 \* \* \*`.*05:29 UTC/i);
+    expect(deployment).toMatch(/`POST \/api\/cron\/automation-purge`.*`29 7 \* \* \*`.*07:29 UTC/i);
     expect(vercel.crons ?? []).toEqual([]);
   });
 });

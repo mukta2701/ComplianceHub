@@ -5,6 +5,7 @@ on:
     - cron: "29 5 * * *"
     - cron: "7 6 * * *"
     - cron: "13 7 * * *"
+    - cron: "29 7 * * *"
   workflow_dispatch:
     inputs:
       route:
@@ -15,6 +16,7 @@ on:
           - github-collect
           - daily
           - monitor
+          - automation-purge
 
 permissions:
   contents: read
@@ -39,7 +41,7 @@ jobs:
           set -euo pipefail
           if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
             case "$REQUESTED_ROUTE" in
-              github-collect|daily|monitor) route="$REQUESTED_ROUTE" ;;
+              github-collect|daily|monitor|automation-purge) route="$REQUESTED_ROUTE" ;;
               *) echo "Unknown maintenance route" >&2; exit 1 ;;
             esac
           else
@@ -47,6 +49,7 @@ jobs:
               "29 5 * * *") route="github-collect" ;;
               "7 6 * * *") route="daily" ;;
               "13 7 * * *") route="monitor" ;;
+              "29 7 * * *") route="automation-purge" ;;
               *) echo "Unknown maintenance schedule" >&2; exit 1 ;;
             esac
           fi

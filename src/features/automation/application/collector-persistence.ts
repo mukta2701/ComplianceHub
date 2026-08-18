@@ -119,7 +119,7 @@ export async function persistCollectedAutomation({
   if (!existingLink) {
     const { error: linkError } = await supabase.from("automation_proposal_sources").insert({ proposal_id: proposalId, source_object_id: sourceObject.id, organisation_id: organisationId });
     if (linkError?.code !== "23505" && linkError) throw linkError;
-    changed = true;
+    if (!linkError) changed = true;
   }
   const { error: healthError } = await supabase.from("connector_connections")
     .update({ last_collected_at: new Date().toISOString(), last_error_at: null, status: "connected" }).eq("id", connection.id).eq("organisation_id", organisationId);

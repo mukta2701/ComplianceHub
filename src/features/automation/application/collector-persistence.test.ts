@@ -4,6 +4,7 @@ import { persistCollectedAutomation } from "./collector-persistence";
 type State = {
   proposalPresent: boolean;
   failFirstProposalInsert: boolean;
+  failFirstLinkInsert: boolean;
   linkPresent: boolean;
   proposalInserts: number;
   linkInserts: number;
@@ -36,6 +37,11 @@ function makeSupabase(state: State) {
     }
     if (table === "automation_proposal_sources" && mode === "insert" && terminal === "await") {
       state.linkInserts += 1;
+      if (state.failFirstLinkInsert) {
+        state.failFirstLinkInsert = false;
+        state.linkPresent = true;
+        return Promise.resolve({ error: { code: "23505", message: "simulated concurrent link write" } });
+      }
       state.linkPresent = true;
       return Promise.resolve({ error: null });
     }
@@ -69,7 +75,7 @@ function makeSupabase(state: State) {
 
 describe("automation collector persistence recovery", () => {
   it("retries a missing proposal and source link after a partial proposal write", async () => {
-    const state: State = { proposalPresent: false, failFirstProposalInsert: true, linkPresent: false, proposalInserts: 0, linkInserts: 0, signalInserts: 0 };
+    const state: State = { proposalPresent: false, failFirstProposalInsert: true, failFirstLinkInsert: false, linkPresent: false, proposalInserts: 0, linkInserts: 0, signalInserts: 0 };
     const supabase = makeSupabase(state);
     const input = {
       supabase,
@@ -90,6 +96,29 @@ describe("automation collector persistence recovery", () => {
     await expect(persistCollectedAutomation(input)).resolves.toBe(true);
     expect(state.signalInserts).toBe(0);
     expect(state.proposalInserts).toBe(2);
+    expect(state.linkInserts).toBe(1);
+    expect(state.linkPresent).toBe(true);
+  });
+
+  it("does not report a change when a concurrent worker creates the missing source link", async () => {
+    const state: State = { proposalPresent: true, failFirstProposalInsert: false, failFirstLinkInsert: true, linkPresent: false, proposalInserts: 0, linkInserts: 0, signalInserts: 0 };
+    const supabase = makeSupabase(state);
+    const input = {
+      supabase,
+      organisationId: "org-1",
+      provider: "github" as const,
+      config: { automationConnectionId: "11111111-1111-4111-8111-111111111111" },
+      collected: {
+        externalRef: "repo:acme/app:branches",
+        title: "Branch protection settings",
+        kind: "link" as const,
+        url: "https://github.example/acme/app/settings/branches",
+        collectedOn: "2026-07-10",
+        validUntil: "2026-08-09",
+      },
+    };
+
+    await expect(persistCollectedAutomation(input)).resolves.toBe(false);
     expect(state.linkInserts).toBe(1);
     expect(state.linkPresent).toBe(true);
   });

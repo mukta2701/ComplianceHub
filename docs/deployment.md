@@ -251,13 +251,14 @@ does not require these values and makes no GitHub request.
 
 ## 3. Cron automation (GitHub Actions calling Azure)
 
-`.github/workflows/azure-maintenance.yml` declares three UTC schedules and calls
+`.github/workflows/azure-maintenance.yml` declares four UTC schedules and calls
 the Azure origin with `CRON_SECRET` from the protected `azure-staging`
 environment:
 
 - `POST /api/cron/github-collect` — `29 5 * * *` (05:29 UTC daily). Runs the lease-protected, read-only GitHub shadow collector before any downstream maintenance. During the first pilot, select exactly one dedicated repository.
 - `POST /api/cron/daily` — `7 6 * * *` (06:07 UTC daily). First classifies digest reservations left in-flight for more than 15 minutes as `unknown` for human review (never automatic retry), collects evidence, runs integration sync, and then performs the evidence-freshness + policy-review sweep. Notifications are deduplicated per day and a new task is opened only when none is already open for that item, so retries and manual runs are safe.
 - `POST /api/cron/monitor` — `13 7 * * *` (07:13 UTC daily). Checks every organisation's configured monitoring sources, reconciles findings, and sends enabled finding alerts. Non-zero minutes avoid GitHub Actions' highest scheduled-load window.
+- `POST /api/cron/automation-purge` — `29 7 * * *` (07:29 UTC daily). Purges expired source content while retaining hashed provenance and proposal references for the configured retention window.
 
 Integration sync is folded into the 06:07 UTC daily pipeline. The compatibility route `POST /api/cron/integrations-sync` remains available for a deliberate manual run, but it has no separate Vercel schedule and must not be described or deployed as an hourly cron.
 
@@ -267,6 +268,7 @@ The workflow sends `Authorization: Bearer <CRON_SECRET>`; each route rejects any
 curl -i -X POST http://localhost:3000/api/cron/github-collect -H "Authorization: Bearer $CRON_SECRET"
 curl -i -X POST http://localhost:3000/api/cron/daily   -H "Authorization: Bearer $CRON_SECRET"
 curl -i -X POST http://localhost:3000/api/cron/monitor -H "Authorization: Bearer $CRON_SECRET"
+curl -i -X POST http://localhost:3000/api/cron/automation-purge -H "Authorization: Bearer $CRON_SECRET"
 ```
 
 The MCP daily-digest write also requires `SUPABASE_SERVICE_ROLE_KEY`. The OAuth

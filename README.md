@@ -42,7 +42,7 @@ npm run test:e2e
 
 The browser suite runs both desktop and mobile projects. It uses the local
 Supabase environment from `.env.local` (or the CI-provisioned environment) and
-caps workers at two because the local stack is shared. Set
+serializes local runs to one worker because the local stack is shared. Set
 `E2E_TEST_TOOLS_ENABLED=1` only for local test runs so the sandbox integration
 fixtures are visible; never enable that flag on a hosted origin. CI runs the
 suite against the production build; local runs use the development server for
