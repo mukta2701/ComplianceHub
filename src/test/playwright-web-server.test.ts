@@ -21,7 +21,7 @@ describe("Playwright worker count", () => {
     expect(playwrightWorkerCount({ ci: false })).toBe(1);
   });
 
-  it("caps CI worker count for the single local Supabase instance", () => {
-    expect(playwrightWorkerCount({ ci: true })).toBe(2);
+  it("serializes CI runs against the single local Supabase instance", () => {
+    expect(playwrightWorkerCount({ ci: true })).toBe(1);
   });
 });
