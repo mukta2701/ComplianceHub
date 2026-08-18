@@ -258,7 +258,7 @@ environment:
 - `POST /api/cron/github-collect` — `29 5 * * *` (05:29 UTC daily). Runs the lease-protected, read-only GitHub shadow collector before any downstream maintenance. During the first pilot, select exactly one dedicated repository.
 - `POST /api/cron/daily` — `7 6 * * *` (06:07 UTC daily). First classifies digest reservations left in-flight for more than 15 minutes as `unknown` for human review (never automatic retry), collects evidence, runs integration sync, and then performs the evidence-freshness + policy-review sweep. Notifications are deduplicated per day and a new task is opened only when none is already open for that item, so retries and manual runs are safe.
 - `POST /api/cron/monitor` — `13 7 * * *` (07:13 UTC daily). Checks every organisation's configured monitoring sources, reconciles findings, and sends enabled finding alerts. Non-zero minutes avoid GitHub Actions' highest scheduled-load window.
-- `POST /api/cron/automation-purge` — `29 7 * * *` (07:29 UTC daily). Purges expired source content while retaining hashed provenance and proposal references for the configured retention window.
+- `POST /api/cron/automation-purge` — `29 7 * * *` (07:29 UTC daily). Purges up to 100 expired source objects per invocation while retaining hashed provenance and proposal references for the configured retention window; the response reports any deferred remainder for the next scheduled run.
 
 Integration sync is folded into the 06:07 UTC daily pipeline. The compatibility route `POST /api/cron/integrations-sync` remains available for a deliberate manual run, but it has no separate Vercel schedule and must not be described or deployed as an hourly cron.
 

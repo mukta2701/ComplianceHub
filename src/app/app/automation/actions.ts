@@ -141,10 +141,15 @@ export async function generateAutomationExplanationAction(formData: FormData) {
   const proposalId = String(formData.get("id"));
   const { data: settings } = await supabase.from("ai_workspace_settings").select("enabled").eq("organisation_id", organisation.id).maybeSingle();
   if (!settings?.enabled) throw new Error("AI assistance is disabled for this workspace");
-  const provider = configuredAiProvider();
+  let provider: ReturnType<typeof configuredAiProvider> = null;
+  try {
+    provider = configuredAiProvider();
+  } catch {
+    provider = null;
+  }
   if (!provider) throw new Error("AI assistance is not configured");
   const { data: proposal, error: proposalError } = await supabase.from("automation_proposals")
-    .select("id,target_type,assigned_to,output,automation_signals(id,signal_type,summary)").eq("id", proposalId).eq("organisation_id", organisation.id).eq("assigned_to", user.id).maybeSingle();
+    .select("id,target_type,assigned_to,status,output,automation_signals(id,signal_type,summary)").eq("id", proposalId).eq("organisation_id", organisation.id).eq("assigned_to", user.id).eq("status", "draft").maybeSingle();
   const signal = Array.isArray(proposal?.automation_signals) ? proposal?.automation_signals[0] : proposal?.automation_signals;
   if (proposalError || !proposal || !signal || !proposal.output || typeof proposal.output !== "object") throw new Error("Automation draft not found");
   const output = proposal.output as { title?: unknown; confidence?: unknown };

@@ -5,7 +5,13 @@ import { requireAppContext } from "@/lib/app-context";
 const schema = z.object({ status: z.enum(["accepted", "dismissed"]) });
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const parsed = schema.safeParse(await request.json());
+  let rawBody: unknown;
+  try {
+    rawBody = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid review state" }, { status: 400 });
+  }
+  const parsed = schema.safeParse(rawBody);
   if (!parsed.success) return NextResponse.json({ error: "Invalid review state" }, { status: 400 });
   const { id } = await params;
   const { supabase, user, organisation } = await requireAppContext();

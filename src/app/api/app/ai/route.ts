@@ -22,11 +22,22 @@ const requestSchema = z.discriminatedUnion("targetType", [
 export async function POST(request: Request) {
   const { supabase, user, organisation } = await requireAppContext();
   await enforceRateLimit(`ai-draft:${user.id}`, { limit: 20, windowMs: 60 * 60_000 });
-  const parsed = requestSchema.safeParse(await request.json());
+  let rawBody: unknown;
+  try {
+    rawBody = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid AI request" }, { status: 400 });
+  }
+  const parsed = requestSchema.safeParse(rawBody);
   if (!parsed.success) return NextResponse.json({ error: "Invalid AI request" }, { status: 400 });
   const { data: settings } = await supabase.from("ai_workspace_settings").select("enabled").eq("organisation_id", organisation.id).maybeSingle();
   if (!settings?.enabled) return NextResponse.json({ error: "AI assistance is disabled for this workspace" }, { status: 403 });
-  const provider = configuredAiProvider();
+  let provider: ReturnType<typeof configuredAiProvider> = null;
+  try {
+    provider = configuredAiProvider();
+  } catch {
+    provider = null;
+  }
   if (!provider) return NextResponse.json({ error: "AI assistance is not configured" }, { status: 503 });
 
   let targetId: string;
@@ -80,7 +91,7 @@ export async function POST(request: Request) {
     context = buildRiskAiContext({ risk });
   } else {
     const { data: proposal } = await supabase.from("automation_proposals")
-      .select("id,target_type,output,automation_signals(id,signal_type,summary)").eq("id", parsed.data.targetId).eq("organisation_id", organisation.id).maybeSingle();
+      .select("id,target_type,output,automation_signals(id,signal_type,summary)").eq("id", parsed.data.targetId).eq("organisation_id", organisation.id).eq("assigned_to", user.id).eq("status", "draft").maybeSingle();
     const signal = Array.isArray(proposal?.automation_signals) ? proposal?.automation_signals[0] : proposal?.automation_signals;
     if (!proposal || !signal || !proposal.output || typeof proposal.output !== "object") return NextResponse.json({ error: "Automation draft not found" }, { status: 404 });
     const output = proposal.output as { title?: unknown; confidence?: unknown };
