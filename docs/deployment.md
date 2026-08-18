@@ -176,12 +176,24 @@ printing their values.
 
 GitHub may download an RSA private key with a `BEGIN RSA PRIVATE KEY` header,
 but the runtime deliberately accepts PKCS#8 only. Convert the downloaded key
-offline with `openssl pkcs8 -topk8 -inform PEM -outform PEM -nocrypt`, confirm
-the converted first line is exactly `-----BEGIN PRIVATE KEY-----`, and then use
+offline into a separate, owner-readable file (never overwrite the original):
+
+```bash
+openssl pkcs8 -topk8 -inform PEM -outform PEM -nocrypt \
+  -in <downloaded-key.pem> -out <converted-pkcs8-key.pem>
+chmod 600 <converted-pkcs8-key.pem>
+head -n 1 <converted-pkcs8-key.pem   # -----BEGIN PRIVATE KEY-----
+tail -n 1 <converted-pkcs8-key.pem   # -----END PRIVATE KEY-----
+openssl pkcs8 -in <converted-pkcs8-key.pem> -nocrypt -out /dev/null
+```
+
+The final command must exit zero. Confirm the converted first line is exactly
+`-----BEGIN PRIVATE KEY-----`, then use
 an approved secret-entry tool to replace each newline with the two literal
 characters `\n`. Do not print the converted key, paste it into a shell history,
 or store either key file in this repository. The deployment preflight rejects
-actual newlines, a non-PKCS#8 header, or a missing PKCS#8 footer.
+actual newlines, a non-PKCS#8 header, a missing PKCS#8 footer, or any trailing
+payload after the footer.
 
 Application environment variables (names must match `.env.example`):
 
