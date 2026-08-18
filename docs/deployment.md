@@ -182,13 +182,13 @@ offline into a separate, owner-readable file (never overwrite the original):
 openssl pkcs8 -topk8 -inform PEM -outform PEM -nocrypt \
   -in <downloaded-key.pem> -out <converted-pkcs8-key.pem>
 chmod 600 <converted-pkcs8-key.pem>
-head -n 1 <converted-pkcs8-key.pem   # -----BEGIN PRIVATE KEY-----
-tail -n 1 <converted-pkcs8-key.pem   # -----END PRIVATE KEY-----
+head -n 1 <converted-pkcs8-key.pem   # PKCS#8 BEGIN marker
+tail -n 1 <converted-pkcs8-key.pem   # PKCS#8 END marker
 openssl pkcs8 -in <converted-pkcs8-key.pem> -nocrypt -out /dev/null
 ```
 
-The final command must exit zero. Confirm the converted first line is exactly
-`-----BEGIN PRIVATE KEY-----`, then use
+The final command must exit zero. Confirm the first and last lines are the
+PKCS#8 BEGIN/END `PRIVATE KEY` markers, then use
 an approved secret-entry tool to replace each newline with the two literal
 characters `\n`. Do not print the converted key, paste it into a shell history,
 or store either key file in this repository. The deployment preflight rejects
