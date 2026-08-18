@@ -47,10 +47,17 @@ jobs:
       - uses: supabase/setup-cli@v1
         with:
           version: 2.109.0
-      - run: supabase start
+      - name: Start local Supabase without logging credentials
+        run: supabase start > "$RUNNER_TEMP/compliancehub-supabase-start.log" 2>&1
       - name: Configure local application environment
         run: |
           eval "$(supabase status -o env)"
+          app_encryption_key="$(openssl rand -base64 32)"
+          echo "::add-mask::$API_URL"
+          echo "::add-mask::$ANON_KEY"
+          echo "::add-mask::$SERVICE_ROLE_KEY"
+          echo "::add-mask::ci-test-cron-secret"
+          echo "::add-mask::$app_encryption_key"
           {
             echo "NEXT_PUBLIC_SUPABASE_URL=$API_URL"
             echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$ANON_KEY"
@@ -59,7 +66,7 @@ jobs:
             # Provisioned so the CRON_SECRET-gated e2e steps actually run (rather than
             # skipping to a vacuous pass) and so secret-encryption paths have a key.
             echo "CRON_SECRET=ci-test-cron-secret"
-            echo "APP_ENCRYPTION_KEY=$(openssl rand -base64 32)"
+            echo "APP_ENCRYPTION_KEY=$app_encryption_key"
             echo "E2E_TEST_TOOLS_ENABLED=1"
           } >> "$GITHUB_ENV"
       # Build only after the same local Supabase environment used by the
@@ -92,6 +99,7 @@ jobs:
       - uses: supabase/setup-cli@v1
         with:
           version: 2.109.0
-      - run: supabase start
+      - name: Start local Supabase without logging credentials
+        run: supabase start > "$RUNNER_TEMP/compliancehub-supabase-start.log" 2>&1
       - run: bash scripts/test-db-upgrade.sh
       - run: supabase test db

@@ -118,4 +118,17 @@ describe("private ComplianceHub plugin safety contract", () => {
     expect(deployment).toMatch(/`POST \/api\/cron\/automation-purge`.*`29 7 \* \* \*`.*07:29 UTC/i);
     expect(vercel.crons ?? []).toEqual([]);
   });
+
+  it("keeps disposable Supabase credentials out of public CI logs", () => {
+    const workflow = read(".github/workflows/ci.yml");
+
+    expect(workflow.match(/supabase start > "\$RUNNER_TEMP\/compliancehub-supabase-start\.log" 2>&1/g)).toHaveLength(2);
+    expect(workflow).not.toMatch(/^\s*- run: supabase start\s*$/m);
+    expect(workflow).toContain('echo "::add-mask::$API_URL"');
+    expect(workflow).toContain('echo "::add-mask::$ANON_KEY"');
+    expect(workflow).toContain('echo "::add-mask::$SERVICE_ROLE_KEY"');
+    expect(workflow).toContain('echo "::add-mask::ci-test-cron-secret"');
+    expect(workflow).toContain('app_encryption_key="$(openssl rand -base64 32)"');
+    expect(workflow).toContain('echo "::add-mask::$app_encryption_key"');
+  });
 });
