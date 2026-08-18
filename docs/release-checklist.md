@@ -20,9 +20,9 @@
 These checks prove the current local implementation only; they do not close the
 hosted, Azure, Slack, GitHub-owner, email, or backup checkpoints above.
 
-- [x] On release commit `8e14a17`, `npm run verify` passed lint, typecheck,
+- [x] On release commit `4560d3e`, `npm run verify` passed lint, typecheck,
   **195 test files / 1,356 tests**, and the Next production build.
-- [x] GitHub CI run `32114754110` for `8e14a17` passed Gitleaks, container,
+- [x] GitHub CI run `32116987686` for `4560d3e` passed Gitleaks, container,
   database upgrade/full pgTAP, application lint/typecheck/unit/build,
   integration, and the full desktop/mobile Playwright gate.
 - [x] Fresh local `npm run test:db`: 76 files / 1,229 tests passed against the

@@ -6,7 +6,7 @@
 ## Current handoff — 2026-08-18
 
 - Branch: `codex/github-collection-foundation`; the reviewed baseline for this
-  handoff is `8e14a17`, including retry-safe automation provenance, scheduled
+  handoff is `4560d3e`, including retry-safe automation provenance, scheduled
   retention purging, owner-gated AI drafting, stable automation sign-up/tracker
   E2E paths, and the safe connector-metadata grant.
 - Local application health: `/api/health` returns HTTP 200 with `db: ok`.
@@ -19,7 +19,7 @@
   the shared local Supabase fixture.
 - Integration evidence: `npm run test:integration` passed 3 files / 5 tests;
   the production GitHub shadow spec passed on Chromium and mobile (2/2).
-- Remote CI evidence: run `32114754110` for `8e14a17` completed successfully.
+- Remote CI evidence: run `32116987686` for `4560d3e` completed successfully.
   Gitleaks, container, database upgrade/full pgTAP, application
   lint/typecheck/unit/build, integration, and 58/58 Playwright desktop/mobile
   tests all passed.
