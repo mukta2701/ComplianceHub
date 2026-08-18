@@ -20,12 +20,13 @@
 These checks prove the current local implementation only; they do not close the
 hosted, Azure, Slack, GitHub-owner, email, or backup checkpoints above.
 
-- [x] On source commit `db384cb`, `npm run verify` passed lint, typecheck,
+- [x] On release commit `8e14a17`, `npm run verify` passed lint, typecheck,
   **195 test files / 1,356 tests**, and the Next production build.
-- [ ] GitHub CI for `db384cb` is pending; the preceding run `32112222209` for
-  `7b0d918` has passed Gitleaks, container, database upgrade/full pgTAP, and
-  application lint/typecheck/unit/build/integration; its final Playwright gate
-  is still running.
+- [x] GitHub CI run `32114754110` for `8e14a17` passed Gitleaks, container,
+  database upgrade/full pgTAP, application lint/typecheck/unit/build,
+  integration, and the full desktop/mobile Playwright gate.
+- [x] Fresh local `npm run test:db`: 76 files / 1,229 tests passed against the
+  preserved local Supabase fixture.
 - [x] Fresh local `npm run test:integration`: 3 files / 5 tests against the
   running localhost Supabase stack.
 - [x] Fresh local `npm run test:e2e -- --workers=1`: **58/58 desktop + mobile
