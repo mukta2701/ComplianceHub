@@ -40,7 +40,10 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
-      - run: npx playwright install --with-deps chromium
+      # GitHub-hosted Ubuntu already provides Playwright's system libraries;
+      # install only the pinned browser so apt dependency setup cannot stall the
+      # application job before the production build and E2E gates.
+      - run: npx playwright install chromium
       - uses: supabase/setup-cli@v1
         with:
           version: 2.109.0
