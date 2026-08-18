@@ -8,6 +8,18 @@
 
 **Tech Stack:** Next.js 16 route handlers, TypeScript, Zod, Vitest, Supabase RPCs, GitHub App OAuth.
 
+## Current implementation status — 2026-08-18
+
+- [x] Tasks 1–3 are implemented and covered by the account-policy, installation
+  claim, and callback contract tests.
+- [x] Local shadow evidence is executable: the selected
+  `mukta2701/ComplianceHub` repository is read-only, the collection summary is
+  rendered as current/partial, and readiness remains unchanged. The exact
+  branch CI run also passes the production desktop/mobile suite.
+- [ ] Task 4 live acceptance remains open until the GitHub App is approved and
+  installed for the owner-controlled account/repository. A GitHub user token
+  returning `403` from the installations API is not installation proof.
+
 ---
 
 ### Task 1: Fail-closed GitHub account-type policy

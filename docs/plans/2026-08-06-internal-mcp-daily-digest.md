@@ -13,6 +13,20 @@ and audit history.
 **Tech Stack:** Next.js 16, TypeScript 5, Zod 4, Supabase Auth/Postgres/RLS,
 Model Context Protocol TypeScript SDK, Vitest, pgTAP, Slack incoming webhooks.
 
+## Current implementation status — 2026-08-18
+
+- [x] Tasks 1–7 are implemented in the current release branch and covered by
+  unit, database, integration, and production Playwright verification. The
+  private plugin also passes the official structural validator.
+- [x] Local MCP discovery, PKCE/revocation coverage, Owner-only digest
+  reservation/finalisation, replay-safe delivery lifecycle, and closed-world
+  fact/message validation are executable and green.
+- [ ] Task 8 hosted acceptance remains open: real MCP Inspector/Codex/Claude
+  OAuth round trips, three real ComplianceHub-owned Slack deliveries, and the
+  trusted hosted 09:00 Europe/London scheduled task require the hosted owner
+  connections and deployment gates described below. Local connector smoke
+  messages are not counted as application-owned digest delivery.
+
 ---
 
 ## Tasks
