@@ -6,12 +6,12 @@
 ## Current handoff — 2026-08-18
 
 - Branch: `codex/github-collection-foundation`; the reviewed baseline for this
-  handoff is `7b0d918`, including retry-safe automation provenance, scheduled
+  handoff is `db384cb`, including retry-safe automation provenance, scheduled
   retention purging, owner-gated AI drafting, stable automation sign-up/tracker
   E2E paths, and the safe connector-metadata grant.
 - Local application health: `/api/health` returns HTTP 200 with `db: ok`.
 - Local verification baseline: `npm run verify` passed lint, typecheck, **195
-  test files / 1,355 tests**, and the Next production build. The disposable CI
+  test files / 1,356 tests**, and the Next production build. The disposable CI
   database gate is the authoritative check for the newly added automation
   migrations.
 - Browser evidence: the complete production matrix passed **58/58** across
