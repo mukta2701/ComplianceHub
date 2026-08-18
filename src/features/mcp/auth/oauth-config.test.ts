@@ -40,4 +40,18 @@ describe("parseMcpOAuthEnvironment", () => {
     expect(value.resource).toBe("http://127.0.0.1:3000/mcp");
     expect(value.authorizationServer).toBe("http://127.0.0.1:54321/auth/v1");
   });
+
+  it("treats blank optional values like omitted local configuration", () => {
+    const value = parseMcpOAuthEnvironment({
+      NODE_ENV: "test",
+      MCP_RESOURCE_URL: "  ",
+      SUPABASE_OAUTH_ISSUER: "",
+      SUPABASE_OAUTH_JWKS_URL: "",
+      MCP_JWT_ALGORITHMS: "",
+    });
+    expect(value.resource).toBe("http://127.0.0.1:3000/mcp");
+    expect(value.authorizationServer).toBe("http://127.0.0.1:54321/auth/v1");
+    expect(value.jwksUrl).toBe("http://127.0.0.1:54321/auth/v1/.well-known/jwks.json");
+    expect(value.algorithms).toEqual(["RS256", "ES256"]);
+  });
 });

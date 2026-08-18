@@ -31,6 +31,7 @@ npm run dev
 ```
 
 Use the local Supabase values printed by `supabase start` in `.env.local`. Never expose `SUPABASE_SERVICE_ROLE_KEY` to browser code.
+Leave `MCP_RESOURCE_URL`, `SUPABASE_OAUTH_ISSUER`, and `SUPABASE_OAUTH_JWKS_URL` blank for local development; they use fixed loopback defaults. Set them to the exact hosted origin and Supabase issuer/JWKS values only for staging or production.
 
 ## Verification
 

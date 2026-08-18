@@ -3,7 +3,7 @@
 - [ ] Project owner has reviewed and approved every assessment question and remediation.
 - [ ] Legal, privacy, certification, and open-source disclaimers are visible and accurate.
 - [ ] Production Supabase project uses the intended region and all migrations pass.
-- [ ] Hosted Supabase personal staging project ref `ytenjiyjdcrjkgwmciqw` has a verified backup; `supabase migration list` and `supabase db push --dry-run` showed exactly GitHub migrations `20260817010000`, `20260817020000`, `20260817030000`, and `20260817192458` in order; they were verified before any application deployment; and `HOSTED_SUPABASE_PROJECT_REF` plus `HOSTED_SUPABASE_MIGRATION_VERSION` were set only afterwards and match `NEXT_PUBLIC_SUPABASE_URL`.
+- [ ] Hosted Supabase personal staging project ref `ytenjiyjdcrjkgwmciqw` has a verified backup; `supabase migration list` and `supabase db push --dry-run` showed exactly the nine reviewed migrations through `20260818070000` in order; they were verified before any application deployment; and `HOSTED_SUPABASE_PROJECT_REF` plus `HOSTED_SUPABASE_MIGRATION_VERSION` were set only afterwards and match `NEXT_PUBLIC_SUPABASE_URL`.
 - [ ] Cross-tenant RLS tests, immutable-record tests, and stale-write tests pass.
 - [ ] Service-role and cron credentials are server-only, rotated, and stored in deployment secrets.
 - [ ] An Adtecher organisation owner approved the private GitHub App, one dedicated selected repository, exact read-only permissions/events, SSL verification, OAuth-during-install disabled, Redirect-on-update enabled, and the callback/setup/webhook URLs at the canonical origin.
@@ -20,7 +20,7 @@
 These checks prove the current local implementation only; they do not close the
 hosted, Azure, Slack, GitHub-owner, email, or backup checkpoints above.
 
-- [x] On source commit `bf41b95`, `npm run verify` passed lint, typecheck,
+- [x] On source commit `7b0d918`, `npm run verify` passed lint, typecheck,
   **195 test files / 1,355 tests**, and the Next production build.
 - [x] GitHub CI run `32109668215` for `bf41b95` passed Gitleaks, the production
   container build, the disposable database upgrade/full pgTAP suite, application
@@ -31,7 +31,7 @@ hosted, Azure, Slack, GitHub-owner, email, or backup checkpoints above.
 - [x] Fresh local `npm run test:e2e -- --workers=1`: **58/58 desktop + mobile
   tests passed** against the preserved local fixture.
 - [x] Local `/api/health` returned HTTP 200 with `db: ok`; the running local
-  stack reports 97 applied migrations and the expected GitHub/automation/MCP
+  stack reports 98 applied migrations and the expected GitHub/automation/MCP
   tables are present.
 - [x] Focused GitHub production shadow run: Chromium + mobile 2/2; local
   personal-pilot readiness unchanged.

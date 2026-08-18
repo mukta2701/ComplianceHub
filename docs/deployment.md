@@ -54,20 +54,25 @@ The personal staging project for this rollout is project ref
 `ytenjiyjdcrjkgwmciqw`. Confirm that exact ref in both the Supabase dashboard and
 CLI before linking or applying anything, then take and verify a recoverable
 backup. From the last deployed schema, both `supabase migration list` and
-`supabase db push --dry-run` must show exactly these four pending additive
+`supabase db push --dry-run` must show exactly these nine pending additive
 migrations, in this order:
 
 1. `20260817010000_github_collection_foundation.sql`
 2. `20260817020000_github_collection_run_leases.sql`
 3. `20260817030000_github_webhook_delivery_ids.sql`
 4. `20260817192458_github_shadow_ui_summary.sql`
+5. `20260818030000_automation_proposal_signal_uniqueness.sql`
+6. `20260818040000_harden_oauth_trigger_permissions.sql`
+7. `20260818050000_grant_safe_connection_metadata.sql`
+8. `20260818060000_automation_task_draft_uniqueness.sql`
+9. `20260818070000_reassert_finalise_soa_operator_guard.sql`
 
 Stop if the project ref, ordering, or pending set differs. After the backup is
 verified, apply that reviewed set once with `supabase db push`, rerun
 `supabase migration list`, and verify the GitHub tables, security-invoker summary
 view, and service-only RPC signatures. Only then set the protected environment
 variables `HOSTED_SUPABASE_PROJECT_REF=ytenjiyjdcrjkgwmciqw` and
-`HOSTED_SUPABASE_MIGRATION_VERSION=20260817192458`. The deploy preflight binds
+`HOSTED_SUPABASE_MIGRATION_VERSION=20260818070000`. The deploy preflight binds
 both attestations to the exact `NEXT_PUBLIC_SUPABASE_URL`; changing the target
 project invalidates the gate. These attestations are not substitutes for the
 list, dry run, backup, or direct verification. The migrations remain compatible
@@ -142,7 +147,7 @@ GitHub environment variables:
 | `SUPABASE_OAUTH_JWKS_URL` | `<issuer>/.well-known/jwks.json` |
 | `MCP_JWT_ALGORITHMS` | `RS256,ES256` |
 | `HOSTED_SUPABASE_PROJECT_REF` | `ytenjiyjdcrjkgwmciqw`, only after the exact hosted project, backup, and four-migration checkpoint above pass |
-| `HOSTED_SUPABASE_MIGRATION_VERSION` | `20260817192458`, only after the four-migration checkpoint above passes |
+| `HOSTED_SUPABASE_MIGRATION_VERSION` | `20260818070000`, only after the nine-migration checkpoint above passes |
 | `REGISTERED_GITHUB_APP_SITE_URL` | Exact canonical origin registered in GitHub; must equal `NEXT_PUBLIC_SITE_URL` |
 
 GitHub environment secrets:

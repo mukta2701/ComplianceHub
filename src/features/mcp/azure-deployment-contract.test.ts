@@ -112,13 +112,13 @@ describe("Azure staging deployment contract", () => {
   it("gates mutation on the hosted schema and registered canonical GitHub origin", () => {
     expect(workflow).toContain("HOSTED_SUPABASE_MIGRATION_VERSION");
     expect(workflow).toContain("HOSTED_SUPABASE_PROJECT_REF");
-    expect(workflow).toContain("20260817192458");
+    expect(workflow).toContain("20260818070000");
     expect(workflow).toMatch(/test "\$SUPABASE_URL" = "https:\/\/\$HOSTED_SUPABASE_PROJECT_REF\.supabase\.co"/);
     expect(workflow).toContain("REGISTERED_GITHUB_APP_SITE_URL");
     expect(workflow).toMatch(/test "\$REGISTERED_GITHUB_APP_SITE_URL" = "\$CANONICAL_SITE_URL"/);
     expect(workflow).toMatch(/properties\.configuration\.ingress\.fqdn[\s\S]*test "\$CANONICAL_SITE_URL" = "https:\/\/\$container_app_fqdn"/);
     expect(deployment).toMatch(/backup[\s\S]*supabase migration list[\s\S]*HOSTED_SUPABASE_MIGRATION_VERSION/i);
-    expect(deployment).toMatch(/supabase db push --dry-run[\s\S]*20260817010000[\s\S]*20260817020000[\s\S]*20260817030000[\s\S]*20260817192458/);
+    expect(deployment).toMatch(/supabase db push --dry-run[\s\S]*20260817010000[\s\S]*20260817020000[\s\S]*20260817030000[\s\S]*20260817192458[\s\S]*20260818030000[\s\S]*20260818040000[\s\S]*20260818050000[\s\S]*20260818060000[\s\S]*20260818070000/);
     expect(deployment).toMatch(/REGISTERED_GITHUB_APP_SITE_URL[\s\S]*NEXT_PUBLIC_SITE_URL/);
     expect(releaseChecklist).toMatch(/hosted Supabase[\s\S]*before.*application deployment/i);
     expect(releaseChecklist).toMatch(/GitHub App[\s\S]*canonical.*origin/i);
