@@ -6,19 +6,20 @@
 ## Current handoff — 2026-08-18
 
 - Branch: `codex/github-collection-foundation`; the reviewed baseline for this
-  handoff is `b3dd748`, including retry-safe automation provenance, stable
-  automation sign-up/tracker E2E paths, and the safe connector-metadata grant.
+  handoff is `e7a0a98`, including retry-safe automation provenance, scheduled
+  retention purging, owner-gated AI drafting, stable automation sign-up/tracker
+  E2E paths, and the safe connector-metadata grant.
 - Local application health: `/api/health` returns HTTP 200 with `db: ok`.
-- Local verification baseline: `npm test -- --run` passed lint-adjacent unit
-  coverage with 189 test files / 1,333 tests; typecheck and the Next production
-  build also passed. The disposable CI database gate is the authoritative check
-  for the newly added automation migrations.
+- Local verification baseline: `npm run verify` passed lint, typecheck, **191
+  test files / 1,341 tests**, and the Next production build. The disposable CI
+  database gate is the authoritative check for the newly added automation
+  migrations.
 - Browser evidence: the complete production matrix passed **58/58** across
   Chromium and mobile with `E2E_TEST_TOOLS_ENABLED=1` and one worker against
   the shared local Supabase fixture.
 - Integration evidence: `npm run test:integration` passed 3 files / 5 tests;
   the production GitHub shadow spec passed on Chromium and mobile (2/2).
-- Remote CI evidence: run `32097617770` for `b3dd748` passed Gitleaks, container,
+- Remote CI evidence: run `32099612502` for `e7a0a98` passed Gitleaks, container,
   database upgrade/full pgTAP, application lint/typecheck/unit/build,
   integration, and 58/58 Playwright desktop/mobile tests.
 - MCP evidence: local DCR + S256 PKCE, authorization-code exchange, refresh,
