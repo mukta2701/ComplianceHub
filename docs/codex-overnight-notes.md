@@ -6,7 +6,7 @@
 ## Current handoff — 2026-08-18
 
 - Branch: `codex/github-collection-foundation`; the reviewed baseline for this
-  handoff is `8405b10`, including retry-safe automation provenance, scheduled
+  handoff is `47d7757`, including retry-safe automation provenance, scheduled
   retention purging, owner-gated AI drafting, replay-safe automation reviews,
   stable automation sign-up/tracker
   E2E paths, the safe connector-metadata grant, and active-workspace isolation
@@ -18,11 +18,10 @@
   migrations.
 - Browser evidence: GitHub CI's complete production matrix passed **58/58**
   across Chromium and mobile with `E2E_TEST_TOOLS_ENABLED=1` and one worker.
-  The local production-server run completed 57 tests with one retry-only flaky
-  automation attempt; that retry passed.
+  A fresh local production-server run also completed **58/58**.
 - Integration evidence: `npm run test:integration` passed 3 files / 5 tests;
   the production GitHub shadow spec passed on Chromium and mobile (2/2).
-- Remote CI evidence: run `32126259509` for `8405b10` completed successfully.
+- Remote CI evidence: run `32126839581` for `47d7757` completed successfully.
   Gitleaks, container, database upgrade/full pgTAP, application
   lint/typecheck/unit/build, integration, and 58/58 Playwright desktop/mobile
   tests all passed.

@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 const root = path.join(process.cwd(), "src/app/app");
 
 const scopedQueries = [
+  ["page.tsx", "risk_matrix_config"],
   ["assessment/page.tsx", "assessment_sessions"],
   ["assessment/[id]/page.tsx", "assessment_sessions"],
   ["assessment/[id]/page.tsx", "assessment_responses"],
@@ -73,5 +74,32 @@ describe("legacy server mutations pin IDs to the active workspace", () => {
       "supabase\\.from\\(\\\"" + table + "\\\"\\)[\\s\\S]{0,700}?\\." + operation + "\\([\\s\\S]{0,700}?\\.eq\\(\\\"" + key + "\\\",[\\s\\S]{0,700}?\\.eq\\(\\\"organisation_id\\\", organisation\\.id\\)",
     );
     expect(source).toMatch(tableCall);
+  });
+});
+
+describe("audit pages and actions keep related reads in the active workspace", () => {
+  it("scopes checklist position lookup by both audit and organisation", () => {
+    const source = readFileSync(path.join(root, "audits/actions.ts"), "utf8");
+    expect(source).toMatch(/from\("audit_checklist_items"\)[\s\S]{0,500}?\.eq\("audit_id", parsed\.auditId\)[\s\S]{0,500}?\.eq\("organisation_id", organisation\.id\)/);
+  });
+
+  it("scopes the detail page's auditor token list to the selected audit", () => {
+    const source = readFileSync(path.join(root, "audits/[id]/page.tsx"), "utf8");
+    expect(source).toMatch(/from\("auditor_access_tokens"\)[\s\S]{0,500}?\.eq\("audit_id", id\)[\s\S]{0,500}?\.eq\("organisation_id", organisation\.id\)/);
+  });
+});
+
+describe("active-workspace reference and AI reads are explicit", () => {
+  it("pins risk suggestion reference lookups to the active organisation", () => {
+    const source = readFileSync(path.join(root, "actions.ts"), "utf8");
+    expect(source).toMatch(/from\("risks"\)\.select\("id",\{count:"exact",head:true\}\)\.eq\("organisation_id", organisation\.id\)/);
+    expect(source).toMatch(/from\("risk_categories"\)[\s\S]{0,220}?\.eq\("name", "Readiness"\)\.eq\("organisation_id", organisation\.id\)/);
+  });
+
+  it("pins assessment and SoA AI target reads to the active organisation", () => {
+    const source = readFileSync(path.join(process.cwd(), "src/app/api/app/ai/route.ts"), "utf8");
+    expect(source).toMatch(/from\("assessment_sessions"\)[\s\S]{0,300}?\.eq\("organisation_id", organisation\.id\)/);
+    expect(source).toMatch(/from\("assessment_responses"\)[\s\S]{0,350}?\.eq\("organisation_id", organisation\.id\)/);
+    expect(source).toMatch(/from\("soa_items"\)[\s\S]{0,300}?\.eq\("organisation_id", organisation\.id\)/);
   });
 });

@@ -20,25 +20,25 @@
 These checks prove the current local implementation only; they do not close the
 hosted, Azure, Slack, GitHub-owner, email, or backup checkpoints above.
 
-- [x] On release commit `8405b10`, `npm run verify` passed lint, typecheck,
+- [x] On release commit `47d7757`, `npm run verify` passed lint, typecheck,
   **199 test files / 1,414 tests**, and the Next production build.
-- [x] GitHub CI run `32126259509` for `8405b10` passed Gitleaks, container,
+- [x] GitHub CI run `32126839581` for `47d7757` passed Gitleaks, container,
   database upgrade/full pgTAP, application lint/typecheck/unit/build,
   integration, and the full desktop/mobile Playwright gate.
 - [x] Fresh local `npm run test:db`: 76 files / 1,232 tests passed against the
   preserved local Supabase fixture.
 - [x] Fresh local `npm run test:integration`: 3 files / 5 tests against the
   running localhost Supabase stack.
-- [x] GitHub CI run `32126259509`: **58/58 desktop + mobile tests passed**
-  against the disposable CI fixture. A local production-server run completed
-  with 57 passed and one retry-only flaky automation attempt; the retry passed.
+- [x] GitHub CI run `32126839581`: **58/58 desktop + mobile tests passed**
+  against the disposable CI fixture. A fresh local production-server run also
+  completed **58/58** with one worker.
 - [x] Local `/api/health` returned HTTP 200 with `db: ok`; the running local
   stack reports 98 applied migrations and the expected GitHub/automation/MCP
   tables are present.
 - [x] Focused GitHub production shadow run: Chromium + mobile 2/2; local
   personal-pilot readiness unchanged.
 - [x] Slack connector smoke test posted and re-read one non-sensitive message in
-  `#compliancehub-adtecher-pilot` ([message](https://kt-sme.slack.com/archives/C0BQDARKE4F/p1787035559542319)); this verifies the connected Slack
+  `#compliancehub-adtecher-pilot` ([message](https://kt-sme.slack.com/archives/C0BQDARKE4F/p1787049744090669)); this verifies the connected Slack
   destination only, not the ComplianceHub webhook or scheduled digest delivery.
 - [x] `npm run test:db:upgrade`: passed earlier in the disposable/local upgrade
   gate (14 upgrade assertions, with the database restored afterwards); it was

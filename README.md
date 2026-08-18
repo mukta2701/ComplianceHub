@@ -30,7 +30,20 @@ npx supabase start
 npm run dev
 ```
 
-Use the local Supabase values printed by `supabase start` in `.env.local`. Never expose `SUPABASE_SERVICE_ROLE_KEY` to browser code.
+Use the local Supabase values printed by `supabase start` in `.env.local`. If you use
+`supabase status -o env`, map its names to the application names before starting
+Next.js (the CLI prints `API_URL`, `ANON_KEY`, and `SERVICE_ROLE_KEY`):
+
+```bash
+eval "$(npx supabase status -o env)"
+NEXT_PUBLIC_SUPABASE_URL="$API_URL" \
+NEXT_PUBLIC_SUPABASE_ANON_KEY="$ANON_KEY" \
+SUPABASE_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY" \
+npm run dev
+```
+
+Alternatively, copy the values into `.env.local`; do not commit that file.
+Never expose `SUPABASE_SERVICE_ROLE_KEY` to browser code.
 Leave `MCP_RESOURCE_URL`, `SUPABASE_OAUTH_ISSUER`, and `SUPABASE_OAUTH_JWKS_URL` blank for local development; they use fixed loopback defaults. Set them to the exact hosted origin and Supabase issuer/JWKS values only for staging or production.
 
 ## Verification

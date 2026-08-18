@@ -25,8 +25,8 @@ export async function linkPolicyEvidenceAction(formData: FormData) {
 }
 
 export async function unlinkPolicyEvidenceAction(formData: FormData) {
-  const { supabase } = await requirePolicyEvidenceManager();
+  const { supabase, organisation } = await requirePolicyEvidenceManager();
   const policyId = String(formData.get("policyId"));
-  const { error } = await supabase.from("evidence_links").delete().eq("id", String(formData.get("linkId"))); if (error) throw new Error("Could not remove the evidence link");
+  const { error } = await supabase.from("evidence_links").delete().eq("id", String(formData.get("linkId"))).eq("organisation_id", organisation.id); if (error) throw new Error("Could not remove the evidence link");
   revalidatePath(`/app/policies/${policyId}`);
 }

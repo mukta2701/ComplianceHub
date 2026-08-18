@@ -25,7 +25,10 @@ const siblingRows: Record<string, Row[]> = {
   audits: [{ id: AUDIT_ID, organisation_id: OTHER_ORGANISATION_ID, reference: "SIBLING-AUDIT", title: "Sibling-only audit" }],
   soa_snapshots: [{ id: SNAPSHOT_ID, organisation_id: OTHER_ORGANISATION_ID, title: "Sibling-only snapshot", version: 1, organisation_name: "Sibling", finalised_at: "2026-08-18T00:00:00Z", finalised_by: "sibling-user", assessment_session_id: "sibling-assessment", items: [], catalogue_versions: null }],
   assets: [{ organisation_id: OTHER_ORGANISATION_ID, reference: "SIBLING-ASSET", description: "Sibling-only asset", owner_location: "Sibling", classification: "internal", value_criticality: "low", security_controls: "Sibling-only", lifespan: "1 year", last_updated: null, remarks: "Sibling-only" }],
-  evidence: [{ organisation_id: OTHER_ORGANISATION_ID, id: "sibling-evidence", title: "Sibling-only evidence", kind: "note", status: "current", collected_on: "2026-08-18", valid_until: null, profiles: null }],
+  evidence: [
+    { organisation_id: ORGANISATION_ID, id: "active-evidence", title: "Active evidence", kind: "note", status: "current", collected_on: "2026-08-18", valid_until: null, profiles: null },
+    { organisation_id: OTHER_ORGANISATION_ID, id: "sibling-evidence", title: "Sibling-only evidence", kind: "note", status: "current", collected_on: "2026-08-18", valid_until: null, profiles: null },
+  ],
   risks: [{ organisation_id: OTHER_ORGANISATION_ID, reference: "SIBLING-RISK", title: "Sibling-only risk", description: "Sibling-only risk", likelihood: 1, impact: 1, treatment_plan: "Sibling-only", status: "open", review_date: null, risk_categories: null, profiles: null }],
   tasks: [{ organisation_id: OTHER_ORGANISATION_ID, id: "sibling-task", title: "Sibling-only task", detail: "Sibling-only", status: "open", due_on: null, recurrence: null, source: "manual", profiles: null }],
   soa_items: [{ organisation_id: OTHER_ORGANISATION_ID, soa_register_id: REGISTER_ID, control_code: "SIBLING-CTRL", control_title: "Sibling-only control", applicable: true, status: "operational", justification: "Sibling-only", evidence: "Sibling-only", owner_id: null, position: 1 }],
@@ -122,6 +125,16 @@ describe("active-organisation export boundaries", () => {
     expect(response.status).toBe(200);
     expect(body).not.toContain(siblingValue);
     expect(hoisted.queries).toContainEqual({ table: resource, column: "organisation_id", value: ORGANISATION_ID });
+  });
+
+  it("labels evidence with no owner as Unassigned", async () => {
+    const { GET } = await import("./evidence/export/route");
+
+    const response = await GET(new Request("http://localhost/api/app/evidence/export?format=csv"));
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(body).toContain("Active evidence,note,current,2026-08-18,,Unassigned");
   });
 
   it("does not export SoA items from a sibling organisation for an explicit register id", async () => {

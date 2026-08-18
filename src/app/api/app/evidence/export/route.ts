@@ -16,7 +16,7 @@ export async function GET(request: Request) {
     { header: "Status", value: (e) => e.status },
     { header: "Collected on", value: (e) => e.collected_on },
     { header: "Valid until", value: (e) => e.valid_until ?? "" },
-    { header: "Owner", value: (e) => one(e.profiles)?.display_name ?? "" },
+    { header: "Owner", value: (e) => one(e.profiles)?.display_name ?? "Unassigned" },
   ];
   if (format === "csv") return new NextResponse(toCsv(columns, rows), { headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": 'attachment; filename="evidence.csv"', "cache-control": "private, no-store" } });
   const buffer = await toXlsx("Evidence", columns, rows);

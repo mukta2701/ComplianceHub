@@ -73,6 +73,10 @@ test("a workspace turns selected systems into reviewable automation evidence", a
   await completeE2eSignUp(page, email, password);
   await page.getByLabel("Organisation name").fill(`Automation Workspace ${suffix}`);
   await submitServerAction(page, page.getByRole("button", { name: "Create workspace" }), "/app");
+  // The server action response can arrive before the redirect finishes. Wait
+  // for the authenticated dashboard before requesting the setup page, or a
+  // fast suite run can race the membership cookie/schema write.
+  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
   await page.goto("/app/setup");
   await expect(page.getByRole("heading", { name: "Connect the systems that already know your work" })).toBeVisible();
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);

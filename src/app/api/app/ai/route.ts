@@ -45,16 +45,16 @@ export async function POST(request: Request) {
   let context;
   if (parsed.data.targetType === "assessment_question") {
     const [{ data: session }, { data: question }, { data: response }] = await Promise.all([
-      supabase.from("assessment_sessions").select("id,organisation_id").eq("id", parsed.data.sessionId).maybeSingle(),
+      supabase.from("assessment_sessions").select("id,organisation_id").eq("id", parsed.data.sessionId).eq("organisation_id", organisation.id).maybeSingle(),
       supabase.from("catalogue_questions").select("id,code,prompt").eq("id", parsed.data.targetId).maybeSingle(),
-      supabase.from("assessment_responses").select("answer").eq("session_id", parsed.data.sessionId).eq("question_id", parsed.data.targetId).maybeSingle(),
+      supabase.from("assessment_responses").select("answer").eq("session_id", parsed.data.sessionId).eq("question_id", parsed.data.targetId).eq("organisation_id", organisation.id).maybeSingle(),
     ]);
     if (!session || session.organisation_id !== organisation.id || !question) return NextResponse.json({ error: "Assessment record not found" }, { status: 404 });
     targetId = question.id;
     suggestionType = "assessment_remediation";
     context = buildAssessmentAiContext({ sessionId: session.id, question, answer: response?.answer ?? null });
   } else if (parsed.data.targetType === "soa_item") {
-    const { data: item } = await supabase.from("soa_items").select("id,control_code,control_title,applicable,status,soa_registers(organisation_id)").eq("id", parsed.data.targetId).maybeSingle();
+    const { data: item } = await supabase.from("soa_items").select("id,control_code,control_title,applicable,status,soa_registers(organisation_id)").eq("id", parsed.data.targetId).eq("organisation_id", organisation.id).maybeSingle();
     const register = Array.isArray(item?.soa_registers) ? item.soa_registers[0] : item?.soa_registers;
     if (!item || !register || register.organisation_id !== organisation.id) return NextResponse.json({ error: "SoA item not found" }, { status: 404 });
     targetId = item.id;

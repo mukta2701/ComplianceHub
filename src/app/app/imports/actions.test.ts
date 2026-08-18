@@ -135,3 +135,23 @@ describe("runImportAction — safeParse resilience (Fix 3)", () => {
     }
   });
 });
+
+describe("runImportAction — active workspace reference lookups", () => {
+  it("counts only active-workspace risks when generating references", async () => {
+    const store: Store = {
+      risk_categories: [{ id: CATEGORY_ID, organisation_id: ORG_ID, name: "Operational", position: 0 }],
+      memberships: [],
+      risks: [
+        { id: "risk-active", organisation_id: ORG_ID },
+        { id: "risk-sibling", organisation_id: "00000000-0000-4000-8000-000000000099" },
+      ],
+    };
+    hoisted.ctx = { supabase: fakeSupabase(store), user: { id: USER_ID }, organisation: { id: ORG_ID, name: "Org" }, membership: { role: "owner" } };
+    const { runImportAction } = await import("./actions");
+
+    const result = await runImportAction({ module: "risk", headers: HEADERS, rows: [validRow(1)], mapping: MAPPING, commit: true });
+
+    expect(result.imported).toBe(1);
+    expect(store.risks.at(-1)).toMatchObject({ reference: "R-002", organisation_id: ORG_ID });
+  });
+});

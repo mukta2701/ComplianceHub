@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const POLICY_ID = "78000000-0000-4000-8000-000000000001";
+type PolicyChain = {
+  select: () => PolicyChain;
+  eq: () => PolicyChain;
+  maybeSingle: () => Promise<{ data: { id: string }; error: null }>;
+};
 
 const hoisted = vi.hoisted(() => ({
   ctx: null as unknown,
@@ -24,9 +29,12 @@ describe("acceptPolicyAction", () => {
 
   it("delegates acceptance authority to the narrow database RPC", async () => {
     const rpc = vi.fn().mockResolvedValue({ data: POLICY_ID, error: null });
-    const from = vi.fn(() => {
-      throw new Error("acceptance action must not read or write acceptance tables directly");
-    });
+    const maybeSingle = vi.fn().mockResolvedValue({ data: { id: POLICY_ID }, error: null });
+    const chain = {} as PolicyChain;
+    chain.select = () => chain;
+    chain.eq = () => chain;
+    chain.maybeSingle = maybeSingle;
+    const from = vi.fn(() => chain);
     hoisted.ctx = {
       supabase: { rpc, from },
       user: { id: "78000000-0000-4000-8000-000000000002" },
@@ -40,14 +48,14 @@ describe("acceptPolicyAction", () => {
     await expect(acceptPolicyAction(form)).resolves.toBeUndefined();
 
     expect(rpc).toHaveBeenCalledWith("accept_policy", { target_policy_id: POLICY_ID });
-    expect(from).not.toHaveBeenCalled();
+    expect(from).toHaveBeenCalledWith("policies");
     expect(hoisted.revalidatePath).toHaveBeenCalledWith(`/app/policies/${POLICY_ID}`);
   });
 
   it("returns a generic error when the database refuses acceptance", async () => {
     const rpc = vi.fn().mockResolvedValue({ data: null, error: { message: "sensitive database detail" } });
     hoisted.ctx = {
-      supabase: { rpc, from: vi.fn() },
+      supabase: { rpc, from: vi.fn(() => ({ select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: vi.fn().mockResolvedValue({ data: { id: POLICY_ID }, error: null }) }) }) }) })) },
       user: { id: "78000000-0000-4000-8000-000000000002" },
       organisation: { id: "78000000-0000-4000-8000-000000000003" },
     };

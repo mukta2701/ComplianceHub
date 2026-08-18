@@ -14,13 +14,16 @@ import { buildAutomationProposalAiContext } from "@/features/ai/domain/context";
 import { decryptSecret } from "@/lib/security/secrets";
 
 export async function reviewAutomationProposalAction(formData: FormData) {
-  const { supabase, user } = await requireAppContext();
+  const { supabase, user, organisation } = await requireAppContext();
   await enforceRateLimit(`automation-review:${user.id}`, { limit: 30, windowMs: 60_000 });
   const id = String(formData.get("id"));
   const decision = String(formData.get("decision"));
   if (decision !== "accepted" && decision !== "dismissed") throw new Error("Invalid automation review decision");
   const dismissalReason = String(formData.get("dismissalReason") ?? "").trim();
   if (decision === "dismissed" && !dismissalReason) throw new Error("Explain why this automation draft does not apply");
+  const { data: proposal, error: proposalError } = await supabase.from("automation_proposals")
+    .select("id").eq("id", id).eq("organisation_id", organisation.id).eq("assigned_to", user.id).eq("status", "draft").maybeSingle();
+  if (proposalError || !proposal) throw new Error("Automation draft not found");
   const { error } = await supabase.rpc("review_automation_proposal", {
     target_proposal_id: id,
     target_decision: decision,

@@ -110,12 +110,12 @@ export async function updateRiskStatusAction(formData: FormData) {
 export async function acceptRiskSuggestionAction(formData: FormData) {
   const { supabase, user, organisation } = await requireAppContext(); const questionId=String(formData.get("questionId"));
   const { data: question } = await supabase.from("catalogue_questions").select("code,prompt,remediation,weight").eq("id", questionId).single(); if (!question) throw new Error("Suggestion not found");
-  const { count }=await supabase.from("risks").select("id",{count:"exact",head:true}); const rating=Math.max(1,Math.min(5,Math.round(Number(question.weight))));
+  const { count }=await supabase.from("risks").select("id",{count:"exact",head:true}).eq("organisation_id", organisation.id); const rating=Math.max(1,Math.min(5,Math.round(Number(question.weight))));
   const { data: readinessCat } = await supabase.from("risk_categories")
-    .select("id").eq("name", "Readiness").maybeSingle();
+    .select("id").eq("name", "Readiness").eq("organisation_id", organisation.id).maybeSingle();
   let categoryId = readinessCat?.id ?? null;
   if (!categoryId) {
-    const { data: maxPos } = await supabase.from("risk_categories").select("position").order("position", { ascending: false }).limit(1).maybeSingle();
+    const { data: maxPos } = await supabase.from("risk_categories").select("position").eq("organisation_id", organisation.id).order("position", { ascending: false }).limit(1).maybeSingle();
     const { data: created } = await supabase.from("risk_categories")
       .insert({ organisation_id: organisation.id, name: "Readiness", position: (maxPos?.position ?? -1) + 1 })
       .select("id").single();
@@ -367,10 +367,13 @@ export async function removeMemberAction(formData: FormData) {
 }
 
 export async function revokeInvitationAction(formData: FormData) {
-  const { supabase, membership } = await requireAppContext();
+  const { supabase, membership, organisation } = await requireAppContext();
   if (!hasCapability(membership.role, "manage_members")) throw new Error("You are not allowed to manage invitations");
   const invitationId = z.uuid().safeParse(formData.get("invitationId"));
   if (!invitationId.success) throw new Error("Invalid invitation");
+  const { data: invitation, error: invitationError } = await supabase.from("invitations").select("id")
+    .eq("id", invitationId.data).eq("organisation_id", organisation.id).maybeSingle();
+  if (invitationError || !invitation) throw new Error("Invitation not found");
   const { error } = await supabase.rpc("revoke_invitation", { target_invitation_id: invitationId.data });
   if (error) throw new Error("Could not revoke the invitation");
   revalidatePath("/app/settings");
@@ -382,6 +385,9 @@ export async function resendInvitationAction(formData: FormData) {
   const invitationId = z.uuid().safeParse(formData.get("invitationId"));
   if (!invitationId.success) throw new Error("Invalid invitation");
   await enforceRateLimit(`invite-resend:${user.id}`, { limit: 10, windowMs: 60 * 60_000 });
+  const { data: invitation, error: invitationError } = await supabase.from("invitations").select("id")
+    .eq("id", invitationId.data).eq("organisation_id", organisation.id).maybeSingle();
+  if (invitationError || !invitation) throw new Error("Invitation not found");
 
   const credential = createInvitationCredential();
   const { data, error } = await supabase.rpc("resend_invitation", {

@@ -34,7 +34,7 @@ export async function addChecklistItemAction(formData: FormData) {
   const { supabase, user, organisation } = await requireAppContext();
   await enforceRateLimit(`audit:${user.id}`, { limit: 30, windowMs: 60_000 });
   const parsed = checklistItemInputSchema.parse(Object.fromEntries(formData));
-  const { data: last } = await supabase.from("audit_checklist_items").select("position").eq("audit_id", parsed.auditId).order("position", { ascending: false }).limit(1).maybeSingle();
+  const { data: last } = await supabase.from("audit_checklist_items").select("position").eq("audit_id", parsed.auditId).eq("organisation_id", organisation.id).order("position", { ascending: false }).limit(1).maybeSingle();
   const { error } = await supabase.from("audit_checklist_items").insert({
     organisation_id: organisation.id, audit_id: parsed.auditId, area: parsed.area, clause_reference: parsed.clauseReference,
     checklist_item: parsed.checklistItem, control_id: parsed.controlId, compliant: parsed.compliant,

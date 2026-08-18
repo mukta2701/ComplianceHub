@@ -20,7 +20,7 @@ vi.mock("@/features/ai/domain/context", () => ({ buildAutomationProposalAiContex
 vi.mock("@/lib/security/secrets", () => ({ decryptSecret: vi.fn() }));
 vi.mock("next/cache", () => ({ revalidatePath: hoisted.revalidatePath }));
 
-import { generateAutomationExplanationAction } from "./actions";
+import { generateAutomationExplanationAction, reviewAutomationProposalAction } from "./actions";
 
 const organisation = { id: "00000000-0000-4000-8000-000000000001" };
 const user = { id: "00000000-0000-4000-8000-000000000002" };
@@ -47,7 +47,7 @@ function supabaseForProposal() {
             const matches = filters.get("id") === proposal.id
               && filters.get("organisation_id") === organisation.id
               && filters.get("assigned_to") === proposal.assigned_to
-              && filters.get("status") === proposal.status;
+              && (!filters.has("status") || filters.get("status") === proposal.status);
             return Promise.resolve({ data: matches ? proposal : null, error: null });
           }
           return Promise.resolve({ data: null, error: null });
@@ -55,6 +55,7 @@ function supabaseForProposal() {
       };
       return builder;
     },
+    rpc: vi.fn().mockResolvedValue({ error: null }),
   };
 }
 
@@ -80,5 +81,27 @@ describe("generateAutomationExplanationAction", () => {
   it("does not expose malformed provider configuration through the server action", async () => {
     hoisted.provider.mockImplementation(() => { throw new Error("provider URL is invalid"); });
     await expect(generateAutomationExplanationAction(formData())).rejects.toThrow("AI assistance is not configured");
+  });
+});
+
+describe("reviewAutomationProposalAction workspace boundary", () => {
+  it("does not review a proposal from a sibling organisation", async () => {
+    const rpc = vi.fn().mockResolvedValue({ error: null });
+    hoisted.ctx = { supabase: { ...supabaseForProposal(), rpc }, user, organisation };
+    const form = formData("00000000-0000-4000-8000-000000000098");
+    form.set("decision", "accepted");
+
+    await expect(reviewAutomationProposalAction(form)).rejects.toThrow("Automation draft not found");
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("does not replay a proposal that is no longer a draft", async () => {
+    const rpc = vi.fn().mockResolvedValue({ error: null });
+    hoisted.ctx = { supabase: { ...supabaseForProposal(), rpc }, user, organisation };
+    const form = formData();
+    form.set("decision", "accepted");
+
+    await expect(reviewAutomationProposalAction(form)).rejects.toThrow("Automation draft not found");
+    expect(rpc).not.toHaveBeenCalled();
   });
 });

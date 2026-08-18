@@ -42,7 +42,9 @@ export async function deleteAssetAction(formData: FormData) {
 export async function linkAssetRiskAction(formData: FormData) {
   const { supabase, user, organisation } = await requireAppContext();
   const assetId = String(formData.get("assetId"));
-  const { error } = await supabase.from("asset_risks").insert({ organisation_id: organisation.id, asset_id: assetId, risk_id: String(formData.get("riskId")), created_by: user.id });
+  const riskId = String(formData.get("riskId"));
+  if (!assetId || !riskId) throw new Error("Asset and risk IDs are required");
+  const { error } = await supabase.from("asset_risks").insert({ organisation_id: organisation.id, asset_id: assetId, risk_id: riskId, created_by: user.id });
   if (error) throw new Error("Could not link the risk");
   revalidatePath(`/app/assets/${assetId}`);
 }
@@ -50,6 +52,8 @@ export async function linkAssetRiskAction(formData: FormData) {
 export async function unlinkAssetRiskAction(formData: FormData) {
   const { supabase, organisation } = await requireAppContext();
   const assetId = String(formData.get("assetId"));
-  const { error } = await supabase.from("asset_risks").delete().eq("asset_id", assetId).eq("risk_id", String(formData.get("riskId"))).eq("organisation_id", organisation.id); if (error) throw new Error("Could not unlink the risk");
+  const riskId = String(formData.get("riskId"));
+  if (!assetId || !riskId) throw new Error("Asset and risk IDs are required");
+  const { error } = await supabase.from("asset_risks").delete().eq("asset_id", assetId).eq("risk_id", riskId).eq("organisation_id", organisation.id); if (error) throw new Error("Could not unlink the risk");
   revalidatePath(`/app/assets/${assetId}`);
 }

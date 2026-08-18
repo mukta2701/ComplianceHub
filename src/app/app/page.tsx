@@ -120,7 +120,7 @@ export default async function AppHome() {
     supabase.from("audit_events").select("action,entity_type,occurred_at").eq("organisation_id", organisation.id).order("occurred_at", { ascending: false }).limit(6).then((r) => r.data),
     supabase.from("evidence").select("status").eq("organisation_id", organisation.id).in("status", ["current", "expiring", "expired"]).limit(3000).then((r) => r.data),
     supabase.from("risks").select("likelihood,impact,residual_likelihood,residual_impact").eq("organisation_id", organisation.id).neq("status", "closed").limit(500).then((r) => r.data),
-    supabase.from("risk_matrix_config").select("low_max,moderate_max,high_max,appetite_threshold").maybeSingle().then((r) => r.data),
+    supabase.from("risk_matrix_config").select("low_max,moderate_max,high_max,appetite_threshold").eq("organisation_id", organisation.id).maybeSingle().then((r) => r.data),
     supabase.from("assessment_sessions").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id),
     supabase.from("soa_snapshots").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id),
     supabase.from("risks").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id),

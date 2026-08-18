@@ -104,18 +104,11 @@ Phase B took every compliance workflow that a 10–20 person organisation used t
 
 ## Deferred hardening
 
-Small backlog items carried forward in the SDD ledger (`.superpowers/sdd/progress.md`, Phase B section) and the GO-LIVE notes:
+The following review items remain open:
 
-- **CSV formula-injection hardening is shipped** — the shared `cell()` escaper (`src/features/exports/exports.ts`) prefixes formula-like free text with a neutralising apostrophe before quoting commas, quotes, or newlines. Keep the regression tests in place when extending export/import coverage.
-- **XLSX export test checks the container, not the content** — there is no round-trip read-back assertion on the generated workbook (Task 12 minor).
-- **`risk_matrix_config` update policy does not re-assert `updated_by = auth.uid()`** — the server action always sets it, but the RLS with-check does not pin it (Task 3 minor).
-- **RTP delete action discards the DB error** — `deleteRtpAction` swallows any delete failure, matching the existing pattern but hiding errors (Task 5 minor).
 - **`reviewSoaItemAction` lacks server-side owner-membership re-validation** — the composite FK backstops it and the UI is unreachable for a non-member, but there is no explicit server check (Task 7 minor).
-- **Asset link/unlink actions lack an empty-id guard** — the form is always valid today, but the actions do not defensively guard a blank id (Task 11 minor).
-- **Category-backfill `dense_rank` position collision** — the `202607020011` backfill can collide positions for category values that differ only by case; it passed on real data as a one-shot but is not collision-proof (Task 2 minor).
-- **Export e2e hits endpoints, not buttons, and asserts no filenames** — the download tests call the routes directly and do not assert the `content-disposition` filename (Tasks 13/14 minor).
-- **Evidence export owner fallback is `""` rather than "Unassigned"** — inconsistent with the other export owner columns (Task 14 minor).
-- **`maybeSingle` risk-matrix-config read assumes a single active org** — a pre-existing pattern that will need revisiting for multi-org membership (Task 3 minor).
+
+The following previously reported items are now closed and tracked as `Done` in `docs/feature-backlog.csv`: CSV formula-injection protection, XLSX content round-trip coverage, risk-matrix policy identity and active-workspace reads, RTP delete errors, asset-link empty-id guards, category position collision, export filename/button coverage, and the evidence owner fallback.
 
 ---
 

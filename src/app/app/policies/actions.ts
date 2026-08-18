@@ -34,13 +34,13 @@ export async function updatePolicyAction(formData: FormData) {
   const expectedVersion = Number(formData.get("expectedVersion"));
   if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1) throw new Error("Invalid expected policy version");
   const parsed = policyInputSchema.parse({ ...Object.fromEntries(formData), organisationId: organisation.id });
-  const { data: current, error: readError } = await supabase.from("policies").select("body,version,owner_id").eq("id", id).single();
+  const { data: current, error: readError } = await supabase.from("policies").select("body,version,owner_id").eq("id", id).eq("organisation_id", organisation.id).single();
   if (readError || !current) throw new Error("Policy not found");
   if (current.version !== expectedVersion) throw new Error("This policy changed while you were editing it. Refresh and try again.");
   const { data: updated, error } = await supabase.from("policies").update({
     reference: parsed.reference, title: parsed.title, body: parsed.body, owner_id: parsed.ownerId,
     review_due: parsed.reviewDue, updated_at: new Date().toISOString(),
-  }).eq("id", id).eq("version", expectedVersion).select("version").maybeSingle();
+  }).eq("id", id).eq("organisation_id", organisation.id).eq("version", expectedVersion).select("version").maybeSingle();
   if (error) throw new Error("Could not update the policy");
   if (!updated) throw new Error("This policy changed while you were editing it. Refresh and try again.");
   if (updated.version !== expectedVersion) {
@@ -51,33 +51,35 @@ export async function updatePolicyAction(formData: FormData) {
 }
 
 export async function approvePolicyAction(formData: FormData) {
-  const { supabase, user, membership } = await requireAppContext();
+  const { supabase, user, organisation, membership } = await requireAppContext();
   requirePolicyManager(membership.role);
   await enforceRateLimit(`policy:${user.id}`, { limit: 30, windowMs: 60_000 });
   const id = String(formData.get("id"));
   const { error } = await supabase.from("policies").update({
     status: "approved", approved_by: user.id, approved_at: new Date().toISOString(), updated_at: new Date().toISOString(),
-  }).eq("id", id);
+  }).eq("id", id).eq("organisation_id", organisation.id);
   if (error) throw new Error("Could not approve the policy");
   revalidatePath(`/app/policies/${id}`); revalidatePath("/app/policies");
 }
 
 export async function setPolicyStatusAction(formData: FormData) {
-  const { supabase, user, membership } = await requireAppContext();
+  const { supabase, user, organisation, membership } = await requireAppContext();
   requirePolicyManager(membership.role);
   await enforceRateLimit(`policy:${user.id}`, { limit: 30, windowMs: 60_000 });
   const id = String(formData.get("id"));
   const status = String(formData.get("status"));
   if (!["draft", "in_review", "approved", "archived"].includes(status)) throw new Error("Invalid policy status");
-  const { error } = await supabase.from("policies").update({ status, updated_at: new Date().toISOString() }).eq("id", id);
+  const { error } = await supabase.from("policies").update({ status, updated_at: new Date().toISOString() }).eq("id", id).eq("organisation_id", organisation.id);
   if (error) throw new Error("Could not update the policy status");
   revalidatePath(`/app/policies/${id}`); revalidatePath("/app/policies");
 }
 
 export async function acceptPolicyAction(formData: FormData) {
-  const { supabase, user } = await requireAppContext();
+  const { supabase, user, organisation } = await requireAppContext();
   await enforceRateLimit(`policy:${user.id}`, { limit: 30, windowMs: 60_000 });
   const id = String(formData.get("id"));
+  const { data: policy, error: policyError } = await supabase.from("policies").select("id").eq("id", id).eq("organisation_id", organisation.id).maybeSingle();
+  if (policyError || !policy) throw new Error("Policy not found");
   const { error } = await supabase.rpc("accept_policy", { target_policy_id: id });
   if (error) throw new Error("Could not record your acceptance");
   revalidatePath(`/app/policies/${id}`);

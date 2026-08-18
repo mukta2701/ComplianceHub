@@ -84,9 +84,12 @@ async function loadSoaRegister(supabase: SupabaseClient, registerId: string | un
   if (!id) {
     const { data: latest } = await supabase.from("soa_registers").select("id").eq("organisation_id", organisationId).order("updated_at", { ascending: false }).limit(1).maybeSingle();
     id = latest?.id;
+  } else {
+    const { data: selected } = await supabase.from("soa_registers").select("id").eq("id", id).eq("organisation_id", organisationId).maybeSingle();
+    if (!selected) return { registerId: null, byCode: new Map() };
   }
   if (!id) return { registerId: null, byCode: new Map() };
-  const { data: items } = await supabase.from("soa_items").select("id,control_code").eq("soa_register_id", id);
+  const { data: items } = await supabase.from("soa_items").select("id,control_code").eq("soa_register_id", id).eq("organisation_id", organisationId);
   const byCode = new Map<string, string>();
   for (const it of items ?? []) byCode.set(String(it.control_code).toLowerCase(), String(it.id));
   return { registerId: id, byCode };
@@ -142,7 +145,7 @@ export async function runImportAction(input: { module: ImportModule; headers: st
   if (input.module === "risk") {
     const resolveCategory = await categoryResolver(supabase, "risk_categories", organisation.id);
     const resolveMember = await memberResolver(supabase, organisation.id);
-    const { count } = await supabase.from("risks").select("id", { count: "exact", head: true });
+    const { count } = await supabase.from("risks").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id);
     let n = count ?? 0;
     for (const r of results) {
       if (!r.ok) continue;
@@ -166,7 +169,7 @@ export async function runImportAction(input: { module: ImportModule; headers: st
   } else if (input.module === "asset") {
     const resolveCategory = await categoryResolver(supabase, "asset_categories", organisation.id);
     const resolveMember = await memberResolver(supabase, organisation.id);
-    const { count } = await supabase.from("assets").select("id", { count: "exact", head: true });
+    const { count } = await supabase.from("assets").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id);
     let n = count ?? 0;
     for (const r of results) {
       if (!r.ok) continue;
@@ -196,7 +199,7 @@ export async function runImportAction(input: { module: ImportModule; headers: st
       const parseResult = soaItemReviewSchema.safeParse({ itemId, status: v.status, applicable: v.applicable, justification: v.justification, evidence: (v.comments as string) ?? "" });
       if (!parseResult.success) { skipped++; notes.push(`Control ${v.controlCode}: ${zodMessage(parseResult.error)}`); continue; }
       const parsed = parseResult.data;
-      const { error } = await supabase.from("soa_items").update({ status: parsed.status, applicable: parsed.applicable, justification: parsed.justification, evidence: parsed.evidence, owner_id: resolveMember(v.ownerName as string | null) }).eq("id", parsed.itemId);
+      const { error } = await supabase.from("soa_items").update({ status: parsed.status, applicable: parsed.applicable, justification: parsed.justification, evidence: parsed.evidence, owner_id: resolveMember(v.ownerName as string | null) }).eq("id", parsed.itemId).eq("organisation_id", organisation.id);
       if (error) { skipped++; notes.push(`Control ${v.controlCode}: ${error.message}`); } else updated++;
     }
     revalidatePath("/app/soa");

@@ -44,7 +44,7 @@ describe("policy management access", () => {
   });
 
   it("allows admins to approve policies", async () => {
-    const update = vi.fn(() => ({ eq: vi.fn().mockResolvedValue({ error: null }) }));
+    const update = vi.fn(() => ({ eq: vi.fn(() => ({ eq: vi.fn().mockResolvedValue({ error: null }) })) }));
     hoisted.ctx = {
       supabase: { from: vi.fn(() => ({ update })) }, user: { id: USER_ID },
       organisation: { id: ORGANISATION_ID }, membership: { role: "admin" },
@@ -63,13 +63,14 @@ describe("policy update concurrency", () => {
   function updateContext(returnedPolicy: { version: number } | null) {
     const read = {
       select: vi.fn(() => ({
-        eq: vi.fn(() => ({ single: vi.fn().mockResolvedValue({ data: { body: "Old text", version: 4, owner_id: null }, error: null }) })),
+        eq: vi.fn(() => ({ eq: vi.fn(() => ({ single: vi.fn().mockResolvedValue({ data: { body: "Old text", version: 4, owner_id: null }, error: null }) })) })),
       })),
     };
     const maybeSingle = vi.fn().mockResolvedValue({ data: returnedPolicy, error: null });
     const selectUpdated = vi.fn(() => ({ maybeSingle }));
     const versionEq = vi.fn(() => ({ select: selectUpdated }));
-    const idEq = vi.fn(() => ({ eq: versionEq }));
+    const organisationEq = vi.fn(() => ({ eq: versionEq }));
+    const idEq = vi.fn(() => ({ eq: organisationEq }));
     const update = vi.fn(() => ({ eq: idEq }));
     const rpc = vi.fn().mockResolvedValue({ error: null });
     const from = vi.fn().mockReturnValueOnce(read).mockReturnValueOnce({ update });
