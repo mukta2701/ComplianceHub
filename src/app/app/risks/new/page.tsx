@@ -4,8 +4,8 @@ import { createRiskAction } from "../../actions";
 
 export default async function NewRiskPage({ searchParams }: { searchParams: Promise<{ title?: string; description?: string; treatmentPlan?: string; sourceAssessmentSessionId?: string }> }) {
   const suggested = await searchParams;
-  const { supabase } = await requireAppContext();
-  const { data: categories } = await supabase.from("risk_categories").select("id,name").order("position");
+  const { supabase, organisation } = await requireAppContext();
+  const { data: categories } = await supabase.from("risk_categories").select("id,name").eq("organisation_id", organisation.id).order("position");
   return <>
     <PageIntro eyebrow="RISK" title="Add risk" body="Record inherent and residual exposure on the documented 5×5 matrix." />
     <form action={createRiskAction} className="card app-form">

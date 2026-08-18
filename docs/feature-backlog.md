@@ -106,7 +106,7 @@ Phase B took every compliance workflow that a 10–20 person organisation used t
 
 Small backlog items carried forward in the SDD ledger (`.superpowers/sdd/progress.md`, Phase B section) and the GO-LIVE notes:
 
-- **CSV formula-injection is unmitigated** — the shared `cell()` escaper (`src/features/exports/exports.ts`) quotes commas / quotes / newlines but does not neutralise a leading `=`, `+`, `-` or `@`, so exported free text can execute as a spreadsheet formula (Task 12 minor; security-relevant, also gates the B.5 round-trip).
+- **CSV formula-injection hardening is shipped** — the shared `cell()` escaper (`src/features/exports/exports.ts`) prefixes formula-like free text with a neutralising apostrophe before quoting commas, quotes, or newlines. Keep the regression tests in place when extending export/import coverage.
 - **XLSX export test checks the container, not the content** — there is no round-trip read-back assertion on the generated workbook (Task 12 minor).
 - **`risk_matrix_config` update policy does not re-assert `updated_by = auth.uid()`** — the server action always sets it, but the RLS with-check does not pin it (Task 3 minor).
 - **RTP delete action discards the DB error** — `deleteRtpAction` swallows any delete failure, matching the existing pattern but hiding errors (Task 5 minor).

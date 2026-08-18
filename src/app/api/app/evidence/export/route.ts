@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { requireAppContext } from "@/lib/app-context";
 import { toCsv, toXlsx, type ExportColumn } from "@/features/exports/exports";
 import { one } from "@/lib/supabase/one";
 
@@ -7,10 +7,8 @@ type Row = { title: string; kind: string; status: string; collected_on: string; 
 
 export async function GET(request: Request) {
   const format = new URL(request.url).searchParams.get("format") === "csv" ? "csv" : "xlsx";
-  const supabase = await createSupabaseServerClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
-  const { data } = await supabase.from("evidence").select("id,title,kind,status,collected_on,valid_until,profiles:owner_id(display_name)").order("created_at", { ascending: false });
+  const { supabase, organisation } = await requireAppContext();
+  const { data } = await supabase.from("evidence").select("id,title,kind,status,collected_on,valid_until,profiles:owner_id(display_name)").eq("organisation_id", organisation.id).order("created_at", { ascending: false });
   const rows = (data ?? []) as unknown as Row[];
   const columns: ExportColumn<Row>[] = [
     { header: "Title", value: (e) => e.title },

@@ -73,6 +73,7 @@ describe("updateTaskStatusAction", () => {
     hoisted.ctx = {
       supabase,
       user: { id: "10000000-0000-4000-8000-000000000001" },
+      organisation: { id: "20000000-0000-4000-8000-000000000001" },
     };
 
     const { updateTaskStatusAction } = await import("./actions");

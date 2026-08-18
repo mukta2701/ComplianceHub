@@ -4,11 +4,11 @@ import { one } from "@/lib/supabase/one";
 import { createTaskAction } from "../actions";
 
 export default async function NewTaskPage() {
-  const { supabase } = await requireAppContext();
+  const { supabase, organisation } = await requireAppContext();
   const [{ data: members }, { data: controls }, { data: risks }] = await Promise.all([
-    supabase.from("memberships").select("user_id,profiles(display_name)"),
+    supabase.from("memberships").select("user_id,profiles(display_name)").eq("organisation_id", organisation.id),
     supabase.from("controls").select("id,code,title").order("position"),
-    supabase.from("risks").select("id,reference,title").neq("status", "closed").order("reference"),
+    supabase.from("risks").select("id,reference,title").eq("organisation_id", organisation.id).neq("status", "closed").order("reference"),
   ]);
   return <>
     <PageIntro eyebrow="REMEDIATION" title="New task" body="Create an owned, dated action. Recurring tasks regenerate when you mark them done." />

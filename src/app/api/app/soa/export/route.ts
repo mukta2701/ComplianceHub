@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { requireAppContext } from "@/lib/app-context";
 import { toCsv, toXlsx, type ExportColumn } from "@/features/exports/exports";
 import { SOA_STATUS_LABEL, type SoaStatus } from "@/features/soa/domain/soa";
 import { one } from "@/lib/supabase/one";
@@ -10,20 +10,20 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const format = url.searchParams.get("format") === "csv" ? "csv" : "xlsx";
   const requestedRegisterId = url.searchParams.get("registerId");
-  const supabase = await createSupabaseServerClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
+  const { supabase, organisation } = await requireAppContext();
   let registerId = requestedRegisterId;
   if (!registerId) {
-    const { data: latest } = await supabase.from("soa_registers").select("id").order("updated_at", { ascending: false }).limit(1).maybeSingle();
+    const { data: latest } = await supabase.from("soa_registers").select("id").eq("organisation_id", organisation.id).order("updated_at", { ascending: false }).limit(1).maybeSingle();
     if (!latest) return NextResponse.json({ error: "No SoA register found" }, { status: 404 });
     registerId = latest.id;
   }
+  const { data: register } = await supabase.from("soa_registers").select("id").eq("id", registerId).eq("organisation_id", organisation.id).maybeSingle();
+  if (!register) return NextResponse.json({ error: "No SoA register found" }, { status: 404 });
   // soa_items.owner_id references memberships(user_id) — not profiles directly —
   // so resolve display names through the memberships → profiles join, matching the review page.
   const [{ data }, { data: members }] = await Promise.all([
-    supabase.from("soa_items").select("control_code,control_title,applicable,status,justification,evidence,owner_id").eq("soa_register_id", registerId).order("position"),
-    supabase.from("memberships").select("user_id,profiles(display_name)"),
+    supabase.from("soa_items").select("control_code,control_title,applicable,status,justification,evidence,owner_id").eq("soa_register_id", registerId).eq("organisation_id", organisation.id).order("position"),
+    supabase.from("memberships").select("user_id,profiles(display_name)").eq("organisation_id", organisation.id),
   ]);
   const rows = (data ?? []) as unknown as Row[];
   const ownerName = new Map<string, string>();

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { requireAppContext } from "@/lib/app-context";
 import { toCsv, toXlsx, type ExportColumn } from "@/features/exports/exports";
 import { ASSET_CLASSIFICATION_LABEL, ASSET_VALUE_LABEL, type AssetClassification, type AssetValue } from "@/features/assets/domain/assets";
 import { one } from "@/lib/supabase/one";
@@ -8,10 +8,8 @@ type Row = { reference: string; description: string; owner_location: string; cla
 
 export async function GET(request: Request) {
   const format = new URL(request.url).searchParams.get("format") === "csv" ? "csv" : "xlsx";
-  const supabase = await createSupabaseServerClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
-  const { data } = await supabase.from("assets").select("reference,description,owner_location,classification,value_criticality,security_controls,lifespan,last_updated,remarks,asset_categories(name)").order("reference");
+  const { supabase, organisation } = await requireAppContext();
+  const { data } = await supabase.from("assets").select("reference,description,owner_location,classification,value_criticality,security_controls,lifespan,last_updated,remarks,asset_categories(name)").eq("organisation_id", organisation.id).order("reference");
   const rows = (data ?? []) as unknown as Row[];
   const columns: ExportColumn<Row>[] = [
     { header: "Asset Reference", value: (a) => a.reference },

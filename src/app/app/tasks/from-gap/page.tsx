@@ -7,7 +7,7 @@ import { createGapTaskAction } from "../actions";
 export default async function FromGapPage({ searchParams }: { searchParams: Promise<{ questionId?: string }> }) {
   const { questionId } = await searchParams;
   if (!questionId) notFound();
-  const { supabase } = await requireAppContext();
+  const { supabase, organisation } = await requireAppContext();
   const { data: question } = await supabase.from("catalogue_questions").select("id,code,prompt,remediation").eq("id", questionId).maybeSingle();
   if (!question) notFound();
   const { data: acm } = await supabase.from("assessment_control_mappings").select("control_id").eq("catalogue_question_id", questionId).limit(1).maybeSingle();
@@ -16,7 +16,7 @@ export default async function FromGapPage({ searchParams }: { searchParams: Prom
     const { data: rcm } = await supabase.from("requirement_control_mappings").select("control_id").eq("requirement_id", acm.control_id).limit(1).maybeSingle();
     if (rcm) { const { data: c } = await supabase.from("controls").select("code,title").eq("id", rcm.control_id).maybeSingle(); control = c ?? null; }
   }
-  const { data: members } = await supabase.from("memberships").select("user_id,profiles(display_name)");
+  const { data: members } = await supabase.from("memberships").select("user_id,profiles(display_name)").eq("organisation_id", organisation.id);
   const title = `Close gap: ${question.prompt}`;
   return <>
     <PageIntro eyebrow="REMEDIATION" title="Accept gap as task" body="Assign an owner and a due date. A dated, owned task is created and the gap stays visible until it is done." />

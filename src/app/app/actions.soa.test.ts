@@ -14,6 +14,7 @@ vi.mock("next/navigation", () => ({ redirect: hoisted.redirect }));
 
 type Row = Record<string, unknown>;
 type Store = {
+  assessment_sessions: Row[];
   soa_registers: Row[];
   soa_items: Row[];
   requirement_control_mappings: Row[];
@@ -103,6 +104,7 @@ const ORG_ID = "00000000-0000-4000-8000-000000000001";
 const OTHER_ORG_ID = "00000000-0000-4000-8000-000000000002";
 const USER_ID = "00000000-0000-4000-8000-000000000003";
 const REGISTER_ID = "00000000-0000-4000-8000-000000000004";
+const ASSESSMENT_ID = "00000000-0000-4000-8000-000000000009";
 const ITEM_ID = "00000000-0000-4000-8000-000000000005";
 const REQUIREMENT_ID = "00000000-0000-4000-8000-000000000006";
 const CONTROL_ID = "00000000-0000-4000-8000-000000000007";
@@ -111,6 +113,12 @@ const OWNER_ID = "00000000-0000-4000-8000-000000000008";
 function formData() {
   const data = new FormData();
   data.set("registerId", REGISTER_ID);
+  return data;
+}
+
+function assessmentFormData(assessmentId = ASSESSMENT_ID) {
+  const data = new FormData();
+  data.set("assessmentId", assessmentId);
   return data;
 }
 
@@ -135,6 +143,7 @@ function context(client: ReturnType<typeof fakeSupabase>["client"]) {
 
 function reviewedStore(): Store {
   return {
+    assessment_sessions: [{ id: ASSESSMENT_ID, organisation_id: ORG_ID }],
     soa_registers: [{ id: REGISTER_ID, organisation_id: ORG_ID }],
     soa_items: [{
       id: ITEM_ID,
@@ -154,6 +163,25 @@ function reviewedStore(): Store {
     }],
   };
 }
+
+describe("createSoaAction active workspace scope", () => {
+  it("rejects an assessment id belonging to another organisation before calling the draft RPC", async () => {
+    const store = reviewedStore();
+    store.assessment_sessions[0] = { id: ASSESSMENT_ID, organisation_id: OTHER_ORG_ID };
+    const fake = fakeSupabase(store);
+    hoisted.ctx = context(fake.client);
+    const { createSoaAction } = await import("./actions");
+
+    await expect(createSoaAction(assessmentFormData())).rejects.toThrow("Assessment not found in the active workspace");
+    expect(fake.rpc).not.toHaveBeenCalled();
+    expect(fake.queries).toContainEqual({
+      table: "assessment_sessions",
+      operation: "eq",
+      column: "organisation_id",
+      value: ORG_ID,
+    });
+  });
+});
 
 describe("finaliseSoaAction preflight", () => {
   beforeEach(() => {

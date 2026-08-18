@@ -28,14 +28,14 @@ export async function updateAssetAction(formData: FormData) {
   const { supabase, organisation } = await requireAppContext();
   const id = String(formData.get("id"));
   const parsed = assetInputSchema.parse({ ...Object.fromEntries(formData), organisationId: organisation.id });
-  const { error } = await supabase.from("assets").update({ ...toRow(parsed, organisation.id), updated_at: new Date().toISOString() }).eq("id", id);
+  const { error } = await supabase.from("assets").update({ ...toRow(parsed, organisation.id), updated_at: new Date().toISOString() }).eq("id", id).eq("organisation_id", organisation.id);
   if (error) throw new Error("Could not update the asset");
   revalidatePath(`/app/assets/${id}`); redirect(`/app/assets/${id}`);
 }
 
 export async function deleteAssetAction(formData: FormData) {
-  const { supabase } = await requireAppContext();
-  const { error } = await supabase.from("assets").delete().eq("id", String(formData.get("id"))); if (error) throw new Error("Could not delete the asset");
+  const { supabase, organisation } = await requireAppContext();
+  const { error } = await supabase.from("assets").delete().eq("id", String(formData.get("id"))).eq("organisation_id", organisation.id); if (error) throw new Error("Could not delete the asset");
   revalidatePath("/app/assets"); redirect("/app/assets");
 }
 
@@ -48,8 +48,8 @@ export async function linkAssetRiskAction(formData: FormData) {
 }
 
 export async function unlinkAssetRiskAction(formData: FormData) {
-  const { supabase } = await requireAppContext();
+  const { supabase, organisation } = await requireAppContext();
   const assetId = String(formData.get("assetId"));
-  const { error } = await supabase.from("asset_risks").delete().eq("asset_id", assetId).eq("risk_id", String(formData.get("riskId"))); if (error) throw new Error("Could not unlink the risk");
+  const { error } = await supabase.from("asset_risks").delete().eq("asset_id", assetId).eq("risk_id", String(formData.get("riskId"))).eq("organisation_id", organisation.id); if (error) throw new Error("Could not unlink the risk");
   revalidatePath(`/app/assets/${assetId}`);
 }

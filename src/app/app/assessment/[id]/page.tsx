@@ -4,8 +4,8 @@ import { PageIntro } from "@/components/ui";
 import { AssessmentResponseList } from "@/components/assessment-response-form";
 
 export default async function AssessmentPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params; const { supabase } = await requireAppContext();
-  const { data: session, error: sessionError } = await supabase.from("assessment_sessions").select("id,title,revision,catalogue_version_id").eq("id", id).single();
+  const { id } = await params; const { supabase, organisation } = await requireAppContext();
+  const { data: session, error: sessionError } = await supabase.from("assessment_sessions").select("id,title,revision,catalogue_version_id").eq("id", id).eq("organisation_id", organisation.id).single();
   if (sessionError) {
     if (sessionError.code === "PGRST116") notFound();
     throw new Error("Could not load assessment session");
@@ -14,7 +14,7 @@ export default async function AssessmentPage({ params }: { params: Promise<{ id:
   const [categoryResult, questionResult, responseResult] = await Promise.all([
     supabase.from("catalogue_categories").select("id,code,title,position").eq("catalogue_version_id", session.catalogue_version_id).order("position"),
     supabase.from("catalogue_questions").select("id,category_id,code,prompt,position").eq("catalogue_version_id", session.catalogue_version_id).order("position"),
-    supabase.from("assessment_responses").select("question_id,answer,evidence_note").eq("session_id", id),
+    supabase.from("assessment_responses").select("question_id,answer,evidence_note").eq("session_id", id).eq("organisation_id", organisation.id),
   ]);
   if (categoryResult.error || questionResult.error || responseResult.error) throw new Error("Could not load assessment questions and responses");
   const questionsByCategory = new Map<string, typeof questionResult.data>();

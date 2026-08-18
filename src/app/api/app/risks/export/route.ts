@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { requireAppContext } from "@/lib/app-context";
 import { calculateRiskScore, RISK_STATUS_LABEL, type RiskStatus } from "@/features/risks/domain/risks";
 import { toCsv, toXlsx, type ExportColumn } from "@/features/exports/exports";
 import { one } from "@/lib/supabase/one";
@@ -8,10 +8,8 @@ type Row = { reference: string; title: string; description: string; likelihood: 
 
 export async function GET(request: Request) {
   const format = new URL(request.url).searchParams.get("format") === "csv" ? "csv" : "xlsx";
-  const supabase = await createSupabaseServerClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
-  const { data } = await supabase.from("risks").select("reference,title,description,likelihood,impact,treatment_plan,status,review_date,risk_categories(name),profiles:owner_id(display_name)").order("reference");
+  const { supabase, organisation } = await requireAppContext();
+  const { data } = await supabase.from("risks").select("reference,title,description,likelihood,impact,treatment_plan,status,review_date,risk_categories(name),profiles:owner_id(display_name)").eq("organisation_id", organisation.id).order("reference");
   const rows = (data ?? []) as unknown as Row[];
   const columns: ExportColumn<Row>[] = [
     { header: "Risk ID", value: (r) => r.reference },

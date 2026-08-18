@@ -4,8 +4,8 @@ import { SubTabs } from "@/components/sub-tabs";
 import { one } from "@/lib/supabase/one";
 
 export default async function ActivityPage() {
-  const { supabase } = await requireAppContext();
-  const { data } = await supabase.from("audit_events").select("id,action,entity_type,occurred_at,profiles(display_name)").order("occurred_at", { ascending: false }).limit(300);
+  const { supabase, organisation } = await requireAppContext();
+  const { data } = await supabase.from("audit_events").select("id,action,entity_type,occurred_at,profiles(display_name)").eq("organisation_id", organisation.id).order("occurred_at", { ascending: false }).limit(300);
 
   // Collapse consecutive same-second, same-actor, same-action events (e.g.
   // generating a 93-control SoA in one go) into a single counted row, so the

@@ -9,14 +9,14 @@ import { createPolicyAction } from "../actions";
 import { hasCapability } from "@/features/organisations/domain/access";
 
 export default async function NewPolicyPage({ searchParams }: { searchParams: Promise<{ template?: string }> }) {
-  const { supabase, membership } = await requireAppContext();
+  const { supabase, membership, organisation } = await requireAppContext();
   if (!hasCapability(membership.role, "manage_policies")) notFound();
   const { template: templateSlug } = await searchParams;
   // Pre-fill is presentation only: pick a template by slug and seed the form's
   // defaultValues. The blank-form path (no/unknown slug) keeps its current empty
   // defaults, and createPolicyAction still validates and inserts under RLS.
   const template = templateSlug ? policyTemplateBySlug(templateSlug) : undefined;
-  const { data: members } = await supabase.from("memberships").select("user_id,profiles(display_name)");
+  const { data: members } = await supabase.from("memberships").select("user_id,profiles(display_name)").eq("organisation_id", organisation.id);
   return <>
     <PageIntro eyebrow="POLICIES" title="Author a policy" body="Write the policy content. You approve it and members accept it from the policy's page." />
     <section className="card template-picker" aria-labelledby="template-picker-heading">

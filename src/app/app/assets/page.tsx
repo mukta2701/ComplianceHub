@@ -7,8 +7,8 @@ import { SubTabs } from "@/components/sub-tabs";
 import { one } from "@/lib/supabase/one";
 
 export default async function AssetsPage() {
-  const { supabase } = await requireAppContext();
-  const { data: assets } = await supabase.from("assets").select("id,reference,description,classification,value_criticality,owner_location,asset_categories(name)").order("reference");
+  const { supabase, organisation } = await requireAppContext();
+  const { data: assets } = await supabase.from("assets").select("id,reference,description,classification,value_criticality,owner_location,asset_categories(name)").eq("organisation_id", organisation.id).order("reference");
   const rows = assets ?? [];
   const summary = summariseAssets(rows.map((a) => ({ classification: a.classification as AssetClassification, value_criticality: a.value_criticality as AssetValue })));
   return <>

@@ -6,10 +6,10 @@ import { Icon } from "@/components/icons";
 import { SubTabs } from "@/components/sub-tabs";
 
 export default async function AuditsPage() {
-  const { supabase } = await requireAppContext();
+  const { supabase, organisation } = await requireAppContext();
   const [{ data: audits }, { data: findings }] = await Promise.all([
-    supabase.from("audits").select("id,reference,title,status,planned_start,planned_end").order("reference"),
-    supabase.from("audit_findings").select("severity,status"),
+    supabase.from("audits").select("id,reference,title,status,planned_start,planned_end").eq("organisation_id", organisation.id).order("reference"),
+    supabase.from("audit_findings").select("severity,status").eq("organisation_id", organisation.id),
   ]);
   const rows = audits ?? [];
   const openAudits = rows.filter((a) => a.status !== "closed").length;

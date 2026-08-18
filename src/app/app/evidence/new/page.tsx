@@ -5,8 +5,8 @@ import { createEvidenceAction } from "../actions";
 
 export default async function NewEvidencePage({ searchParams }: { searchParams: Promise<{ replaces?: string; message?: string }> }) {
   const { replaces, message } = await searchParams;
-  const { supabase } = await requireAppContext();
-  const { data: members } = await supabase.from("memberships").select("user_id,profiles(display_name)");
+  const { supabase, organisation } = await requireAppContext();
+  const { data: members } = await supabase.from("memberships").select("user_id,profiles(display_name)").eq("organisation_id", organisation.id);
   return <>
     <PageIntro eyebrow="EVIDENCE" title="Add evidence" body="Attach a file, link or note. Set a valid-until date; freshness is then tracked automatically." />
     {message && <p role="alert" className="card" style={{ padding: "12px", borderColor: "#f0c9c9", background: "#fdf2f2", color: "#963f00", fontSize: "13px", marginBottom: "12px" }}>{message}</p>}

@@ -10,18 +10,18 @@ const FILTERS = ["all", "open", "in_progress", "done", "cancelled", "overdue"] a
 
 export default async function TasksPage({ searchParams }: { searchParams: Promise<{ filter?: string }> }) {
   const { filter = "all" } = await searchParams;
-  const { supabase } = await requireAppContext();
+  const { supabase, organisation } = await requireAppContext();
   const today = new Date().toISOString().slice(0, 10);
   const statusFilter = filter === "open" || filter === "in_progress" || filter === "done" || filter === "cancelled" ? filter : null;
-  let query = supabase.from("tasks").select("id,title,detail,status,due_on,recurrence,source,owner_id,profiles:owner_id(display_name)")
+  let query = supabase.from("tasks").select("id,title,detail,status,due_on,recurrence,source,owner_id,profiles:owner_id(display_name)").eq("organisation_id", organisation.id)
     .order("due_on", { ascending: true, nullsFirst: false }).order("created_at", { ascending: false }).limit(500);
   if (statusFilter) query = query.eq("status", statusFilter);
   const [{ data }, { count: openCount }, { count: overdueCount }, { count: recurringCount }, { count: totalCount }] = await Promise.all([
     query,
-    supabase.from("tasks").select("id", { count: "exact", head: true }).in("status", ["open", "in_progress"]),
-    supabase.from("tasks").select("id", { count: "exact", head: true }).in("status", ["open", "in_progress"]).not("due_on", "is", null).lt("due_on", today),
-    supabase.from("tasks").select("id", { count: "exact", head: true }).not("recurrence", "is", null),
-    supabase.from("tasks").select("id", { count: "exact", head: true }),
+    supabase.from("tasks").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).in("status", ["open", "in_progress"]),
+    supabase.from("tasks").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).in("status", ["open", "in_progress"]).not("due_on", "is", null).lt("due_on", today),
+    supabase.from("tasks").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).not("recurrence", "is", null),
+    supabase.from("tasks").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id),
   ]);
   const all = data ?? [];
   const tasks = all.filter((t) => filter === "all" ? true : filter === "overdue" ? isOverdue({ status: t.status as TaskStatus, dueOn: t.due_on }, today) : t.status === filter);

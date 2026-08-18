@@ -7,11 +7,11 @@ import { updateAssetAction } from "../../actions";
 
 export default async function EditAssetPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { supabase } = await requireAppContext();
+  const { supabase, organisation } = await requireAppContext();
   const [{ data: asset }, { data: categories }, { data: members }] = await Promise.all([
-    supabase.from("assets").select("id,reference,description,owner_location,owner_id,classification,value_criticality,category_id,security_controls,lifespan,last_updated,remarks").eq("id", id).maybeSingle(),
-    supabase.from("asset_categories").select("id,name").order("position"),
-    supabase.from("memberships").select("user_id,profiles(display_name)"),
+    supabase.from("assets").select("id,reference,description,owner_location,owner_id,classification,value_criticality,category_id,security_controls,lifespan,last_updated,remarks").eq("id", id).eq("organisation_id", organisation.id).maybeSingle(),
+    supabase.from("asset_categories").select("id,name").eq("organisation_id", organisation.id).order("position"),
+    supabase.from("memberships").select("user_id,profiles(display_name)").eq("organisation_id", organisation.id),
   ]);
   if (!asset) notFound();
   const classifications = Object.keys(ASSET_CLASSIFICATION_LABEL) as AssetClassification[];

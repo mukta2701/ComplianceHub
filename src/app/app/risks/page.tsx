@@ -13,13 +13,13 @@ import { one } from "@/lib/supabase/one";
 const BAND_TONE: Record<string, string> = { low: "green", moderate: "amber", high: "red", very_high: "critical" };
 
 export default async function RisksPage() {
-  const { supabase } = await requireAppContext();
+  const { supabase, organisation } = await requireAppContext();
   const [{ data }, { data: gaps }, { data: linkedTasks }, { data: evidenceLinks }, { data: cfg }] = await Promise.all([
-    supabase.from("risks").select("id,reference,title,category_id,risk_categories(name),likelihood,impact,residual_likelihood,residual_impact,status,review_date").order("updated_at", { ascending: false }).limit(500),
-    supabase.from("assessment_responses").select("session_id,question_id,answer,catalogue_questions!assessment_responses_question_id_fkey(code,prompt)").in("answer", ["no", "partially"]).limit(10),
-    supabase.from("tasks").select("id,title,risk_id,status").in("status", ["open", "in_progress"]).not("risk_id", "is", null),
-    supabase.from("evidence_links").select("risk_id,evidence(status)").not("risk_id", "is", null),
-    supabase.from("risk_matrix_config").select("low_max,moderate_max,high_max,appetite_threshold").maybeSingle(),
+    supabase.from("risks").select("id,reference,title,category_id,risk_categories(name),likelihood,impact,residual_likelihood,residual_impact,status,review_date").eq("organisation_id", organisation.id).order("updated_at", { ascending: false }).limit(500),
+    supabase.from("assessment_responses").select("session_id,question_id,answer,catalogue_questions!assessment_responses_question_id_fkey(code,prompt)").eq("organisation_id", organisation.id).in("answer", ["no", "partially"]).limit(10),
+    supabase.from("tasks").select("id,title,risk_id,status").eq("organisation_id", organisation.id).in("status", ["open", "in_progress"]).not("risk_id", "is", null),
+    supabase.from("evidence_links").select("risk_id,evidence(status)").eq("organisation_id", organisation.id).not("risk_id", "is", null),
+    supabase.from("risk_matrix_config").select("low_max,moderate_max,high_max,appetite_threshold").eq("organisation_id", organisation.id).maybeSingle(),
   ]);
   const config: RiskMatrixConfig = cfg ? { lowMax: cfg.low_max, moderateMax: cfg.moderate_max, highMax: cfg.high_max, appetite: cfg.appetite_threshold } : DEFAULT_RISK_MATRIX_CONFIG;
   // Residual-exposure heat map: same 5×5 banding the register uses, so the
@@ -36,6 +36,10 @@ export default async function RisksPage() {
   for (const t of linkedTasks ?? []) { if (!t.risk_id) continue; const list = tasksByRisk.get(t.risk_id) ?? []; list.push({ id: t.id, title: t.title }); tasksByRisk.set(t.risk_id, list); }
   const evidenceByRisk = new Map<string, { status: EvidenceStatus }[]>();
   for (const link of evidenceLinks ?? []) { if (!link.risk_id) continue; const ev = one(link.evidence); if (!ev) continue; const list = evidenceByRisk.get(link.risk_id) ?? []; list.push({ status: ev.status as EvidenceStatus }); evidenceByRisk.set(link.risk_id, list); }
+  const gapSuggestions = (gaps ?? []).map((gap) => {
+    const question = one(gap.catalogue_questions);
+    return { key: `${gap.session_id}-${gap.question_id}`, questionId: gap.question_id, sessionId: gap.session_id, label: [question?.code, question?.prompt].filter(Boolean).join(": ") };
+  });
   return <>
     <PageIntro eyebrow="RISK" title="Risk register" body="Track inherent and residual exposure on a documented 5×5 matrix." action={<span style={{ display: "flex", gap: "8px" }}>
       <a className="button secondary" href="/api/app/risks/export?format=xlsx">Export XLSX</a>
@@ -44,7 +48,7 @@ export default async function RisksPage() {
       <Link className="button primary" href="/app/risks/new"><Icon name="plus" />Add risk</Link>
     </span>} />
     <SubTabs tabs={[{ href: "/app/risks", label: "Risks" }, { href: "/app/assets", label: "Assets" }]} />
-    {Boolean(gaps?.length) && <Card style={{ padding: "20px", marginBottom: "16px", borderColor: "#efe1aa", background: "#fffbef" }}><h2 style={{ fontSize: "15px", margin: "0 0 4px" }}>Assessment gap suggestions</h2><p style={{ fontSize: "12px", color: "#596273", margin: 0 }}>Nothing is created until you accept it.</p>{gaps?.map((g) => { const q = one(g.catalogue_questions); return <div key={`${g.session_id}-${g.question_id}`} style={{ display: "flex", justifyContent: "space-between", gap: "16px", marginTop: "12px" }}><span style={{ fontSize: "13px" }}>{q?.code}: {q?.prompt}</span><span style={{ display: "flex", flexShrink: 0, gap: "16px" }}><form action={acceptRiskSuggestionAction}><input type="hidden" name="questionId" value={g.question_id} /><input type="hidden" name="sessionId" value={g.session_id} /><button style={{ color: "var(--blue)", fontWeight: 700, border: 0, background: "none" }}>Accept as risk</button></form><Link style={{ color: "var(--blue)", fontWeight: 700 }} href={`/app/tasks/from-gap?questionId=${g.question_id}`}>Accept as task</Link></span></div>; })}</Card>}
+    {Boolean(gapSuggestions.length) && <Card style={{ padding: "20px", marginBottom: "16px", borderColor: "#efe1aa", background: "#fffbef" }}><h2 style={{ fontSize: "15px", margin: "0 0 4px" }}>Assessment gap suggestions</h2><p style={{ fontSize: "12px", color: "#596273", margin: 0 }}>Nothing is created until you accept it.</p>{gapSuggestions.map((gap) => <div key={gap.key} style={{ display: "flex", justifyContent: "space-between", gap: "16px", marginTop: "12px" }}><span style={{ fontSize: "13px" }}>{gap.label}</span><span style={{ display: "flex", flexShrink: 0, gap: "16px" }}><form action={acceptRiskSuggestionAction}><input type="hidden" name="questionId" value={gap.questionId} /><input type="hidden" name="sessionId" value={gap.sessionId} /><button style={{ color: "var(--blue)", fontWeight: 700, border: 0, background: "none" }}>Accept as risk</button></form><Link style={{ color: "var(--blue)", fontWeight: 700 }} href={`/app/tasks/from-gap?questionId=${gap.questionId}`}>Accept as task</Link></span></div>)}</Card>}
     {!data?.length ? (
       <EmptyState icon="alert" title="Start your risk register" body="Record the threats to your information — each scored for inherent and residual likelihood and impact on a documented 5×5 matrix. Add your first risk, or import a register you already keep in a spreadsheet." primary={{ href: "/app/risks/new", label: "Add your first risk" }} secondary={{ href: "/app/risks/import", label: "Import from spreadsheet" }} />
     ) : (<>

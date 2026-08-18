@@ -30,12 +30,12 @@ function Sparkline({ readings }: { readings: MeasurementReading[] }) {
 }
 
 export default async function KpisPage() {
-  const { supabase } = await requireAppContext();
+  const { supabase, organisation } = await requireAppContext();
   const today = new Date().toISOString().slice(0, 10);
   const [{ data: kpis }, { data: members }, { data: measurements }] = await Promise.all([
-    supabase.from("kpis").select("id,control_function,indicator,measurement_type,threshold,observations,next_steps,last_reviewed,task_id").order("indicator"),
-    supabase.from("memberships").select("user_id,profiles(display_name)"),
-    supabase.from("kpi_measurements").select("kpi_id,value,measured_on").order("measured_on"),
+    supabase.from("kpis").select("id,control_function,indicator,measurement_type,threshold,observations,next_steps,last_reviewed,task_id").eq("organisation_id", organisation.id).order("indicator"),
+    supabase.from("memberships").select("user_id,profiles(display_name)").eq("organisation_id", organisation.id),
+    supabase.from("kpi_measurements").select("kpi_id,value,measured_on").eq("organisation_id", organisation.id).order("measured_on"),
   ]);
   const rows = kpis ?? [];
   const readingsByKpi = new Map<string, MeasurementReading[]>();

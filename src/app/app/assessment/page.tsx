@@ -4,8 +4,8 @@ import { Card, EmptyState, PageIntro } from "@/components/ui";
 import { createAssessmentAction } from "../actions";
 
 export default async function AssessmentsPage({ searchParams }: { searchParams: Promise<{ message?: string }> }) {
-  const { supabase } = await requireAppContext(); const { message } = await searchParams;
-  const { data } = await supabase.from("assessment_sessions").select("id,title,state,revision,updated_at").order("updated_at", { ascending: false });
+  const { supabase, organisation } = await requireAppContext(); const { message } = await searchParams;
+  const { data } = await supabase.from("assessment_sessions").select("id,title,state,revision,updated_at").eq("organisation_id", organisation.id).order("updated_at", { ascending: false });
   return <>
     <PageIntro eyebrow="ASSESSMENT" title="Readiness assessments" body="Complete the original plain-English catalogue and retain evidence notes." action={<span style={{ display: "flex", gap: "8px" }}>
       <a className="button secondary" href="/api/app/assessment/export?format=xlsx">Export XLSX</a>

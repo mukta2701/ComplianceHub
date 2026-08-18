@@ -5,10 +5,10 @@ import { one } from "@/lib/supabase/one";
 import { createAssetAction } from "../actions";
 
 export default async function NewAssetPage() {
-  const { supabase } = await requireAppContext();
+  const { supabase, organisation } = await requireAppContext();
   const [{ data: categories }, { data: members }] = await Promise.all([
-    supabase.from("asset_categories").select("id,name").order("position"),
-    supabase.from("memberships").select("user_id,profiles(display_name)"),
+    supabase.from("asset_categories").select("id,name").eq("organisation_id", organisation.id).order("position"),
+    supabase.from("memberships").select("user_id,profiles(display_name)").eq("organisation_id", organisation.id),
   ]);
   const classifications = Object.keys(ASSET_CLASSIFICATION_LABEL) as AssetClassification[];
   const values = Object.keys(ASSET_VALUE_LABEL) as AssetValue[];

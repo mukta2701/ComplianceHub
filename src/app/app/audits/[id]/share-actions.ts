@@ -42,9 +42,9 @@ export async function mintAuditorTokenAction(formData: FormData) {
 }
 
 export async function revokeAuditorTokenAction(formData: FormData) {
-  const { supabase } = await requireAppContext();
+  const { supabase, organisation } = await requireAppContext();
   const auditId = String(formData.get("auditId"));
-  const { error } = await supabase.from("auditor_access_tokens").update({ revoked_at: new Date().toISOString() }).eq("id", String(formData.get("id")));
+  const { error } = await supabase.from("auditor_access_tokens").update({ revoked_at: new Date().toISOString() }).eq("id", String(formData.get("id"))).eq("organisation_id", organisation.id);
   if (error) throw new Error("Could not revoke the auditor link");
   revalidatePath(`/app/audits/${auditId}`);
 }

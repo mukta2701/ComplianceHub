@@ -59,21 +59,21 @@ export async function linkEvidenceAction(formData: FormData) {
 }
 
 export async function unlinkEvidenceAction(formData: FormData) {
-  const { supabase } = await requireAppContext();
-  const { error } = await supabase.from("evidence_links").delete().eq("id", String(formData.get("linkId"))); if (error) throw new Error("Could not remove the evidence link");
+  const { supabase, organisation } = await requireAppContext();
+  const { error } = await supabase.from("evidence_links").delete().eq("id", String(formData.get("linkId"))).eq("organisation_id", organisation.id); if (error) throw new Error("Could not remove the evidence link");
   revalidatePath("/app/evidence");
 }
 
 export async function withdrawEvidenceAction(formData: FormData) {
-  const { supabase } = await requireAppContext();
-  const { error } = await supabase.from("evidence").update({ status: "withdrawn" }).eq("id", String(formData.get("id")));
+  const { supabase, organisation } = await requireAppContext();
+  const { error } = await supabase.from("evidence").update({ status: "withdrawn" }).eq("id", String(formData.get("id"))).eq("organisation_id", organisation.id);
   if (error) throw new Error("Could not withdraw evidence");
   revalidatePath("/app/evidence");
 }
 
 export async function downloadEvidenceAction(formData: FormData) {
-  const { supabase } = await requireAppContext();
-  const { data: item } = await supabase.from("evidence").select("storage_path").eq("id", String(formData.get("id"))).single();
+  const { supabase, organisation } = await requireAppContext();
+  const { data: item } = await supabase.from("evidence").select("storage_path").eq("id", String(formData.get("id"))).eq("organisation_id", organisation.id).single();
   if (!item?.storage_path) throw new Error("Evidence file not found");
   const { data, error } = await supabase.storage.from("evidence").createSignedUrl(item.storage_path, 60);
   if (error || !data) throw new Error("Could not create a download link");

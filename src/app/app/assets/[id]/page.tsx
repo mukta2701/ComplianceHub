@@ -21,12 +21,12 @@ const VALUE_HELP: Record<AssetValue, string> = {
 
 export default async function AssetDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { supabase } = await requireAppContext();
-  const { data: asset } = await supabase.from("assets").select("id,reference,description,owner_location,owner_id,classification,value_criticality,security_controls,lifespan,last_updated,remarks,asset_categories(name)").eq("id", id).maybeSingle();
+  const { supabase, organisation } = await requireAppContext();
+  const { data: asset } = await supabase.from("assets").select("id,reference,description,owner_location,owner_id,classification,value_criticality,security_controls,lifespan,last_updated,remarks,asset_categories(name)").eq("id", id).eq("organisation_id", organisation.id).maybeSingle();
   if (!asset) notFound();
   const [{ data: linked }, { data: allRisks }, { data: owner }] = await Promise.all([
-    supabase.from("asset_risks").select("risk_id,risks(id,reference,title)").eq("asset_id", id),
-    supabase.from("risks").select("id,reference,title").order("reference"),
+    supabase.from("asset_risks").select("risk_id,risks(id,reference,title)").eq("asset_id", id).eq("organisation_id", organisation.id),
+    supabase.from("risks").select("id,reference,title").eq("organisation_id", organisation.id).order("reference"),
     asset.owner_id ? supabase.from("profiles").select("display_name").eq("id", asset.owner_id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
   const cls = asset.classification as AssetClassification;

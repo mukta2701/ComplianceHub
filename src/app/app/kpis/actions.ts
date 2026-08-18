@@ -27,7 +27,7 @@ export async function updateKpiAction(formData: FormData) {
   await enforceRateLimit(`kpi:${user.id}`, { limit: 30, windowMs: 60_000 });
   const id = String(formData.get("id"));
   const parsed = kpiInputSchema.parse({ ...Object.fromEntries(formData), organisationId: organisation.id });
-  const { error } = await supabase.from("kpis").update({ ...toRow(parsed, organisation.id), updated_at: new Date().toISOString() }).eq("id", id);
+  const { error } = await supabase.from("kpis").update({ ...toRow(parsed, organisation.id), updated_at: new Date().toISOString() }).eq("id", id).eq("organisation_id", organisation.id);
   if (error) throw new Error("Could not update the KPI");
   revalidatePath("/app/kpis");
 }
@@ -41,7 +41,7 @@ export async function recordKpiMeasurementAction(formData: FormData) {
     measured_on: parsed.measuredOn, note: parsed.note, created_by: user.id,
   });
   if (error) throw new Error("Could not record the measurement");
-  const { error: reviewError } = await supabase.from("kpis").update({ last_reviewed: parsed.measuredOn, updated_at: new Date().toISOString() }).eq("id", parsed.kpiId);
+  const { error: reviewError } = await supabase.from("kpis").update({ last_reviewed: parsed.measuredOn, updated_at: new Date().toISOString() }).eq("id", parsed.kpiId).eq("organisation_id", organisation.id);
   if (reviewError) throw new Error("Could not update the KPI review date");
   revalidatePath("/app/kpis");
 }
@@ -58,6 +58,6 @@ export async function raiseKpiTaskAction(formData: FormData) {
     detail: nextSteps, owner_id: ownerId, source: "manual", created_by: user.id,
   }).select("id").single();
   if (error) throw new Error("Could not raise the task");
-  const { error: linkError } = await supabase.from("kpis").update({ task_id: task.id }).eq("id", id); if (linkError) throw new Error("Raised the task but could not link it to the KPI");
+  const { error: linkError } = await supabase.from("kpis").update({ task_id: task.id }).eq("id", id).eq("organisation_id", organisation.id); if (linkError) throw new Error("Raised the task but could not link it to the KPI");
   revalidatePath("/app/kpis"); revalidatePath("/app/tasks");
 }

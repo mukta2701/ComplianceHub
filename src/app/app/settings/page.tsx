@@ -34,7 +34,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const canManageTeam = hasCapability(membership.role, "manage_members");
 
   const { data: org } = await supabase.from("organisations").select("slug,created_at").eq("id", organisation.id).maybeSingle();
-  const { data: memberRows } = await supabase.from("memberships").select("user_id,role,job_title,created_at,profiles(display_name)").order("created_at", { ascending: true });
+  const { data: memberRows } = await supabase.from("memberships").select("user_id,role,job_title,created_at,profiles(display_name)").eq("organisation_id", organisation.id).order("created_at", { ascending: true });
   const { data: invites } = canManageTeam
     ? await supabase.from("invitations")
       .select("id,email,role,job_title,expires_at,accepted_at,revoked_at,delivery_status,last_delivery_attempt_at,delivery_attempt_count,created_at")

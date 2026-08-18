@@ -31,20 +31,20 @@ export async function createRtpAction(formData: FormData) {
 }
 
 export async function updateRtpStatusAction(formData: FormData) {
-  const { supabase } = await requireAppContext();
+  const { supabase, organisation } = await requireAppContext();
   const status = String(formData.get("status"));
   if (!["planned", "in_progress", "completed", "cancelled"].includes(status)) throw new Error("Invalid RTP status");
   const riskId = String(formData.get("riskId"));
   const patch: Record<string, unknown> = { status, updated_at: new Date().toISOString() };
   if (status === "completed") patch.actual_completion = new Date().toISOString().slice(0, 10);
-  const { error } = await supabase.from("risk_treatment_plans").update(patch).eq("id", String(formData.get("id")));
+  const { error } = await supabase.from("risk_treatment_plans").update(patch).eq("id", String(formData.get("id"))).eq("organisation_id", organisation.id);
   if (error) throw new Error("Could not update the treatment plan");
   revalidatePath(`/app/risks/${riskId}`);
 }
 
 export async function deleteRtpAction(formData: FormData) {
-  const { supabase } = await requireAppContext();
+  const { supabase, organisation } = await requireAppContext();
   const riskId = String(formData.get("riskId"));
-  const { error } = await supabase.from("risk_treatment_plans").delete().eq("id", String(formData.get("id"))); if (error) throw new Error("Could not delete the treatment plan");
+  const { error } = await supabase.from("risk_treatment_plans").delete().eq("id", String(formData.get("id"))).eq("organisation_id", organisation.id); if (error) throw new Error("Could not delete the treatment plan");
   revalidatePath(`/app/risks/${riskId}`);
 }

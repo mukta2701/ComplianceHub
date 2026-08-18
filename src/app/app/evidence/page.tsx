@@ -9,11 +9,11 @@ const TONE: Record<string, string> = { current: "green", expiring: "amber", expi
 const PROVIDER_LABELS: Record<string, string> = { google_workspace: "Google Workspace", github: "GitHub", aws: "AWS" };
 
 export default async function EvidencePage() {
-  const { supabase } = await requireAppContext();
+  const { supabase, organisation } = await requireAppContext();
   const [{ data: items }, { data: controls }, { data: policies }] = await Promise.all([
-    supabase.from("evidence").select("id,title,kind,url,storage_path,status,collected_on,valid_until,source_id,evidence_sources(provider),evidence_links(id,control_id,risk_id,task_id,controls(code,title),risks(reference),tasks(title))").order("created_at", { ascending: false }).limit(200),
+    supabase.from("evidence").select("id,title,kind,url,storage_path,status,collected_on,valid_until,source_id,evidence_sources(provider),evidence_links(id,control_id,risk_id,task_id,controls(code,title),risks(reference),tasks(title))").eq("organisation_id", organisation.id).order("created_at", { ascending: false }).limit(200),
     supabase.from("controls").select("id,code,title").order("position"),
-    supabase.from("policies").select("id,reference,title").order("reference"),
+    supabase.from("policies").select("id,reference,title").eq("organisation_id", organisation.id).order("reference"),
   ]);
   const evidence = { current: 0, expiring: 0, expired: 0 };
   for (const i of items ?? []) { const st = i.status as string; if (st === "current" || st === "expiring" || st === "expired") evidence[st] += 1; }

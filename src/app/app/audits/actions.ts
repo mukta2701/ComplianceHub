@@ -20,12 +20,12 @@ export async function createAuditAction(formData: FormData) {
 }
 
 export async function updateAuditStatusAction(formData: FormData) {
-  const { supabase, user } = await requireAppContext();
+  const { supabase, user, organisation } = await requireAppContext();
   await enforceRateLimit(`audit:${user.id}`, { limit: 30, windowMs: 60_000 });
   const id = String(formData.get("id"));
   const status = String(formData.get("status"));
   if (!["planned", "in_progress", "reporting", "closed"].includes(status)) throw new Error("Invalid audit status");
-  const { error } = await supabase.from("audits").update({ status, updated_at: new Date().toISOString() }).eq("id", id);
+  const { error } = await supabase.from("audits").update({ status, updated_at: new Date().toISOString() }).eq("id", id).eq("organisation_id", organisation.id);
   if (error) throw new Error("Could not update the audit status");
   revalidatePath(`/app/audits/${id}`);
 }
@@ -51,13 +51,13 @@ export async function populateAuditChecklistAction(formData: FormData) {
   const auditId = String(formData.get("auditId"));
   // Confirm the audit exists in the caller's org (read under RLS — never a
   // service role); a stranger's id simply reads back nothing.
-  const { data: audit } = await supabase.from("audits").select("id").eq("id", auditId).maybeSingle();
+  const { data: audit } = await supabase.from("audits").select("id").eq("id", auditId).eq("organisation_id", organisation.id).maybeSingle();
   if (!audit) throw new Error("Could not find that audit");
   // The Annex A control library is global (RLS: controls_read using(true)); the
   // audits module already reads it this way elsewhere.
   const [{ data: controls }, { data: existing }] = await Promise.all([
     supabase.from("controls").select("id,code,title").order("position"),
-    supabase.from("audit_checklist_items").select("control_id,position").eq("audit_id", auditId),
+    supabase.from("audit_checklist_items").select("control_id,position").eq("audit_id", auditId).eq("organisation_id", organisation.id),
   ]);
   // Idempotency: skip any control that already has a row on this audit, so a
   // re-run only fills in the controls that are still missing.
@@ -79,7 +79,7 @@ export async function populateAuditChecklistAction(formData: FormData) {
 }
 
 export async function updateChecklistItemAction(formData: FormData) {
-  const { supabase, user } = await requireAppContext();
+  const { supabase, user, organisation } = await requireAppContext();
   await enforceRateLimit(`audit:${user.id}`, { limit: 30, windowMs: 60_000 });
   const id = String(formData.get("id"));
   const auditId = String(formData.get("auditId"));
@@ -88,7 +88,7 @@ export async function updateChecklistItemAction(formData: FormData) {
   const { error } = await supabase.from("audit_checklist_items").update({
     compliant, evidence_note: String(formData.get("evidenceNote") ?? ""), findings: String(formData.get("findings") ?? ""),
     reviewed_on: new Date().toISOString().slice(0, 10), updated_at: new Date().toISOString(),
-  }).eq("id", id);
+  }).eq("id", id).eq("organisation_id", organisation.id);
   if (error) throw new Error("Could not update the checklist item");
   revalidatePath(`/app/audits/${auditId}`);
 }
@@ -111,20 +111,20 @@ export async function raiseFindingAction(formData: FormData) {
       source: "audit", created_by: user.id,
     }).select("id").single();
     if (taskError) throw new Error("Raised the finding but could not create its task");
-    const { error: linkError } = await supabase.from("audit_findings").update({ task_id: task.id, status: "in_progress" }).eq("id", finding.id);
+    const { error: linkError } = await supabase.from("audit_findings").update({ task_id: task.id, status: "in_progress" }).eq("id", finding.id).eq("organisation_id", organisation.id);
     if (linkError) throw new Error("Created the task but could not link it to the finding");
   }
   revalidatePath(`/app/audits/${parsed.auditId}`); revalidatePath("/app/tasks");
 }
 
 export async function updateFindingStatusAction(formData: FormData) {
-  const { supabase, user } = await requireAppContext();
+  const { supabase, user, organisation } = await requireAppContext();
   await enforceRateLimit(`audit:${user.id}`, { limit: 30, windowMs: 60_000 });
   const id = String(formData.get("id"));
   const auditId = String(formData.get("auditId"));
   const status = String(formData.get("status"));
   if (!["open", "in_progress", "closed"].includes(status)) throw new Error("Invalid finding status");
-  const { error } = await supabase.from("audit_findings").update({ status, updated_at: new Date().toISOString() }).eq("id", id);
+  const { error } = await supabase.from("audit_findings").update({ status, updated_at: new Date().toISOString() }).eq("id", id).eq("organisation_id", organisation.id);
   if (error) throw new Error("Could not update the finding");
   revalidatePath(`/app/audits/${auditId}`);
 }

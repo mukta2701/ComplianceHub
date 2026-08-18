@@ -4,8 +4,8 @@ import { one } from "@/lib/supabase/one";
 import { createAuditAction } from "../actions";
 
 export default async function NewAuditPage() {
-  const { supabase } = await requireAppContext();
-  const { data: members } = await supabase.from("memberships").select("user_id,profiles(display_name)");
+  const { supabase, organisation } = await requireAppContext();
+  const { data: members } = await supabase.from("memberships").select("user_id,profiles(display_name)").eq("organisation_id", organisation.id);
   return <>
     <PageIntro eyebrow="AUDIT" title="Plan an audit" body="Define the scope and window. You will add checklist items and raise findings from the audit's page." />
     <form action={createAuditAction} className="card app-form">

@@ -31,18 +31,19 @@ export default async function AuditDetailPage({ params }: { params: Promise<{ id
     }
   }
   const { supabase, organisation } = await requireAppContext();
-  const { data: audit } = await supabase.from("audits").select("id,reference,title,scope,status,framework,planned_start,planned_end").eq("id", id).maybeSingle();
+  const { data: audit } = await supabase.from("audits").select("id,reference,title,scope,status,framework,planned_start,planned_end").eq("id", id).eq("organisation_id", organisation.id).maybeSingle();
   if (!audit) notFound();
   const [{ data: items }, { data: findings }, { data: members }, { data: tokens }, { data: aiSettings }] = await Promise.all([
-    supabase.from("audit_checklist_items").select("id,area,clause_reference,checklist_item,compliant,evidence_note,findings").eq("audit_id", id).order("position"),
-    supabase.from("audit_findings").select("id,summary,severity,status,corrective_action,task_id").eq("audit_id", id).order("created_at"),
-    supabase.from("memberships").select("user_id,profiles(display_name)"),
-    supabase.from("auditor_access_tokens").select("id,label,expires_at,revoked_at,audit_id").order("created_at", { ascending: false }),
+    supabase.from("audit_checklist_items").select("id,area,clause_reference,checklist_item,compliant,evidence_note,findings").eq("audit_id", id).eq("organisation_id", organisation.id).order("position"),
+    supabase.from("audit_findings").select("id,summary,severity,status,corrective_action,task_id").eq("audit_id", id).eq("organisation_id", organisation.id).order("created_at"),
+    supabase.from("memberships").select("user_id,profiles(display_name)").eq("organisation_id", organisation.id),
+    supabase.from("auditor_access_tokens").select("id,label,expires_at,revoked_at,audit_id").eq("organisation_id", organisation.id).order("created_at", { ascending: false }),
     supabase.from("ai_workspace_settings").select("enabled").eq("organisation_id", organisation.id).maybeSingle(),
   ]);
   const rows = items ?? [];
   const { data: accessRows, error: accessRowsError } = await supabase.from("auditor_access_log")
     .select("viewed_at,auditor_access_tokens!inner(label)")
+    .eq("organisation_id", organisation.id)
     .eq("auditor_access_tokens.audit_id", id)
     .order("viewed_at", { ascending: false })
     .limit(10);

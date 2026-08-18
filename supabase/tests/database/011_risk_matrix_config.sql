@@ -1,5 +1,5 @@
 begin;
-select plan(7);
+select plan(8);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data)
 values
@@ -18,6 +18,10 @@ select lives_ok(
   $$ insert into public.risk_matrix_config (organisation_id, low_max, moderate_max, high_max, updated_by)
      values ('20000000-0000-4000-8000-000000000001', 4, 9, 14, '10000000-0000-4000-8000-000000000001') $$,
   'members can create their own config');
+select throws_ok(
+  $$ update public.risk_matrix_config set low_max = 5, updated_by = '10000000-0000-4000-8000-000000000002'
+     where organisation_id = '20000000-0000-4000-8000-000000000001' $$,
+  '42501', null, 'config updates cannot spoof the editor identity');
 select throws_ok(
   $$ insert into public.risk_matrix_config (organisation_id, low_max, moderate_max, high_max, updated_by)
      values ('20000000-0000-4000-8000-000000000001', 9, 4, 14, '10000000-0000-4000-8000-000000000001') $$,

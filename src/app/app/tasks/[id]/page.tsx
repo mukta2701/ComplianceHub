@@ -13,17 +13,17 @@ const EVIDENCE_TONE: Record<string, string> = { current: "green", expiring: "amb
 export default async function TaskDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { supabase, organisation } = await requireAppContext();
-  const { data: task } = await supabase.from("tasks").select("id,title,detail,status,due_on,recurrence,source,owner_id,control_id,risk_id,created_at,updated_at").eq("id", id).maybeSingle();
+  const { data: task } = await supabase.from("tasks").select("id,title,detail,status,due_on,recurrence,source,owner_id,control_id,risk_id,created_at,updated_at").eq("id", id).eq("organisation_id", organisation.id).maybeSingle();
   if (!task) notFound();
   const [{ data: owner }, { data: control }, { data: risk }, { data: evidenceLinks }] = await Promise.all([
     task.owner_id ? supabase.from("profiles").select("display_name").eq("id", task.owner_id).maybeSingle() : Promise.resolve({ data: null }),
     task.control_id ? supabase.from("controls").select("id,code,title").eq("id", task.control_id).maybeSingle() : Promise.resolve({ data: null }),
-    task.risk_id ? supabase.from("risks").select("id,reference,title").eq("id", task.risk_id).maybeSingle() : Promise.resolve({ data: null }),
-    supabase.from("evidence_links").select("id,evidence(id,title,status,kind)").eq("task_id", id),
+    task.risk_id ? supabase.from("risks").select("id,reference,title").eq("id", task.risk_id).eq("organisation_id", organisation.id).maybeSingle() : Promise.resolve({ data: null }),
+    supabase.from("evidence_links").select("id,evidence(id,title,status,kind)").eq("task_id", id).eq("organisation_id", organisation.id),
   ]);
   const evidence = (evidenceLinks ?? []).map((l) => one(l.evidence)).filter((e): e is { id: string; title: string; status: string; kind: string } => Boolean(e));
   const [{ data: ticket }, { data: connections }] = await Promise.all([
-    supabase.from("task_tickets").select("external_id,external_url,external_status,external_assignee,last_synced_at").eq("task_id", id).maybeSingle(),
+    supabase.from("task_tickets").select("external_id,external_url,external_status,external_assignee,last_synced_at").eq("task_id", id).eq("organisation_id", organisation.id).maybeSingle(),
     supabase.from("integration_connections").select("id,provider,label")
       .eq("organisation_id", organisation.id).eq("enabled", true).is("revoked_at", null).order("created_at"),
   ]);

@@ -5,11 +5,11 @@ import { SubTabs } from "@/components/sub-tabs";
 import { createSoaAction } from "../actions";
 
 export default async function SoaPage() {
-  const { supabase } = await requireAppContext();
+  const { supabase, organisation } = await requireAppContext();
   const [{ data: assessments }, { data: registers }, { data: snapshots }] = await Promise.all([
-    supabase.from("assessment_sessions").select("id,title").order("updated_at", { ascending: false }),
-    supabase.from("soa_registers").select("id,title,version,updated_at").order("updated_at", { ascending: false }),
-    supabase.from("soa_snapshots").select("id,title,version,finalised_at").order("finalised_at", { ascending: false }),
+    supabase.from("assessment_sessions").select("id,title").eq("organisation_id", organisation.id).order("updated_at", { ascending: false }),
+    supabase.from("soa_registers").select("id,title,version,updated_at").eq("organisation_id", organisation.id).order("updated_at", { ascending: false }),
+    supabase.from("soa_snapshots").select("id,title,version,finalised_at").eq("organisation_id", organisation.id).order("finalised_at", { ascending: false }),
   ]);
   return <>
     <PageIntro eyebrow="SOA" title="Statement of Applicability" body="Generate a draft from an assessment, review every applicability decision, then finalise an immutable snapshot." action={<span style={{ display: "flex", gap: "8px" }}>

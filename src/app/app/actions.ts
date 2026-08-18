@@ -95,15 +95,15 @@ export async function createRiskAction(formData: FormData) {
 }
 
 export async function deleteRiskAction(formData: FormData) {
-  const { supabase } = await requireAppContext();
-  const { error } = await supabase.from("risks").delete().eq("id", String(formData.get("id"))); if (error) throw new Error("Could not delete the risk");
+  const { supabase, organisation } = await requireAppContext();
+  const { error } = await supabase.from("risks").delete().eq("id", String(formData.get("id"))).eq("organisation_id", organisation.id); if (error) throw new Error("Could not delete the risk");
   revalidatePath("/app/risks");
 }
 
 export async function updateRiskStatusAction(formData: FormData) {
-  const { supabase } = await requireAppContext();
+  const { supabase, organisation } = await requireAppContext();
   const status = String(formData.get("status")); if (!["open","treating","accepted","closed"].includes(status)) throw new Error("Invalid risk status");
-  const { error } = await supabase.from("risks").update({ status }).eq("id", String(formData.get("id"))); if (error) throw new Error("Could not update risk");
+  const { error } = await supabase.from("risks").update({ status }).eq("id", String(formData.get("id"))).eq("organisation_id", organisation.id); if (error) throw new Error("Could not update risk");
   revalidatePath("/app/risks");
 }
 
@@ -125,8 +125,15 @@ export async function acceptRiskSuggestionAction(formData: FormData) {
 }
 
 export async function createSoaAction(formData: FormData) {
-  const { supabase } = await requireAppContext();
+  const { supabase, organisation } = await requireAppContext();
   const assessmentId = String(formData.get("assessmentId"));
+  const { data: assessment, error: assessmentError } = await supabase
+    .from("assessment_sessions")
+    .select("id")
+    .eq("id", assessmentId)
+    .eq("organisation_id", organisation.id)
+    .maybeSingle();
+  if (assessmentError || !assessment) throw new Error("Assessment not found in the active workspace");
   const { data: registerId, error } = await supabase.rpc("create_soa_draft", {
     target_assessment_id: assessmentId,
     draft_title: "Statement of Applicability",

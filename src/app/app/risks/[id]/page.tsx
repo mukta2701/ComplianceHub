@@ -11,12 +11,12 @@ import { AiSuggestionPanel } from "@/components/ai-suggestion-panel";
 export default async function RiskDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { supabase, organisation } = await requireAppContext();
-  const { data: risk } = await supabase.from("risks").select("id,reference,title,description,likelihood,impact,residual_likelihood,residual_impact,status,review_date,treatment,treatment_plan,risk_categories(name)").eq("id", id).maybeSingle();
+  const { data: risk } = await supabase.from("risks").select("id,reference,title,description,likelihood,impact,residual_likelihood,residual_impact,status,review_date,treatment,treatment_plan,risk_categories(name)").eq("id", id).eq("organisation_id", organisation.id).maybeSingle();
   if (!risk) notFound();
   const [{ data: plans }, { data: cfg }, { data: members }, { data: controls }, { data: aiSettings }] = await Promise.all([
-    supabase.from("risk_treatment_plans").select("id,reference,summary,treatment_measures,status,target_completion,actual_completion,assigned_lead_id").eq("risk_id", id).order("reference"),
-    supabase.from("risk_matrix_config").select("low_max,moderate_max,high_max,appetite_threshold").maybeSingle(),
-    supabase.from("memberships").select("user_id,profiles(display_name)"),
+    supabase.from("risk_treatment_plans").select("id,reference,summary,treatment_measures,status,target_completion,actual_completion,assigned_lead_id").eq("risk_id", id).eq("organisation_id", organisation.id).order("reference"),
+    supabase.from("risk_matrix_config").select("low_max,moderate_max,high_max,appetite_threshold").eq("organisation_id", organisation.id).maybeSingle(),
+    supabase.from("memberships").select("user_id,profiles(display_name)").eq("organisation_id", organisation.id),
     supabase.from("controls").select("id,code,title").order("position"),
     supabase.from("ai_workspace_settings").select("enabled").eq("organisation_id", organisation.id).maybeSingle(),
   ]);
