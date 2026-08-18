@@ -17,7 +17,9 @@ Model Context Protocol TypeScript SDK, Vitest, pgTAP, Slack incoming webhooks.
 
 - [x] Tasks 1–7 are implemented in the current release branch and covered by
   unit, database, integration, and production Playwright verification. The
-  private plugin also passes the official structural validator.
+  private plugin contract test passes; the official structural validator is
+  currently unavailable in this environment because its Python `yaml`
+  dependency is not installed.
 - [x] Local MCP discovery, PKCE/revocation coverage, Owner-only digest
   reservation/finalisation, replay-safe delivery lifecycle, and closed-world
   fact/message validation are executable and green.

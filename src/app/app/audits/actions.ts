@@ -88,7 +88,7 @@ export async function updateChecklistItemAction(formData: FormData) {
   const { error } = await supabase.from("audit_checklist_items").update({
     compliant, evidence_note: String(formData.get("evidenceNote") ?? ""), findings: String(formData.get("findings") ?? ""),
     reviewed_on: new Date().toISOString().slice(0, 10), updated_at: new Date().toISOString(),
-  }).eq("id", id).eq("organisation_id", organisation.id);
+  }).eq("id", id).eq("organisation_id", organisation.id).eq("audit_id", auditId);
   if (error) throw new Error("Could not update the checklist item");
   revalidatePath(`/app/audits/${auditId}`);
 }
@@ -124,7 +124,7 @@ export async function updateFindingStatusAction(formData: FormData) {
   const auditId = String(formData.get("auditId"));
   const status = String(formData.get("status"));
   if (!["open", "in_progress", "closed"].includes(status)) throw new Error("Invalid finding status");
-  const { error } = await supabase.from("audit_findings").update({ status, updated_at: new Date().toISOString() }).eq("id", id).eq("organisation_id", organisation.id);
+  const { error } = await supabase.from("audit_findings").update({ status, updated_at: new Date().toISOString() }).eq("id", id).eq("organisation_id", organisation.id).eq("audit_id", auditId);
   if (error) throw new Error("Could not update the finding");
   revalidatePath(`/app/audits/${auditId}`);
 }
