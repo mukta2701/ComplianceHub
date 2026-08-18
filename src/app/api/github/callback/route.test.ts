@@ -65,7 +65,7 @@ describe("GET /api/github/callback", () => {
       v: 1, state: "state-value", codeVerifier: "v".repeat(43), organisationId: ORG_ID,
       actorId: ACTOR_ID, pendingInstallationId: 77, expiresAt: "2026-08-17T12:10:00.000Z",
     });
-    hoisted.enforceRateLimit.mockResolvedValue(undefined);
+    hoisted.enforceRateLimit.mockImplementation(async () => { hoisted.sequence.push("rate-limit"); });
     hoisted.rpc.mockResolvedValue({ data: true, error: null });
     hoisted.exchange.mockResolvedValue(crypto.randomUUID());
     hoisted.listIds.mockResolvedValue([77]);
@@ -153,6 +153,45 @@ describe("GET /api/github/callback", () => {
 
     expect(response.status).toBe(303);
     expect(response.headers.get("location")).toBe(`${canonicalSiteUrl}/app/integrations?github=configuration_error`);
+    expect(hoisted.rpc).not.toHaveBeenCalled();
+    expect(hoisted.exchange).not.toHaveBeenCalled();
+    expect(hoisted.createAppJwt).not.toHaveBeenCalled();
+    expect(hoisted.listIds).not.toHaveBeenCalled();
+    expect(hoisted.getApp).not.toHaveBeenCalled();
+    expect(hoisted.collectRepos).not.toHaveBeenCalled();
+    expect(hoisted.claim).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a malformed site URL", "test", "://not-a-url", "/app/integrations?github=configuration_error"],
+    ["a missing production site URL", "production", undefined, "/app/integrations?github=configuration_error"],
+    ["an empty production site URL", "production", "", "/app/integrations?github=configuration_error"],
+    ["a credential-bearing loopback URL", "test", "http://user:secret@127.0.0.1:3000", "/app/integrations?github=configuration_error"],
+    ["an empty-userinfo loopback URL", "test", "http://@127.0.0.1:3000", "http://127.0.0.1:3000/app/integrations?github=configuration_error"],
+    ["a query-bearing loopback URL", "test", "http://127.0.0.1:3000/?secret=value", "/app/integrations?github=configuration_error"],
+    ["a hash-bearing loopback URL", "test", "http://127.0.0.1:3000/#secret", "/app/integrations?github=configuration_error"],
+  ])("safely redirects invalid personal policy configuration for %s", async (
+    _label,
+    nodeEnv,
+    configuredSiteUrl,
+    expectedLocation,
+  ) => {
+    vi.stubEnv("NODE_ENV", nodeEnv);
+    vi.stubEnv("GITHUB_ALLOWED_ACCOUNT_TYPE", "User");
+    vi.stubEnv("NEXT_PUBLIC_SITE_URL", configuredSiteUrl);
+
+    const response = await GET(request());
+
+    expect(hoisted.sequence.slice(0, 3)).toEqual(["clear-cookie", "auth", "rate-limit"]);
+    expect(hoisted.cookieSet).toHaveBeenCalledWith("compliancehub_github_oauth", "", {
+      httpOnly: true, secure: true, sameSite: "lax", path: "/api/github", maxAge: 0,
+    });
+    expect(hoisted.enforceRateLimit).toHaveBeenCalledTimes(1);
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(expectedLocation);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(response.headers.get("x-robots-tag")).toBe("noindex, nofollow");
     expect(hoisted.rpc).not.toHaveBeenCalled();
     expect(hoisted.exchange).not.toHaveBeenCalled();
     expect(hoisted.createAppJwt).not.toHaveBeenCalled();

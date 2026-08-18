@@ -47,6 +47,20 @@ function errorRedirect(code: ErrorCode): NextResponse {
   return redirectTo(canonicalSiteUrl(`/app/integrations?github=${code}`));
 }
 
+function configurationErrorRedirect(): NextResponse {
+  try {
+    return errorRedirect("configuration_error");
+  } catch {
+    return new NextResponse(null, {
+      status: 303,
+      headers: {
+        ...RESPONSE_HEADERS,
+        Location: "/app/integrations?github=configuration_error",
+      },
+    });
+  }
+}
+
 function sourceClass(request: Request): string {
   const forwarded = request.headers.get("x-forwarded-for")?.split(",", 1)[0]?.trim();
   if (!forwarded) return "unknown";
@@ -125,7 +139,7 @@ export async function GET(request: Request): Promise<NextResponse> {
   const privateKey = process.env.GITHUB_APP_PRIVATE_KEY;
   const allowedAccountId = Number(process.env.GITHUB_ALLOWED_ACCOUNT_ID);
   if (!clientId || !appId || !privateKey || !Number.isSafeInteger(allowedAccountId) || allowedAccountId <= 0) {
-    return errorRedirect("configuration_error");
+    return configurationErrorRedirect();
   }
   let allowedAccountType;
   try {
@@ -135,7 +149,7 @@ export async function GET(request: Request): Promise<NextResponse> {
       siteUrl: process.env.NEXT_PUBLIC_SITE_URL,
     });
   } catch {
-    return errorRedirect("configuration_error");
+    return configurationErrorRedirect();
   }
 
   try {
