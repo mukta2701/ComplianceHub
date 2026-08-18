@@ -20,21 +20,21 @@
 These checks prove the current local implementation only; they do not close the
 hosted, Azure, Slack, GitHub-owner, email, or backup checkpoints above.
 
-- [x] On the current hardening commit `11c9815`, the release verification
-  baseline passed lint, typecheck, **207 test files / 1,454 tests**, and the
+- [x] On the current hardening commit `0fd0e04`, the release verification
+  baseline passed lint, typecheck, **208 test files / 1,460 tests**, and the
   Next production build; the focused export, policy-evidence, monitoring,
-  audit-scoping, filename, and active-workspace GitHub repository-selection
-  tests are included in that count.
-- [x] GitHub CI run `32149626188` for `11c9815` passed Gitleaks, container,
+  audit-scoping, filename, active-workspace GitHub repository-selection, and
+  atomic KPI task tests are included in that count.
+- [x] GitHub CI run `32154415336` for `0fd0e04` passed Gitleaks, container,
   database upgrade/full pgTAP, application lint/typecheck/unit/build,
   integration, and the full desktop/mobile Playwright gate.
 - [x] The CI database job ran `bash scripts/test-db-upgrade.sh` and
-  `supabase test db` successfully. Local `npm run test:db` was intentionally
-  not rerun in the final pass because it destructively resets the preserved
-  local Supabase fixture.
+  `supabase test db` successfully. The local fixture-preserving DB run also
+  passed `supabase test db`: **77 files / 1,241 tests**, including the atomic
+  KPI task RPC.
 - [x] Fresh local `npm run test:integration`: 3 files / 5 tests against the
   running localhost Supabase stack.
-- [x] GitHub CI run `32149626188`: **58/58 desktop + mobile tests passed**
+- [x] GitHub CI run `32154415336`: **58/58 desktop + mobile tests passed**
   against the disposable CI fixture with one worker.
 - [x] Local `/api/health` returned HTTP 200 with `db: ok`; the running local
   stack reports 99 applied migrations and the expected GitHub/automation/MCP
