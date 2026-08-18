@@ -16,10 +16,10 @@ import {
 const REQUIRED_PERMISSIONS = {
   actions: "read",
   administration: "read",
-  dependabot_alerts: "read",
   metadata: "read",
   secret_scanning_alerts: "read",
   security_events: "read",
+  vulnerability_alerts: "read",
 } as const;
 
 function isLocalSupabaseUrl(value: string): boolean {

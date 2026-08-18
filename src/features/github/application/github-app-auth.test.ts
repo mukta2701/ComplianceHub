@@ -21,6 +21,18 @@ beforeAll(() => {
 });
 
 describe("GitHub App authentication", () => {
+  it("uses GitHub's exact read-only installation permission payload", () => {
+    expect(READ_PERMISSIONS).toEqual({
+      actions: "read",
+      administration: "read",
+      metadata: "read",
+      secret_scanning_alerts: "read",
+      security_events: "read",
+      vulnerability_alerts: "read",
+    });
+    expect(READ_PERMISSIONS).not.toHaveProperty("dependabot_alerts");
+  });
+
   it("signs an RS256 app JWT with GitHub's bounded claims and normalises escaped PEM newlines", async () => {
     const now = new Date("2026-08-17T12:00:00.000Z");
     const token = await createAppJwt({
@@ -76,7 +88,14 @@ describe("GitHub App authentication", () => {
         },
         body: JSON.stringify({
           repository_ids: [101, 102],
-          permissions: READ_PERMISSIONS,
+          permissions: {
+            actions: "read",
+            administration: "read",
+            metadata: "read",
+            secret_scanning_alerts: "read",
+            security_events: "read",
+            vulnerability_alerts: "read",
+          },
         }),
         cache: "no-store",
         redirect: "error",
