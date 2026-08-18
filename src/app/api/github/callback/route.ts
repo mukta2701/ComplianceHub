@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { createAppJwt } from "@/features/github/application/github-app-auth";
+import { resolveGitHubAccountType } from "@/features/github/application/github-account-policy";
 import {
   collectUserInstallationRepositories,
   exchangeGitHubUserCode,
@@ -126,6 +127,16 @@ export async function GET(request: Request): Promise<NextResponse> {
   if (!clientId || !appId || !privateKey || !Number.isSafeInteger(allowedAccountId) || allowedAccountId <= 0) {
     return errorRedirect("configuration_error");
   }
+  let allowedAccountType;
+  try {
+    allowedAccountType = resolveGitHubAccountType({
+      configuredType: process.env.GITHUB_ALLOWED_ACCOUNT_TYPE,
+      nodeEnv: process.env.NODE_ENV,
+      siteUrl: process.env.NEXT_PUBLIC_SITE_URL,
+    });
+  } catch {
+    return errorRedirect("configuration_error");
+  }
 
   try {
     const stateHash = createHash("sha256").update(callback.state, "utf8").digest("hex");
@@ -152,14 +163,17 @@ export async function GET(request: Request): Promise<NextResponse> {
       getAppInstallation({ appJwt, installationId: flow.pendingInstallationId }),
       collectUserInstallationRepositories({ userToken, installationId: flow.pendingInstallationId }),
     ]);
-    await claimInstallation({
-      organisationId: flow.organisationId,
-      actorId: flow.actorId,
-      requestedInstallationId: flow.pendingInstallationId,
-      userInstallationIds,
-      appInstallation,
-      repositories,
-    });
+    await claimInstallation(
+      {
+        organisationId: flow.organisationId,
+        actorId: flow.actorId,
+        requestedInstallationId: flow.pendingInstallationId,
+        userInstallationIds,
+        appInstallation,
+        repositories,
+      },
+      { allowedAccountType },
+    );
     return redirectTo(canonicalSiteUrl("/app/integrations?github=connected"));
   } catch {
     return errorRedirect("verification_failed");

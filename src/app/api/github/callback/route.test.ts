@@ -51,6 +51,7 @@ import { GET } from "./route";
 describe("GET /api/github/callback", () => {
   beforeEach(() => {
     vi.stubEnv("NEXT_PUBLIC_SITE_URL", "https://compliance.example");
+    vi.stubEnv("GITHUB_ALLOWED_ACCOUNT_TYPE", undefined);
     vi.stubEnv("GITHUB_APP_CLIENT_ID", "client-id");
     vi.stubEnv("GITHUB_APP_CLIENT_SECRET", "client-secret");
     vi.stubEnv("GITHUB_APP_ID", "123");
@@ -88,11 +89,77 @@ describe("GET /api/github/callback", () => {
     expect(response.headers.get("location")).toBe("https://compliance.example/app/integrations?github=connected");
     expect(response.headers.get("referrer-policy")).toBe("no-referrer");
     expect(hoisted.exchange).toHaveBeenCalledWith(expect.objectContaining({ codeVerifier: "v".repeat(43) }));
-    expect(hoisted.claim).toHaveBeenCalledWith(expect.objectContaining({
-      organisationId: ORG_ID, actorId: ACTOR_ID, requestedInstallationId: 77,
-      userInstallationIds: [77],
-      repositories: [REPOSITORY],
-    }));
+    expect(hoisted.claim).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organisationId: ORG_ID, actorId: ACTOR_ID, requestedInstallationId: 77,
+        userInstallationIds: [77],
+        repositories: [REPOSITORY],
+      }),
+      { allowedAccountType: "Organization" },
+    );
+  });
+
+  it("completes a verified local personal installation claim", async () => {
+    vi.stubEnv("GITHUB_ALLOWED_ACCOUNT_TYPE", "User");
+    vi.stubEnv("NODE_ENV", "test");
+    vi.stubEnv("NEXT_PUBLIC_SITE_URL", "http://127.0.0.1:3000");
+    const appInstallation = {
+      id: 77,
+      account: { id: 99, login: "mukta2701", type: "User" },
+      repositorySelection: "selected",
+      permissions: {},
+      suspendedAt: null,
+    };
+    const repositories = [{
+      ...REPOSITORY,
+      owner: "mukta2701",
+      fullName: "mukta2701/pilot",
+      htmlUrl: "https://github.com/mukta2701/pilot",
+    }];
+    hoisted.getApp.mockResolvedValue(appInstallation);
+    hoisted.collectRepos.mockResolvedValue(repositories);
+
+    const response = await GET(request());
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe("http://127.0.0.1:3000/app/integrations?github=connected");
+    expect(hoisted.claim).toHaveBeenCalledWith(
+      expect.objectContaining({
+        appInstallation,
+        repositories,
+      }),
+      { allowedAccountType: "User" },
+    );
+  });
+
+  it.each([
+    ["production User on loopback", "production", "User", "http://127.0.0.1:3000", "http://127.0.0.1:3000"],
+    ["test User on hosted HTTPS", "test", "User", "https://compliance.example", "https://compliance.example"],
+    ["development User on hosted HTTPS", "development", "User", "https://compliance.example", "https://compliance.example"],
+    ["test User on a loopback path", "test", "User", "http://127.0.0.1:3000/path", "http://127.0.0.1:3000"],
+    ["unknown account type", "test", "Enterprise", "https://compliance.example", "https://compliance.example"],
+  ])("rejects invalid account policy configuration before state consumption for %s", async (
+    _label,
+    nodeEnv,
+    accountType,
+    configuredSiteUrl,
+    canonicalSiteUrl,
+  ) => {
+    vi.stubEnv("NODE_ENV", nodeEnv);
+    vi.stubEnv("GITHUB_ALLOWED_ACCOUNT_TYPE", accountType);
+    vi.stubEnv("NEXT_PUBLIC_SITE_URL", configuredSiteUrl);
+
+    const response = await GET(request());
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(`${canonicalSiteUrl}/app/integrations?github=configuration_error`);
+    expect(hoisted.rpc).not.toHaveBeenCalled();
+    expect(hoisted.exchange).not.toHaveBeenCalled();
+    expect(hoisted.createAppJwt).not.toHaveBeenCalled();
+    expect(hoisted.listIds).not.toHaveBeenCalled();
+    expect(hoisted.getApp).not.toHaveBeenCalled();
+    expect(hoisted.collectRepos).not.toHaveBeenCalled();
+    expect(hoisted.claim).not.toHaveBeenCalled();
   });
 
   it.each([
