@@ -30,4 +30,7 @@ hosted, Azure, Slack, GitHub-owner, email, or backup checkpoints above.
   `E2E_TEST_TOOLS_ENABLED=1` and one worker against the shared local Supabase
   fixture: **58/58 desktop + mobile tests passed**.
 - [x] Focused GitHub production shadow run: Chromium + mobile 2/2; local personal-pilot readiness unchanged.
+- [x] Slack connector smoke test posted and re-read one non-sensitive message in
+  `#compliancehub-adtecher-pilot`; this verifies the connected Slack destination
+  only, not the ComplianceHub webhook or scheduled digest delivery.
 - [x] `npm run test:db:upgrade`: passed earlier in the disposable/local upgrade gate (14 upgrade assertions, with the database restored afterwards); it was not rerun in this final fixture-preserving pass.
