@@ -202,4 +202,27 @@ describe("AssessmentResponseList guided flow", () => {
     expect(yes).toHaveFocus();
   });
 
+  it("does not drop a newer draft when an earlier queued save fails", async () => {
+    const firstSave = deferred<Response>();
+    const secondSave = deferred<Response>();
+    const fetchMock = vi.fn()
+      .mockReturnValueOnce(firstSave.promise)
+      .mockReturnValueOnce(secondSave.promise);
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AssessmentResponseList {...props} />);
+
+    await userEvent.click(screen.getByRole("radio", { name: "Yes" }));
+    const evidence = screen.getByRole("textbox", { name: "Evidence note" });
+    await userEvent.type(evidence, "Updated evidence");
+    await userEvent.tab();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    firstSave.resolve({ ok: false, status: 500, json: async () => ({}) } as Response);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    secondSave.resolve(ok(3));
+
+    await waitFor(() => expect(screen.getByRole("status", { name: "Save status" })).toHaveTextContent("Saved"));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
 });
