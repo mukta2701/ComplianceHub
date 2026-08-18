@@ -20,9 +20,9 @@
 These checks prove the current local implementation only; they do not close the
 hosted, Azure, Slack, GitHub-owner, email, or backup checkpoints above.
 
-- [x] On hardening commit `28e2a54`, `npm run verify` passed lint, typecheck,
-  **203 test files / 1,436 tests**, and the Next production build.
-- [x] GitHub CI run `32131873025` for `28e2a54` passed Gitleaks, container,
+- [x] On latest hardening commit `871072b`, `npm run verify` passed lint,
+  typecheck, **203 test files / 1,438 tests**, and the Next production build.
+- [x] GitHub CI run `32135475323` for `871072b` passed Gitleaks, container,
   database upgrade/full pgTAP, application lint/typecheck/unit/build,
   integration, and the full desktop/mobile Playwright gate.
 - [x] The CI database job ran `bash scripts/test-db-upgrade.sh` and
