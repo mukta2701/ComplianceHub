@@ -20,16 +20,18 @@
 These checks prove the current local implementation only; they do not close the
 hosted, Azure, Slack, GitHub-owner, email, or backup checkpoints above.
 
-- [x] On release commit `47d7757`, `npm run verify` passed lint, typecheck,
-  **199 test files / 1,414 tests**, and the Next production build.
-- [x] GitHub CI run `32126839581` for `47d7757` passed Gitleaks, container,
+- [x] On hardening commit `28e2a54`, `npm run verify` passed lint, typecheck,
+  **203 test files / 1,436 tests**, and the Next production build.
+- [x] GitHub CI run `32131873025` for `28e2a54` passed Gitleaks, container,
   database upgrade/full pgTAP, application lint/typecheck/unit/build,
   integration, and the full desktop/mobile Playwright gate.
-- [x] Fresh local `npm run test:db`: 76 files / 1,232 tests passed against the
-  preserved local Supabase fixture.
+- [x] The CI database job ran `bash scripts/test-db-upgrade.sh` and
+  `supabase test db` successfully. Local `npm run test:db` was intentionally
+  not rerun in the final pass because it destructively resets the preserved
+  local Supabase fixture.
 - [x] Fresh local `npm run test:integration`: 3 files / 5 tests against the
   running localhost Supabase stack.
-- [x] GitHub CI run `32126839581`: **58/58 desktop + mobile tests passed**
+- [x] GitHub CI run `32131873025`: **58/58 desktop + mobile tests passed**
   against the disposable CI fixture. A fresh local production-server run also
   completed **58/58** with one worker.
 - [x] Local `/api/health` returned HTTP 200 with `db: ok`; the running local

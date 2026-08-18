@@ -6,22 +6,23 @@
 ## Current handoff — 2026-08-18
 
 - Branch: `codex/github-collection-foundation`; the reviewed baseline for this
-  handoff is `47d7757`, including retry-safe automation provenance, scheduled
+  handoff is `28e2a54`, including retry-safe automation provenance, scheduled
   retention purging, owner-gated AI drafting, replay-safe automation reviews,
   stable automation sign-up/tracker
   E2E paths, the safe connector-metadata grant, and active-workspace isolation
-  across legacy registers and exports.
+  across policies, imports, autosave, automation, invitations, AI, audits,
+  legacy registers, and exports.
 - Local application health: `/api/health` returns HTTP 200 with `db: ok`.
-- Local verification baseline: `npm run verify` passed lint, typecheck, **199
-  test files / 1,414 tests**, and the Next production build. The disposable CI
-  database gate is the authoritative check for the newly added automation
-  migrations.
+- Local verification baseline: `npm run verify` passed lint, typecheck, **203
+  test files / 1,436 tests**, and the Next production build. The disposable CI
+  database gate is the authoritative check for the newly added automation and
+  workspace-hardening migrations.
 - Browser evidence: GitHub CI's complete production matrix passed **58/58**
   across Chromium and mobile with `E2E_TEST_TOOLS_ENABLED=1` and one worker.
   A fresh local production-server run also completed **58/58**.
 - Integration evidence: `npm run test:integration` passed 3 files / 5 tests;
   the production GitHub shadow spec passed on Chromium and mobile (2/2).
-- Remote CI evidence: run `32126839581` for `47d7757` completed successfully.
+- Remote CI evidence: run `32131873025` for `28e2a54` completed successfully.
   Gitleaks, container, database upgrade/full pgTAP, application
   lint/typecheck/unit/build, integration, and 58/58 Playwright desktop/mobile
   tests all passed.
