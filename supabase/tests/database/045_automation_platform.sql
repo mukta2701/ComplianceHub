@@ -1,5 +1,5 @@
 begin;
-select plan(26);
+select plan(28);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data)
 values
@@ -95,6 +95,10 @@ select lives_ok(
   'assigned member accepts a task draft atomically');
 select is((select status::text from public.automation_proposals where id = '60000000-0000-4000-8000-000000000702'), 'accepted', 'atomic review updates the proposal status');
 select is((select count(*) from public.tasks where organisation_id = '20000000-0000-4000-8000-000000000701' and title = 'Review GitHub protection'), 1::bigint, 'atomic review creates the normal remediation task');
+select lives_ok(
+  $$ select public.review_automation_proposal('60000000-0000-4000-8000-000000000702', 'accepted', null) $$,
+  'replaying the same accepted review is idempotent for the original reviewer');
+select is((select count(*) from public.tasks where organisation_id = '20000000-0000-4000-8000-000000000701' and title = 'Review GitHub protection'), 1::bigint, 'replaying an accepted task review does not duplicate the task');
 
 set local role service_role;
 select throws_ok(
