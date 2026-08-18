@@ -6,8 +6,9 @@
 ## Current handoff — 2026-08-18
 
 - Branch: `codex/github-collection-foundation`; the reviewed baseline for this
-  handoff is `5927b84`, including retry-safe automation provenance, scheduled
-  retention purging, owner-gated AI drafting, stable automation sign-up/tracker
+  handoff is `8405b10`, including retry-safe automation provenance, scheduled
+  retention purging, owner-gated AI drafting, replay-safe automation reviews,
+  stable automation sign-up/tracker
   E2E paths, the safe connector-metadata grant, and active-workspace isolation
   across legacy registers and exports.
 - Local application health: `/api/health` returns HTTP 200 with `db: ok`.
@@ -21,7 +22,7 @@
   automation attempt; that retry passed.
 - Integration evidence: `npm run test:integration` passed 3 files / 5 tests;
   the production GitHub shadow spec passed on Chromium and mobile (2/2).
-- Remote CI evidence: run `32123344785` for `5927b84` completed successfully.
+- Remote CI evidence: run `32126259509` for `8405b10` completed successfully.
   Gitleaks, container, database upgrade/full pgTAP, application
   lint/typecheck/unit/build, integration, and 58/58 Playwright desktop/mobile
   tests all passed.

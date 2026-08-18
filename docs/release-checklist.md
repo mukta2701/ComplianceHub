@@ -3,7 +3,7 @@
 - [ ] Project owner has reviewed and approved every assessment question and remediation.
 - [ ] Legal, privacy, certification, and open-source disclaimers are visible and accurate.
 - [ ] Production Supabase project uses the intended region and all migrations pass.
-- [ ] Hosted Supabase personal staging project ref `ytenjiyjdcrjkgwmciqw` has a verified backup; `supabase migration list` and `supabase db push --dry-run` showed exactly the ten reviewed migrations through `20260818100000` in order; they were verified before any application deployment; and `HOSTED_SUPABASE_PROJECT_REF` plus `HOSTED_SUPABASE_MIGRATION_VERSION` were set only afterwards and match `NEXT_PUBLIC_SUPABASE_URL`.
+- [ ] Hosted Supabase personal staging project ref `ytenjiyjdcrjkgwmciqw` has a verified backup; `supabase migration list` and `supabase db push --dry-run` showed exactly the eleven reviewed migrations through `20260818110000` in order; they were verified before any application deployment; and `HOSTED_SUPABASE_PROJECT_REF` plus `HOSTED_SUPABASE_MIGRATION_VERSION` were set only afterwards and match `NEXT_PUBLIC_SUPABASE_URL`.
 - [ ] Cross-tenant RLS tests, immutable-record tests, and stale-write tests pass.
 - [ ] Service-role and cron credentials are server-only, rotated, and stored in deployment secrets.
 - [ ] An Adtecher organisation owner approved the private GitHub App, one dedicated selected repository, exact read-only permissions/events, SSL verification, OAuth-during-install disabled, Redirect-on-update enabled, and the callback/setup/webhook URLs at the canonical origin.
@@ -20,16 +20,16 @@
 These checks prove the current local implementation only; they do not close the
 hosted, Azure, Slack, GitHub-owner, email, or backup checkpoints above.
 
-- [x] On release commit `5927b84`, `npm run verify` passed lint, typecheck,
+- [x] On release commit `8405b10`, `npm run verify` passed lint, typecheck,
   **199 test files / 1,414 tests**, and the Next production build.
-- [x] GitHub CI run `32123344785` for `5927b84` passed Gitleaks, container,
+- [x] GitHub CI run `32126259509` for `8405b10` passed Gitleaks, container,
   database upgrade/full pgTAP, application lint/typecheck/unit/build,
   integration, and the full desktop/mobile Playwright gate.
-- [x] Fresh local `npm run test:db`: 76 files / 1,230 tests passed against the
+- [x] Fresh local `npm run test:db`: 76 files / 1,232 tests passed against the
   preserved local Supabase fixture.
 - [x] Fresh local `npm run test:integration`: 3 files / 5 tests against the
   running localhost Supabase stack.
-- [x] GitHub CI run `32123344785`: **58/58 desktop + mobile tests passed**
+- [x] GitHub CI run `32126259509`: **58/58 desktop + mobile tests passed**
   against the disposable CI fixture. A local production-server run completed
   with 57 passed and one retry-only flaky automation attempt; the retry passed.
 - [x] Local `/api/health` returned HTTP 200 with `db: ok`; the running local
