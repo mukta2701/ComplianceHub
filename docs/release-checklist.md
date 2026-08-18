@@ -20,17 +20,24 @@
 These checks prove the current local implementation only; they do not close the
 hosted, Azure, Slack, GitHub-owner, email, or backup checkpoints above.
 
-- [x] `npm run verify`: lint, typecheck, **191 test files / 1,341 tests**, and Next production build.
-- [x] GitHub CI run `32099612502` for `e7a0a98` applied the complete migration chain, including
-  `20260818050000_grant_safe_connection_metadata.sql`, and the full pgTAP
-  database suite passed. This disposable database run is authoritative for the
-  current schema; the preserved local fixture was not reset.
-- [x] `npm run test:integration`: 3 files / 5 tests against the running localhost Supabase stack.
-- [x] GitHub CI run `32099612502` ran the production build with
-  `E2E_TEST_TOOLS_ENABLED=1` and one worker against the shared local Supabase
-  fixture: **58/58 desktop + mobile tests passed**.
-- [x] Focused GitHub production shadow run: Chromium + mobile 2/2; local personal-pilot readiness unchanged.
+- [x] On source commit `bf41b95`, `npm run verify` passed lint, typecheck,
+  **195 test files / 1,355 tests**, and the Next production build.
+- [x] GitHub CI run `32109668215` for `bf41b95` passed Gitleaks, the production
+  container build, the disposable database upgrade/full pgTAP suite, application
+  lint/typecheck/unit tests/build, integration (3 files / 5 tests), and **58/58
+  Playwright desktop + mobile tests**.
+- [x] Fresh local `npm run test:integration`: 3 files / 5 tests against the
+  running localhost Supabase stack.
+- [x] Fresh local `npm run test:e2e -- --workers=1`: **58/58 desktop + mobile
+  tests passed** against the preserved local fixture.
+- [x] Local `/api/health` returned HTTP 200 with `db: ok`; the running local
+  stack reports 97 applied migrations and the expected GitHub/automation/MCP
+  tables are present.
+- [x] Focused GitHub production shadow run: Chromium + mobile 2/2; local
+  personal-pilot readiness unchanged.
 - [x] Slack connector smoke test posted and re-read one non-sensitive message in
-  `#compliancehub-adtecher-pilot`; this verifies the connected Slack destination
-  only, not the ComplianceHub webhook or scheduled digest delivery.
-- [x] `npm run test:db:upgrade`: passed earlier in the disposable/local upgrade gate (14 upgrade assertions, with the database restored afterwards); it was not rerun in this final fixture-preserving pass.
+  `#compliancehub-adtecher-pilot` ([message](https://kt-sme.slack.com/archives/C0BQDARKE4F/p1787035559542319)); this verifies the connected Slack
+  destination only, not the ComplianceHub webhook or scheduled digest delivery.
+- [x] `npm run test:db:upgrade`: passed earlier in the disposable/local upgrade
+  gate (14 upgrade assertions, with the database restored afterwards); it was
+  not rerun in this final fixture-preserving pass.
