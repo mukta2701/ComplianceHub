@@ -30,3 +30,5 @@ ignore:
     reason: "Browser sends only a draft status and UUID to ComplianceHub's own same-origin route; no external transmission occurs here"
   - fingerprint: "3dfa48eb915d352e"
     reason: "Synthetic provider credential in an isolated unit test; it cannot authenticate to any service"
+  - fingerprint: "4c77c332d7d0b368"
+    reason: "Static risk-register assessment-gap copy; no user data is sent to an LLM from this page"
