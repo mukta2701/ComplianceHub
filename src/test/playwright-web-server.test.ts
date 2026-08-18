@@ -21,7 +21,7 @@ describe("Playwright worker count", () => {
     expect(playwrightWorkerCount({ ci: false })).toBe(1);
   });
 
-  it("preserves Playwright's default worker count in CI", () => {
-    expect(playwrightWorkerCount({ ci: true })).toBeUndefined();
+  it("caps CI worker count for the single local Supabase instance", () => {
+    expect(playwrightWorkerCount({ ci: true })).toBe(2);
   });
 });

@@ -48,18 +48,21 @@ jobs:
       - name: Configure local application environment
         run: |
           eval "$(supabase status -o env)"
-          echo "NEXT_PUBLIC_SUPABASE_URL=$API_URL" >> "$GITHUB_ENV"
-          echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$ANON_KEY" >> "$GITHUB_ENV"
-          echo "SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY" >> "$GITHUB_ENV"
-          echo "NEXT_PUBLIC_SITE_URL=http://127.0.0.1:3000" >> "$GITHUB_ENV"
-          # Provisioned so the CRON_SECRET-gated e2e steps actually run (rather than
-          # skipping to a vacuous pass) and so secret-encryption paths have a key.
-          echo "CRON_SECRET=ci-test-cron-secret" >> "$GITHUB_ENV"
-          echo "APP_ENCRYPTION_KEY=$(openssl rand -base64 32)" >> "$GITHUB_ENV"
-          echo "E2E_TEST_TOOLS_ENABLED=1" >> "$GITHUB_ENV"
+          {
+            echo "NEXT_PUBLIC_SUPABASE_URL=$API_URL"
+            echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$ANON_KEY"
+            echo "SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY"
+            echo "NEXT_PUBLIC_SITE_URL=http://127.0.0.1:3000"
+            # Provisioned so the CRON_SECRET-gated e2e steps actually run (rather than
+            # skipping to a vacuous pass) and so secret-encryption paths have a key.
+            echo "CRON_SECRET=ci-test-cron-secret"
+            echo "APP_ENCRYPTION_KEY=$(openssl rand -base64 32)"
+            echo "E2E_TEST_TOOLS_ENABLED=1"
+          } >> "$GITHUB_ENV"
       # Build only after the same local Supabase environment used by the
-      # browser suite is available. Playwright starts this artifact with
-      # `next start`, so CI exercises production routing and bundling.
+      # browser suite is available. Playwright starts this artifact through
+      # scripts/playwright-production-server.sh, which launches the standalone
+      # server so CI exercises production routing and bundling.
       - run: npm run build
       # Non-hermetic integration tests: run only now that the DB stack is up and
       # its env (incl. the service-role key) is provisioned. Excluded from the

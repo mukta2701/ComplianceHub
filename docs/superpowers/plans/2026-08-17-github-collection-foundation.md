@@ -8,6 +8,18 @@
 
 **Tech Stack:** Next.js 16 App Router, TypeScript 5, React 19, Supabase PostgreSQL/RLS/pgTAP, Zod 4, `jose` 6, Vitest 4, Playwright 1.61, Azure Container Apps, GitHub REST API version `2026-03-10`.
 
+## Current implementation status — 2026-08-18
+
+Tasks 1–8 are implemented and covered by the domain, adapter, pgTAP, route,
+orchestration, webhook, UI, and production-shadow tests in this branch. Task 9
+steps 1–5 are also implemented: the secret-safe Azure contract, local personal
+pilot configuration, production E2E server wrapper, export parity checks, and
+the full local verification matrix are current. Task 9 steps 6–9 remain
+intentionally open because they require a verified hosted backup/migration,
+owner-controlled Azure secrets and deployment, Adtecher GitHub App approval,
+and a real one-repository shadow comparison. The checkboxes below preserve the
+original execution trace; this status block is the current evidence summary.
+
 ## Global Constraints
 
 - Collection is read-only: no repository, issue, workflow, ruleset, or administration writes.

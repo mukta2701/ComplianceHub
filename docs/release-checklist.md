@@ -14,3 +14,15 @@
 - [ ] Desktop and mobile critical journeys pass keyboard and automated accessibility checks.
 - [ ] PDF and DOCX exports match the finalised snapshot.
 - [ ] `npm run verify`, `npm run test:db`, and `npm run test:e2e` pass from a clean checkout.
+
+## Local verification evidence — 2026-08-18
+
+These checks prove the current local implementation only; they do not close the
+hosted, Azure, Slack, GitHub-owner, email, or backup checkpoints above.
+
+- [x] `npm run verify`: lint, typecheck, 173 test files / 1,291 tests, and Next production build.
+- [x] `npm run test:db`: 66 pgTAP files / 1,170 tests.
+- [x] `npm run test:integration`: 3 files / 5 tests against the running localhost Supabase stack.
+- [x] `npm run test:e2e` with CI-equivalent local secrets, `E2E_TEST_TOOLS_ENABLED=1`, production build, and two workers: 56/56 desktop + mobile tests.
+- [x] Focused GitHub production shadow run: Chromium + mobile 2/2; local personal-pilot readiness unchanged.
+- [x] `npm run test:db:upgrade`: passed earlier in the disposable/local upgrade gate (14 upgrade assertions, with the database restored afterwards); it was not rerun in this final fixture-preserving pass.

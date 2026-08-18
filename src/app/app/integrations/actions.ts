@@ -9,6 +9,7 @@ import { requireAppContext } from "@/lib/app-context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { encryptSecret } from "@/lib/security/secrets";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
+import { validateSlackIncomingWebhookUrl } from "@/lib/integrations/slack-incoming-webhook";
 import { connectionInputSchema, connectionTargetInputSchema } from "@/features/integrations/application/connection";
 import { evidenceSourceInputSchema } from "@/features/integrations/application/evidence-source";
 import { hasCapability } from "@/features/organisations/domain/access";
@@ -54,11 +55,16 @@ const monitorSourceSchema = z.object({
   label: z.string().trim().max(160).optional(),
   accessToken: z.string().trim().max(4_000).optional(),
 });
+const slackWebhookUrlSchema = z.string().trim().url().refine((value) => {
+  try {
+    validateSlackIncomingWebhookUrl(value);
+    return true;
+  } catch {
+    return false;
+  }
+}, "Must be a valid Slack incoming-webhook URL");
 const alertChannelSchema = z.object({
-  endpoint: z.string().trim().url().refine(
-    (url) => url.startsWith("https://hooks.slack.com/services/"),
-    "Must be a Slack incoming-webhook URL (https://hooks.slack.com/services/…)",
-  ),
+  endpoint: slackWebhookUrlSchema,
   minSeverity: z.enum(["low", "medium", "high", "critical"]),
   label: z.string().trim().max(160).optional(),
 });

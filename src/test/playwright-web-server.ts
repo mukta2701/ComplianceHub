@@ -4,5 +4,5 @@ export function playwrightWebServerCommand(input: { ci: boolean; port: number })
 }
 
 export function playwrightWorkerCount(input: { ci: boolean }): number | undefined {
-  return input.ci ? undefined : 1;
+  return input.ci ? 2 : 1;
 }

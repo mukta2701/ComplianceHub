@@ -194,6 +194,7 @@ Application environment variables (names must match `.env.example`):
 | `GITHUB_WEBHOOK_SECRET` | for GitHub shadow pilot | **Server-only.** High-entropy HMAC secret for signed webhook intake. |
 | `GITHUB_APP_SLUG` | for GitHub shadow pilot | **Server-only.** Exact slug used to construct the installation URL. |
 | `GITHUB_ALLOWED_ACCOUNT_ID` | for GitHub shadow pilot | **Server-only.** Immutable numeric Adtecher organisation ID; never substitute a personal account. |
+| `GITHUB_ALLOWED_ACCOUNT_TYPE` | local personal pilot only | **Server-only, optional.** Set exactly to `User` only on an HTTP loopback origin during the personal local pilot; leave unset for hosted/organisation rollout. |
 | `GITHUB_APPROVED_SECURITY_WORKFLOW_IDS` | for GitHub shadow pilot | **Server-only.** One to twenty unique comma-separated numeric workflow IDs approved for the dedicated pilot repository. |
 | `RESEND_API_KEY` | for invitation delivery | **Server-only.** Resend API key with sending access. Never use a `NEXT_PUBLIC_` variable for it. If absent, invitations remain retryable with status `not_configured` and no mail request is made. |
 | `INVITATION_FROM_EMAIL` | for invitation delivery | **Server-only.** Verified sender, e.g. `ComplianceHub <invites@notify.example.com>`. |

@@ -1,5 +1,36 @@
 # Codex overnight readiness notes
 
+> The original 2026-07-13 entry below is retained as historical evidence. The
+> current handoff is the section immediately following it.
+
+## Current handoff — 2026-08-18
+
+- Branch: `codex/github-collection-foundation`; the reviewed baseline for this
+  handoff is `8197e9a` (`test: verify export parity and production e2e runtime`)
+  plus the follow-up worker, Slack-validation, and documentation changes in the
+  current release commit.
+- Local application health: `/api/health` returns HTTP 200 with `db: ok`.
+- Local verification baseline: `npm run verify` passed lint, typecheck, 173 test
+  files / 1,291 tests, and the Next production build. `npm run test:db` passed
+  66 pgTAP files / 1,170 tests.
+- Browser evidence: the complete production matrix passed **56/56** across
+  Chromium and mobile with `E2E_TEST_TOOLS_ENABLED=1` and the two-worker cap.
+- Integration evidence: `npm run test:integration` passed 3 files / 5 tests;
+  the production GitHub shadow spec passed on Chromium and mobile (2/2).
+- MCP evidence: local DCR + S256 PKCE, authorization-code exchange, refresh,
+  authenticated initialize/tools/list, and revocation all passed. The local
+  audience row is configured for `http://127.0.0.1:3000/mcp` only.
+- Slack evidence: local digest reservation/finalisation and concurrency tests
+  pass with an injected transport. The connected Slack pilot channel contains
+  only a connection-test notice; no live compliance data was posted.
+- GitHub evidence: the local personal pilot collected the selected
+  `mukta2701/ComplianceHub` repository and kept readiness unchanged. This is not
+  Adtecher acceptance.
+- Release boundary: hosted Supabase backup/migrations, Azure deployment and
+  protected secrets, hosted MCP OAuth, real Slack webhook deliveries, and the
+  Adtecher-owned App/repository proof remain owner-controlled checkpoints. Do
+  not mark them complete from local fixtures.
+
 Date: 2026-07-13  
 Branch: `main`  
 Readiness verdict: **NO-GO for hosted deployment until the three new database migrations are applied through the approved production migration process.**

@@ -547,6 +547,34 @@ describe("integration connection access", () => {
     expect(hoisted.encryptSecret).toHaveBeenCalledWith("https://hooks.slack.com/services/T/B/X");
   });
 
+  it("accepts Slack Gov incoming-webhook URLs", async () => {
+    const insert = vi.fn().mockResolvedValue({ error: null });
+    hoisted.ctx = {
+      supabase: { from: vi.fn(() => ({ insert })) }, user: { id: USER_ID },
+      organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
+    };
+    const channel = new FormData();
+    channel.set("endpoint", "https://hooks.slack-gov.com/services/T/B/X"); channel.set("minSeverity", "high");
+
+    await addAlertChannelAction(channel);
+
+    expect(hoisted.encryptSecret).toHaveBeenCalledWith("https://hooks.slack-gov.com/services/T/B/X");
+  });
+
+  it("rejects malformed official-looking Slack webhook URLs before writing", async () => {
+    const from = vi.fn();
+    hoisted.ctx = {
+      supabase: { from }, user: { id: USER_ID },
+      organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
+    };
+    const channel = new FormData();
+    channel.set("endpoint", "https://hooks.slack.com/services/T/B/X?redirect=https://example.test"); channel.set("minSeverity", "high");
+
+    await expect(addAlertChannelAction(channel)).rejects.toThrow();
+    expect(from).not.toHaveBeenCalled();
+    expect(hoisted.encryptSecret).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["monitor source", setMonitorSourceEnabledAction, "monitor_sources"],
     ["alert channel", setAlertChannelEnabledAction, "alert_channels"],

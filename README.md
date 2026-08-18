@@ -13,6 +13,8 @@ ComplianceHub supports readiness work. It does **not** provide certification, le
 - **Policies** — a policy library with an approval lifecycle, per-employee version-stamped acceptance, material-edit re-accept, scheduled review reminders, and 10 original, editable starter policies for ISO 27001 readiness.
 - **KPIs & management review** — a KPI register with measurement trends for management review.
 - **Integrations** — Owner/Admin-managed GitHub and Jira OAuth authorization through a server-only Nango boundary, with mode-bound ticket push/status sync, linked GitHub compliance monitoring, enable/disable controls, and a network-free local sandbox path.
+- **Internal MCP + daily digest** — OAuth-protected, read-only MCP tools for workspace compliance facts plus an Owner-only, fact-hashed Slack digest flow with encrypted webhook delivery and replay-safe delivery records.
+- **GitHub shadow collection** — a private, read-only GitHub App flow can scope one repository, collect sanitised security observations, and show collection health without changing readiness, evidence, findings, MCP answers, or Slack output.
 - **Multi-framework** — record how your ISO 27001 controls map to SOC 2 / GDPR / HIPAA / NIST CSF / ISO 27017, with per-framework coverage.
 - **Public Trust Center** — an owner-opt-in public page that shares only a safe security-posture summary with prospects.
 - **Multi-tenant & audited** — every table is org-isolated via Postgres Row-Level Security with cross-tenant attack tests, and every change is captured to an audit trail.
@@ -38,6 +40,14 @@ npm run test:db
 npm run test:e2e
 ```
 
+The browser suite runs both desktop and mobile projects. It uses the local
+Supabase environment from `.env.local` (or the CI-provisioned environment) and
+caps workers at two because the local stack is shared. Set
+`E2E_TEST_TOOLS_ENABLED=1` only for local test runs so the sandbox integration
+fixtures are visible; never enable that flag on a hosted origin. CI runs the
+suite against the production build; local runs use the development server for
+faster iteration.
+
 `npm run test:db` runs ordinary pgTAP against the current local schema and does
 not reset the database. The historical migration-upgrade harness is deliberately
 separate because it destroys all data in the local Supabase instance: it resets
@@ -55,7 +65,12 @@ upgrade harness exits before invoking Supabase.
 
 ## Deployment
 
-The reference beta deployment uses Vercel and managed Supabase. See `docs/deployment.md`. The application remains portable because schema changes are SQL migrations and core domain logic is framework-independent TypeScript.
+The active staging target is Azure Container Apps with managed Supabase; Vercel
+is not used by the current rollout. See `docs/deployment.md` and the checked-in
+release checklist. Hosted migrations, Azure credentials, GitHub App approval,
+and real Slack delivery remain explicit owner-controlled gates. The application
+remains portable because schema changes are SQL migrations and core domain logic
+is framework-independent TypeScript.
 
 ## Security and privacy
 

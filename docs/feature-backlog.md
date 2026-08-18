@@ -166,3 +166,35 @@ Small backlog items carried forward in the SDD ledger (`.superpowers/sdd/progres
 - Move integration tokens to Supabase Vault / an encrypted column before any real connection (go-live hardening, already flagged on the connect checklist).
 
 **Deferred hardening (from the whole-branch review):** policy evidence link/unlink actions lack the rate-limit the other policy actions carry and `unlink` deletes by `linkId` without re-scoping to `policyId` (RLS still org-scopes it); `024` pgTAP omits an UPDATE-verb assertion (evidence_links has no UPDATE path); poll-cron per-ticket errors now isolated (returns `{synced, failed}`) but failures are counted, not logged per-row.
+
+## Internal MCP + daily Slack digest (shipped)
+
+**What shipped:** an OAuth-protected Streamable HTTP MCP endpoint with six
+tenant-scoped read/prepare tools plus a separate Owner-only `post_daily_digest`
+external-write tool, deterministic digest facts, and an Owner-only daily
+Slack digest workflow. Digest claims are derived from a prepared fact hash;
+reservation/finalisation RPCs make concurrent calls idempotent, webhook URLs are
+encrypted at rest, and delivery outcomes are terminally classified. A private
+ComplianceHub plugin and daily-brief skill keep preparation side-effect-free
+unless the user explicitly requests a send. Hosted OAuth and a real Slack
+webhook remain go-live checkpoints, not local defaults.
+
+**Suggested improvements:**
+- Complete hosted MCP Inspector/Codex/Claude OAuth acceptance against the canonical Azure origin.
+- Configure a real Slack incoming webhook and record three redacted shadow deliveries, including failure/unknown handling.
+- Add operator-facing schedule status and a bounded retry/recovery dashboard for abandoned digest reservations.
+
+## GitHub shadow collection (foundation shipped)
+
+**What shipped:** a private GitHub App claim/callback flow, tenant-safe
+installation and repository scope, deterministic rule evaluation, bounded
+collection orchestration, signed replay-safe webhook intake, manual recheck UI,
+and collection-health summaries. The local personal pilot accepts a `User`
+account only on an HTTP loopback origin; hosted deployments stay
+organisation-only. Shadow observations are intentionally not readiness-affecting
+until a later mapping-approval release.
+
+**Suggested improvements:**
+- Complete the hosted Supabase migration and Azure secret/registration checkpoints.
+- Run the approved Adtecher one-repository shadow pilot and commit a redacted comparison proof.
+- Add the separately planned mapping/evidence/finding lifecycle after the shadow proof passes.
