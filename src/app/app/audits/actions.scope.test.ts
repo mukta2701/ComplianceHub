@@ -16,7 +16,12 @@ vi.mock("@/lib/app-context", () => ({ requireAppContext: () => Promise.resolve(h
 vi.mock("@/lib/security/rate-limit", () => ({ enforceRateLimit: hoisted.enforceRateLimit }));
 vi.mock("next/cache", () => ({ revalidatePath: hoisted.revalidatePath }));
 
-import { updateChecklistItemAction, updateFindingStatusAction } from "./actions";
+import {
+  linkChecklistEvidenceAction,
+  raiseFindingAction,
+  updateChecklistItemAction,
+  updateFindingStatusAction,
+} from "./actions";
 
 function form(entries: Record<string, string>) {
   const data = new FormData();
@@ -36,6 +41,26 @@ function updateClient() {
   const update = vi.fn(() => builder);
   const from = vi.fn(() => ({ update }));
   return { from, update, eqCalls };
+}
+
+function checklistOwnershipClient() {
+  const checklistLookup = {
+    select: vi.fn(() => checklistLookup),
+    eq: vi.fn(() => checklistLookup),
+    maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+  };
+  const findingInsert = vi.fn();
+  const evidenceInsert = vi.fn();
+  findingInsert.mockReturnValue({
+    select: vi.fn(() => ({ single: vi.fn().mockResolvedValue({ data: { id: FINDING_ID }, error: null }) })),
+  });
+  evidenceInsert.mockResolvedValue({ error: null });
+  const from = vi.fn((table: string) => {
+    if (table === "audit_checklist_items") return checklistLookup;
+    if (table === "audit_findings") return { insert: findingInsert };
+    return { insert: evidenceInsert };
+  });
+  return { from, checklistLookup, findingInsert, evidenceInsert };
 }
 
 describe("audit mutation object scoping", () => {
@@ -84,5 +109,41 @@ describe("audit mutation object scoping", () => {
       ["organisation_id", ORGANISATION_ID],
       ["audit_id", AUDIT_ID],
     ]);
+  });
+
+  it("rejects a finding that names a checklist item from another audit", async () => {
+    const client = checklistOwnershipClient();
+    (hoisted.ctx as { supabase: unknown }).supabase = client;
+
+    await expect(raiseFindingAction(form({
+      auditId: AUDIT_ID,
+      checklistItemId: ITEM_ID,
+      summary: "Wrong-audit finding",
+      severity: "observation",
+      rootCause: "",
+      correctiveAction: "",
+      ownerId: "",
+      dueOn: "",
+      spawnTask: "",
+    }))).rejects.toThrow("Could not find that checklist item");
+
+    expect(client.checklistLookup.eq).toHaveBeenCalledWith("audit_id", AUDIT_ID);
+    expect(client.checklistLookup.eq).toHaveBeenCalledWith("organisation_id", ORGANISATION_ID);
+    expect(client.findingInsert).not.toHaveBeenCalled();
+  });
+
+  it("rejects evidence links to a checklist item from another audit", async () => {
+    const client = checklistOwnershipClient();
+    (hoisted.ctx as { supabase: unknown }).supabase = client;
+
+    await expect(linkChecklistEvidenceAction(form({
+      auditId: AUDIT_ID,
+      evidenceId: "60000000-0000-4000-8000-000000000006",
+      checklistItemId: ITEM_ID,
+    }))).rejects.toThrow("Could not find that checklist item");
+
+    expect(client.checklistLookup.eq).toHaveBeenCalledWith("audit_id", AUDIT_ID);
+    expect(client.checklistLookup.eq).toHaveBeenCalledWith("organisation_id", ORGANISATION_ID);
+    expect(client.evidenceInsert).not.toHaveBeenCalled();
   });
 });

@@ -97,6 +97,15 @@ export async function raiseFindingAction(formData: FormData) {
   const { supabase, user, organisation } = await requireAppContext();
   await enforceRateLimit(`audit:${user.id}`, { limit: 30, windowMs: 60_000 });
   const parsed = findingInputSchema.parse(Object.fromEntries(formData));
+  if (parsed.checklistItemId) {
+    const { data: checklistItem, error: checklistError } = await supabase.from("audit_checklist_items")
+      .select("id")
+      .eq("id", parsed.checklistItemId)
+      .eq("audit_id", parsed.auditId)
+      .eq("organisation_id", organisation.id)
+      .maybeSingle();
+    if (checklistError || !checklistItem) throw new Error("Could not find that checklist item");
+  }
   const { data: finding, error } = await supabase.from("audit_findings").insert({
     organisation_id: organisation.id, audit_id: parsed.auditId, checklist_item_id: parsed.checklistItemId,
     summary: parsed.summary, severity: parsed.severity, root_cause: parsed.rootCause,
@@ -133,9 +142,17 @@ export async function linkChecklistEvidenceAction(formData: FormData) {
   const { supabase, user, organisation } = await requireAppContext();
   await enforceRateLimit(`audit:${user.id}`, { limit: 30, windowMs: 60_000 });
   const auditId = String(formData.get("auditId"));
+  const checklistItemId = String(formData.get("checklistItemId"));
+  const { data: checklistItem, error: checklistError } = await supabase.from("audit_checklist_items")
+    .select("id")
+    .eq("id", checklistItemId)
+    .eq("audit_id", auditId)
+    .eq("organisation_id", organisation.id)
+    .maybeSingle();
+  if (checklistError || !checklistItem) throw new Error("Could not find that checklist item");
   const { error } = await supabase.from("evidence_links").insert({
     organisation_id: organisation.id, evidence_id: String(formData.get("evidenceId")),
-    audit_checklist_item_id: String(formData.get("checklistItemId")), created_by: user.id,
+    audit_checklist_item_id: checklistItemId, created_by: user.id,
   });
   if (error) throw new Error("Could not link the evidence");
   revalidatePath(`/app/audits/${auditId}`);
