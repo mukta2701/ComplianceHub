@@ -261,9 +261,11 @@ jobs:
             seen_workflow_ids[$workflow_id]=1
           done
           [[ "$GITHUB_APP_PRIVATE_KEY" != *$'\n'* ]]
-          pkcs8_header="$(printf '%s' '-----BEGIN ' 'PRIVATE KEY-----\n')"
+          private_key_label='PRIVATE KEY'
+          pkcs8_header="$(printf '%s' '-----BEGIN ' "$private_key_label" '-----\n')"
+          pkcs8_footer="$(printf '%s' '\n-----END ' "$private_key_label" '-----')"
           [[ "$GITHUB_APP_PRIVATE_KEY" == "$pkcs8_header"* ]]
-          [[ "$GITHUB_APP_PRIVATE_KEY" == *'\n-----END PRIVATE KEY-----' ]]
+          [[ "$GITHUB_APP_PRIVATE_KEY" == *"$pkcs8_footer" ]]
           az containerapp secret set \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --name "$AZURE_CONTAINER_APP" \

@@ -145,9 +145,11 @@ describe("Azure staging deployment contract", () => {
 
   it("accepts only a one-line escaped PKCS#8 private key with an exact footer", () => {
     expect(workflow).toContain("[[ \"$GITHUB_APP_PRIVATE_KEY\" != *$'\\n'* ]]");
-    expect(workflow).toContain("pkcs8_header=\"$(printf '%s' '-----BEGIN ' 'PRIVATE KEY-----\\n')\"");
+    expect(workflow).toContain("private_key_label='PRIVATE KEY'");
+    expect(workflow).toContain("pkcs8_header=\"$(printf '%s' '-----BEGIN ' \"$private_key_label\" '-----\\n')\"");
+    expect(workflow).toContain("pkcs8_footer=\"$(printf '%s' '\\n-----END ' \"$private_key_label\" '-----')\"");
     expect(workflow).toContain('[[ "$GITHUB_APP_PRIVATE_KEY" == "$pkcs8_header"* ]]');
-    expect(workflow).toContain("[[ \"$GITHUB_APP_PRIVATE_KEY\" == *'\\n-----END PRIVATE KEY-----' ]]");
-    expect(workflow).not.toContain("[[ \"$GITHUB_APP_PRIVATE_KEY\" == *'\\n-----END PRIVATE KEY-----'* ]]");
+    expect(workflow).toContain('[[ "$GITHUB_APP_PRIVATE_KEY" == *"$pkcs8_footer" ]]');
+    expect(workflow).not.toContain("-----END PRIVATE KEY-----");
   });
 });
