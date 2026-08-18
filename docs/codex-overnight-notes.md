@@ -6,20 +6,22 @@
 ## Current handoff — 2026-08-18
 
 - Branch: `codex/github-collection-foundation`; the reviewed baseline for this
-  handoff is `4560d3e`, including retry-safe automation provenance, scheduled
+  handoff is `5927b84`, including retry-safe automation provenance, scheduled
   retention purging, owner-gated AI drafting, stable automation sign-up/tracker
-  E2E paths, and the safe connector-metadata grant.
+  E2E paths, the safe connector-metadata grant, and active-workspace isolation
+  across legacy registers and exports.
 - Local application health: `/api/health` returns HTTP 200 with `db: ok`.
-- Local verification baseline: `npm run verify` passed lint, typecheck, **195
-  test files / 1,356 tests**, and the Next production build. The disposable CI
+- Local verification baseline: `npm run verify` passed lint, typecheck, **199
+  test files / 1,414 tests**, and the Next production build. The disposable CI
   database gate is the authoritative check for the newly added automation
   migrations.
-- Browser evidence: the complete production matrix passed **58/58** across
-  Chromium and mobile with `E2E_TEST_TOOLS_ENABLED=1` and one worker against
-  the shared local Supabase fixture.
+- Browser evidence: GitHub CI's complete production matrix passed **58/58**
+  across Chromium and mobile with `E2E_TEST_TOOLS_ENABLED=1` and one worker.
+  The local production-server run completed 57 tests with one retry-only flaky
+  automation attempt; that retry passed.
 - Integration evidence: `npm run test:integration` passed 3 files / 5 tests;
   the production GitHub shadow spec passed on Chromium and mobile (2/2).
-- Remote CI evidence: run `32116987686` for `4560d3e` completed successfully.
+- Remote CI evidence: run `32123344785` for `5927b84` completed successfully.
   Gitleaks, container, database upgrade/full pgTAP, application
   lint/typecheck/unit/build, integration, and 58/58 Playwright desktop/mobile
   tests all passed.
