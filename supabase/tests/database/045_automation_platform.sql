@@ -63,8 +63,12 @@ select lives_ok(
   'collector creates a draft proposal for the assigned member');
 select lives_ok(
   $$ insert into public.automation_proposals (id, organisation_id, signal_id, target_type, assigned_to, created_by, input_snapshot, output, source_references)
-     values ('60000000-0000-4000-8000-000000000702', '20000000-0000-4000-8000-000000000701', '50000000-0000-4000-8000-000000000701', 'task', '10000000-0000-4000-8000-000000000702', '10000000-0000-4000-8000-000000000701', '{"signal":"github.branch_protection"}', '{"title":"Review GitHub protection","why":"Review the source","recommendedAction":"Create a task"}', '[]') $$,
+     values ('60000000-0000-4000-8000-000000000702', '20000000-0000-4000-8000-000000000701', null, 'task', '10000000-0000-4000-8000-000000000702', '10000000-0000-4000-8000-000000000701', '{"signal":"github.branch_protection"}', '{"title":"Review GitHub protection","why":"Review the source","recommendedAction":"Create a task"}', '[]') $$,
   'collector creates a task draft for the assigned member');
+select throws_ok(
+  $$ insert into public.automation_proposals (organisation_id, signal_id, target_type, assigned_to, created_by, input_snapshot, output, source_references)
+     values ('20000000-0000-4000-8000-000000000701', '50000000-0000-4000-8000-000000000701', 'risk', '10000000-0000-4000-8000-000000000702', '10000000-0000-4000-8000-000000000701', '{}', '{}', '[]') $$,
+  '23505', null, 'one signal cannot create duplicate review proposals');
 
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub":"10000000-0000-4000-8000-000000000702","role":"authenticated"}', true);
