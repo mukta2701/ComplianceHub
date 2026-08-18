@@ -133,10 +133,10 @@ The following previously reported items are now closed and tracked as `Done` in 
 - Findings dashboard + trend over time; link findings to the SoA control they affect.
 - KPI trend charts + threshold RAG status (currently a flat log); KPI edit UI.
 - Readiness report: scheduled email/PDF to leadership; a 5th risk-band tone so high vs very-high are visually distinct.
-- Auditor access hardening: flash the one-time link via a single-use server-side store instead of a 60s cookie; per-view access log of auditor-token reads; escape `audit.reference` in the evidence-pack filename.
+- Auditor access hardening: replace the short-lived flash cookie with a single-use server-side store.
 - Management-review meeting record (agenda + minutes) built on the KPI log.
 
-**Deferred hardening (from reviews):** evidence-pack Content-Disposition filename not escaped; pgTAP 021 per-query cross-org coverage (RPC code-clean, public-view e2e renders full payload); `grant usage public to anon` broader than needed; auditor token `on delete cascade` with its audit.
+**Deferred hardening (from reviews):** pgTAP 021 per-query cross-org coverage (RPC code-clean, public-view e2e renders full payload); `grant usage public to anon` broader than needed; auditor token `on delete cascade` with its audit.
 
 ---
 

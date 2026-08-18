@@ -63,7 +63,7 @@ Revisit single-org assumption in risk-matrix-config read,Replace the maybeSingle
 "Recurring/scheduled audits","Auto-create audits on an annual/quarterly cycle","Backlog","Medium","enhancement;audit"
 "Audit checklist templates","Pre-populate checklist from a framework's full Annex A set","Backlog","Medium","enhancement;audit"
 "KPI trend charts + RAG + edit UI","Trend over time, threshold status, and an edit form","Backlog","Medium","enhancement;kpi"
-"Auditor-view access log","Record each auditor-token read for accountability","Backlog","Medium","enhancement;auditor;security"
+"Auditor-view access log","Record each auditor-token read for accountability","Done","Medium","enhancement;auditor;security"
 "Auditor link single-use store","Replace 60s flash cookie with a single-use server store","Backlog","Low","hardening;auditor;security"
 "Escape evidence-pack filename","Escape audit.reference in Content-Disposition","Done","Low","hardening;export"
 "5th risk-band tone in reports","Distinguish high vs very-high visually","Backlog","Low","enhancement;reporting"
