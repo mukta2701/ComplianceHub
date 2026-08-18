@@ -98,9 +98,7 @@ Phase B took every compliance workflow that a 10–20 person organisation used t
 
 **Suggested improvements:**
 - Add an audit-pack export that bundles all registers, the finalised SoA snapshot and the evidence index into a single workbook or zip for auditors.
-- Add an XLSX import round-trip (the planned Phase B.5) so exported workbooks re-import cleanly.
 - Produce styled, branded XLSX output (formatted header row, sensible column widths, auto-filters) so the export can genuinely replace the workbooks.
-- Rate-limit and audit the export route handlers (closed: every authenticated CSV/XLSX/PDF/DOCX export now has a per-workspace/user limiter and durable audit event).
 
 ## Deferred hardening
 

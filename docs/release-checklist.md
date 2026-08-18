@@ -20,9 +20,11 @@
 These checks prove the current local implementation only; they do not close the
 hosted, Azure, Slack, GitHub-owner, email, or backup checkpoints above.
 
-- [x] On latest hardening commit `871072b`, `npm run verify` passed lint,
-  typecheck, **203 test files / 1,438 tests**, and the Next production build.
-- [x] GitHub CI run `32135475323` for `871072b` passed Gitleaks, container,
+- [x] On latest hardening commit `4b1b641`, `npm run verify` passed lint,
+  typecheck, **206 test files / 1,449 tests**, and the Next production build;
+  the focused export, policy-evidence, monitoring, and filename hardening tests
+  are included in that count.
+- [x] GitHub CI run `32139491928` for `4b1b641` passed Gitleaks, container,
   database upgrade/full pgTAP, application lint/typecheck/unit/build,
   integration, and the full desktop/mobile Playwright gate.
 - [x] The CI database job ran `bash scripts/test-db-upgrade.sh` and
@@ -31,9 +33,8 @@ hosted, Azure, Slack, GitHub-owner, email, or backup checkpoints above.
   local Supabase fixture.
 - [x] Fresh local `npm run test:integration`: 3 files / 5 tests against the
   running localhost Supabase stack.
-- [x] GitHub CI run `32131873025`: **58/58 desktop + mobile tests passed**
-  against the disposable CI fixture. A fresh local production-server run also
-  completed **58/58** with one worker.
+- [x] GitHub CI run `32139491928`: **58/58 desktop + mobile tests passed**
+  against the disposable CI fixture with one worker.
 - [x] Local `/api/health` returned HTTP 200 with `db: ok`; the running local
   stack reports 98 applied migrations and the expected GitHub/automation/MCP
   tables are present.
