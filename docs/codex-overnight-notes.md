@@ -6,19 +6,22 @@
 ## Current handoff — 2026-08-18
 
 - Branch: `codex/github-collection-foundation`; the reviewed baseline for this
-  handoff is `0fd0e04`, including retry-safe automation provenance, scheduled
+  handoff is `3fd6ebd`, including retry-safe automation provenance, scheduled
   retention purging, owner-gated AI drafting, replay-safe automation reviews,
   stable automation sign-up/tracker
   E2E paths, the safe connector-metadata grant, and active-workspace isolation
   across policies, imports, autosave, automation, invitations, AI, audits,
   legacy registers, exports, SoA owner assignment, deployment attestation, and
-  active-workspace GitHub repository selection. KPI follow-up task creation is
-  now an atomic, tenant-scoped RPC with a row lock and duplicate protection.
+  active-workspace GitHub repository selection. KPI follow-up task creation and
+  monitoring remediation-task creation are now atomic, tenant-scoped RPCs with
+  row locks and duplicate protection; risk-matrix mutations are operator-only
+  in both the UI and RLS.
 - Local application health: `/api/health` returns HTTP 200 with `db: ok`.
 - Local verification baseline: the current release verification passed lint,
-  typecheck, **208 test files / 1,460 tests**, and the Next production build.
-  The fixture-preserving local database gate also passed **77 files / 1,241
-  tests**, including the atomic KPI task RPC; the disposable CI database gate
+  typecheck, **210 test files / 1,469 tests**, and the Next production build.
+  The fixture-preserving local database gate also passed **79 files / 1,257
+  tests**, including the atomic KPI and monitoring task RPCs and operator-only
+  risk mutations; the disposable CI database gate
   independently passed the same migration set.
 - Browser evidence: GitHub CI's complete production matrix passed **58/58**
   across Chromium and mobile with `E2E_TEST_TOOLS_ENABLED=1` and one worker.
@@ -26,10 +29,10 @@
   evidence.
 - Integration evidence: `npm run test:integration` passed 3 files / 5 tests;
   the production GitHub shadow spec passed on Chromium and mobile (2/2).
-- Remote CI evidence: run `32154415336` for `0fd0e04` completed successfully.
+- Remote CI evidence: run `32158868448` for `3fd6ebd` completed successfully.
   Gitleaks, container, database upgrade/full pgTAP, application
-  lint/typecheck/unit/build, integration, and 58/58 Playwright desktop/mobile
-  tests all passed.
+  lint/typecheck/unit/build, integration, and the full desktop/mobile
+  Playwright gate all passed.
 - MCP evidence: local DCR + S256 PKCE, authorization-code exchange, refresh,
   authenticated initialize/tools/list, and revocation all passed. The local
   audience row is configured for `http://127.0.0.1:3000/mcp` only.

@@ -20,18 +20,19 @@
 These checks prove the current local implementation only; they do not close the
 hosted, Azure, Slack, GitHub-owner, email, or backup checkpoints above.
 
-- [x] On the current hardening commit `0fd0e04`, the release verification
-  baseline passed lint, typecheck, **208 test files / 1,460 tests**, and the
-  Next production build; the focused export, policy-evidence, monitoring,
-  audit-scoping, filename, active-workspace GitHub repository-selection, and
-  atomic KPI task tests are included in that count.
-- [x] GitHub CI run `32154415336` for `0fd0e04` passed Gitleaks, container,
+- [x] On the current hardening commit `3fd6ebd`, the release verification
+  baseline passed lint, typecheck, **210 test files / 1,469 tests**, and the
+  Next production build; the focused export, policy-evidence, monitoring
+  owner/RLS, risk-matrix operator, audit-scoping, filename, active-workspace
+  GitHub repository-selection, atomic KPI task, and atomic monitoring-task
+  tests are included in that count.
+- [x] GitHub CI run `32158868448` for `3fd6ebd` passed Gitleaks, container,
   database upgrade/full pgTAP, application lint/typecheck/unit/build,
   integration, and the full desktop/mobile Playwright gate.
 - [x] The CI database job ran `bash scripts/test-db-upgrade.sh` and
   `supabase test db` successfully. The local fixture-preserving DB run also
-  passed `supabase test db`: **77 files / 1,241 tests**, including the atomic
-  KPI task RPC.
+  passed `supabase test db`: **79 files / 1,257 tests**, including the atomic
+  KPI and monitoring finding task RPCs plus operator-only risk mutations.
 - [x] Fresh local `npm run test:integration`: 3 files / 5 tests against the
   running localhost Supabase stack.
 - [x] GitHub CI run `32154415336`: **58/58 desktop + mobile tests passed**
