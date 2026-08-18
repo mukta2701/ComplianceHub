@@ -718,10 +718,40 @@ describe("GitHub shadow collection actions", () => {
     expect(rpc).not.toHaveBeenCalled();
   });
 
+  it("rejects a repository from a sibling workspace before calling the selection RPC", async () => {
+    const rpc = vi.fn();
+    const maybeSingle = vi.fn().mockResolvedValue({ data: null, error: null });
+    const organisationFilter = vi.fn().mockReturnValue({ maybeSingle });
+    const repositoryFilter = vi.fn().mockReturnValue({ eq: organisationFilter });
+    const select = vi.fn().mockReturnValue({ eq: repositoryFilter });
+    const from = vi.fn().mockReturnValue({ select });
+    hoisted.ctx = {
+      supabase: { from, rpc }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "admin" },
+    };
+    const form = new FormData();
+    form.set("repositoryId", REPOSITORY_ID);
+    form.set("selected", "true");
+
+    await expect(setGitHubRepositorySelectedAction(form)).resolves.toEqual({
+      ok: false,
+      message: "Could not update repository scope. Please try again.",
+    });
+    expect(from).toHaveBeenCalledWith("github_repositories");
+    expect(select).toHaveBeenCalledWith("id");
+    expect(repositoryFilter).toHaveBeenCalledWith("id", REPOSITORY_ID);
+    expect(organisationFilter).toHaveBeenCalledWith("organisation_id", ORGANISATION_ID);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
   it("uses the authenticated operator RPC with exact derived arguments and requires true", async () => {
     const rpc = vi.fn().mockResolvedValue({ data: true, error: null });
+    const maybeSingle = vi.fn().mockResolvedValue({ data: { id: REPOSITORY_ID }, error: null });
+    const organisationFilter = vi.fn().mockReturnValue({ maybeSingle });
+    const repositoryFilter = vi.fn().mockReturnValue({ eq: organisationFilter });
+    const select = vi.fn().mockReturnValue({ eq: repositoryFilter });
+    const from = vi.fn().mockReturnValue({ select });
     hoisted.ctx = {
-      supabase: { rpc }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
+      supabase: { from, rpc }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
     };
     const form = new FormData();
     form.set("repositoryId", REPOSITORY_ID);
