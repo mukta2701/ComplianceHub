@@ -23,6 +23,7 @@ const hoisted = vi.hoisted(() => ({
   supabase: null as FakeSupabase | null,
   membership: null as unknown,
   rpc: vi.fn(),
+  sessionData: null as unknown,
 }));
 
 vi.mock("@/lib/supabase/server", () => ({ createSupabaseServerClient: () => Promise.resolve(hoisted.supabase) }));
@@ -44,9 +45,10 @@ function fakeSupabase() {
         select: () => builder,
         eq: (column: string, value: unknown) => { filters.set(column, value); return builder; },
         maybeSingle: async () => ({
-          data: table === "assessment_sessions" && filters.get("id") === SESSION_ID && !filters.has("organisation_id")
-              ? { id: SESSION_ID, organisation_id: SIBLING_ORG_ID }
-              : null,
+          data: table === "assessment_sessions" && filters.get("id") === SESSION_ID &&
+            hoisted.sessionData && filters.get("organisation_id") === (hoisted.sessionData as { organisation_id?: unknown }).organisation_id
+            ? hoisted.sessionData
+            : null,
           error: null,
         }),
       });
@@ -62,9 +64,11 @@ describe("PATCH /api/app/assessment/response workspace boundary", () => {
     vi.clearAllMocks();
     hoisted.membership = { organisation_id: ORG_ID };
     hoisted.supabase = fakeSupabase();
+    hoisted.sessionData = null;
   });
 
   it("rejects a response for a session owned by a sibling organisation", async () => {
+    hoisted.sessionData = { id: SESSION_ID, organisation_id: SIBLING_ORG_ID };
     const response = await PATCH(new Request("http://localhost/api/app/assessment/response", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -73,6 +77,22 @@ describe("PATCH /api/app/assessment/response workspace boundary", () => {
 
     expect(response.status).toBe(404);
     expect(hoisted.rpc).not.toHaveBeenCalled();
+  });
+
+  it("does not expose internal database details for a failed save", async () => {
+    hoisted.sessionData = { id: SESSION_ID, organisation_id: ORG_ID };
+    hoisted.rpc.mockResolvedValue({ data: null, error: { code: "42501", message: "secret policy detail" } });
+
+    const response = await PATCH(new Request("http://localhost/api/app/assessment/response", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionId: SESSION_ID, questionId: QUESTION_ID, answer: "yes", evidenceNote: "", expectedRevision: 0 }),
+    }));
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body).toEqual({ error: "Could not save assessment response" });
+    expect(JSON.stringify(body)).not.toContain("secret policy detail");
   });
 });
 

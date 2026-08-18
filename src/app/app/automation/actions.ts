@@ -29,7 +29,7 @@ export async function reviewAutomationProposalAction(formData: FormData) {
     target_decision: decision,
     target_dismissal_reason: decision === "dismissed" ? dismissalReason : null,
   });
-  if (error) throw new Error(error.message);
+  if (error) throw new Error("Could not review automation draft");
   revalidatePath("/app/automation");
   revalidatePath("/app/evidence");
   revalidatePath("/app/tasks");

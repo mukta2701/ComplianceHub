@@ -90,7 +90,7 @@ class Builder implements PromiseLike<Result> {
 
 function fakeSupabase(store: Store) {
   const queries: QueryLog[] = [];
-  const rpc = vi.fn(async () => ({ data: "snapshot-1", error: null }));
+  const rpc = vi.fn<() => Promise<Result>>(async () => ({ data: "snapshot-1", error: null }));
   return {
     client: {
       from: (table: keyof Store) => new Builder(table, store[table], queries),
@@ -237,6 +237,15 @@ describe("finaliseSoaAction preflight", () => {
     await expect(finaliseSoaAction(formData())).rejects.toThrow("REDIRECT:/app/soa?finalised=snapshot-1");
     expect(fake.rpc).toHaveBeenCalledTimes(1);
     expect(fake.rpc).toHaveBeenCalledWith("finalise_soa", { target_register_id: REGISTER_ID });
+  });
+
+  it("does not expose internal RPC details when finalisation fails", async () => {
+    const fake = fakeSupabase(reviewedStore());
+    fake.rpc.mockResolvedValue({ data: null, error: { message: "internal finalise policy detail" } });
+    hoisted.ctx = context(fake.client);
+    const { finaliseSoaAction } = await import("./actions");
+
+    await expect(finaliseSoaAction(formData())).rejects.toThrow("Could not finalise the SoA");
   });
 
   it("rejects a requirement that has both current and expired evidence", async () => {

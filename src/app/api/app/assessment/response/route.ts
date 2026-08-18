@@ -22,5 +22,8 @@ export async function PATCH(request: Request) {
     } });
     return NextResponse.json(result);
   }
-  catch (error) { const conflict = error instanceof Error && "code" in error && error.code === "ASSESSMENT_REVISION_CONFLICT"; return NextResponse.json({ error: error instanceof Error ? error.message : "Save failed" }, { status: conflict ? 409 : 400 }); }
+  catch (error) {
+    const conflict = error instanceof Error && "code" in error && error.code === "ASSESSMENT_REVISION_CONFLICT";
+    return NextResponse.json({ error: conflict ? "This assessment changed elsewhere. Reload it before saving again." : "Could not save assessment response" }, { status: conflict ? 409 : 400 });
+  }
 }

@@ -38,7 +38,8 @@ const proposal = {
   automation_signals: { id: "signal-1", signal_type: "test", summary: "Reviewed" },
 };
 
-function supabaseForProposal() {
+function supabaseForProposal(status = proposal.status) {
+  const currentProposal = { ...proposal, status };
   return {
     from(table: string) {
       const filters = new Map<string, unknown>();
@@ -51,9 +52,9 @@ function supabaseForProposal() {
           if (table === "automation_proposals") {
             const matches = filters.get("id") === proposal.id
               && filters.get("organisation_id") === organisation.id
-              && filters.get("assigned_to") === proposal.assigned_to
-              && (!filters.has("status") || filters.get("status") === proposal.status);
-            return Promise.resolve({ data: matches ? proposal : null, error: null });
+              && filters.get("assigned_to") === currentProposal.assigned_to
+              && (!filters.has("status") || filters.get("status") === currentProposal.status);
+            return Promise.resolve({ data: matches ? currentProposal : null, error: null });
           }
           return Promise.resolve({ data: null, error: null });
         },
@@ -98,6 +99,15 @@ describe("reviewAutomationProposalAction workspace boundary", () => {
 
     await expect(reviewAutomationProposalAction(form)).rejects.toThrow("Automation draft not found");
     expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("does not expose internal RPC details when review fails", async () => {
+    const rpc = vi.fn().mockResolvedValue({ error: { message: "internal review policy detail" } });
+    hoisted.ctx = { supabase: { ...supabaseForProposal("draft"), rpc }, user, organisation };
+    const form = formData();
+    form.set("decision", "accepted");
+
+    await expect(reviewAutomationProposalAction(form)).rejects.toThrow("Could not review automation draft");
   });
 
   it("does not replay a proposal that is no longer a draft", async () => {

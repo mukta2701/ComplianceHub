@@ -252,7 +252,7 @@ export async function finaliseSoaAction(formData: FormData) {
   }
 
   const { data, error } = await supabase.rpc("finalise_soa", { target_register_id: register.id });
-  if (error) throw new Error(error.message);
+  if (error) throw new Error("Could not finalise the SoA");
   redirect(`/app/soa?finalised=${data}`);
 }
 
