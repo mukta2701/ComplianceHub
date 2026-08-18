@@ -14,7 +14,7 @@ update public.soa_items set justification = 'Documented for review' where soa_re
 
 select throws_ok(
   format($$ select public.finalise_soa(%L) $$, current_setting('app.pending_register')),
-  'P0001', 'Every applicable SoA item must be reviewed before finalisation',
+  'P0001', 'SoA cannot be finalised: pending controls',
   'finalisation rejects an SoA that still contains pending applicable controls');
 
 select * from finish();

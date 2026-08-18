@@ -13,7 +13,7 @@ update public.soa_items set status = 'operational', justification = 'Reviewed an
 
 select throws_ok(
   format($$ select public.finalise_soa(%L) $$, current_setting('app.owner_guard_register')),
-  'P0001', 'Every applicable SoA item requires an owner before finalisation',
+  'P0001', 'SoA cannot be finalised: missing owners',
   'finalisation rejects applicable controls without an accountable owner');
 
 select * from finish();
