@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireAppContext } from "@/lib/app-context";
+import { hasCapability } from "@/features/organisations/domain/access";
 
 const configSchema = z.object({
   lowMax: z.coerce.number().int().min(1).max(23),
@@ -12,7 +13,10 @@ const configSchema = z.object({
 }).refine((v) => v.lowMax < v.moderateMax && v.moderateMax < v.highMax, { message: "Thresholds must increase" });
 
 export async function updateRiskMatrixConfigAction(formData: FormData) {
-  const { supabase, user, organisation } = await requireAppContext();
+  const { supabase, user, organisation, membership } = await requireAppContext();
+  if (!hasCapability(membership.role, "manage_risk_matrix")) {
+    throw new Error("Only workspace operators can manage risk matrix configuration");
+  }
   const parsed = configSchema.parse(Object.fromEntries(formData));
   const { error } = await supabase.from("risk_matrix_config").upsert({
     organisation_id: organisation.id, low_max: parsed.lowMax, moderate_max: parsed.moderateMax,

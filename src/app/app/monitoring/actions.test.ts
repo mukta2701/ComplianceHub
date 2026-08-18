@@ -24,7 +24,13 @@ vi.mock("@/lib/security/rate-limit", () => ({ enforceRateLimit: hoisted.enforceR
 vi.mock("@/lib/security/secrets", () => ({ encryptSecret: hoisted.encryptSecret }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
-import { acknowledgeFindingAction, fetchRecentAlertsAction, runMonitoringNowAction } from "./actions";
+import {
+  acknowledgeFindingAction,
+  fetchRecentAlertsAction,
+  raiseTaskFromFindingAction,
+  resolveFindingAction,
+  runMonitoringNowAction,
+} from "./actions";
 
 describe("runMonitoringNowAction", () => {
   beforeEach(() => {
@@ -61,6 +67,25 @@ describe("runMonitoringNowAction", () => {
 });
 
 describe("monitoring finding mutations", () => {
+  it.each([
+    ["acknowledge", acknowledgeFindingAction],
+    ["raise a task from", raiseTaskFromFindingAction],
+    ["resolve", resolveFindingAction],
+  ] as const)("rejects Admin callers before attempting to %s a finding", async (_label, action) => {
+    const from = vi.fn();
+    hoisted.ctx = {
+      supabase: { from },
+      user: { id: "user-1" },
+      organisation: { id: "org-1" },
+      membership: { role: "admin" },
+    };
+    const form = new FormData();
+    form.set("id", "10000000-0000-4000-8000-000000000099");
+
+    await expect(action(form)).rejects.toThrow("Only workspace owners can manage monitoring findings");
+    expect(from).not.toHaveBeenCalled();
+  });
+
   it("scopes acknowledgement to the active organisation and fails closed on no match", async () => {
     const builder: Record<string, ReturnType<typeof vi.fn>> = {};
     builder.update = vi.fn(() => builder);
@@ -69,13 +94,42 @@ describe("monitoring finding mutations", () => {
     builder.maybeSingle = vi.fn().mockResolvedValue({ data: null, error: null });
     hoisted.ctx = {
       supabase: { from: vi.fn(() => builder) }, user: { id: "user-1" }, organisation: { id: "org-1" },
-      membership: { role: "admin" },
+      membership: { role: "owner" },
     };
     const form = new FormData();
     form.set("id", "10000000-0000-4000-8000-000000000099");
 
     await expect(acknowledgeFindingAction(form)).rejects.toThrow("Finding was not found in this workspace");
     expect(builder.eq).toHaveBeenCalledWith("organisation_id", "org-1");
+  });
+
+  it("raises and links a remediation task through the atomic owner RPC", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: "task-1", error: null });
+    hoisted.ctx = {
+      supabase: { rpc }, user: { id: "user-1" }, organisation: { id: "org-1" },
+      membership: { role: "owner" },
+    };
+    const form = new FormData();
+    form.set("id", "10000000-0000-4000-8000-000000000099");
+
+    await expect(raiseTaskFromFindingAction(form)).resolves.toBeUndefined();
+    expect(rpc).toHaveBeenCalledWith("raise_monitoring_finding_task", {
+      target_organisation_id: "org-1",
+      target_finding_id: "10000000-0000-4000-8000-000000000099",
+      target_owner_id: "user-1",
+    });
+  });
+
+  it("treats an already-linked finding as an idempotent no-op", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: null, error: { code: "23505" } });
+    hoisted.ctx = {
+      supabase: { rpc }, user: { id: "user-1" }, organisation: { id: "org-1" },
+      membership: { role: "owner" },
+    };
+    const form = new FormData();
+    form.set("id", "10000000-0000-4000-8000-000000000099");
+
+    await expect(raiseTaskFromFindingAction(form)).resolves.toBeUndefined();
   });
 });
 

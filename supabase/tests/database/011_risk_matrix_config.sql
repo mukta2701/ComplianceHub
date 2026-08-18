@@ -17,7 +17,7 @@ select set_config('request.jwt.claims', '{"sub":"10000000-0000-4000-8000-0000000
 select lives_ok(
   $$ insert into public.risk_matrix_config (organisation_id, low_max, moderate_max, high_max, updated_by)
      values ('20000000-0000-4000-8000-000000000001', 4, 9, 14, '10000000-0000-4000-8000-000000000001') $$,
-  'members can create their own config');
+  'an owner can create the workspace config');
 select throws_ok(
   $$ update public.risk_matrix_config set low_max = 5, updated_by = '10000000-0000-4000-8000-000000000002'
      where organisation_id = '20000000-0000-4000-8000-000000000001' $$,

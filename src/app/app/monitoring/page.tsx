@@ -41,7 +41,7 @@ export default async function MonitoringPage() {
     return <MemberMonitoring data={await loadMemberMonitoring(supabase, organisation.id)} />;
   }
 
-  const canManageMonitoring = hasCapability(membership.role, "manage_monitoring");
+  const canManageMonitoringFindings = hasCapability(membership.role, "manage_monitoring_findings");
   const [findingResult, sourceResult] = await Promise.all([
     supabase.from("monitoring_findings")
       .select("id,control_ref,subject_id,severity,title,detail,status,task_id,detected_at")
@@ -114,7 +114,7 @@ export default async function MonitoringPage() {
             <span>Detected {new Date(finding.detected_at).toLocaleString("en-GB")}</span>
             {finding.task_id && <Link href={`/app/tasks/${finding.task_id}`}>Remediation task →</Link>}
           </div>
-          {canManageMonitoring && <div className="finding-actions">
+          {canManageMonitoringFindings && <div className="finding-actions">
             {finding.status === "open" && <form action={acknowledgeFindingAction}><input type="hidden" name="id" value={finding.id} /><button className="button secondary">Acknowledge</button></form>}
             {!finding.task_id && <form action={raiseTaskFromFindingAction}><input type="hidden" name="id" value={finding.id} /><button className="button secondary">Raise task</button></form>}
             <form action={resolveFindingAction}><input type="hidden" name="id" value={finding.id} /><button className="button secondary">Resolve</button></form>

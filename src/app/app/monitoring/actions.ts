@@ -15,14 +15,15 @@ async function requireOperator() {
   return ctx;
 }
 
-async function requireMonitoringManager() {
+async function requireMonitoringFindingManager() {
   const ctx = await requireAppContext();
-  if (!hasCapability(ctx.membership.role, "manage_monitoring")) throw new Error("Only workspace operators can manage monitoring configuration");
+  if (!hasCapability(ctx.membership.role, "manage_monitoring_findings")) throw new Error("Only workspace owners can manage monitoring findings");
   return ctx;
 }
 
 export async function acknowledgeFindingAction(formData: FormData) {
-  const { supabase, organisation } = await requireMonitoringManager();
+  const { supabase, user, organisation } = await requireMonitoringFindingManager();
+  await enforceRateLimit(`monitoring-finding:${organisation.id}:${user.id}`, { limit: 30, windowMs: 60_000 });
   const id = z.uuid().parse(String(formData.get("id")));
   const { data, error } = await supabase.from("monitoring_findings")
     .update({ status: "acknowledged" }).eq("id", id).eq("organisation_id", organisation.id)
@@ -32,7 +33,8 @@ export async function acknowledgeFindingAction(formData: FormData) {
 }
 
 export async function resolveFindingAction(formData: FormData) {
-  const { supabase, organisation } = await requireMonitoringManager();
+  const { supabase, user, organisation } = await requireMonitoringFindingManager();
+  await enforceRateLimit(`monitoring-finding:${organisation.id}:${user.id}`, { limit: 30, windowMs: 60_000 });
   const id = z.uuid().parse(String(formData.get("id")));
   const { data, error } = await supabase.from("monitoring_findings")
     .update({ status: "resolved", resolved_at: new Date().toISOString() })
@@ -43,23 +45,15 @@ export async function resolveFindingAction(formData: FormData) {
 }
 
 export async function raiseTaskFromFindingAction(formData: FormData) {
-  const { supabase, user, organisation } = await requireMonitoringManager();
+  const { supabase, user, organisation } = await requireMonitoringFindingManager();
+  await enforceRateLimit(`monitoring-finding:${organisation.id}:${user.id}`, { limit: 30, windowMs: 60_000 });
   const id = z.uuid().parse(String(formData.get("id")));
-  const { data: finding, error: readError } = await supabase.from("monitoring_findings")
-    .select("id,title,detail,control_ref,subject_id,task_id").eq("id", id)
-    .eq("organisation_id", organisation.id).in("status", ["open", "acknowledged"]).maybeSingle();
-  if (readError || !finding) throw new Error("Could not find the finding");
-  if (finding.task_id) { revalidatePath("/app/monitoring"); return; } // already has a task
-  const { data: task, error: taskError } = await supabase.from("tasks").insert({
-    organisation_id: organisation.id,
-    title: `Remediate: ${finding.title}`.slice(0, 200),
-    detail: `${finding.detail}\n\nControl ${finding.control_ref} · ${finding.subject_id}. Raised from continuous monitoring.`,
-    source: "monitoring", owner_id: user.id, created_by: user.id,
-  }).select("id").single();
-  if (taskError || !task) throw new Error("Could not raise the remediation task");
-  const { error: linkError } = await supabase.from("monitoring_findings")
-    .update({ task_id: task.id, status: "acknowledged" }).eq("id", id).eq("organisation_id", organisation.id);
-  if (linkError) throw new Error("Raised the task but could not link it to the finding");
+  const { error } = await supabase.rpc("raise_monitoring_finding_task", {
+    target_organisation_id: organisation.id,
+    target_finding_id: id,
+    target_owner_id: user.id,
+  });
+  if (error && error.code !== "23505") throw new Error("Could not raise the remediation task");
   revalidatePath("/app/monitoring");
 }
 

@@ -9,11 +9,12 @@ import { Card, EmptyState, PageIntro, Pill } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { SubTabs } from "@/components/sub-tabs";
 import { one } from "@/lib/supabase/one";
+import { hasCapability } from "@/features/organisations/domain/access";
 
 const BAND_TONE: Record<string, string> = { low: "green", moderate: "amber", high: "red", very_high: "critical" };
 
 export default async function RisksPage() {
-  const { supabase, organisation } = await requireAppContext();
+  const { supabase, organisation, membership } = await requireAppContext();
   const [{ data }, { data: gaps }, { data: linkedTasks }, { data: evidenceLinks }, { data: cfg }] = await Promise.all([
     supabase.from("risks").select("id,reference,title,category_id,risk_categories(name),likelihood,impact,residual_likelihood,residual_impact,status,review_date").eq("organisation_id", organisation.id).order("updated_at", { ascending: false }).limit(500),
     supabase.from("assessment_responses").select("session_id,question_id,answer,catalogue_questions!assessment_responses_question_id_fkey(code,prompt)").eq("organisation_id", organisation.id).in("answer", ["no", "partially"]).limit(10),
@@ -70,13 +71,13 @@ export default async function RisksPage() {
     <Card style={{ padding: "18px", marginBottom: "16px" }}>
       <h2 style={{ fontSize: "15px", margin: "0 0 4px" }}>RAG band thresholds</h2>
       <p style={{ fontSize: "12px", color: "#596273", margin: "0 0 12px" }}>Set the top of each band on the 1–25 scale. Scores above your appetite are flagged Critical.</p>
-      <form action={updateRiskMatrixConfigAction} className="rag-editor" style={{ display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "end" }}>
+      {hasCapability(membership.role, "manage_risk_matrix") ? <form action={updateRiskMatrixConfigAction} className="rag-editor" style={{ display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "end" }}>
         <label style={{ fontSize: "12px", fontWeight: 700 }}>Low ≤<input name="lowMax" type="number" min={1} max={23} defaultValue={config.lowMax} /></label>
         <label style={{ fontSize: "12px", fontWeight: 700 }}>Medium ≤<input name="moderateMax" type="number" min={2} max={24} defaultValue={config.moderateMax} /></label>
         <label style={{ fontSize: "12px", fontWeight: 700 }}>High ≤<input name="highMax" type="number" min={3} max={24} defaultValue={config.highMax} /></label>
         <label style={{ fontSize: "12px", fontWeight: 700 }}>Appetite<input name="appetite" type="number" min={1} max={25} defaultValue={config.appetite ?? ""} /></label>
         <button className="button secondary">Save thresholds</button>
-      </form>
+      </form> : <p style={{ fontSize: "12px", color: "#596273", margin: 0 }}>Only workspace operators can change these thresholds.</p>}
     </Card>
     <Card><div className="data-table-wrap" role="region" aria-label="Risk register table" tabIndex={0}><table><thead><tr><th>Ref</th><th>Risk</th><th>Inherent</th><th>Residual</th><th>Status</th><th>Review</th><th></th></tr></thead><tbody>
       {data?.map((r) => { const inherent = calculateRiskScore(r.likelihood, r.impact); const residual = calculateRiskScore(r.residual_likelihood, r.residual_impact); const linked = tasksByRisk.get(r.id) ?? []; const freshness = summariseEvidenceFreshness(evidenceByRisk.get(r.id) ?? []); return <tr key={r.id}>

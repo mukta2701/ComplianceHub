@@ -678,7 +678,7 @@ git commit -m "chore(github): prepare personal Azure shadow rollout"
 
 - [ ] **Step 6: Apply and verify the hosted database migration**
 
-Before deploying the application, confirm the exact personal-staging Supabase project reference, take/verify a backup, compare `supabase migration list`, and apply only the four reviewed additive migrations through the approved hosted migration path. Verify the new tables, safe view, and RPC signatures directly. Record that the migrations remain compatible with the previous app revision because an application rollback does not roll back the database.
+Before deploying the application, confirm the exact personal-staging Supabase project reference, take/verify a backup, compare `supabase migration list`, and apply only the current reviewed additive migration set through `20260818140000` via the approved hosted migration path. Verify the new tables, safe views, and RPC signatures directly. Record that the migrations remain compatible with the previous app revision because an application rollback does not roll back the database.
 
 - [ ] **Step 7: Perform the external registration checkpoint**
 

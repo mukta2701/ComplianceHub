@@ -45,11 +45,12 @@ vi.mock("@/features/monitoring/application/monitor-registry", () => ({
 import MonitoringPage from "./page";
 
 describe("operator monitoring page", () => {
-  it("shows active monitoring operations without configuration controls for Admin", async () => {
+  it("shows monitoring operations but hides owner-only finding controls for Admin", async () => {
     render(await MonitoringPage());
 
-    for (const control of ["Run checks now", "Acknowledge", "Raise task", "Resolve"]) {
-      expect(screen.getByRole("button", { name: control })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run checks now" })).toBeInTheDocument();
+    for (const control of ["Acknowledge", "Raise task", "Resolve"]) {
+      expect(screen.queryByRole("button", { name: control })).not.toBeInTheDocument();
     }
     for (const configurationControl of ["Disconnect", "Connect source", "Add Slack channel"]) {
       expect(screen.queryByRole("button", { name: configurationControl })).not.toBeInTheDocument();

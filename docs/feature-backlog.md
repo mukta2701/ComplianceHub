@@ -102,7 +102,7 @@ Phase B took every compliance workflow that a 10–20 person organisation used t
 
 ## Deferred hardening
 
-The following previously reported items are now closed and tracked as `Done` in `docs/feature-backlog.csv`: CSV formula-injection protection, XLSX import round-trip, XLSX content round-trip coverage, risk-matrix policy identity and active-workspace reads, RTP delete errors, asset-link empty-id guards, category position collision, export filename/button coverage, export rate-limit/audit coverage, evidence owner fallback, policy-evidence rate limiting and policy-scoped unlinking, and server-side SoA owner-membership validation.
+The following previously reported items are now closed and tracked as `Done` in `docs/feature-backlog.csv`: CSV formula-injection protection, XLSX import round-trip, XLSX content round-trip coverage, risk-matrix policy identity and active-workspace reads, operator-only risk-matrix mutations, owner-only monitoring-finding mutations with atomic remediation-task linking, RTP delete errors, asset-link empty-id guards, category position collision, export filename/button coverage, export rate-limit/audit coverage, evidence owner fallback, policy-evidence rate limiting and policy-scoped unlinking, and server-side SoA owner-membership validation. A broader operator-facing digest status dashboard and live connector secret vault remain backlog items.
 
 ---
 
