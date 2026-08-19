@@ -1,5 +1,12 @@
 # Reorganize + Built-in Automation + Optimization — Implementation Plan
 
+> **Current deployment note (2026-08-19):** This plan contains the original
+> Vercel-era scheduling steps for historical traceability. ComplianceHub now
+> deploys to Azure Container Apps; `vercel.json` intentionally contains no
+> cron jobs. The active `/api/cron/daily` schedule is owned by
+> `.github/workflows/azure-maintenance.yml`. Do not restore a Vercel cron
+> unless the deployment target is deliberately changed and re-reviewed.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Reorganize ComplianceHub's 21-item navigation into an 11-door funnel, make its automation feel built-in (invisible copy + one nightly pipeline that actually runs), and remove the top performance/reliability rough edges — without a rebuild.
@@ -637,9 +644,13 @@ Then change the final return (line 114) to include all three results:
 ```
 Order matters: collect first (adds/refreshes evidence), then sync (ticket status), then sweep (ages evidence, raises tasks, notifies).
 
-- [ ] **Step 5: Schedule one nightly cron**
+- [x] **Step 5: Schedule one nightly cron (superseded by Azure)**
 
-Replace `vercel.json` with a single scheduled job (the standalone routes remain callable for manual/debug use, just no longer independently scheduled):
+The original Vercel schedule is superseded. Keep the standalone routes callable
+for manual/debug use and keep `vercel.json` free of cron jobs. The active Azure
+maintenance workflow schedules `/api/cron/daily` at `07:06 UTC`.
+
+Historical Vercel example (not active configuration):
 ```json
 {
   "crons": [
@@ -1238,7 +1249,9 @@ git commit -m "refactor(supabase): single one() helper for embedded relations"
 - [ ] Run the full pipeline: `npm run verify` → lint, typecheck, unit tests, build all pass.
 - [ ] Run E2E for touched flows: `npm run test:e2e -- --workers=1`.
 - [ ] Manual smoke: sign in → sidebar shows 11 doors + Dashboard; each nested pair (Risks/Assets, SoA/Frameworks, Audits/Activity, Settings/Connections) works via its tab strip; no UI text says "the daily sweep"/"the automation"; onboarding checklist reads Assessment → SoA → Risks → Evidence → Policy → Team; the empty Leadership report nudges toward an assessment.
-- [ ] Confirm `vercel.json` has one cron and the daily run returns `{ collect, sync, sweep }`.
+- [x] Confirm the Azure maintenance workflow schedules one daily run and the
+  daily route returns `{ collect, sync, sweep }`; `vercel.json` remains free of
+  cron jobs by design.
 
 ## Spec coverage map (self-review)
 

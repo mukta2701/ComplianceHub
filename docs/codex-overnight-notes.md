@@ -6,7 +6,7 @@
 ## Current handoff — 2026-08-18
 
 - Branch: `codex/github-collection-foundation`; the reviewed baseline for this
-  handoff is `3fd6ebd`, including retry-safe automation provenance, scheduled
+  handoff is `5ba9586`, including retry-safe automation provenance, scheduled
   retention purging, owner-gated AI drafting, replay-safe automation reviews,
   stable automation sign-up/tracker
   E2E paths, the safe connector-metadata grant, and active-workspace isolation
@@ -18,11 +18,14 @@
   in both the UI and RLS.
 - Local application health: `/api/health` returns HTTP 200 with `db: ok`.
 - Local verification baseline: the current release verification passed lint,
-  typecheck, **210 test files / 1,469 tests**, and the Next production build.
+  typecheck, **210 test files / 1,472 tests**, and the Next production build.
   The fixture-preserving local database gate also passed **79 files / 1,257
   tests**, including the atomic KPI and monitoring task RPCs and operator-only
   risk mutations; the disposable CI database gate
   independently passed the same migration set.
+- Server error hygiene: assessment autosave, automation review, and SoA
+  finalisation return stable client errors and do not expose raw database
+  messages.
 - Browser evidence: GitHub CI's complete production matrix passed **58/58**
   across Chromium and mobile with `E2E_TEST_TOOLS_ENABLED=1` and one worker.
   The exact current-SHA disposable CI run is the authoritative production-server

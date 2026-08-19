@@ -20,12 +20,14 @@
 These checks prove the current local implementation only; they do not close the
 hosted, Azure, Slack, GitHub-owner, email, or backup checkpoints above.
 
-- [x] On the current hardening commit `3fd6ebd`, the release verification
-  baseline passed lint, typecheck, **210 test files / 1,469 tests**, and the
+- [x] On the current hardening commit `5ba9586`, the release verification
+  baseline passed lint, typecheck, **210 test files / 1,472 tests**, and the
   Next production build; the focused export, policy-evidence, monitoring
   owner/RLS, risk-matrix operator, audit-scoping, filename, active-workspace
   GitHub repository-selection, atomic KPI task, and atomic monitoring-task
-  tests are included in that count.
+  tests are included in that count. Assessment autosave, automation review,
+  and SoA finalisation now return stable client errors instead of raw database
+  details.
 - [x] GitHub CI run `32158868448` for `3fd6ebd` passed Gitleaks, container,
   database upgrade/full pgTAP, application lint/typecheck/unit/build,
   integration, and the full desktop/mobile Playwright gate.
