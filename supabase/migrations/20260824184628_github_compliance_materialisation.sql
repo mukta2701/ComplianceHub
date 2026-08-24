@@ -948,7 +948,7 @@ create or replace function public.seal_github_mapping_pack_server(
 )
 returns uuid
 language plpgsql
-security definer
+security invoker
 set search_path = ''
 as $$
 declare
@@ -1031,8 +1031,6 @@ $$;
 alter function public.seal_github_mapping_pack_server(text,text) owner to postgres;
 revoke all on function public.seal_github_mapping_pack_server(text,text)
 from public, anon, authenticated, service_role;
-grant execute on function public.seal_github_mapping_pack_server(text,text)
-to service_role;
 
 create or replace function public.approve_github_mapping_pack_server(
   target_organisation_id uuid,

@@ -106,7 +106,7 @@ select is(
 select ok(has_function_privilege('service_role', 'public.approve_github_mapping_pack_server(uuid,uuid,text,text)', 'EXECUTE'), 'only the server boundary can approve mapping packs');
 select ok(not has_function_privilege('authenticated', 'public.approve_github_mapping_pack_server(uuid,uuid,text,text)', 'EXECUTE'), 'authenticated callers cannot target a workspace approval RPC directly');
 select ok(not has_function_privilege('anon', 'public.approve_github_mapping_pack_server(uuid,uuid,text,text)', 'EXECUTE'), 'anonymous callers cannot approve mapping packs');
-select ok(has_function_privilege('service_role', 'public.seal_github_mapping_pack_server(text,text)', 'EXECUTE'), 'only the server boundary can seal a reviewed mapping pack');
+select ok(not has_function_privilege('service_role', 'public.seal_github_mapping_pack_server(text,text)', 'EXECUTE'), 'service callers cannot publish a global mapping pack');
 select ok(not has_function_privilege('authenticated', 'public.seal_github_mapping_pack_server(text,text)', 'EXECUTE'), 'authenticated callers cannot seal mapping packs');
 select ok(not has_function_privilege('anon', 'public.seal_github_mapping_pack_server(text,text)', 'EXECUTE'), 'anonymous callers cannot seal mapping packs');
 select ok(has_function_privilege('service_role', 'public.materialise_github_observations_server(uuid,uuid,uuid,text,text,jsonb)', 'EXECUTE'), 'only the server boundary can materialise official results');
@@ -373,6 +373,16 @@ select throws_ok(
 );
 select throws_ok(
   $$ select public.seal_github_mapping_pack_server(
+       'github-iso-27001-v2','498642cd3df84b3a8f480af088ac9d75ae247be136f22292ab51ec40fdf8aeab'
+     ) $$,
+  '42501', null,
+  'the service role cannot invoke the global release-only mapping-pack sealer'
+);
+reset role;
+
+set role postgres;
+select throws_ok(
+  $$ select public.seal_github_mapping_pack_server(
        'github-test-incomplete-v2',repeat('0',64)
      ) $$,
   '22023', 'GitHub mapping pack is incomplete',
@@ -390,7 +400,7 @@ select is(
     'github-iso-27001-v2','498642cd3df84b3a8f480af088ac9d75ae247be136f22292ab51ec40fdf8aeab'
   ),
   '71000000-0000-4000-8000-000000000503'::uuid,
-  'a complete new version seals once with its exact deterministic checksum'
+  'postgres release work can seal a complete new version with its exact deterministic checksum'
 );
 reset role;
 
