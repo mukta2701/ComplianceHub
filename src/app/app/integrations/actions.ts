@@ -53,6 +53,14 @@ const githubCollectionSummarySchema = z.object({
   repositoriesFailed: z.number().int().nonnegative(),
   repositoriesDeferred: z.number().int().nonnegative(),
   runsPartial: z.number().int().nonnegative(),
+  terminalRuns: z.array(z.object({
+    collectionRunId: z.uuid(),
+    organisationId: z.uuid(),
+    installationId: z.uuid(),
+    repositoryId: z.uuid(),
+    providerRepositoryId: z.number().int().positive().safe(),
+    status: z.enum(["succeeded", "partial"]),
+  }).strict()).max(10_000),
 }).strict();
 const monitorSourceSchema = z.object({
   owner: z.string().trim().min(1, "GitHub owner is required").max(120),
@@ -179,8 +187,7 @@ export async function recheckGitHubInstallationAction(formData: FormData): Promi
         buildMaterialisationDependencies(service),
         {
           limit: 100,
-          organisationId: organisation.id,
-          installationId: parsed.installationId,
+          terminalRuns: summary.terminalRuns,
         },
       );
     } catch {

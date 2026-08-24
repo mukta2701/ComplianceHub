@@ -4,6 +4,14 @@ import { buildWebhookWorkerDependencies, drainGitHubWebhookDeliveries, type Clai
 
 const installationId = "11111111-1111-4111-8111-111111111111";
 const repositoryId = "22222222-2222-4222-8222-222222222222";
+const terminalRuns = [{
+  collectionRunId: "55555555-5555-4555-8555-555555555555",
+  organisationId: "66666666-6666-4666-8666-666666666666",
+  installationId,
+  repositoryId,
+  providerRepositoryId: 91,
+  status: "succeeded" as const,
+}];
 
 function row(overrides: Partial<ClaimedWebhookDelivery> = {}): ClaimedWebhookDelivery {
   return {
@@ -33,6 +41,7 @@ function deps(rows: ClaimedWebhookDelivery[]): WebhookWorkerDependencies & {
       repositoriesFailed: 0,
       repositoriesDeferred: 0,
       runsPartial: 0,
+      terminalRuns,
     }),
     reconcile: vi.fn().mockResolvedValue({ runsConsidered: 1, materialised: 1, unchanged: 0, awaitingApproval: 0, needsAttention: 0 }),
   };
@@ -51,7 +60,7 @@ describe("drainGitHubWebhookDeliveries", () => {
       repositoryId,
       signal: undefined,
     });
-    expect(input.reconcile).toHaveBeenCalledWith({ limit: 100, installationId, repositoryId });
+    expect(input.reconcile).toHaveBeenCalledWith({ limit: 100, terminalRuns });
     expect(input.runCollection.mock.invocationCallOrder[0]).toBeLessThan(input.reconcile.mock.invocationCallOrder[0]);
     expect(input.reconcile.mock.invocationCallOrder[0]).toBeLessThan(input.finalise.mock.invocationCallOrder[0]);
     expect(input.finalise).toHaveBeenCalledWith(row(), "processed", null);
@@ -82,8 +91,8 @@ describe("drainGitHubWebhookDeliveries", () => {
     const second = row({ id: "44444444-4444-4444-8444-444444444444", providerDeliveryId: "123e4567-e89b-12d3-a456-426614174001" });
     const input = deps([row(), second]);
     input.runCollection
-      .mockResolvedValueOnce({ installationsChecked: 1, repositoriesChecked: 0, observationsStored: 0, repositoriesFailed: 0, repositoriesDeferred: 1, runsPartial: 0 })
-      .mockResolvedValueOnce({ installationsChecked: 1, repositoriesChecked: 1, observationsStored: 15, repositoriesFailed: 1, repositoriesDeferred: 0, runsPartial: 1 });
+      .mockResolvedValueOnce({ installationsChecked: 1, repositoriesChecked: 0, observationsStored: 0, repositoriesFailed: 0, repositoriesDeferred: 1, runsPartial: 0, terminalRuns: [] })
+      .mockResolvedValueOnce({ installationsChecked: 1, repositoriesChecked: 1, observationsStored: 15, repositoriesFailed: 1, repositoriesDeferred: 0, runsPartial: 1, terminalRuns });
     const result = await drainGitHubWebhookDeliveries(input, { limit: 20 });
     expect(result).toEqual({ claimed: 2, processed: 1, ignored: 0, failed: 1, ownershipLost: 0 });
     expect(input.finalise).toHaveBeenNthCalledWith(1, expect.anything(), "failed", "internal_error");
@@ -101,7 +110,7 @@ describe("drainGitHubWebhookDeliveries", () => {
   it("maps unknown thrown failures to a safe diagnostic and processes rows independently", async () => {
     const second = row({ id: "44444444-4444-4444-8444-444444444444", providerDeliveryId: "123e4567-e89b-12d3-a456-426614174001" });
     const input = deps([row(), second]);
-    input.runCollection.mockRejectedValueOnce(new Error("token body provider-id 71")).mockResolvedValueOnce({ installationsChecked: 1, repositoriesChecked: 1, observationsStored: 15, repositoriesFailed: 0, repositoriesDeferred: 0, runsPartial: 0 });
+    input.runCollection.mockRejectedValueOnce(new Error("token body provider-id 71")).mockResolvedValueOnce({ installationsChecked: 1, repositoriesChecked: 1, observationsStored: 15, repositoriesFailed: 0, repositoriesDeferred: 0, runsPartial: 0, terminalRuns });
     const result = await drainGitHubWebhookDeliveries(input, { limit: 20 });
     expect(result.failed).toBe(1);
     expect(result.processed).toBe(1);
@@ -141,6 +150,7 @@ describe("drainGitHubWebhookDeliveries", () => {
       repositoriesFailed: 0,
       repositoriesDeferred: 0,
       runsPartial: 0,
+      terminalRuns,
     });
     built.reconcile = vi.fn().mockResolvedValue({ runsConsidered: 1, materialised: 1, unchanged: 0, awaitingApproval: 0, needsAttention: 0 });
     const result = await drainGitHubWebhookDeliveries(built, { limit: 5 });
@@ -163,6 +173,7 @@ describe("drainGitHubWebhookDeliveries", () => {
       repositoriesFailed: 0,
       repositoriesDeferred: 0,
       runsPartial: 0,
+      terminalRuns: [],
     });
     const result = await drainGitHubWebhookDeliveries(input, { limit: 20 });
     expect(result.failed).toBe(1);
@@ -206,7 +217,7 @@ describe("drainGitHubWebhookDeliveries", () => {
     const input = deps([row(), second]);
     input.runCollection.mockImplementationOnce(async () => {
       controller.abort();
-      return { installationsChecked: 1, repositoriesChecked: 1, observationsStored: 15, repositoriesFailed: 0, repositoriesDeferred: 0, runsPartial: 0 };
+      return { installationsChecked: 1, repositoriesChecked: 1, observationsStored: 15, repositoriesFailed: 0, repositoriesDeferred: 0, runsPartial: 0, terminalRuns };
     });
     const result = await drainGitHubWebhookDeliveries(input, { limit: 5, signal: controller.signal });
     expect(input.runCollection).toHaveBeenCalledOnce();

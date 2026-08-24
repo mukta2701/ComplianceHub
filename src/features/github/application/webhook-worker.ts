@@ -63,6 +63,14 @@ const collectionSummarySchema = z.object({
   repositoriesFailed: z.number().int().nonnegative(),
   repositoriesDeferred: z.number().int().nonnegative(),
   runsPartial: z.number().int().nonnegative(),
+  terminalRuns: z.array(z.object({
+    collectionRunId: uuid,
+    organisationId: uuid,
+    installationId: uuid,
+    repositoryId: uuid,
+    providerRepositoryId: z.number().int().positive().safe(),
+    status: z.enum(["succeeded", "partial"]),
+  }).strict()).max(10_000),
 }).strict();
 
 function safeFailure(): Error {
@@ -170,8 +178,7 @@ export async function drainGitHubWebhookDeliveries(
         } else {
           const materialisation = await deps.reconcile({
             limit: 100,
-            installationId: delivery.installationId,
-            repositoryId: delivery.repositoryId ?? undefined,
+            terminalRuns: validatedCollection.data.terminalRuns,
           });
           if (materialisation.needsAttention > 0) {
             outcome = "failed";

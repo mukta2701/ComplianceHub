@@ -28,6 +28,15 @@ function request(secret = "secret") {
   return new Request("http://localhost/api/cron/github-collect", { method: "POST", headers: { authorization: `Bearer ${secret}` } });
 }
 
+const terminalRuns = [{
+  collectionRunId: "20000000-0000-4000-8000-000000000001",
+  organisationId: "10000000-0000-4000-8000-000000000001",
+  installationId: "60000000-0000-4000-8000-000000000001",
+  repositoryId: "70000000-0000-4000-8000-000000000001",
+  providerRepositoryId: 71,
+  status: "succeeded",
+}];
+
 beforeEach(() => {
   vi.resetModules();
   vi.stubEnv("CRON_SECRET", "secret");
@@ -36,7 +45,7 @@ beforeEach(() => {
   vi.stubEnv("GITHUB_APPROVED_SECURITY_WORKFLOW_IDS", "101");
   hoisted.createClient.mockReset().mockReturnValue({});
   hoisted.build.mockReset().mockReturnValue({});
-  hoisted.run.mockReset().mockResolvedValue({ installationsChecked: 1, repositoriesChecked: 1, observationsStored: 15, repositoriesFailed: 0, repositoriesDeferred: 0, runsPartial: 0 });
+  hoisted.run.mockReset().mockResolvedValue({ installationsChecked: 1, repositoriesChecked: 1, observationsStored: 15, repositoriesFailed: 0, repositoriesDeferred: 0, runsPartial: 0, terminalRuns });
   hoisted.buildMaterialisation.mockReset().mockReturnValue({ dependency: "materialisation" });
   hoisted.reconcile.mockReset().mockResolvedValue({ runsConsidered: 1, materialised: 1, unchanged: 0, awaitingApproval: 0, needsAttention: 0 });
   hoisted.buildWebhookWorker.mockReset().mockReturnValue({});
@@ -67,11 +76,11 @@ describe("POST /api/cron/github-collect", () => {
     expect(hoisted.drainWebhooks).toHaveBeenCalledWith(expect.anything(), { limit: 5, signal: expect.any(AbortSignal) });
     expect(hoisted.run).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ trigger: "scheduled", requestKey: "scheduled:2026-08-17", signal: expect.any(AbortSignal) }));
     expect(hoisted.drainWebhooks.mock.invocationCallOrder[0]).toBeLessThan(hoisted.run.mock.invocationCallOrder[0]);
-    expect(hoisted.reconcile).toHaveBeenCalledWith({ dependency: "materialisation" }, { limit: 100 });
+    expect(hoisted.reconcile).toHaveBeenCalledWith({ dependency: "materialisation" }, { limit: 100, terminalRuns });
     expect(hoisted.run.mock.invocationCallOrder[0]).toBeLessThan(hoisted.reconcile.mock.invocationCallOrder[0]);
     expect(await response.json()).toEqual({
       webhooks: { claimed: 2, processed: 1, ignored: 1, failed: 0, ownershipLost: 0 },
-      collection: { installationsChecked: 1, repositoriesChecked: 1, observationsStored: 15, repositoriesFailed: 0, repositoriesDeferred: 0, runsPartial: 0 },
+      collection: { installationsChecked: 1, repositoriesChecked: 1, observationsStored: 15, repositoriesFailed: 0, repositoriesDeferred: 0, runsPartial: 0, terminalRuns },
       materialisation: { runsConsidered: 1, materialised: 1, unchanged: 0, awaitingApproval: 0, needsAttention: 0 },
       collectionHealth: "healthy",
     });
@@ -102,7 +111,7 @@ describe("POST /api/cron/github-collect", () => {
     expect(hoisted.run).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ trigger: "scheduled", signal: expect.any(AbortSignal) }));
     expect(await response.json()).toEqual({
       webhooks: { claimed: 0, processed: 0, ignored: 0, failed: 1, ownershipLost: 0 },
-      collection: { installationsChecked: 1, repositoriesChecked: 1, observationsStored: 15, repositoriesFailed: 0, repositoriesDeferred: 0, runsPartial: 0 },
+      collection: { installationsChecked: 1, repositoriesChecked: 1, observationsStored: 15, repositoriesFailed: 0, repositoriesDeferred: 0, runsPartial: 0, terminalRuns },
       materialisation: { runsConsidered: 1, materialised: 1, unchanged: 0, awaitingApproval: 0, needsAttention: 0 },
       collectionHealth: "healthy",
     });
@@ -128,7 +137,7 @@ describe("POST /api/cron/github-collect", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       webhooks: { claimed: 2, processed: 1, ignored: 1, failed: 0, ownershipLost: 0 },
-      collection: { installationsChecked: 1, repositoriesChecked: 1, observationsStored: 15, repositoriesFailed: 0, repositoriesDeferred: 0, runsPartial: 0 },
+      collection: { installationsChecked: 1, repositoriesChecked: 1, observationsStored: 15, repositoriesFailed: 0, repositoriesDeferred: 0, runsPartial: 0, terminalRuns },
       materialisation: { runsConsidered: 0, materialised: 0, unchanged: 0, awaitingApproval: 0, needsAttention: 1 },
       collectionHealth: "needs_attention",
     });

@@ -62,6 +62,7 @@ describe("GitHubInstallationPanel", () => {
         repositoriesFailed: 0,
         repositoriesDeferred: 0,
         runsPartial: 0,
+        terminalRuns: [],
       },
     });
     hoisted.selectRepository.mockResolvedValue({ ok: true, message: "Repository scope updated." });
@@ -313,7 +314,7 @@ describe("GitHubInstallationPanel", () => {
       message: "Recheck complete: 1 checked, 1 deferred, 0 failed.",
       summary: {
         installationsChecked: 1, repositoriesChecked: 1, observationsStored: 15,
-        repositoriesFailed: 0, repositoriesDeferred: 1, runsPartial: 0,
+        repositoriesFailed: 0, repositoriesDeferred: 1, runsPartial: 0, terminalRuns: [],
       },
     });
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("1 deferred"));

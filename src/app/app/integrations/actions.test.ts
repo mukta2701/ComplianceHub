@@ -671,6 +671,14 @@ describe("integration connection access", () => {
 describe("GitHub shadow collection actions", () => {
   const INSTALLATION_ID = "20000000-0000-4000-8000-000000000010";
   const REPOSITORY_ID = "20000000-0000-4000-8000-000000000011";
+  const terminalRuns = [{
+    collectionRunId: "20000000-0000-4000-8000-000000000012",
+    organisationId: ORGANISATION_ID,
+    installationId: INSTALLATION_ID,
+    repositoryId: REPOSITORY_ID,
+    providerRepositoryId: 71,
+    status: "succeeded" as const,
+  }];
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -693,6 +701,7 @@ describe("GitHub shadow collection actions", () => {
       repositoriesFailed: 0,
       repositoriesDeferred: 1,
       runsPartial: 0,
+      terminalRuns,
     });
   });
 
@@ -866,8 +875,7 @@ describe("GitHub shadow collection actions", () => {
       { dependency: "materialisation" },
       {
         limit: 100,
-        organisationId: ORGANISATION_ID,
-        installationId: INSTALLATION_ID,
+        terminalRuns,
       },
     );
     expect(hoisted.runGitHubCollection.mock.invocationCallOrder[0]).toBeLessThan(
@@ -883,6 +891,7 @@ describe("GitHub shadow collection actions", () => {
         repositoriesFailed: 0,
         repositoriesDeferred: 1,
         runsPartial: 0,
+        terminalRuns,
       },
       materialisation: {
         runsConsidered: 1,

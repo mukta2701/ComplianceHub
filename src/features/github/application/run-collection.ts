@@ -63,6 +63,16 @@ export type CollectionSummary = {
   repositoriesFailed: number;
   repositoriesDeferred: number;
   runsPartial: number;
+  terminalRuns: TerminalCollectionRunReference[];
+};
+
+export type TerminalCollectionRunReference = {
+  collectionRunId: string;
+  organisationId: string;
+  installationId: string;
+  repositoryId: string;
+  providerRepositoryId: number;
+  status: "succeeded" | "partial";
 };
 
 export class GitHubCollectionTargetError extends Error {
@@ -185,12 +195,27 @@ async function finaliseOrThrow(deps: CollectionDependencies, reservation: RunRes
   if (!await deps.finaliseRun(reservation, target, result)) throw new GitHubCollectionTargetError();
 }
 
+function terminalReference(
+  reservation: RunReservation,
+  target: CollectionTarget,
+  status: "succeeded" | "partial",
+): TerminalCollectionRunReference {
+  return {
+    collectionRunId: reservation.runId,
+    organisationId: reservation.organisationId,
+    installationId: reservation.installationId,
+    repositoryId: reservation.repositoryId,
+    providerRepositoryId: target.providerRepositoryId,
+    status,
+  };
+}
+
 export async function runGitHubCollection(deps: CollectionDependencies, request: CollectionRequest): Promise<CollectionSummary> {
   validateRequest(request);
   const targets = await deps.listTargets(request);
   validateTargets(targets, request);
   const groups = groupByInstallation(targets);
-  const summary: CollectionSummary = { installationsChecked: groups.length, repositoriesChecked: 0, observationsStored: 0, repositoriesFailed: 0, repositoriesDeferred: 0, runsPartial: 0 };
+  const summary: CollectionSummary = { installationsChecked: groups.length, repositoriesChecked: 0, observationsStored: 0, repositoriesFailed: 0, repositoriesDeferred: 0, runsPartial: 0, terminalRuns: [] };
 
   for (const group of groups) {
     let installationRateLimited = false;
@@ -207,7 +232,12 @@ export async function runGitHubCollection(deps: CollectionDependencies, request:
           summary.repositoriesDeferred += 1;
           continue;
         }
-        if (reservation.acquisitionState === "completed_duplicate") continue;
+        if (reservation.acquisitionState === "completed_duplicate") {
+          if (reservation.status === "succeeded" || reservation.status === "partial") {
+            summary.terminalRuns.push(terminalReference(reservation, target, reservation.status));
+          }
+          continue;
+        }
         summary.repositoriesChecked += 1;
         const persisted = await deps.listPersistedObservations(reservation, target);
         if (persisted.length > 0) {
@@ -225,6 +255,7 @@ export async function runGitHubCollection(deps: CollectionDependencies, request:
           };
           const recoveredStatus = recoveredCounts.unknownCount > 0 ? "partial" : "succeeded";
           await finaliseOrThrow(deps, reservation, target, { status: recoveredStatus, ...recoveredCounts, deriveCountsFromPersisted: true });
+          summary.terminalRuns.push(terminalReference(reservation, target, recoveredStatus));
           summary.observationsStored += persisted.length;
           if (recoveredStatus === "partial") summary.runsPartial += 1;
           continue;
@@ -252,6 +283,7 @@ export async function runGitHubCollection(deps: CollectionDependencies, request:
         const resultCounts = counts(rows);
         const status = resultCounts.unknownCount > 0 ? "partial" : "succeeded";
         await finaliseOrThrow(deps, reservation, effectiveTarget, { status, ...resultCounts });
+        summary.terminalRuns.push(terminalReference(reservation, effectiveTarget, status));
         summary.observationsStored += persistedCount;
         if (status === "partial") summary.runsPartial += 1;
       } catch (error) {

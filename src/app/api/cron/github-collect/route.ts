@@ -78,7 +78,7 @@ export async function POST(request: Request) {
     try {
       materialisation = await reconcileApprovedGitHubObservations(
         buildMaterialisationDependencies(service),
-        { limit: 100 },
+        { limit: 100, terminalRuns: collection.terminalRuns },
       );
     } catch {
       materialisation = failedMaterialisation;

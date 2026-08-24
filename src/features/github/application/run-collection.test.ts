@@ -97,6 +97,17 @@ function dependencies(items: CollectionTarget[]) {
   return deps;
 }
 
+function terminalReference(item: CollectionTarget, lease: RunReservation, status: "succeeded" | "partial") {
+  return {
+    collectionRunId: lease.runId,
+    organisationId: item.organisationId,
+    installationId: item.installationId,
+    repositoryId: item.repositoryId,
+    providerRepositoryId: item.providerRepositoryId,
+    status,
+  };
+}
+
 describe("runGitHubCollection", () => {
   it("keeps the persisted expected check contract aligned with the evaluator", () => {
     expect(evaluateGitHubRepository(facts(target()), { runId: "run", observedAt }).map((row) => row.checkId)).toEqual([...EXPECTED_GITHUB_CHECK_IDS]);
@@ -109,7 +120,15 @@ describe("runGitHubCollection", () => {
 
     const summary = await runGitHubCollection(deps, { trigger: "manual", requestKey: "manual:opaque" });
 
-    expect(summary).toEqual({ installationsChecked: 1, repositoriesChecked: 1, observationsStored: 15, repositoriesFailed: 0, repositoriesDeferred: 0, runsPartial: 0 });
+    expect(summary).toEqual({
+      installationsChecked: 1,
+      repositoriesChecked: 1,
+      observationsStored: 15,
+      repositoriesFailed: 0,
+      repositoriesDeferred: 0,
+      runsPartial: 0,
+      terminalRuns: [terminalReference(item, reservation(item), "succeeded")],
+    });
     expect(deps.finaliseRun).toHaveBeenCalledWith(expect.anything(), item, expect.objectContaining({ status: "succeeded", failedCount: 15 }));
   });
 
@@ -150,15 +169,34 @@ describe("runGitHubCollection", () => {
     const complete = target({ repositoryId: "30000000-0000-4000-8000-000000000002", providerRepositoryId: 102, name: "api" });
     const stale = target({ repositoryId: "30000000-0000-4000-8000-000000000003", providerRepositoryId: 103, name: "worker" });
     const deps = dependencies([active, complete, stale]);
+    const completedLease = reservation(complete, { acquisitionState: "completed_duplicate", status: "succeeded" });
+    const staleLease = reservation(stale, { acquisitionState: "reclaimed", attempt: 2 });
     vi.mocked(deps.reserveRun)
       .mockResolvedValueOnce(reservation(active, { acquisitionState: "active_duplicate" }))
-      .mockResolvedValueOnce(reservation(complete, { acquisitionState: "completed_duplicate", status: "succeeded" }))
-      .mockResolvedValueOnce(reservation(stale, { acquisitionState: "reclaimed", attempt: 2 }));
+      .mockResolvedValueOnce(completedLease)
+      .mockResolvedValueOnce(staleLease);
 
     const summary = await runGitHubCollection(deps, { trigger: "manual", requestKey: "manual:same" });
 
     expect(deps.collectFacts).toHaveBeenCalledTimes(1);
     expect(summary.repositoriesChecked).toBe(1);
+    expect(summary.terminalRuns).toEqual([
+      terminalReference(complete, completedLease, "succeeded"),
+      terminalReference(stale, staleLease, "succeeded"),
+    ]);
+  });
+
+  it("does not expose failed completed duplicates as materialisation candidates", async () => {
+    const item = target();
+    const deps = dependencies([item]);
+    vi.mocked(deps.reserveRun).mockResolvedValue(reservation(item, {
+      acquisitionState: "completed_duplicate",
+      status: "failed",
+    }));
+
+    const summary = await runGitHubCollection(deps, { trigger: "manual", requestKey: "manual:failed-duplicate" });
+
+    expect(summary.terminalRuns).toEqual([]);
   });
 
   it("finalises a reclaimed complete set without recollecting", async () => {
@@ -239,6 +277,7 @@ describe("runGitHubCollection", () => {
     vi.mocked(deps.listPersistedObservations).mockResolvedValue(recovered);
     const summary = await runGitHubCollection(deps, { trigger: "manual", requestKey: "manual:recover-unknown" });
     expect(summary.runsPartial).toBe(1);
+    expect(summary.terminalRuns).toEqual([terminalReference(item, lease, "partial")]);
     expect(deps.finaliseRun).toHaveBeenCalledWith(lease, item, expect.objectContaining({ status: "partial", unknownCount: 1, deriveCountsFromPersisted: true }));
     expect(deps.collectFacts).not.toHaveBeenCalled();
   });
