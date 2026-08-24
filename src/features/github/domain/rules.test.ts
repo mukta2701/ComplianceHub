@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { evaluateGitHubRepository, RULE_PACK_VERSION } from "./rules";
+import {
+  evaluateGitHubRepository,
+  EXPECTED_GITHUB_CHECK_IDS,
+  RULE_PACK_VERSION,
+} from "./rules";
 import type { GitHubFactSet } from "./observation";
 
 const complete: GitHubFactSet = {
@@ -50,6 +54,7 @@ describe("evaluateGitHubRepository", () => {
     expect(RULE_PACK_VERSION).toBe("github-repository-v1");
     expect(first.every((item) => item.ruleVersion === "github-repository-v1")).toBe(true);
     expect(first.every((item) => item.ruleVersion === RULE_PACK_VERSION)).toBe(true);
+    expect(first.map((item) => item.checkId)).toEqual(EXPECTED_GITHUB_CHECK_IDS);
   });
 
   it("normalizes the observation timestamp to UTC and sets freshness 36 hours later", () => {

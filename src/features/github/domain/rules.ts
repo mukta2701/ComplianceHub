@@ -29,6 +29,8 @@ export const EXPECTED_GITHUB_CHECK_IDS = [
   "github.administration.outside_collaborator_admins",
 ] as const;
 
+export type ExpectedGitHubCheckId = (typeof EXPECTED_GITHUB_CHECK_IDS)[number];
+
 type EvaluationContext = {
   runId: string;
   observedAt: string;
