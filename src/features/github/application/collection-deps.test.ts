@@ -179,5 +179,6 @@ describe("buildCollectionDependencies", () => {
     expect(deps).not.toHaveProperty("createEvidence");
     expect(deps).not.toHaveProperty("saveFinding");
     expect(deps).not.toHaveProperty("deliverSlack");
+    expect(deps).not.toHaveProperty("materialise");
   });
 });

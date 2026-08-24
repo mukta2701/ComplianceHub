@@ -4,6 +4,8 @@ const hoisted = vi.hoisted(() => ({
   createClient: vi.fn(),
   build: vi.fn(),
   run: vi.fn(),
+  buildMaterialisation: vi.fn(),
+  reconcile: vi.fn(),
   buildWebhookWorker: vi.fn(),
   drainWebhooks: vi.fn(),
   logError: vi.fn(),
@@ -12,6 +14,10 @@ const hoisted = vi.hoisted(() => ({
 vi.mock("@/lib/supabase/service", () => ({ createSupabaseServiceClient: hoisted.createClient }));
 vi.mock("@/features/github/application/collection-deps", () => ({ buildCollectionDependencies: hoisted.build }));
 vi.mock("@/features/github/application/run-collection", () => ({ runGitHubCollection: hoisted.run }));
+vi.mock("@/features/github/application/materialise-approved-observations", () => ({
+  buildMaterialisationDependencies: hoisted.buildMaterialisation,
+  reconcileApprovedGitHubObservations: hoisted.reconcile,
+}));
 vi.mock("@/features/github/application/webhook-worker", () => ({
   buildWebhookWorkerDependencies: hoisted.buildWebhookWorker,
   drainGitHubWebhookDeliveries: hoisted.drainWebhooks,
@@ -31,6 +37,8 @@ beforeEach(() => {
   hoisted.createClient.mockReset().mockReturnValue({});
   hoisted.build.mockReset().mockReturnValue({});
   hoisted.run.mockReset().mockResolvedValue({ installationsChecked: 1, repositoriesChecked: 1, observationsStored: 15, repositoriesFailed: 0, repositoriesDeferred: 0, runsPartial: 0 });
+  hoisted.buildMaterialisation.mockReset().mockReturnValue({ dependency: "materialisation" });
+  hoisted.reconcile.mockReset().mockResolvedValue({ runsConsidered: 1, materialised: 1, unchanged: 0, awaitingApproval: 0, needsAttention: 0 });
   hoisted.buildWebhookWorker.mockReset().mockReturnValue({});
   hoisted.drainWebhooks.mockReset().mockResolvedValue({ claimed: 2, processed: 1, ignored: 1, failed: 0, ownershipLost: 0 });
   hoisted.logError.mockReset().mockResolvedValue(undefined);
@@ -59,9 +67,13 @@ describe("POST /api/cron/github-collect", () => {
     expect(hoisted.drainWebhooks).toHaveBeenCalledWith(expect.anything(), { limit: 5, signal: expect.any(AbortSignal) });
     expect(hoisted.run).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ trigger: "scheduled", requestKey: "scheduled:2026-08-17", signal: expect.any(AbortSignal) }));
     expect(hoisted.drainWebhooks.mock.invocationCallOrder[0]).toBeLessThan(hoisted.run.mock.invocationCallOrder[0]);
+    expect(hoisted.reconcile).toHaveBeenCalledWith({ dependency: "materialisation" }, { limit: 100 });
+    expect(hoisted.run.mock.invocationCallOrder[0]).toBeLessThan(hoisted.reconcile.mock.invocationCallOrder[0]);
     expect(await response.json()).toEqual({
       webhooks: { claimed: 2, processed: 1, ignored: 1, failed: 0, ownershipLost: 0 },
       collection: { installationsChecked: 1, repositoriesChecked: 1, observationsStored: 15, repositoriesFailed: 0, repositoriesDeferred: 0, runsPartial: 0 },
+      materialisation: { runsConsidered: 1, materialised: 1, unchanged: 0, awaitingApproval: 0, needsAttention: 0 },
+      collectionHealth: "healthy",
     });
   });
 
@@ -91,6 +103,8 @@ describe("POST /api/cron/github-collect", () => {
     expect(await response.json()).toEqual({
       webhooks: { claimed: 0, processed: 0, ignored: 0, failed: 1, ownershipLost: 0 },
       collection: { installationsChecked: 1, repositoriesChecked: 1, observationsStored: 15, repositoriesFailed: 0, repositoriesDeferred: 0, runsPartial: 0 },
+      materialisation: { runsConsidered: 1, materialised: 1, unchanged: 0, awaitingApproval: 0, needsAttention: 0 },
+      collectionHealth: "healthy",
     });
     expect(hoisted.logError).toHaveBeenCalledWith("cron", "GitHub webhook drain failed", undefined, { stage: "webhook_drain" });
     expect(JSON.stringify(hoisted.logError.mock.calls)).not.toContain(privateMarker);
@@ -103,5 +117,22 @@ describe("POST /api/cron/github-collect", () => {
     expect(response.status).toBe(500);
     expect(hoisted.logError).toHaveBeenCalledWith("cron", "GitHub collection cron failed", undefined, { stage: "collection" });
     expect(JSON.stringify(hoisted.logError.mock.calls)).not.toContain("token-secret");
+  });
+
+  it("surfaces materialisation failure as health attention without rewriting collection success", async () => {
+    hoisted.reconcile.mockRejectedValue(new Error("private RPC body"));
+    const { POST } = await import("./route");
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      webhooks: { claimed: 2, processed: 1, ignored: 1, failed: 0, ownershipLost: 0 },
+      collection: { installationsChecked: 1, repositoriesChecked: 1, observationsStored: 15, repositoriesFailed: 0, repositoriesDeferred: 0, runsPartial: 0 },
+      materialisation: { runsConsidered: 0, materialised: 0, unchanged: 0, awaitingApproval: 0, needsAttention: 1 },
+      collectionHealth: "needs_attention",
+    });
+    expect(hoisted.logError).toHaveBeenCalledWith("cron", "GitHub materialisation failed", undefined, { stage: "materialisation" });
+    expect(JSON.stringify(hoisted.logError.mock.calls)).not.toContain("private RPC body");
   });
 });

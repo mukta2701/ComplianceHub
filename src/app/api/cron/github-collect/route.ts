@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 
 import { buildCollectionDependencies } from "@/features/github/application/collection-deps";
+import {
+  buildMaterialisationDependencies,
+  reconcileApprovedGitHubObservations,
+  type ReconciliationSummary,
+} from "@/features/github/application/materialise-approved-observations";
 import { runGitHubCollection } from "@/features/github/application/run-collection";
 import { buildWebhookWorkerDependencies, drainGitHubWebhookDeliveries } from "@/features/github/application/webhook-worker";
 import { logError } from "@/lib/observability/logger";
@@ -14,6 +19,13 @@ const WEBHOOK_DRAIN_DEADLINE_MS = 20_000;
 const SCHEDULED_COLLECTION_DEADLINE_MS = 240_000;
 const WEBHOOK_CLAIM_LIMIT = 5;
 const failedWebhookDrain = { claimed: 0, processed: 0, ignored: 0, failed: 1, ownershipLost: 0 } as const;
+const failedMaterialisation: ReconciliationSummary = {
+  runsConsidered: 0,
+  materialised: 0,
+  unchanged: 0,
+  awaitingApproval: 0,
+  needsAttention: 1,
+};
 
 function deadlineSignal(milliseconds: number): AbortSignal {
   const controller = new AbortController();
@@ -62,7 +74,24 @@ export async function POST(request: Request) {
       requestKey: `scheduled:${now.toISOString().slice(0, 10)}`,
       signal,
     });
-    return NextResponse.json({ webhooks, collection });
+    let materialisation: ReconciliationSummary;
+    try {
+      materialisation = await reconcileApprovedGitHubObservations(
+        buildMaterialisationDependencies(service),
+        { limit: 100 },
+      );
+    } catch {
+      materialisation = failedMaterialisation;
+      try {
+        await logError("cron", "GitHub materialisation failed", undefined, { stage: "materialisation" });
+      } catch { /* collection completion remains authoritative */ }
+    }
+    return NextResponse.json({
+      webhooks,
+      collection,
+      materialisation,
+      collectionHealth: materialisation.needsAttention > 0 ? "needs_attention" : "healthy",
+    });
   } catch {
     await logError("cron", "GitHub collection cron failed", undefined, { stage: "collection" });
     return NextResponse.json({ error: "GitHub collection failed" }, { status: 500 });

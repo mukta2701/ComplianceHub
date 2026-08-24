@@ -9,10 +9,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // task constraints that make the sweep idempotent across retries and concurrent
 // invocations.
 
-const hoisted = vi.hoisted(() => ({ client: null as unknown }));
+const hoisted = vi.hoisted(() => ({
+  client: null as unknown,
+  buildMaterialisation: vi.fn(),
+  reconcileMaterialisation: vi.fn(),
+}));
 
 vi.mock("@/lib/supabase/service", () => ({
   createSupabaseServiceClient: () => hoisted.client,
+}));
+vi.mock("@/features/github/application/materialise-approved-observations", () => ({
+  buildMaterialisationDependencies: hoisted.buildMaterialisation,
+  reconcileApprovedGitHubObservations: hoisted.reconcileMaterialisation,
 }));
 
 type Row = Record<string, unknown>;
@@ -205,6 +213,14 @@ beforeEach(async () => {
   vi.stubEnv("CRON_SECRET", "test-secret");
   store = seed();
   hoisted.client = createFakeClient(store);
+  hoisted.buildMaterialisation.mockReset().mockReturnValue({ dependency: "materialisation" });
+  hoisted.reconcileMaterialisation.mockReset().mockResolvedValue({
+    runsConsidered: 1,
+    materialised: 0,
+    unchanged: 1,
+    awaitingApproval: 0,
+    needsAttention: 0,
+  });
   ({ GET } = await import("./route"));
 });
 
@@ -233,6 +249,17 @@ describe("GET /api/cron/daily", () => {
     expect(summary.collect).toEqual({ collected: 0, refreshed: 0, failed: 0 });
     expect(summary.sync).toEqual({ synced: 0, failed: 0, tasksClosed: 0 });
     expect(summary.digestRecovery).toEqual({ classifiedUnknown: 0, limitReached: false });
+    expect(summary.githubMaterialisation).toEqual({
+      runsConsidered: 1,
+      materialised: 0,
+      unchanged: 1,
+      awaitingApproval: 0,
+      needsAttention: 0,
+    });
+    expect(hoisted.reconcileMaterialisation).toHaveBeenCalledWith(
+      { dependency: "materialisation" },
+      { limit: 20 },
+    );
   });
 
   it("raises exactly one policy_review task for the due policy and notifies the owner", async () => {
@@ -288,5 +315,17 @@ describe("GET /api/cron/daily", () => {
     expect(store.evidence[0].status).toBe("current");
     expect(expiryTasks()).toHaveLength(0);
     expect(store.notifications).toHaveLength(0);
+    expect(hoisted.reconcileMaterialisation).not.toHaveBeenCalled();
+  });
+
+  it("isolates a bounded GitHub materialisation recovery failure from the existing daily sweep", async () => {
+    hoisted.reconcileMaterialisation.mockRejectedValue(new Error("private RPC body"));
+
+    const response = await GET(request("test-secret"));
+    const summary = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(summary.githubMaterialisation).toEqual({ error: "githubMaterialisation failed" });
+    expect(summary.sweep.evidenceExpired).toBe(1);
   });
 });

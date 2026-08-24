@@ -4,6 +4,12 @@ import { z } from "zod";
 
 import type { DiagnosticCode } from "../domain/observation";
 import { GitHubCollectionError } from "./github-collection-error";
+import {
+  buildMaterialisationDependencies,
+  reconcileApprovedGitHubObservations,
+  type ReconciliationScope,
+  type ReconciliationSummary,
+} from "./materialise-approved-observations";
 import { runGitHubCollection, type CollectionDependencies, type CollectionRequest, type CollectionSummary } from "./run-collection";
 
 export type ClaimedWebhookDelivery = {
@@ -25,6 +31,7 @@ export type WebhookWorkerDependencies = {
   claim(limit: number): Promise<unknown[]>;
   finalise(delivery: WebhookDeliveryLease, outcome: WebhookOutcome, diagnosticCode: WebhookDiagnostic | null): Promise<boolean>;
   runCollection(request: CollectionRequest): Promise<CollectionSummary>;
+  reconcile(scope: ReconciliationScope): Promise<ReconciliationSummary>;
 };
 
 export type WebhookDrainSummary = {
@@ -67,6 +74,7 @@ export function buildWebhookWorkerDependencies(
   collectionDependencies: CollectionDependencies,
 ): WebhookWorkerDependencies {
   const service = serviceInput as SupabaseServiceClient;
+  const materialisationDependencies = buildMaterialisationDependencies(service);
   return {
     async claim(limit) {
       const { data, error } = await service.rpc("claim_github_webhook_deliveries_server", { target_limit: limit });
@@ -96,6 +104,7 @@ export function buildWebhookWorkerDependencies(
       return data;
     },
     runCollection: (request) => runGitHubCollection(collectionDependencies, request),
+    reconcile: (scope) => reconcileApprovedGitHubObservations(materialisationDependencies, scope),
   };
 }
 
@@ -158,6 +167,16 @@ export async function drainGitHubWebhookDeliveries(
         } else if (validatedCollection.data.repositoriesDeferred > 0) {
           outcome = "failed";
           diagnosticCode = "internal_error";
+        } else {
+          const materialisation = await deps.reconcile({
+            limit: 100,
+            installationId: delivery.installationId,
+            repositoryId: delivery.repositoryId ?? undefined,
+          });
+          if (materialisation.needsAttention > 0) {
+            outcome = "failed";
+            diagnosticCode = "internal_error";
+          }
         }
       }
     } catch (error) {

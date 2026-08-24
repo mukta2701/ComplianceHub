@@ -126,6 +126,13 @@ describe("GET /api/cron/daily against the live database", () => {
       classifiedUnknown: expect.any(Number),
       limitReached: expect.any(Boolean),
     });
+    expect(summary.githubMaterialisation).toEqual({
+      runsConsidered: expect.any(Number),
+      materialised: expect.any(Number),
+      unchanged: expect.any(Number),
+      awaitingApproval: expect.any(Number),
+      needsAttention: expect.any(Number),
+    });
     expect(summary.sweep.evidenceExpired).toBeGreaterThanOrEqual(1);
     expect(summary.sweep.tasksCreated).toBeGreaterThanOrEqual(1);
 

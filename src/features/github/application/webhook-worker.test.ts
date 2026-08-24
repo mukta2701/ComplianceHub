@@ -21,6 +21,7 @@ function row(overrides: Partial<ClaimedWebhookDelivery> = {}): ClaimedWebhookDel
 function deps(rows: ClaimedWebhookDelivery[]): WebhookWorkerDependencies & {
   finalise: ReturnType<typeof vi.fn>;
   runCollection: ReturnType<typeof vi.fn>;
+  reconcile: ReturnType<typeof vi.fn>;
 } {
   return {
     claim: vi.fn().mockResolvedValue(rows),
@@ -33,6 +34,7 @@ function deps(rows: ClaimedWebhookDelivery[]): WebhookWorkerDependencies & {
       repositoriesDeferred: 0,
       runsPartial: 0,
     }),
+    reconcile: vi.fn().mockResolvedValue({ runsConsidered: 1, materialised: 1, unchanged: 0, awaitingApproval: 0, needsAttention: 0 }),
   };
 }
 
@@ -49,6 +51,9 @@ describe("drainGitHubWebhookDeliveries", () => {
       repositoryId,
       signal: undefined,
     });
+    expect(input.reconcile).toHaveBeenCalledWith({ limit: 100, installationId, repositoryId });
+    expect(input.runCollection.mock.invocationCallOrder[0]).toBeLessThan(input.reconcile.mock.invocationCallOrder[0]);
+    expect(input.reconcile.mock.invocationCallOrder[0]).toBeLessThan(input.finalise.mock.invocationCallOrder[0]);
     expect(input.finalise).toHaveBeenCalledWith(row(), "processed", null);
   });
 
@@ -137,6 +142,7 @@ describe("drainGitHubWebhookDeliveries", () => {
       repositoriesDeferred: 0,
       runsPartial: 0,
     });
+    built.reconcile = vi.fn().mockResolvedValue({ runsConsidered: 1, materialised: 1, unchanged: 0, awaitingApproval: 0, needsAttention: 0 });
     const result = await drainGitHubWebhookDeliveries(built, { limit: 5 });
     expect(result).toEqual({ claimed: 2, processed: 1, ignored: 0, failed: 1, ownershipLost: 0 });
     expect(built.runCollection).toHaveBeenCalledOnce();
@@ -161,6 +167,27 @@ describe("drainGitHubWebhookDeliveries", () => {
     const result = await drainGitHubWebhookDeliveries(input, { limit: 20 });
     expect(result.failed).toBe(1);
     expect(input.finalise).toHaveBeenCalledWith(expect.anything(), "failed", "invalid_response");
+  });
+
+  it("leaves a completed collection retryable when post-terminal materialisation needs attention", async () => {
+    const input = deps([row()]);
+    input.reconcile.mockResolvedValue({ runsConsidered: 1, materialised: 0, unchanged: 0, awaitingApproval: 0, needsAttention: 1 });
+
+    const result = await drainGitHubWebhookDeliveries(input, { limit: 20 });
+
+    expect(result).toEqual({ claimed: 1, processed: 0, ignored: 0, failed: 1, ownershipLost: 0 });
+    expect(input.finalise).toHaveBeenCalledWith(row(), "failed", "internal_error");
+    expect(input.runCollection).toHaveBeenCalledOnce();
+  });
+
+  it("processes the delivery when official records are only awaiting approval", async () => {
+    const input = deps([row()]);
+    input.reconcile.mockResolvedValue({ runsConsidered: 1, materialised: 0, unchanged: 0, awaitingApproval: 1, needsAttention: 0 });
+
+    const result = await drainGitHubWebhookDeliveries(input, { limit: 20 });
+
+    expect(result.processed).toBe(1);
+    expect(input.finalise).toHaveBeenCalledWith(row(), "processed", null);
   });
 
   it("does not start an already-aborted delivery and leaves it retryable", async () => {

@@ -9,6 +9,10 @@ import { syncTickets } from "@/features/integrations/application/sync-run";
 import { logError } from "@/lib/observability/logger";
 import { collectIdPages, collectStringCursorPages } from "@/lib/supabase/paginate";
 import { recoverAbandonedDailyDigests } from "@/features/mcp/application/recover-abandoned-digests";
+import {
+  buildMaterialisationDependencies,
+  reconcileApprovedGitHubObservations,
+} from "@/features/github/application/materialise-approved-observations";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -27,6 +31,16 @@ async function sweep(request: Request) {
   const digestRecoveryResult = await stage("digestRecovery", async () => {
     const recovery = await recoverAbandonedDailyDigests(supabase);
     return { classifiedUnknown: recovery.recovered, limitReached: recovery.limitReached };
+  });
+  const githubMaterialisationResult = await stage("githubMaterialisation", async () => {
+    try {
+      return await reconcileApprovedGitHubObservations(
+        buildMaterialisationDependencies(supabase),
+        { limit: 20 },
+      );
+    } catch {
+      throw new Error("GitHub materialisation recovery failed");
+    }
   });
   // Order matters: collect fresh evidence, then sync ticket statuses, then
   // sweep (age evidence, raise tasks, notify). Each stage is isolated so a
@@ -166,7 +180,13 @@ async function sweep(request: Request) {
     },
   };
   const summary = await stage("sweep", () => runDailySweep(deps));
-  return NextResponse.json({ digestRecovery: digestRecoveryResult, collect: collectResult, sync: syncResult, sweep: summary });
+  return NextResponse.json({
+    digestRecovery: digestRecoveryResult,
+    githubMaterialisation: githubMaterialisationResult,
+    collect: collectResult,
+    sync: syncResult,
+    sweep: summary,
+  });
 }
 
 export async function GET(request: Request) { return sweep(request); } // Vercel Cron sends GET

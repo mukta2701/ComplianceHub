@@ -16,6 +16,8 @@ const hoisted = vi.hoisted(() => ({
   createServiceClient: vi.fn(),
   buildCollectionDependencies: vi.fn(),
   runGitHubCollection: vi.fn(),
+  buildMaterialisationDependencies: vi.fn(),
+  reconcileApprovedGitHubObservations: vi.fn(),
 }));
 
 vi.mock("@/lib/app-context", () => ({ requireAppContext: () => Promise.resolve(hoisted.ctx) }));
@@ -36,6 +38,10 @@ vi.mock("@/features/github/application/collection-deps", () => ({
 }));
 vi.mock("@/features/github/application/run-collection", () => ({
   runGitHubCollection: hoisted.runGitHubCollection,
+}));
+vi.mock("@/features/github/application/materialise-approved-observations", () => ({
+  buildMaterialisationDependencies: hoisted.buildMaterialisationDependencies,
+  reconcileApprovedGitHubObservations: hoisted.reconcileApprovedGitHubObservations,
 }));
 vi.mock("next/cache", () => ({ revalidatePath: hoisted.revalidatePath }));
 
@@ -672,6 +678,14 @@ describe("GitHub shadow collection actions", () => {
     process.env.GITHUB_APP_PRIVATE_KEY = "private-key";
     process.env.GITHUB_APPROVED_SECURITY_WORKFLOW_IDS = "101,202";
     hoisted.buildCollectionDependencies.mockReturnValue({ dependency: "collection" });
+    hoisted.buildMaterialisationDependencies.mockReturnValue({ dependency: "materialisation" });
+    hoisted.reconcileApprovedGitHubObservations.mockResolvedValue({
+      runsConsidered: 1,
+      materialised: 1,
+      unchanged: 0,
+      awaitingApproval: 0,
+      needsAttention: 0,
+    });
     hoisted.runGitHubCollection.mockResolvedValue({
       installationsChecked: 1,
       repositoriesChecked: 1,
@@ -847,6 +861,18 @@ describe("GitHub shadow collection actions", () => {
         requestKey: expect.stringMatching(/^manual:[0-9a-f-]{36}$/),
       },
     );
+    expect(hoisted.buildMaterialisationDependencies).toHaveBeenCalledWith(service);
+    expect(hoisted.reconcileApprovedGitHubObservations).toHaveBeenCalledWith(
+      { dependency: "materialisation" },
+      {
+        limit: 100,
+        organisationId: ORGANISATION_ID,
+        installationId: INSTALLATION_ID,
+      },
+    );
+    expect(hoisted.runGitHubCollection.mock.invocationCallOrder[0]).toBeLessThan(
+      hoisted.reconcileApprovedGitHubObservations.mock.invocationCallOrder[0],
+    );
     expect(result).toEqual({
       ok: true,
       message: "Recheck complete: 1 checked, 1 deferred, 0 failed.",
@@ -858,7 +884,45 @@ describe("GitHub shadow collection actions", () => {
         repositoriesDeferred: 1,
         runsPartial: 0,
       },
+      materialisation: {
+        runsConsidered: 1,
+        materialised: 1,
+        unchanged: 0,
+        awaitingApproval: 0,
+        needsAttention: 0,
+      },
     });
+  });
+
+  it("surfaces post-terminal materialisation attention without changing the collection summary", async () => {
+    const lookup: Record<string, ReturnType<typeof vi.fn>> = {};
+    lookup.select = vi.fn(() => lookup);
+    lookup.eq = vi.fn(() => lookup);
+    lookup.maybeSingle = vi.fn().mockResolvedValue({
+      data: { id: INSTALLATION_ID, status: "active", permissions_ok: true }, error: null,
+    });
+    hoisted.ctx = {
+      supabase: { from: vi.fn(() => lookup) }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
+    };
+    hoisted.createServiceClient.mockReturnValue({});
+    hoisted.reconcileApprovedGitHubObservations.mockResolvedValue({
+      runsConsidered: 1,
+      materialised: 0,
+      unchanged: 0,
+      awaitingApproval: 0,
+      needsAttention: 1,
+    });
+    const form = new FormData();
+    form.set("installationId", INSTALLATION_ID);
+
+    const result = await recheckGitHubInstallationAction(form);
+
+    expect(result).toEqual(expect.objectContaining({
+      ok: true,
+      message: "Recheck complete, but official GitHub records need attention: 1 checked, 1 deferred, 0 failed.",
+      summary: expect.objectContaining({ repositoriesChecked: 1, repositoriesDeferred: 1, repositoriesFailed: 0 }),
+      materialisation: expect.objectContaining({ needsAttention: 1 }),
+    }));
   });
 
   it.each([

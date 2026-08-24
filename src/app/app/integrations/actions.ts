@@ -4,6 +4,11 @@ import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { buildCollectionDependencies } from "@/features/github/application/collection-deps";
+import {
+  buildMaterialisationDependencies,
+  reconcileApprovedGitHubObservations,
+  type ReconciliationSummary,
+} from "@/features/github/application/materialise-approved-observations";
 import { runGitHubCollection, type CollectionSummary } from "@/features/github/application/run-collection";
 import { requireAppContext } from "@/lib/app-context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
@@ -89,6 +94,7 @@ export type GitHubMutationResult = {
   ok: boolean;
   message: string;
   summary?: CollectionSummary;
+  materialisation?: ReconciliationSummary;
 };
 
 function approvedGitHubWorkflowIds(): number[] {
@@ -167,11 +173,36 @@ export async function recheckGitHubInstallationAction(formData: FormData): Promi
       installationId: parsed.installationId,
       requestKey: `manual:${randomUUID()}`,
     }));
+    let materialisation: ReconciliationSummary;
+    try {
+      materialisation = await reconcileApprovedGitHubObservations(
+        buildMaterialisationDependencies(service),
+        {
+          limit: 100,
+          organisationId: organisation.id,
+          installationId: parsed.installationId,
+        },
+      );
+    } catch {
+      materialisation = {
+        runsConsidered: 0,
+        materialised: 0,
+        unchanged: 0,
+        awaitingApproval: 0,
+        needsAttention: 1,
+      };
+    }
     revalidatePath("/app/integrations");
+    const counts = `${summary.repositoriesChecked} checked, ${summary.repositoriesDeferred} deferred, ${summary.repositoriesFailed} failed.`;
     return {
       ok: true,
-      message: `Recheck complete: ${summary.repositoriesChecked} checked, ${summary.repositoriesDeferred} deferred, ${summary.repositoriesFailed} failed.`,
+      message: materialisation.needsAttention > 0
+        ? `Recheck complete, but official GitHub records need attention: ${counts}`
+        : materialisation.awaitingApproval > 0
+          ? `Recheck complete; official GitHub records await Owner approval: ${counts}`
+          : `Recheck complete: ${counts}`,
       summary,
+      materialisation,
     };
   } catch {
     return installationRecheckFailure;
