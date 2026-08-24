@@ -108,6 +108,26 @@ describe("standard GitHub ISO mapping pack", () => {
     expect(() => mappingPackSchema.parse(pack)).toThrow();
   });
 
+  it.each([
+    ["a pass treatment that is not evidence", (pack: typeof STANDARD_GITHUB_ISO_MAPPING_PACK) => {
+      pack.mappings[0]!.treatments.pass.kind = "finding";
+    }],
+    ["the public visibility fail treatment changed to evidence", (pack: typeof STANDARD_GITHUB_ISO_MAPPING_PACK) => {
+      const visibility = pack.mappings.find((mapping) => mapping.checkId === "github.repository.visibility")!;
+      visibility.treatments.fail.kind = "evidence";
+    }],
+    ["an unknown treatment changed to evidence", (pack: typeof STANDARD_GITHUB_ISO_MAPPING_PACK) => {
+      pack.mappings[0]!.treatments.unknown.kind = "evidence";
+    }],
+    ["a not-applicable treatment changed to evidence", (pack: typeof STANDARD_GITHUB_ISO_MAPPING_PACK) => {
+      pack.mappings[0]!.treatments.not_applicable.kind = "evidence";
+    }],
+  ])("rejects %s even with a recomputed checksum", (_name, change) => {
+    const pack = changedPack(change);
+
+    expect(() => mappingPackSchema.parse(pack)).toThrow();
+  });
+
   it("turns public visibility into a finding, never positive evidence", () => {
     const treatment = selectGitHubObservationTreatment(
       STANDARD_GITHUB_ISO_MAPPING_PACK,

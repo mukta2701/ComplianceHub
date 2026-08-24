@@ -20,6 +20,15 @@ const mappingTreatmentSchema = z.object({
   summary: safeText(280),
 }).strict();
 
+type MappingTreatmentKind = z.infer<typeof mappingTreatmentSchema>["kind"];
+
+const REQUIRED_TREATMENT_KINDS = {
+  pass: "evidence",
+  fail: "finding",
+  unknown: "explanatory",
+  not_applicable: "explanatory",
+} as const satisfies Record<ObservationResult, MappingTreatmentKind>;
+
 const mappingSchema = z.object({
   checkId: safeText(120),
   ruleVersion: safeText(80),
@@ -55,6 +64,15 @@ export const mappingPackSchema = mappingPackShape.superRefine((pack, context) =>
     seenCheckIds.add(mapping.checkId);
     if (mapping.ruleVersion !== RULE_PACK_VERSION) {
       context.addIssue({ code: "custom", path: ["mappings", index, "ruleVersion"], message: "Mapping rule version must match the active rule pack" });
+    }
+    for (const [result, expectedKind] of Object.entries(REQUIRED_TREATMENT_KINDS) as Array<[ObservationResult, MappingTreatmentKind]>) {
+      if (mapping.treatments[result].kind !== expectedKind) {
+        context.addIssue({
+          code: "custom",
+          path: ["mappings", index, "treatments", result, "kind"],
+          message: `${result} treatment must be ${expectedKind}`,
+        });
+      }
     }
   }
 
