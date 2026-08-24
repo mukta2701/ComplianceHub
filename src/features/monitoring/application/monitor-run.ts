@@ -44,12 +44,12 @@ export type MonitorSummary = {
 export type MonitorDependencies = {
   listActiveSources: () => Promise<MonitorSource[]>;
   runChecks: (source: MonitorSource) => Promise<CheckResult[]>;
-  // Keys (findingKey) of this org's findings that are open or acknowledged — i.e.
-  // not resolved. planFindings skips these so an already-raised finding never
-  // re-alerts, and an acknowledged one stays quiet until it resolves.
+  // Keys (findingKey) of this org's unresolved legacy findings. planFindings
+  // skips these so an already-raised finding never re-alerts, and a reviewed
+  // human state stays quiet until it resolves.
   listOpenFindingKeys: (organisationId: string) => Promise<string[]>;
-  // Upsert on the (organisation_id, check_id, subject_id) dedup key: insert a new
-  // open finding, or re-open one that had resolved. Idempotent.
+  // Upsert on the origin-aware stable identity: insert a new open finding, or
+  // re-open one that had resolved. Idempotent.
   saveFinding: (finding: SaveFindingInput) => Promise<void>;
   resolveFindings: (organisationId: string, keys: string[]) => Promise<number>;
   // External channels only (slack / whatsapp). In-app is always-on below.

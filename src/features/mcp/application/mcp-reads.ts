@@ -1,5 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
+import {
+  ACTIVE_MONITORING_FINDING_STATUSES,
+  MONITORING_FINDING_STATUSES,
+} from "@/features/monitoring/domain/finding-status";
 import { readinessReportSchema } from "@/features/reports/application/leadership-snapshots";
 import { DEFAULT_RISK_MATRIX_CONFIG, type RiskMatrixConfig } from "@/features/risks/domain/risks";
 import { McpError } from "../auth/errors";
@@ -24,7 +28,7 @@ const uuid = z.uuid();
 const dateTime = z.string().datetime({ offset: true });
 const riskConfigRow = z.object({ low_max: z.number().int(), moderate_max: z.number().int(), high_max: z.number().int(), appetite_threshold: z.number().int().nullable() });
 const snapshotRow = z.object({ id: uuid, payload: readinessReportSchema, published_at: dateTime });
-const monitoringStatus = z.enum(["open", "acknowledged", "resolved"]);
+const monitoringStatus = z.enum(MONITORING_FINDING_STATUSES);
 const monitoringRow = z.object({
   id: uuid,
   control_ref: z.string(),
@@ -219,7 +223,9 @@ async function monitoringForWorkspace(supabase: SupabaseClient, workspace: Acces
   if (!limit.success || (severity && !severity.success) || (status && !status.success)) throw new McpError("VALIDATION_ERROR");
   let query = supabase.from("monitoring_findings").select("id,control_ref,severity,title,status,task_id,detected_at,resolved_at")
     .eq("organisation_id", workspace.id);
-  query = status?.success ? query.eq("status", status.data) : query.in("status", ["open", "acknowledged"]);
+  query = status?.success
+    ? query.eq("status", status.data)
+    : query.in("status", [...ACTIVE_MONITORING_FINDING_STATUSES]);
   if (severity?.success) query = query.eq("severity", severity.data);
   const result = await query.order("severity", { ascending: false }).order("detected_at", { ascending: false }).order("id", { ascending: true }).limit(limit.data + 1);
   if (result.error) queryFailure();

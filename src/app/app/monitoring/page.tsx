@@ -13,10 +13,20 @@ import { shouldShowRunMonitoring } from "./monitoring-access";
 import { hasCapability } from "@/features/organisations/domain/access";
 import { loadMemberMonitoring } from "@/features/monitoring/application/load-member-monitoring";
 import { MemberMonitoring } from "@/features/monitoring/components/member-monitoring";
+import {
+  ACTIVE_MONITORING_FINDING_STATUSES,
+  type ActiveMonitoringFindingStatus,
+} from "@/features/monitoring/domain/finding-status";
 
 const SEVERITY_TONE: Record<CheckSeverity, StatusTone> = { critical: "risk", high: "risk", medium: "attention", low: "neutral" };
 const SEVERITY_PILL: Record<CheckSeverity, string> = { critical: "red", high: "red", medium: "amber", low: "blue" };
-const STATUS_PILL: Record<string, string> = { open: "red", acknowledged: "amber" };
+const STATUS_PILL: Record<ActiveMonitoringFindingStatus, string> = {
+  open: "red",
+  acknowledged: "amber",
+  in_progress: "amber",
+  exception_requested: "amber",
+  risk_accepted: "blue",
+};
 
 type Finding = {
   id: string;
@@ -25,7 +35,7 @@ type Finding = {
   severity: CheckSeverity;
   title: string;
   detail: string;
-  status: "open" | "acknowledged";
+  status: ActiveMonitoringFindingStatus;
   task_id: string | null;
   detected_at: string;
 };
@@ -46,7 +56,7 @@ export default async function MonitoringPage() {
     supabase.from("monitoring_findings")
       .select("id,control_ref,subject_id,severity,title,detail,status,task_id,detected_at")
       .eq("organisation_id", organisation.id)
-      .in("status", ["open", "acknowledged"])
+      .in("status", [...ACTIVE_MONITORING_FINDING_STATUSES])
       .order("detected_at", { ascending: false })
       .limit(100),
     // No provider configuration or token is needed in the monitoring view.
@@ -61,9 +71,8 @@ export default async function MonitoringPage() {
 
   // Keep the rendered set active-only even if a non-PostgREST test adapter or
   // stale cache ever returns a row outside the requested status filter.
-  const findings = ((findingResult.data ?? []) as Finding[]).filter(
-    (finding) => finding.status === "open" || finding.status === "acknowledged",
-  );
+  const activeStatuses = new Set<string>(ACTIVE_MONITORING_FINDING_STATUSES);
+  const findings = ((findingResult.data ?? []) as Finding[]).filter((finding) => activeStatuses.has(finding.status));
   const sources = (sourceResult.data ?? []) as Source[];
   const highOrCritical = findings.filter((finding) => finding.severity === "high" || finding.severity === "critical").length;
 

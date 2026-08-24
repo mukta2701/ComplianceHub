@@ -217,13 +217,39 @@ on public.github_evidence_provenance(approval_id, organisation_id, mapping_pack_
 alter table public.monitoring_findings
   drop constraint monitoring_findings_dedup_key,
   add column finding_origin text not null default 'legacy',
+  add column provider_repository_id bigint,
+  add column mapping_version text not null default 'legacy';
+
+alter table public.monitoring_findings
+  add column stable_subject_identity text generated always as (
+    case
+      when finding_origin = 'github' then provider_repository_id::text
+      else subject_id
+    end
+  ) stored,
   add constraint monitoring_findings_origin_check
     check (finding_origin in ('legacy', 'github')),
+  add constraint monitoring_findings_mapping_version_check check (
+    pg_catalog.char_length(mapping_version) between 1 and 80
+    and mapping_version !~ '[<>[:cntrl:]]'
+  ),
+  add constraint monitoring_findings_identity_shape_check check (
+    (
+      finding_origin = 'legacy'
+      and provider_repository_id is null
+      and mapping_version = 'legacy'
+    )
+    or (
+      finding_origin = 'github'
+      and provider_repository_id > 0
+      and mapping_version <> 'legacy'
+    )
+  ),
   add constraint monitoring_findings_origin_dedup_key
-    unique (organisation_id, finding_origin, check_id, subject_id);
-
-create index monitoring_findings_origin_identity_idx
-on public.monitoring_findings(organisation_id, finding_origin, check_id, subject_id);
+    unique (
+      organisation_id, finding_origin, stable_subject_identity,
+      check_id, mapping_version
+    );
 
 create table public.github_finding_provenance (
   id uuid primary key default extensions.gen_random_uuid(),
@@ -231,19 +257,30 @@ create table public.github_finding_provenance (
   organisation_id uuid not null references public.organisations(id) on delete cascade,
   installation_id uuid not null,
   repository_id uuid not null,
+  provider_repository_id bigint not null check (provider_repository_id > 0),
   identity_key text not null check (identity_key ~ '^[0-9a-f]{64}$'),
   check_id text not null check (pg_catalog.char_length(check_id) between 1 and 120),
+  mapping_version text not null check (
+    pg_catalog.char_length(mapping_version) between 1 and 80
+    and mapping_version !~ '[<>[:cntrl:]]'
+  ),
   subject_id text not null check (pg_catalog.char_length(subject_id) between 1 and 200),
   initial_collection_run_id uuid not null,
   initial_observation_id uuid not null,
   initial_approval_id uuid not null,
   initial_mapping_pack_id uuid not null references public.github_mapping_packs(id) on delete restrict,
+  latest_installation_id uuid not null,
+  latest_repository_id uuid not null,
   latest_collection_run_id uuid not null,
   latest_observation_id uuid not null,
   latest_approval_id uuid not null,
   latest_mapping_pack_id uuid not null references public.github_mapping_packs(id) on delete restrict,
+  latest_failed_installation_id uuid not null,
+  latest_failed_repository_id uuid not null,
   latest_failed_collection_run_id uuid not null,
   latest_failed_observation_id uuid not null,
+  resolved_by_installation_id uuid,
+  resolved_by_repository_id uuid,
   resolved_by_collection_run_id uuid,
   resolved_by_observation_id uuid,
   first_detected_at timestamptz not null,
@@ -254,12 +291,15 @@ create table public.github_finding_provenance (
   constraint github_finding_provenance_id_organisation_key unique (id, organisation_id),
   constraint github_finding_provenance_finding_key unique (finding_id),
   constraint github_finding_provenance_org_identity_key unique (organisation_id, identity_key),
+  constraint github_finding_provenance_stable_identity_key unique (
+    organisation_id, provider_repository_id, check_id, mapping_version
+  ),
   constraint github_finding_provenance_finding_tenant_fk
     foreign key (finding_id, organisation_id)
     references public.monitoring_findings(id, organisation_id) on delete restrict,
   constraint github_finding_provenance_repository_ancestry_fk
-    foreign key (repository_id, organisation_id, installation_id)
-    references public.github_repositories(id, organisation_id, installation_id) on delete restrict,
+    foreign key (repository_id, organisation_id, installation_id, provider_repository_id)
+    references public.github_repositories(id, organisation_id, installation_id, provider_repository_id) on delete restrict,
   constraint github_finding_provenance_initial_run_ancestry_fk
     foreign key (initial_collection_run_id, organisation_id, installation_id, repository_id)
     references public.github_collection_runs(id, organisation_id, installation_id, repository_id) on delete restrict,
@@ -270,36 +310,71 @@ create table public.github_finding_provenance (
     foreign key (initial_approval_id, organisation_id, initial_mapping_pack_id)
     references public.github_mapping_approvals(id, organisation_id, mapping_pack_id) on delete restrict,
   constraint github_finding_provenance_latest_run_ancestry_fk
-    foreign key (latest_collection_run_id, organisation_id, installation_id, repository_id)
+    foreign key (latest_collection_run_id, organisation_id, latest_installation_id, latest_repository_id)
     references public.github_collection_runs(id, organisation_id, installation_id, repository_id) on delete restrict,
+  constraint github_finding_provenance_latest_repository_ancestry_fk
+    foreign key (latest_repository_id, organisation_id, latest_installation_id, provider_repository_id)
+    references public.github_repositories(id, organisation_id, installation_id, provider_repository_id) on delete restrict,
   constraint github_finding_provenance_latest_observation_ancestry_fk
-    foreign key (latest_observation_id, organisation_id, installation_id, repository_id, latest_collection_run_id)
+    foreign key (latest_observation_id, organisation_id, latest_installation_id, latest_repository_id, latest_collection_run_id)
     references public.github_observations(id, organisation_id, installation_id, repository_id, collection_run_id) on delete restrict,
   constraint github_finding_provenance_latest_approval_ancestry_fk
     foreign key (latest_approval_id, organisation_id, latest_mapping_pack_id)
     references public.github_mapping_approvals(id, organisation_id, mapping_pack_id) on delete restrict,
   constraint github_finding_provenance_latest_fail_run_ancestry_fk
-    foreign key (latest_failed_collection_run_id, organisation_id, installation_id, repository_id)
+    foreign key (latest_failed_collection_run_id, organisation_id, latest_failed_installation_id, latest_failed_repository_id)
     references public.github_collection_runs(id, organisation_id, installation_id, repository_id) on delete restrict,
+  constraint github_finding_provenance_latest_fail_repository_ancestry_fk
+    foreign key (latest_failed_repository_id, organisation_id, latest_failed_installation_id, provider_repository_id)
+    references public.github_repositories(id, organisation_id, installation_id, provider_repository_id) on delete restrict,
   constraint github_finding_provenance_latest_fail_observation_ancestry_fk
-    foreign key (latest_failed_observation_id, organisation_id, installation_id, repository_id, latest_failed_collection_run_id)
+    foreign key (latest_failed_observation_id, organisation_id, latest_failed_installation_id, latest_failed_repository_id, latest_failed_collection_run_id)
     references public.github_observations(id, organisation_id, installation_id, repository_id, collection_run_id) on delete restrict,
   constraint github_finding_provenance_resolved_run_ancestry_fk
-    foreign key (resolved_by_collection_run_id, organisation_id, installation_id, repository_id)
+    foreign key (resolved_by_collection_run_id, organisation_id, resolved_by_installation_id, resolved_by_repository_id)
     references public.github_collection_runs(id, organisation_id, installation_id, repository_id) on delete restrict,
+  constraint github_finding_provenance_resolved_repository_ancestry_fk
+    foreign key (resolved_by_repository_id, organisation_id, resolved_by_installation_id, provider_repository_id)
+    references public.github_repositories(id, organisation_id, installation_id, provider_repository_id) on delete restrict,
   constraint github_finding_provenance_resolved_observation_ancestry_fk
-    foreign key (resolved_by_observation_id, organisation_id, installation_id, repository_id, resolved_by_collection_run_id)
+    foreign key (resolved_by_observation_id, organisation_id, resolved_by_installation_id, resolved_by_repository_id, resolved_by_collection_run_id)
     references public.github_observations(id, organisation_id, installation_id, repository_id, collection_run_id) on delete restrict,
+  constraint github_finding_provenance_identity_key_check check (
+    identity_key = pg_catalog.encode(
+      extensions.digest(
+        pg_catalog.convert_to(
+          pg_catalog.jsonb_build_array(
+            organisation_id, provider_repository_id, check_id, mapping_version
+          )::text,
+          'UTF8'
+        ),
+        'sha256'
+      ),
+      'hex'
+    )
+  ),
   constraint github_finding_provenance_detection_order_check
     check (most_recent_detected_at >= first_detected_at),
   constraint github_finding_provenance_resolution_check check (
-    (resolved_by_collection_run_id is null and resolved_by_observation_id is null and resolved_at is null)
-    or (resolved_by_collection_run_id is not null and resolved_by_observation_id is not null and resolved_at is not null)
+    (
+      resolved_by_installation_id is null
+      and resolved_by_repository_id is null
+      and resolved_by_collection_run_id is null
+      and resolved_by_observation_id is null
+      and resolved_at is null
+    )
+    or (
+      resolved_by_installation_id is not null
+      and resolved_by_repository_id is not null
+      and resolved_by_collection_run_id is not null
+      and resolved_by_observation_id is not null
+      and resolved_at is not null
+    )
   )
 );
 
 create index github_finding_provenance_repository_idx
-on public.github_finding_provenance(repository_id, organisation_id, installation_id);
+on public.github_finding_provenance(provider_repository_id, organisation_id, mapping_version);
 create index github_finding_provenance_latest_run_idx
 on public.github_finding_provenance(latest_collection_run_id, organisation_id);
 create index github_finding_provenance_latest_approval_idx
@@ -437,8 +512,10 @@ begin
     or new.organisation_id is distinct from old.organisation_id
     or new.installation_id is distinct from old.installation_id
     or new.repository_id is distinct from old.repository_id
+    or new.provider_repository_id is distinct from old.provider_repository_id
     or new.identity_key is distinct from old.identity_key
     or new.check_id is distinct from old.check_id
+    or new.mapping_version is distinct from old.mapping_version
     or new.subject_id is distinct from old.subject_id
     or new.initial_collection_run_id is distinct from old.initial_collection_run_id
     or new.initial_observation_id is distinct from old.initial_observation_id
@@ -493,6 +570,14 @@ begin
   end if;
   if new.finding_origin is distinct from old.finding_origin then
     raise exception 'monitoring finding origin is immutable' using errcode = 'P0001';
+  end if;
+  if old.finding_origin = 'github'
+    and (
+      new.provider_repository_id is distinct from old.provider_repository_id
+      or new.mapping_version is distinct from old.mapping_version
+    )
+  then
+    raise exception 'official GitHub finding identity is immutable' using errcode = 'P0001';
   end if;
   if old.finding_origin = 'github'
     and (
@@ -551,7 +636,7 @@ create trigger github_mapping_packs_immutable
 before update or delete on public.github_mapping_packs
 for each statement execute function public.reject_github_mapping_pack_change();
 create trigger github_mapping_entries_immutable
-before update or delete on public.github_mapping_entries
+before insert or update or delete on public.github_mapping_entries
 for each statement execute function public.reject_github_mapping_entry_change();
 create trigger github_mapping_approvals_guard
 before update or delete on public.github_mapping_approvals
@@ -572,24 +657,46 @@ create trigger evidence_links_github_guard
 before insert or update or delete on public.evidence_links
 for each row execute function public.guard_official_github_evidence_link_change();
 
--- Preserve the established evidence lifecycle while making official GitHub
--- evidence status changes exclusive to the materialisation transaction.
+-- Preserve verified daily expiry transitions for official evidence while
+-- keeping supersession/withdrawal exclusive to the materialiser.
 create or replace function public.evidence_guard_update()
 returns trigger
 language plpgsql
 set search_path = ''
 as $$
+declare
+  is_official_github_evidence boolean;
+  is_materialiser boolean;
+  is_verified_daily_expiry boolean;
 begin
-  if exists (
+  is_official_github_evidence := exists (
     select 1 from public.github_evidence_provenance provenance
     where provenance.evidence_id = old.id
       and provenance.organisation_id = old.organisation_id
-  ) and (
-    current_user <> 'postgres'
-    or pg_catalog.coalesce(
+  );
+  is_materialiser := current_user = 'postgres'
+    and pg_catalog.coalesce(
       pg_catalog.current_setting('compliancehub.github_materialiser', true), ''
-    ) <> 'on'
-  )
+    ) = 'on';
+  is_verified_daily_expiry := current_user = 'service_role'
+    and (pg_catalog.to_jsonb(new) - 'status') = (pg_catalog.to_jsonb(old) - 'status')
+    and (
+      (
+        new.status::text = 'expiring'
+        and old.status::text in ('current', 'expiring')
+        and new.valid_until >= current_date
+        and new.valid_until <= current_date + 30
+      )
+      or (
+        new.status::text = 'expired'
+        and old.status::text in ('current', 'expiring', 'expired')
+        and new.valid_until < current_date
+      )
+    );
+
+  if is_official_github_evidence
+    and not is_materialiser
+    and not is_verified_daily_expiry
   then
     raise exception 'official GitHub evidence lifecycle is server-managed' using errcode = 'P0001';
   end if;
@@ -1130,10 +1237,9 @@ begin
         pg_catalog.convert_to(
           pg_catalog.jsonb_build_array(
             target_organisation_id,
-            observation_row.installation_id,
-            observation_row.repository_id,
+            observation_row.provider_repository_id,
             observation_row.check_id,
-            observation_row.subject_id
+            target_mapping_version
           )::text,
           'UTF8'
         ),
@@ -1311,10 +1417,14 @@ begin
             and organisation_id = target_organisation_id;
 
           update public.github_finding_provenance
-          set latest_collection_run_id = run_row.id,
+          set latest_installation_id = observation_row.installation_id,
+              latest_repository_id = observation_row.repository_id,
+              latest_collection_run_id = run_row.id,
               latest_observation_id = observation_row.id,
               latest_approval_id = approval_row.id,
               latest_mapping_pack_id = approval_row.mapping_pack_id,
+              resolved_by_installation_id = observation_row.installation_id,
+              resolved_by_repository_id = observation_row.repository_id,
               resolved_by_collection_run_id = run_row.id,
               resolved_by_observation_id = observation_row.id,
               resolved_at = observation_row.observed_at,
@@ -1354,7 +1464,7 @@ begin
       insert into public.monitoring_findings(
         organisation_id, source_id, check_id, control_ref, subject_type,
         subject_id, severity, title, detail, status, detected_at,
-        resolved_at, finding_origin
+        resolved_at, finding_origin, provider_repository_id, mapping_version
       ) values (
         target_organisation_id, null, observation_row.check_id,
         pg_catalog.array_to_string(mapping_row.iso_control_references, ', '),
@@ -1364,25 +1474,32 @@ begin
           observation_row.explanation || E'\n\nApproved remediation: ' || mapping_row.remediation,
           4000
         ),
-        'open', observation_row.observed_at, null, 'github'
+        'open', observation_row.observed_at, null, 'github',
+        observation_row.provider_repository_id, target_mapping_version
       ) returning id into created_finding_id;
 
       insert into public.github_finding_provenance(
         finding_id, organisation_id, installation_id, repository_id,
-        identity_key, check_id, subject_id,
+        provider_repository_id, identity_key, check_id, mapping_version, subject_id,
         initial_collection_run_id, initial_observation_id,
         initial_approval_id, initial_mapping_pack_id,
+        latest_installation_id, latest_repository_id,
         latest_collection_run_id, latest_observation_id,
         latest_approval_id, latest_mapping_pack_id,
+        latest_failed_installation_id, latest_failed_repository_id,
         latest_failed_collection_run_id, latest_failed_observation_id,
         first_detected_at, most_recent_detected_at
       ) values (
         created_finding_id, target_organisation_id,
         observation_row.installation_id, observation_row.repository_id,
-        finding_identity, observation_row.check_id, observation_row.subject_id,
+        observation_row.provider_repository_id, finding_identity,
+        observation_row.check_id, target_mapping_version, observation_row.subject_id,
         run_row.id, observation_row.id, approval_row.id,
-        approval_row.mapping_pack_id, run_row.id, observation_row.id,
+        approval_row.mapping_pack_id,
+        observation_row.installation_id, observation_row.repository_id,
+        run_row.id, observation_row.id,
         approval_row.id, approval_row.mapping_pack_id,
+        observation_row.installation_id, observation_row.repository_id,
         run_row.id, observation_row.id,
         observation_row.observed_at, observation_row.observed_at
       );
@@ -1411,6 +1528,8 @@ begin
 
     update public.monitoring_findings
     set control_ref = pg_catalog.array_to_string(mapping_row.iso_control_references, ', '),
+        subject_type = observation_row.subject_type,
+        subject_id = observation_row.subject_id,
         severity = mapping_row.failure_severity,
         title = observation_row.title,
         detail = pg_catalog.left(
@@ -1428,13 +1547,19 @@ begin
       and organisation_id = target_organisation_id;
 
     update public.github_finding_provenance
-    set latest_collection_run_id = run_row.id,
+    set latest_installation_id = observation_row.installation_id,
+        latest_repository_id = observation_row.repository_id,
+        latest_collection_run_id = run_row.id,
         latest_observation_id = observation_row.id,
         latest_approval_id = approval_row.id,
         latest_mapping_pack_id = approval_row.mapping_pack_id,
+        latest_failed_installation_id = observation_row.installation_id,
+        latest_failed_repository_id = observation_row.repository_id,
         latest_failed_collection_run_id = run_row.id,
         latest_failed_observation_id = observation_row.id,
         most_recent_detected_at = observation_row.observed_at,
+        resolved_by_installation_id = null,
+        resolved_by_repository_id = null,
         resolved_by_collection_run_id = null,
         resolved_by_observation_id = null,
         resolved_at = null,
@@ -1723,3 +1848,205 @@ revoke all on function public.raise_monitoring_finding_task(uuid,uuid,uuid)
 from public, anon, authenticated, service_role;
 grant execute on function public.raise_monitoring_finding_task(uuid,uuid,uuid)
 to authenticated;
+
+-- Keep every non-resolved GitHub review state visible to MCP bundle readers.
+-- One RLS-scoped SQL statement builds the bounded MCP readiness/digest bundle.
+-- SECURITY INVOKER is deliberate: every base-table policy remains authoritative.
+create or replace function public.get_mcp_compliance_bundle(
+  target_organisation_id uuid,
+  target_local_date date,
+  attention_limit integer default 20,
+  monitoring_limit integer default 20
+)
+returns jsonb
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+with
+caller as materialized (
+  select membership.role::text as role, organisation.name
+  from public.memberships as membership
+  join public.organisations as organisation on organisation.id = membership.organisation_id
+  where membership.organisation_id = target_organisation_id
+    and membership.user_id = (select auth.uid())
+),
+bounds as (
+  select greatest(1, least(coalesce(attention_limit, 20), 50)) as attention_limit,
+         greatest(1, least(coalesce(monitoring_limit, 20), 50)) as monitoring_limit
+),
+latest_report as materialized (
+  select snapshot.id, snapshot.payload, snapshot.published_at
+  from public.leadership_report_snapshots as snapshot
+  cross join caller
+  where snapshot.organisation_id = target_organisation_id
+  order by snapshot.published_at desc, snapshot.id desc
+  limit 1
+),
+risk_config as (
+  select coalesce(config.low_max, 4) as low_max,
+         coalesce(config.moderate_max, 9) as moderate_max,
+         coalesce(config.high_max, 14) as high_max
+  from caller
+  left join public.risk_matrix_config as config on config.organisation_id = target_organisation_id
+),
+latest_register as (
+  select register.id
+  from public.soa_registers as register
+  cross join caller
+  where register.organisation_id = target_organisation_id
+  order by register.version desc, register.id desc
+  limit 1
+),
+soa_summary as (
+  select count(*) filter (where item.status <> 'not_applicable')::integer as total,
+         case when count(*) filter (where item.status <> 'not_applicable') = 0 then 0 else
+           round(100 * sum(case item.status::text
+             when 'in_progress' then 0.4 when 'established' then 0.7
+             when 'operational' then 0.9 when 'advanced' then 1 else 0 end)
+             filter (where item.status <> 'not_applicable')
+             / count(*) filter (where item.status <> 'not_applicable'))::integer
+         end as percent
+  from latest_register as register
+  left join public.soa_items as item
+    on item.soa_register_id = register.id and item.organisation_id = target_organisation_id
+),
+risk_rows as materialized (
+  select risk.id, risk.reference, risk.title, risk.review_date,
+         (risk.residual_likelihood * risk.residual_impact)::integer as score
+  from public.risks as risk
+  cross join caller
+  where risk.organisation_id = target_organisation_id and risk.status <> 'closed'
+),
+risk_summary as (
+  select count(*) filter (where risk.score <= config.low_max)::integer as low,
+         count(*) filter (where risk.score > config.low_max and risk.score <= config.moderate_max)::integer as moderate,
+         count(*) filter (where risk.score > config.moderate_max and risk.score <= config.high_max)::integer as high,
+         count(*) filter (where risk.score > config.high_max)::integer as very_high
+  from risk_config as config left join risk_rows as risk on true
+),
+task_summary as (
+  select count(*)::integer as open,
+         count(*) filter (where task.due_on is not null and task.due_on < target_local_date)::integer as overdue
+  from public.tasks as task cross join caller
+  where task.organisation_id = target_organisation_id and task.status in ('open','in_progress')
+),
+evidence_summary as (
+  select count(*)::integer as total,
+         count(*) filter (where evidence.valid_until >= target_local_date and evidence.valid_until <= target_local_date + 30)::integer as expiring,
+         count(*) filter (where evidence.valid_until < target_local_date)::integer as expired
+  from public.evidence as evidence cross join caller
+  where evidence.organisation_id = target_organisation_id and evidence.status not in ('superseded','withdrawn')
+),
+audit_summary as (
+  select count(*)::integer as open
+  from public.audits as audit cross join caller
+  where audit.organisation_id = target_organisation_id and audit.status <> 'closed'
+),
+nonconformity_summary as (
+  select count(*)::integer as open
+  from public.audit_findings as finding cross join caller
+  where finding.organisation_id = target_organisation_id and finding.status <> 'closed' and finding.severity <> 'observation'
+),
+live_overview as (
+  select jsonb_build_object(
+    'soaPercent', coalesce(soa.percent, 0), 'soaTotal', coalesce(soa.total, 0),
+    'riskBands', jsonb_build_object('low', coalesce(risk.low, 0), 'moderate', coalesce(risk.moderate, 0), 'high', coalesce(risk.high, 0), 'very_high', coalesce(risk.very_high, 0)),
+    'tasksOpen', task.open, 'tasksOverdue', task.overdue,
+    'evidence', jsonb_build_object('total', evidence.total, 'expiring', evidence.expiring, 'expired', evidence.expired),
+    'openAudits', audit.open, 'openNonConformities', nonconformity.open
+  ) as payload
+  from soa_summary soa cross join risk_summary risk cross join task_summary task
+  cross join evidence_summary evidence cross join audit_summary audit cross join nonconformity_summary nonconformity
+),
+attention_candidates as materialized (
+  select 'task:' || task.id::text as id, 'task'::text as source, 'overdue_task'::text as category,
+         'high'::text as severity, 3 as severity_rank, 1 as category_rank,
+         'Overdue task: ' || task.title as summary, task.due_on as due_on, null::timestamptz as observed_at
+  from public.tasks task cross join caller
+  where task.organisation_id = target_organisation_id and task.status in ('open','in_progress') and task.due_on < target_local_date
+  union all
+  select 'evidence:' || evidence.id::text, 'evidence', 'stale_evidence',
+         case when evidence.valid_until < target_local_date then 'critical' else 'high' end,
+         case when evidence.valid_until < target_local_date then 4 else 3 end, 2,
+         case when evidence.valid_until < target_local_date then 'Expired evidence: ' else 'Expiring evidence: ' end || evidence.title,
+         evidence.valid_until, null::timestamptz
+  from public.evidence evidence cross join caller
+  where evidence.organisation_id = target_organisation_id and evidence.status not in ('superseded','withdrawn')
+    and evidence.valid_until is not null and evidence.valid_until <= target_local_date + 30
+  union all
+  select 'policy:' || policy.id::text, 'policy', 'policy_review', 'high', 3, 3,
+         'Policy review due: ' || policy.reference || ' ' || policy.title, policy.review_due, null::timestamptz
+  from public.policies policy cross join caller
+  where policy.organisation_id = target_organisation_id and policy.status = 'approved' and policy.review_due <= target_local_date
+  union all
+  select 'risk:' || risk.id::text, 'risk', 'high_risk', case when risk.score > config.high_max then 'critical' else 'high' end,
+         case when risk.score > config.high_max then 4 else 3 end, 4,
+         case when risk.score > config.high_max then 'Very high residual risk: ' else 'High residual risk: ' end || risk.reference || ' ' || risk.title,
+         risk.review_date, null::timestamptz
+  from risk_rows risk cross join risk_config config where risk.score > config.moderate_max
+  union all
+  select 'audit_finding:' || finding.id::text, 'audit_finding', 'unresolved_finding',
+         case finding.severity::text when 'major_nc' then 'critical' when 'minor_nc' then 'high' else 'medium' end,
+         case finding.severity::text when 'major_nc' then 4 when 'minor_nc' then 3 else 2 end, 5,
+         'Unresolved ' || case finding.severity::text when 'major_nc' then 'major non-conformity' when 'minor_nc' then 'minor non-conformity' else 'observation' end || ' in audit ' || audit.reference,
+         null::date, finding.created_at
+  from public.audit_findings finding join public.audits audit on audit.id = finding.audit_id and audit.organisation_id = finding.organisation_id
+  cross join caller
+  where finding.organisation_id = target_organisation_id and finding.status <> 'closed'
+),
+attention_top as (
+  select candidate.* from attention_candidates candidate cross join bounds
+  order by candidate.severity_rank desc,
+    coalesce(candidate.due_on, (candidate.observed_at at time zone 'Europe/London')::date, 'infinity'::date),
+    candidate.category_rank, candidate.source, candidate.id
+  limit (select attention_limit + 1 from bounds)
+),
+attention_json as (
+  select coalesce(jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
+    'id', id, 'source', source, 'category', category, 'severity', severity, 'summary', summary,
+    'dueOn', due_on, 'observedOn', observed_at
+  )) order by severity_rank desc, coalesce(due_on, (observed_at at time zone 'Europe/London')::date, 'infinity'::date), category_rank, source, id), '[]'::jsonb) as items
+  from attention_top
+),
+monitoring_top as (
+  select finding.id, finding.control_ref, finding.severity::text as severity, finding.title, finding.status::text as status,
+         (finding.task_id is not null) as has_remediation_task, finding.detected_at, finding.resolved_at
+  from public.monitoring_findings finding cross join caller cross join bounds
+  where finding.organisation_id = target_organisation_id and finding.status in ('open','acknowledged','in_progress','exception_requested','risk_accepted')
+  order by finding.severity desc, finding.detected_at desc, finding.id
+  limit (select monitoring_limit + 1 from bounds)
+),
+monitoring_json as (
+  select coalesce(jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
+    'id', 'monitoring_finding:' || id::text, 'severity', severity, 'status', status, 'title', title,
+    'controlRef', nullif(control_ref, ''), 'detectedAt', detected_at, 'resolvedAt', resolved_at,
+    'hasRemediationTask', has_remediation_task
+  )) order by severity desc, detected_at desc, id), '[]'::jsonb) as items
+  from monitoring_top
+),
+delivery as (
+  select jsonb_build_object('id', delivery.id, 'status', delivery.status::text, 'deliveredAt', delivery.delivered_at) as value
+  from public.daily_digest_deliveries delivery cross join caller
+  where caller.role = 'owner' and delivery.organisation_id = target_organisation_id and delivery.digest_on = target_local_date
+  limit 1
+)
+select jsonb_build_object(
+  'schemaVersion', 1,
+  'workspace', jsonb_build_object('id', target_organisation_id, 'name', caller.name, 'role', caller.role),
+  'overviewSource', case when caller.role = 'member' then 'published' else 'live' end,
+  'overview', case when caller.role = 'member' then latest_report.payload else live_overview.payload end,
+  'attentionItems', attention_json.items,
+  'monitoringFindings', monitoring_json.items,
+  'latestLeadershipReport', case when latest_report.id is null then null else jsonb_build_object('id', latest_report.id, 'publishedAt', latest_report.published_at) end,
+  'delivery', delivery.value
+)
+from caller
+cross join live_overview cross join attention_json cross join monitoring_json
+left join latest_report on true left join delivery on true;
+$$;
+
+alter function public.get_mcp_compliance_bundle(uuid,date,integer,integer) owner to postgres;
+revoke all on function public.get_mcp_compliance_bundle(uuid,date,integer,integer) from public, anon, service_role;
+grant execute on function public.get_mcp_compliance_bundle(uuid,date,integer,integer) to authenticated;

@@ -1,5 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { CheckSeverity } from "@/features/monitoring/domain/monitor-provider";
+import {
+  ACTIVE_MONITORING_FINDING_STATUSES,
+  type ActiveMonitoringFindingStatus,
+} from "@/features/monitoring/domain/finding-status";
 
 export type MemberMonitoringData = {
   connectedSystems: Array<{
@@ -14,7 +18,7 @@ export type MemberMonitoringData = {
     severity: CheckSeverity;
     title: string;
     detail: string;
-    status: "open" | "acknowledged";
+    status: ActiveMonitoringFindingStatus;
     detectedAt: string;
   }>;
 };
@@ -32,7 +36,7 @@ type FindingRow = {
   severity: CheckSeverity;
   title: string;
   detail: string;
-  status: "open" | "acknowledged";
+  status: ActiveMonitoringFindingStatus;
   detected_at: string;
 };
 
@@ -48,7 +52,7 @@ export async function loadMemberMonitoring(
       .from("monitoring_findings")
       .select("id,control_ref,severity,title,detail,status,detected_at")
       .eq("organisation_id", organisationId)
-      .in("status", ["open", "acknowledged"])
+      .in("status", [...ACTIVE_MONITORING_FINDING_STATUSES])
       .order("detected_at", { ascending: false })
       .limit(100),
   ]);

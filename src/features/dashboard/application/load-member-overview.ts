@@ -1,4 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  ACTIVE_MONITORING_FINDING_STATUSES,
+  type ActiveMonitoringFindingStatus,
+} from "@/features/monitoring/domain/finding-status";
 
 type ConnectedSystemRow = {
   id: string;
@@ -9,7 +13,7 @@ type ConnectedSystemRow = {
 
 type FindingRow = {
   severity: "low" | "medium" | "high" | "critical";
-  status: "open" | "acknowledged";
+  status: ActiveMonitoringFindingStatus;
 };
 
 export type MemberOverviewData = {
@@ -53,7 +57,7 @@ export async function loadMemberOverview(
       .from("monitoring_findings")
       .select("severity,status")
       .eq("organisation_id", context.organisationId)
-      .in("status", ["open", "acknowledged"]),
+      .in("status", [...ACTIVE_MONITORING_FINDING_STATUSES]),
     supabase
       .from("leadership_report_snapshots")
       .select("published_at")

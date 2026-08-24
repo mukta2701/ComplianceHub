@@ -7,6 +7,7 @@ import { deliverAlert, type AlertChannel, type AlertFinding, type DeliverPorts }
 import { findingKey, type MonitorDependencies, type MonitorSource } from "./monitor-run";
 import { createTwilioWhatsAppPort } from "./twilio-whatsapp";
 import type { MonitorProviderKind, CheckSeverity } from "../domain/monitor-provider";
+import { ACTIVE_MONITORING_FINDING_STATUSES } from "../domain/finding-status";
 import { collectIdPages, collectStringCursorPages } from "@/lib/supabase/paginate";
 
 // A finding key is `checkId::subjectId`; both halves are opaque strings, so split
@@ -123,7 +124,8 @@ export function buildMonitorDependencies(
         let query = supabase.from("monitoring_findings")
           .select("id,check_id,subject_id")
           .eq("organisation_id", organisationId)
-          .in("status", ["open", "acknowledged"])
+          .eq("finding_origin", "legacy")
+          .in("status", [...ACTIVE_MONITORING_FINDING_STATUSES])
           .order("id", { ascending: true })
           .limit(limit);
         if (afterId) query = query.gt("id", afterId);
@@ -134,7 +136,7 @@ export function buildMonitorDependencies(
       return rows.map((row) => findingKey(row.check_id as string, row.subject_id as string));
     },
     saveFinding: async (finding) => {
-      // Upsert on the (organisation_id, check_id, subject_id) dedup key: inserts a
+      // Upsert on the origin-aware stable identity: inserts a
       // new open finding, or re-opens (fresh detected_at, cleared resolved_at) one
       // that had resolved. Acknowledged findings are filtered out upstream, so this
       // never clobbers an acknowledgement.
@@ -143,8 +145,9 @@ export function buildMonitorDependencies(
         check_id: finding.checkId, control_ref: finding.controlRef,
         subject_type: finding.subjectType, subject_id: finding.subjectId,
         severity: finding.severity, title: finding.title, detail: finding.detail,
+        finding_origin: "legacy", mapping_version: "legacy",
         status: "open", detected_at: new Date().toISOString(), resolved_at: null,
-      }, { onConflict: "organisation_id,check_id,subject_id" });
+      }, { onConflict: "organisation_id,finding_origin,stable_subject_identity,check_id,mapping_version" });
       if (error) throw error;
     },
     resolveFindings: async (organisationId, keys) => {
@@ -154,7 +157,8 @@ export function buildMonitorDependencies(
         const { data, error } = await supabase.from("monitoring_findings")
           .update({ status: "resolved", resolved_at: new Date().toISOString() })
           .eq("organisation_id", organisationId).eq("check_id", checkId).eq("subject_id", subjectId)
-          .in("status", ["open", "acknowledged"]).select("id");
+          .eq("finding_origin", "legacy")
+          .in("status", [...ACTIVE_MONITORING_FINDING_STATUSES]).select("id");
         if (error) throw error;
         resolved += data?.length ?? 0;
       }

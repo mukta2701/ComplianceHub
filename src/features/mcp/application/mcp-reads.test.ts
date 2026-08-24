@@ -181,7 +181,9 @@ describe("MCP public read services", () => {
     expect(result.findings[0]).not.toHaveProperty("taskId");
     const query = fake.states.find(({ table }) => table === "monitoring_findings")!;
     expect(query.select).toBe("id,control_ref,severity,title,status,task_id,detected_at,resolved_at");
-    expect(query.filters).toContainEqual(["in", "status", ["open", "acknowledged"]]);
+    expect(query.filters).toContainEqual(["in", "status", [
+      "open", "acknowledged", "in_progress", "exception_requested", "risk_accepted",
+    ]]);
   });
 
   it("sorts shuffled monitoring rows deterministically and fails closed on query errors", async () => {
@@ -246,6 +248,12 @@ describe("MCP public read services", () => {
     const filteredQuery = filtered.states.find(({ table }) => table === "monitoring_findings")!;
     expect(filteredQuery.filters).toEqual(expect.arrayContaining([["eq", "status", "acknowledged"], ["eq", "severity", "high"]]));
     expect(filteredQuery.limit).toBe(2);
+
+    const accepted = fakeSupabase({ memberships: membership(), monitoring_findings: serverResolver });
+    await expect(listMonitoringFindings(accepted.client as never, USER, { status: "risk_accepted" }))
+      .resolves.toMatchObject({ findings: [] });
+    expect(accepted.states.find(({ table }) => table === "monitoring_findings")?.filters)
+      .toContainEqual(["eq", "status", "risk_accepted"]);
   });
 
   it("prepares a deterministic fact hash and exposes Owner-only delivery state", async () => {

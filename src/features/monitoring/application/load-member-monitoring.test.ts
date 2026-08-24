@@ -23,6 +23,14 @@ describe("loadMemberMonitoring", () => {
         detail: "The default branch is not protected.",
         status: "open",
         detected_at: "2026-01-03T00:00:00Z",
+      }, {
+        id: "finding-2",
+        control_ref: "A.8.32",
+        severity: "medium",
+        title: "Exception review",
+        detail: "The technical condition remains unresolved.",
+        status: "exception_requested",
+        detected_at: "2026-01-04T00:00:00Z",
       }],
       error: null,
     });
@@ -45,11 +53,22 @@ describe("loadMemberMonitoring", () => {
         detail: "The default branch is not protected.",
         status: "open",
         detectedAt: "2026-01-03T00:00:00Z",
+      }, {
+        id: "finding-2",
+        controlRef: "A.8.32",
+        severity: "medium",
+        title: "Exception review",
+        detail: "The technical condition remains unresolved.",
+        status: "exception_requested",
+        detectedAt: "2026-01-04T00:00:00Z",
       }],
     });
 
     expect(from).toHaveBeenCalledWith("monitoring_findings");
     expect(findingQuery.select).toHaveBeenCalledWith("id,control_ref,severity,title,detail,status,detected_at");
+    expect(findingQuery.in).toHaveBeenCalledWith("status", [
+      "open", "acknowledged", "in_progress", "exception_requested", "risk_accepted",
+    ]);
     expect(rpc).toHaveBeenCalledWith("list_connected_monitor_sources", { target_organisation_id: ORGANISATION_ID });
   });
 

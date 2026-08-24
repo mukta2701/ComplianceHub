@@ -9,6 +9,21 @@ const hoisted = vi.hoisted(() => ({
       title: "Branch protection disabled", detail: "Default branch is not protected.",
       status: "open", task_id: null, detected_at: "2026-01-03T00:00:00Z", resolved_at: null,
     }, {
+      id: "finding-progress", check_id: "branch-protection", control_ref: "A.8.32",
+      subject_type: "github_repo", subject_id: "example/repo", severity: "medium",
+      title: "Remediation underway", detail: "The condition remains active.",
+      status: "in_progress", task_id: null, detected_at: "2026-01-02T00:00:00Z", resolved_at: null,
+    }, {
+      id: "finding-exception", check_id: "branch-protection", control_ref: "A.8.32",
+      subject_type: "github_repo", subject_id: "example/repo", severity: "medium",
+      title: "Exception requested", detail: "The condition remains active.",
+      status: "exception_requested", task_id: null, detected_at: "2026-01-02T00:00:00Z", resolved_at: null,
+    }, {
+      id: "finding-risk", check_id: "branch-protection", control_ref: "A.8.32",
+      subject_type: "github_repo", subject_id: "example/repo", severity: "medium",
+      title: "Risk accepted", detail: "The condition remains active.",
+      status: "risk_accepted", task_id: null, detected_at: "2026-01-02T00:00:00Z", resolved_at: null,
+    }, {
       id: "finding-resolved", check_id: "org-2fa", control_ref: "A.5.17",
       subject_type: "github_org", subject_id: "example", severity: "medium",
       title: "Resolved finding must stay hidden", detail: "This is historical.",
@@ -57,6 +72,9 @@ describe("operator monitoring page", () => {
     }
     expect(screen.queryByRole("heading", { name: "Alert channels" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Manage connections and alerts" })).toHaveAttribute("href", "/app/integrations");
+    for (const visible of ["Remediation underway", "Exception requested", "Risk accepted"]) {
+      expect(screen.getByText(visible)).toBeInTheDocument();
+    }
     expect(screen.queryByText("Resolved finding must stay hidden")).not.toBeInTheDocument();
   });
 });

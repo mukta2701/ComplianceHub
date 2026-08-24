@@ -1,5 +1,5 @@
 begin;
-select plan(26);
+select plan(28);
 
 select has_function('public','get_mcp_compliance_bundle',array['uuid','date','integer','integer'],'coherent MCP bundle RPC exists');
 select is((select prosecdef from pg_proc where oid='public.get_mcp_compliance_bundle(uuid,date,integer,integer)'::regprocedure),false,'bundle is security invoker');
@@ -54,6 +54,15 @@ select public.set_daily_digest_channel(
   '88000000-0000-4000-8000-000000000201'
 );
 set local role service_role;
+insert into public.monitoring_findings(
+  id,organisation_id,check_id,control_ref,subject_type,subject_id,severity,title,status,detected_at,resolved_at
+) values
+ ('88000000-0000-4000-8000-000000000401',current_setting('app.bundle_org')::uuid,'bundle-open','A.8.32','github_repository','bundle/open','medium','Bundle open finding','open','2026-08-06 08:00:00+00',null),
+ ('88000000-0000-4000-8000-000000000402',current_setting('app.bundle_org')::uuid,'bundle-ack','A.8.32','github_repository','bundle/ack','medium','Bundle acknowledged finding','acknowledged','2026-08-06 08:01:00+00',null),
+ ('88000000-0000-4000-8000-000000000403',current_setting('app.bundle_org')::uuid,'bundle-progress','A.8.32','github_repository','bundle/progress','medium','Bundle in-progress finding','in_progress','2026-08-06 08:02:00+00',null),
+ ('88000000-0000-4000-8000-000000000404',current_setting('app.bundle_org')::uuid,'bundle-exception','A.8.32','github_repository','bundle/exception','medium','Bundle exception finding','exception_requested','2026-08-06 08:03:00+00',null),
+ ('88000000-0000-4000-8000-000000000405',current_setting('app.bundle_org')::uuid,'bundle-risk','A.8.32','github_repository','bundle/risk','medium','Bundle risk-accepted finding','risk_accepted','2026-08-06 08:04:00+00',null),
+ ('88000000-0000-4000-8000-000000000406',current_setting('app.bundle_org')::uuid,'bundle-resolved','A.8.32','github_repository','bundle/resolved','medium','Bundle resolved finding','resolved','2026-08-06 08:05:00+00','2026-08-06 08:06:00+00');
 select public.reserve_daily_digest_delivery_server(
   current_setting('app.bundle_org')::uuid,'88000000-0000-4000-8000-000000000001','2026-08-06',repeat('a',64),
   '{"text":"Reserved","blocks":[]}'::jsonb
@@ -70,6 +79,13 @@ select is(jsonb_array_length(public.get_mcp_compliance_bundle(current_setting('a
 select is(public.get_mcp_compliance_bundle(current_setting('app.bundle_org')::uuid,'2026-08-06',1,2)#>>'{attentionItems,1,id}','audit_finding:88000000-0000-4000-8000-000000000302','BST-local priority ties use severity after date');
 select isnt(public.get_mcp_compliance_bundle(current_setting('app.bundle_org')::uuid,'2026-08-06',2,2)->'delivery','null'::jsonb,'Owner receives delivery state');
 select ok(public.get_mcp_compliance_bundle(current_setting('app.bundle_org')::uuid,'2026-08-06',2,2)::text !~ '"(body|detail|description|root_cause|corrective_action|owner_id|created_by|published_by|webhook)"\s*:', 'bundle excludes restricted keys');
+select is(jsonb_array_length(public.get_mcp_compliance_bundle(current_setting('app.bundle_org')::uuid,'2026-08-06',2,10)->'monitoringFindings'),5,'bundle retains every non-resolved monitoring state and excludes resolved history');
+select is(
+  (select pg_catalog.jsonb_agg(item->>'status' order by item->>'status')
+   from pg_catalog.jsonb_array_elements(public.get_mcp_compliance_bundle(current_setting('app.bundle_org')::uuid,'2026-08-06',2,10)->'monitoringFindings') item),
+  '["acknowledged","exception_requested","in_progress","open","risk_accepted"]'::jsonb,
+  'bundle exposes the complete non-resolved lifecycle'
+);
 
 select set_config('request.jwt.claims','{"sub":"88000000-0000-4000-8000-000000000002","role":"authenticated"}',true);
 select is(public.get_mcp_compliance_bundle(current_setting('app.bundle_org')::uuid,'2026-08-06',2,2)->>'overviewSource','live','Admin receives live readiness');

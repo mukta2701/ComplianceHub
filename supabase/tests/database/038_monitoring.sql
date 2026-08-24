@@ -1,5 +1,5 @@
 begin;
-select plan(13);
+select plan(14);
 
 -- Monitoring runs on the RLS-bypassing service client, so tenant isolation rests
 -- entirely on the tables' own RLS. This suite proves that safety net directly:
@@ -42,11 +42,26 @@ select throws_ok(
   $$ insert into public.monitoring_findings(organisation_id,check_id,subject_type,subject_id,severity,title)
      values(current_setting('app.org_a')::uuid,'github.branch_protection','github_repo','acme/isms','high','dup') $$,
   '23505', NULL, 'the dedup key blocks a duplicate finding on the same subject');
+select lives_ok(
+  $$ insert into public.monitoring_findings(
+       organisation_id,check_id,subject_type,subject_id,severity,title,finding_origin,mapping_version
+     ) values (
+       current_setting('app.org_a')::uuid,'github.branch_protection','github_repo','acme/isms','high','origin-aware upsert','legacy','legacy'
+     ) on conflict (
+       organisation_id,finding_origin,stable_subject_identity,check_id,mapping_version
+     ) do update set title=excluded.title $$,
+  'the legacy monitor upsert targets the deployed origin-aware unique identity'
+);
 select set_config('compliancehub.github_materialiser','on',true);
 select set_config('compliancehub.github_finding_transition','materialiser',true);
 select lives_ok(
-  $$ insert into public.monitoring_findings(organisation_id,check_id,control_ref,subject_type,subject_id,severity,title,finding_origin)
-     values(current_setting('app.org_a')::uuid,'github.branch_protection','A.8.32','github_repo','acme/isms','high','Official GitHub result','github') $$,
+  $$ insert into public.monitoring_findings(
+       organisation_id,check_id,control_ref,subject_type,subject_id,severity,title,
+       finding_origin,provider_repository_id,mapping_version
+     ) values (
+       current_setting('app.org_a')::uuid,'github.branch_protection','A.8.32','github_repo','acme/isms','high','Official GitHub result',
+       'github',73001,'github-iso-27001-v1'
+     ) $$,
   'official GitHub findings cannot collide with legacy monitor findings'
 );
 

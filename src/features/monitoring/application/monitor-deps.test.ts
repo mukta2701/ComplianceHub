@@ -109,6 +109,42 @@ describe("buildMonitorDependencies WhatsApp delivery", () => {
     expect(from).toHaveBeenCalledTimes(3);
   });
 
+  it("scopes legacy monitoring reads, writes, and resolutions to the origin-aware identity", async () => {
+    const builders: Array<Record<string, ReturnType<typeof vi.fn>>> = [];
+    const from = vi.fn(() => {
+      const builder: Record<string, ReturnType<typeof vi.fn>> = {};
+      for (const method of ["select", "eq", "in", "order", "limit", "gt", "update"]) {
+        builder[method] = vi.fn(() => builder);
+      }
+      builder.upsert = vi.fn().mockResolvedValue({ error: null });
+      builder.then = vi.fn((resolve) => Promise.resolve({ data: [], error: null }).then(resolve));
+      builders.push(builder);
+      return builder;
+    });
+    const deps = buildMonitorDependencies({ from } as unknown as SupabaseClient);
+
+    await deps.listOpenFindingKeys("org1");
+    await deps.saveFinding(finding);
+    await deps.resolveFindings("org1", ["github.branch_protection::acme/isms"]);
+
+    const activeRead = builders[0]!;
+    expect(activeRead.eq).toHaveBeenCalledWith("finding_origin", "legacy");
+    expect(activeRead.in).toHaveBeenCalledWith("status", [
+      "open", "acknowledged", "in_progress", "exception_requested", "risk_accepted",
+    ]);
+
+    expect(builders[1]!.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ finding_origin: "legacy", mapping_version: "legacy" }),
+      { onConflict: "organisation_id,finding_origin,stable_subject_identity,check_id,mapping_version" },
+    );
+
+    const resolution = builders[2]!;
+    expect(resolution.eq).toHaveBeenCalledWith("finding_origin", "legacy");
+    expect(resolution.in).toHaveBeenCalledWith("status", [
+      "open", "acknowledged", "in_progress", "exception_requested", "risk_accepted",
+    ]);
+  });
+
   it("delivers in-app findings to both Owner and Admin operators", async () => {
     const membershipBuilder: Record<string, ReturnType<typeof vi.fn>> = {};
     membershipBuilder.select = vi.fn(() => membershipBuilder);

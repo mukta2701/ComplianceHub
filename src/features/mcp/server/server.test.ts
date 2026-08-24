@@ -108,6 +108,7 @@ describe("ComplianceHub MCP server", () => {
       ["get_compliance_overview", { workspaceId: WORKSPACE_ID }],
       ["list_attention_items", { workspaceId: WORKSPACE_ID, categories: ["overdue_task"], severity: "high", limit: 5 }],
       ["list_monitoring_findings", { workspaceId: WORKSPACE_ID, status: "open", severity: "critical", limit: 5 }],
+      ["list_monitoring_findings", { workspaceId: WORKSPACE_ID, status: "risk_accepted", limit: 5 }],
       ["get_latest_leadership_report", { workspaceId: WORKSPACE_ID }],
       ["prepare_daily_digest", { workspaceId: WORKSPACE_ID, localDate: "2026-08-07" }],
       ["post_daily_digest", { workspaceId: WORKSPACE_ID, localDate: "2026-08-07", factHash: "a".repeat(64), headline: "Compliance needs attention", priorities: [], actions: [] }],

@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { CallToolRequestSchema, ListToolsRequestSchema, type CallToolResult, type ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
+import { MONITORING_FINDING_STATUSES } from "@/features/monitoring/domain/finding-status";
 import { readinessReportSchema } from "@/features/reports/application/leadership-snapshots";
 import {
   getComplianceOverview,
@@ -60,7 +61,7 @@ const attentionInputSchema = z.object({
   limit: z.number().int().min(1).max(50).default(20).optional(),
 }).strict();
 const monitoringInputSchema = z.object({
-  workspaceId: uuid.optional(), status: z.enum(["open", "acknowledged", "resolved"]).optional(),
+  workspaceId: uuid.optional(), status: z.enum(MONITORING_FINDING_STATUSES).optional(),
   severity: z.enum(DIGEST_SEVERITIES).optional(), limit: z.number().int().min(1).max(50).default(20).optional(),
 }).strict();
 const prepareInputSchema = z.object({ workspaceId: uuid.optional(), localDate }).strict();
@@ -73,7 +74,7 @@ const attentionItem = z.object({
 }).strict();
 const monitoringFinding = z.object({
   id: z.string().min(1).max(200), severity: z.enum(DIGEST_SEVERITIES),
-  status: z.enum(["open", "acknowledged", "resolved"]), title: z.string().min(1).max(240),
+  status: z.enum(MONITORING_FINDING_STATUSES), title: z.string().min(1).max(240),
   controlRef: z.string().min(1).max(80).optional(), detectedAt: dateTime,
   resolvedAt: dateTime.nullable(), hasRemediationTask: z.boolean(),
 }).strict();

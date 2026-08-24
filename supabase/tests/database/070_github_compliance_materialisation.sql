@@ -42,6 +42,11 @@ select has_fk('public', 'github_evidence_provenance', 'github_evidence_provenanc
 select has_fk('public', 'github_evidence_provenance', 'github_evidence_provenance_approval_ancestry_fk');
 select has_fk('public', 'github_finding_provenance', 'github_finding_provenance_latest_observation_ancestry_fk');
 select has_fk('public', 'github_finding_provenance', 'github_finding_provenance_latest_approval_ancestry_fk');
+select has_column('public', 'monitoring_findings', 'stable_subject_identity', 'finding deduplication stores a stable origin-specific subject identity');
+select has_column('public', 'monitoring_findings', 'mapping_version', 'finding deduplication includes the reviewed mapping version');
+select has_column('public', 'github_finding_provenance', 'provider_repository_id', 'finding provenance retains the stable GitHub repository identity');
+select has_column('public', 'github_finding_provenance', 'latest_installation_id', 'latest finding ancestry can advance across a GitHub App reinstallation');
+select has_fk('public', 'github_finding_provenance', 'github_finding_provenance_latest_repository_ancestry_fk');
 select is(
   (select checksum from public.github_mapping_packs where version = 'github-iso-27001-v1'),
   'b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',
@@ -131,6 +136,7 @@ insert into public.github_repositories(
  'https://github.com/Compliance-Test/portal','private','main',false,true,true
 );
 
+set local session_replication_role = replica;
 insert into public.github_mapping_packs(id,version,title,checksum,published_at) values (
  '71000000-0000-4000-8000-000000000501','github-test-missing-v1','Test pack with an unresolved ISO requirement',repeat('c',64),now()
 );
@@ -140,7 +146,24 @@ insert into public.github_mapping_entries(
  '71000000-0000-4000-8000-000000000502','71000000-0000-4000-8000-000000000501',
  'github.branch.stale_approvals','github-repository-v1',array['A.8.99'],'medium',
  'Dismiss stale approvals when new commits are pushed.',
- '{"pass":{"kind":"evidence","summary":"Passing creates evidence."},"fail":{"kind":"finding","summary":"Failure creates a finding."},"unknown":{"kind":"explanatory","summary":"Unknown is explanatory."},"not_applicable":{"kind":"explanatory","summary":"Not applicable is explanatory."}}'
+  '{"pass":{"kind":"evidence","summary":"Passing creates evidence."},"fail":{"kind":"finding","summary":"Failure creates a finding."},"unknown":{"kind":"explanatory","summary":"Unknown is explanatory."},"not_applicable":{"kind":"explanatory","summary":"Not applicable is explanatory."}}'
+);
+set local session_replication_role = origin;
+
+insert into public.github_installations(
+ id,organisation_id,provider_installation_id,account_id,account_login,account_type,
+ repository_selection,status,connected_by,permissions,permissions_ok
+) values (
+ '71000000-0000-4000-8000-000000000102','71000000-0000-4000-8000-000000000001',71002,72001,
+ 'Compliance-Test','Organization','selected','active','71000000-0000-4000-8000-000000000001','{"metadata":"read"}',true
+);
+insert into public.github_repositories(
+ id,organisation_id,installation_id,provider_repository_id,owner_login,name,full_name,
+ html_url,visibility,default_branch,archived,selected,available
+) values (
+ '71000000-0000-4000-8000-000000000202','71000000-0000-4000-8000-000000000001',
+ '71000000-0000-4000-8000-000000000102',73001,'Compliance-Test','portal','Compliance-Test/portal',
+ 'https://github.com/Compliance-Test/portal','private','main',false,true,true
 );
 
 insert into public.github_collection_runs(
@@ -161,7 +184,8 @@ insert into public.github_collection_runs(
  ('71000000-0000-4000-8000-000000000311','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000101','71000000-0000-4000-8000-000000000201',73001,'manual','fail-reopen','succeeded',null,now()-interval '3 hours',now()-interval '9 minutes',1,0,1,0,0,extensions.gen_random_uuid(),now()-interval '179 minutes',1),
  ('71000000-0000-4000-8000-000000000312','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000101','71000000-0000-4000-8000-000000000201',73001,'manual','concurrent-pass','succeeded',null,now()-interval '3 hours',now()-interval '7 minutes',1,1,0,0,0,extensions.gen_random_uuid(),now()-interval '179 minutes',1),
  ('71000000-0000-4000-8000-000000000313','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000101','71000000-0000-4000-8000-000000000201',73001,'manual','risk-fail','succeeded',null,now()-interval '3 hours',now()-interval '5 minutes',1,0,1,0,0,extensions.gen_random_uuid(),now()-interval '179 minutes',1),
- ('71000000-0000-4000-8000-000000000314','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000101','71000000-0000-4000-8000-000000000201',73001,'manual','missing-map','succeeded',null,now()-interval '3 hours',now()-interval '3 minutes',1,1,0,0,0,extensions.gen_random_uuid(),now()-interval '179 minutes',1);
+ ('71000000-0000-4000-8000-000000000314','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000101','71000000-0000-4000-8000-000000000201',73001,'manual','missing-map','succeeded',null,now()-interval '3 hours',now()-interval '3 minutes',1,1,0,0,0,extensions.gen_random_uuid(),now()-interval '179 minutes',1),
+ ('71000000-0000-4000-8000-000000000315','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000102','71000000-0000-4000-8000-000000000202',73001,'webhook','reconnected-fail','succeeded',null,now()-interval '3 hours',now()-interval '1 minute',1,0,1,0,0,extensions.gen_random_uuid(),now()-interval '179 minutes',1);
 
 insert into public.github_observations(
  id,organisation_id,installation_id,repository_id,provider_repository_id,collection_run_id,
@@ -181,7 +205,8 @@ insert into public.github_observations(
  ('71000000-0000-4000-8000-000000000411','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000101','71000000-0000-4000-8000-000000000201',73001,'71000000-0000-4000-8000-000000000311','fail-reopen','github.branch.stale_approvals','github-repository-v1','github_repository','Compliance-Test/portal','fail','medium','Failure returned','A newer run detects the condition again.','Dismiss stale approvals when new commits are pushed.',now()-interval '10 minutes',now()+interval '35 hours','https://github.com/Compliance-Test/portal',repeat('b',64),null),
  ('71000000-0000-4000-8000-000000000412','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000101','71000000-0000-4000-8000-000000000201',73001,'71000000-0000-4000-8000-000000000312','concurrent-pass','github.branch.stale_approvals','github-repository-v1','github_repository','Compliance-Test/portal','pass',null,'Concurrent fresh pass','Concurrent calls must materialise this once.',null,now()-interval '8 minutes',now()+interval '35 hours','https://github.com/Compliance-Test/portal',repeat('c',64),null),
  ('71000000-0000-4000-8000-000000000413','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000101','71000000-0000-4000-8000-000000000201',73001,'71000000-0000-4000-8000-000000000313','risk-fail','github.branch.stale_approvals','github-repository-v1','github_repository','Compliance-Test/portal','fail','medium','Accepted risk remains detected','Risk acceptance does not change the technical result.','Dismiss stale approvals when new commits are pushed.',now()-interval '6 minutes',now()+interval '35 hours','https://github.com/Compliance-Test/portal',repeat('d',64),null),
- ('71000000-0000-4000-8000-000000000414','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000101','71000000-0000-4000-8000-000000000201',73001,'71000000-0000-4000-8000-000000000314','missing-map','github.branch.stale_approvals','github-repository-v1','github_repository','Compliance-Test/portal','pass',null,'Unmapped passing observation','The test pack cannot resolve its ISO code.',null,now()-interval '4 minutes',now()+interval '35 hours','https://github.com/Compliance-Test/portal',repeat('e',64),null);
+ ('71000000-0000-4000-8000-000000000414','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000101','71000000-0000-4000-8000-000000000201',73001,'71000000-0000-4000-8000-000000000314','missing-map','github.branch.stale_approvals','github-repository-v1','github_repository','Compliance-Test/portal','pass',null,'Unmapped passing observation','The test pack cannot resolve its ISO code.',null,now()-interval '4 minutes',now()+interval '35 hours','https://github.com/Compliance-Test/portal',repeat('e',64),null),
+ ('71000000-0000-4000-8000-000000000415','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000102','71000000-0000-4000-8000-000000000202',73001,'71000000-0000-4000-8000-000000000315','reconnected-fail','github.branch.stale_approvals','github-repository-v1','github_repository','Compliance-Test/portal','fail','medium','Failure after reconnection','The same stable repository remains non-compliant after GitHub App reconnection.','Dismiss stale approvals when new commits are pushed.',now()-interval '2 minutes',now()+interval '35 hours','https://github.com/Compliance-Test/portal',repeat('f',64),null);
 commit;
 
 create or replace function pg_temp.github_decision(target_observation_id uuid, target_kind text)
@@ -266,6 +291,16 @@ select throws_ok(
   'P0001', 'GitHub mapping entries are immutable', 'mapping entries cannot be removed'
 );
 select throws_ok(
+  $$ insert into public.github_mapping_entries(
+       mapping_pack_id,check_id,rule_version,iso_control_references,failure_severity,remediation,treatments
+     ) values (
+       '91000000-0000-4000-8000-000000000001','github.test.append','github-repository-v1',array['A.8.32'],'medium',
+       'This direct append must never become part of a published mapping pack.',
+       '{"pass":{"kind":"evidence","summary":"Passing creates evidence."},"fail":{"kind":"finding","summary":"Failure creates a finding."},"unknown":{"kind":"explanatory","summary":"Unknown is explanatory."},"not_applicable":{"kind":"explanatory","summary":"Not applicable is explanatory."}}'
+     ) $$,
+  'P0001', 'GitHub mapping entries are immutable', 'published mapping-pack content is append-proof'
+);
+select throws_ok(
   $$ update public.github_mapping_approvals set approved_by='71000000-0000-4000-8000-000000000002' where id=current_setting('app.github_approval')::uuid $$,
   'P0001', 'GitHub mapping approval identity is immutable', 'approval identity and actor cannot be rewritten'
 );
@@ -304,6 +339,36 @@ select is((current_setting('app.material_summary')::jsonb->>'evidence_created'):
 select is((select count(*) from public.evidence where organisation_id='71000000-0000-4000-8000-000000000001'),1::bigint,'one pass produces exactly one evidence row');
 select is((select count(*) from public.evidence_links link join public.controls control on control.id=link.control_id where link.organisation_id='71000000-0000-4000-8000-000000000001' and control.code like 'CH-%'),1::bigint,'ISO requirement A.8.32 resolves through the catalogue to an internal control link');
 select is((select count(*) from public.github_evidence_provenance where observation_id='71000000-0000-4000-8000-000000000401'),1::bigint,'evidence retains exact observation/run/repository/approval provenance');
+select lives_ok(
+  $$ update public.evidence set status='expiring'
+     where id=(select evidence_id from public.github_evidence_provenance where observation_id='71000000-0000-4000-8000-000000000401') $$,
+  'the service-role daily sweep can mark verified official evidence expiring'
+);
+select throws_ok(
+  $$ update public.evidence set status='superseded'
+     where id=(select evidence_id from public.github_evidence_provenance where observation_id='71000000-0000-4000-8000-000000000401') $$,
+  'P0001', 'official GitHub evidence lifecycle is server-managed',
+  'a generic service client still cannot supersede official evidence'
+);
+reset role;
+
+set session_replication_role = replica;
+update public.evidence
+set status='current', valid_until=current_date-1
+where id=(select evidence_id from public.github_evidence_provenance where observation_id='71000000-0000-4000-8000-000000000401');
+set session_replication_role = origin;
+set role service_role;
+select lives_ok(
+  $$ update public.evidence set status='expired'
+     where id=(select evidence_id from public.github_evidence_provenance where observation_id='71000000-0000-4000-8000-000000000401') $$,
+  'the service-role daily sweep can mark verified official evidence expired'
+);
+select throws_ok(
+  $$ update public.evidence set status='withdrawn'
+     where id=(select evidence_id from public.github_evidence_provenance where observation_id='71000000-0000-4000-8000-000000000401') $$,
+  'P0001', 'official GitHub evidence lifecycle is server-managed',
+  'a generic service client still cannot withdraw official evidence'
+);
 reset role;
 
 set role authenticated;
@@ -472,6 +537,28 @@ select set_config('app.material_summary',public.materialise_github_observations_
   pg_temp.github_decision('71000000-0000-4000-8000-000000000413','finding')
 )::text,false);
 select is((select status::text from public.monitoring_findings where finding_origin='github'),'risk_accepted','a repeat technical failure does not turn risk acceptance into a pass');
+
+select set_config('app.material_summary',public.materialise_github_observations_server(
+  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000315',
+  'github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',
+  pg_temp.github_decision('71000000-0000-4000-8000-000000000415','finding')
+)::text,false);
+select is((current_setting('app.material_summary')::jsonb->>'findings_refreshed')::int,1,'reinstallation refreshes the same stable GitHub finding without conflict');
+select is((select count(*) from public.monitoring_findings where finding_origin='github'),1::bigint,'reinstallation does not duplicate the stable repository finding');
+select is((select status::text from public.monitoring_findings where finding_origin='github'),'risk_accepted','reinstallation refresh preserves the unresolved human state');
+select is((select provider_repository_id from public.github_finding_provenance),73001::bigint,'finding identity retains the provider repository ID');
+select is((select mapping_version from public.github_finding_provenance),'github-iso-27001-v1','finding identity retains the reviewed mapping version');
+select is((select installation_id from public.github_finding_provenance),'71000000-0000-4000-8000-000000000101'::uuid,'initial installation ancestry remains immutable');
+select is((select latest_installation_id from public.github_finding_provenance),'71000000-0000-4000-8000-000000000102'::uuid,'latest ancestry advances to the reconnected installation');
+select is((select latest_repository_id from public.github_finding_provenance),'71000000-0000-4000-8000-000000000202'::uuid,'latest ancestry advances to the reconnected repository row');
+select is((select latest_failed_observation_id from public.github_finding_provenance),'71000000-0000-4000-8000-000000000415'::uuid,'latest failed observation retains its reconnected ancestry');
+select is(
+  (select identity_key from public.github_finding_provenance),
+  pg_catalog.encode(extensions.digest(pg_catalog.convert_to(pg_catalog.jsonb_build_array(
+    '71000000-0000-4000-8000-000000000001'::uuid,73001::bigint,'github.branch.stale_approvals','github-iso-27001-v1'
+  )::text,'UTF8'),'sha256'),'hex'),
+  'GitHub finding identity is exactly workspace, provider repository, check, and mapping version'
+);
 
 select set_config('app.bad_approval',public.approve_github_mapping_pack_server(
   '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001','github-test-missing-v1',repeat('c',64)

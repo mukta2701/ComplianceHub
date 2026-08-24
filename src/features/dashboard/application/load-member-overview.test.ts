@@ -25,7 +25,13 @@ describe("loadMemberOverview", () => {
         error: null,
       }),
       monitoring_findings: query({
-        data: [{ severity: "critical", status: "open" }, { severity: "low", status: "acknowledged" }],
+        data: [
+          { severity: "critical", status: "open" },
+          { severity: "low", status: "acknowledged" },
+          { severity: "high", status: "in_progress" },
+          { severity: "medium", status: "exception_requested" },
+          { severity: "low", status: "risk_accepted" },
+        ],
         error: null,
       }),
       leadership_report_snapshots: query({
@@ -55,12 +61,15 @@ describe("loadMemberOverview", () => {
       jobTitle: "Developer",
       policies: { approved: 2, acceptedCurrent: 1 },
       connectedSystems: [{ id: "source-1", provider: "github", label: "Production GitHub", connectedAt: "2026-01-01T00:00:00Z" }],
-      findings: { active: 2, highOrCritical: 1 },
+      findings: { active: 5, highOrCritical: 2 },
       leadershipReport: { publishedAt: "2026-07-14T07:30:00Z" },
     });
 
     expect(tables).toEqual(["policies", "policy_acceptances", "monitoring_findings", "leadership_report_snapshots"]);
     expect(rpc).toHaveBeenCalledWith("list_connected_monitor_sources", { target_organisation_id: ORGANISATION_ID });
+    expect(queries.monitoring_findings.in).toHaveBeenCalledWith("status", [
+      "open", "acknowledged", "in_progress", "exception_requested", "risk_accepted",
+    ]);
     expect(JSON.stringify(queries)).not.toMatch(/config|token|alert_channels|monitor_sources/);
   });
 
