@@ -388,7 +388,7 @@ create table public.github_finding_transitions (
   id uuid primary key default extensions.gen_random_uuid(),
   organisation_id uuid not null references public.organisations(id) on delete cascade,
   finding_id uuid not null,
-  actor_id uuid not null references public.profiles(id) on delete restrict,
+  actor_id uuid references public.profiles(id) on delete restrict,
   from_status public.monitor_finding_status,
   to_status public.monitor_finding_status not null,
   reason text not null check (
@@ -424,6 +424,7 @@ create table public.github_finding_transitions (
       and approval_id is null
       and mapping_pack_id is null
       and mapping_version is null
+      and actor_id is not null
       and reason not in (
         'failed_observation_created','failed_observation_refreshed',
         'failed_observation_reopened','fresh_pass_resolved'
@@ -434,6 +435,7 @@ create table public.github_finding_transitions (
       and approval_id is not null
       and mapping_pack_id is not null
       and mapping_version is not null
+      and actor_id is null
     )
   )
 );
@@ -1195,7 +1197,6 @@ to service_role;
 
 create or replace function public.materialise_github_observations_server(
   target_organisation_id uuid,
-  target_actor_id uuid,
   target_collection_run_id uuid,
   target_mapping_version text,
   target_mapping_checksum text,
@@ -1232,7 +1233,6 @@ declare
   summary_value jsonb;
 begin
   if target_organisation_id is null
-    or target_actor_id is null
     or target_collection_run_id is null
     or target_mapping_version is null
     or target_mapping_checksum is null
@@ -1249,36 +1249,14 @@ begin
       using errcode = '22023';
   end if;
 
-  -- The explicit actor is supplied by a trusted server route, but it is still
-  -- revalidated before and after the organisation-scoped serialization lock.
-  if not exists (
-    select 1
-    from public.memberships membership
-    where membership.organisation_id = target_organisation_id
-      and membership.user_id = target_actor_id
-      and membership.role = 'owner'
-  ) then
-    raise exception 'GitHub materialisation requires a current workspace Owner'
-      using errcode = '42501';
-  end if;
-
+  -- Scheduled reconciliation is authorised by the immutable active approval,
+  -- not by impersonating whichever human Owner happens to exist at run time.
   perform pg_catalog.pg_advisory_xact_lock(
     pg_catalog.hashtextextended(
       'github-mapping-approval:' || target_organisation_id::text,
       0
     )
   );
-
-  perform 1
-  from public.memberships membership
-  where membership.organisation_id = target_organisation_id
-    and membership.user_id = target_actor_id
-    and membership.role = 'owner'
-  for share;
-  if not found then
-    raise exception 'GitHub materialisation requires a current workspace Owner'
-      using errcode = '42501';
-  end if;
 
   select approval.*
   into approval_row
@@ -1437,14 +1415,10 @@ begin
     end if;
   end loop;
 
-  perform pg_catalog.set_config(
-    'request.jwt.claims',
-    pg_catalog.jsonb_build_object(
-      'sub', target_actor_id::text,
-      'role', 'authenticated'
-    )::text,
-    true
-  );
+  -- SECURITY DEFINER must not let a stale/caller-supplied sub leak into audit
+  -- triggers. The service execution is automated; the approval lineage below
+  -- records the human authorization separately and immutably.
+  perform pg_catalog.set_config('request.jwt.claims', '{"role":"service_role"}', true);
   perform pg_catalog.set_config('compliancehub.github_materialiser', 'on', true);
   perform pg_catalog.set_config('compliancehub.github_finding_transition', 'materialiser', true);
 
@@ -1464,11 +1438,14 @@ begin
     insert into public.audit_events(
       organisation_id, actor_id, action, entity_type, entity_id, metadata
     ) values (
-      target_organisation_id, target_actor_id, 'github.materialise',
+      target_organisation_id, null, 'github.materialise',
       'github_collection_runs', run_row.id::text,
       summary_value || pg_catalog.jsonb_build_object(
         'mapping_version', target_mapping_version,
-        'mapping_checksum', target_mapping_checksum
+        'mapping_checksum', target_mapping_checksum,
+        'approval_id', approval_row.id,
+        'approved_by', approval_row.approved_by,
+        'automated', true
       )
     );
     return summary_value;
@@ -1580,12 +1557,12 @@ begin
           observation_row.explanation || E'\n\nVerified from an approved immutable GitHub observation.',
           10000
         ),
-        target_actor_id,
+        approval_row.approved_by,
         observation_row.observed_at::date,
         observation_row.fresh_until::date,
         'current',
         case when previous_evidence.id is null then null else previous_evidence.evidence_id end,
-        target_actor_id
+        approval_row.approved_by
       ) returning id into created_evidence_id;
 
       insert into public.github_evidence_provenance(
@@ -1611,7 +1588,7 @@ begin
         target_organisation_id,
         created_evidence_id,
         control.id,
-        target_actor_id
+        approval_row.approved_by
       from pg_catalog.unnest(mapping_row.iso_control_references)
         as references_list(reference_value)
       join public.frameworks framework
@@ -1644,12 +1621,15 @@ begin
         insert into public.audit_events(
           organisation_id, actor_id, action, entity_type, entity_id, metadata
         ) values (
-          target_organisation_id, target_actor_id,
+          target_organisation_id, null,
           'github.evidence_superseded', 'evidence',
           previous_evidence.evidence_id::text,
           pg_catalog.jsonb_build_object(
             'replacement_evidence_id', created_evidence_id,
-            'identity_key', evidence_identity
+            'identity_key', evidence_identity,
+            'approval_id', approval_row.id,
+            'approved_by', approval_row.approved_by,
+            'automated', true
           )
         );
         evidence_refreshed := evidence_refreshed + 1;
@@ -1700,7 +1680,7 @@ begin
             reason, observation_id, approval_id, mapping_pack_id,
             mapping_version, occurred_at
           ) values (
-            target_organisation_id, finding_row.id, target_actor_id,
+            target_organisation_id, finding_row.id, null,
             finding_row.status, 'resolved', 'fresh_pass_resolved',
             observation_row.id, approval_row.id, approval_row.mapping_pack_id,
             target_mapping_version, observation_row.observed_at
@@ -1774,7 +1754,7 @@ begin
         reason, observation_id, approval_id, mapping_pack_id,
         mapping_version, occurred_at
       ) values (
-        target_organisation_id, created_finding_id, target_actor_id,
+        target_organisation_id, created_finding_id, null,
         null, 'open', 'failed_observation_created',
         observation_row.id, approval_row.id, approval_row.mapping_pack_id,
         target_mapping_version, observation_row.observed_at
@@ -1842,7 +1822,7 @@ begin
         reason, observation_id, approval_id, mapping_pack_id,
         mapping_version, occurred_at
       ) values (
-        target_organisation_id, finding_row.id, target_actor_id,
+        target_organisation_id, finding_row.id, null,
         finding_row.status, 'open', 'failed_observation_reopened',
         observation_row.id, approval_row.id, approval_row.mapping_pack_id,
         target_mapping_version, observation_row.observed_at
@@ -1854,7 +1834,7 @@ begin
         reason, observation_id, approval_id, mapping_pack_id,
         mapping_version, occurred_at
       ) values (
-        target_organisation_id, finding_row.id, target_actor_id,
+        target_organisation_id, finding_row.id, null,
         finding_row.status, finding_row.status, 'failed_observation_refreshed',
         observation_row.id, approval_row.id, approval_row.mapping_pack_id,
         target_mapping_version, observation_row.observed_at
@@ -1875,22 +1855,25 @@ begin
   insert into public.audit_events(
     organisation_id, actor_id, action, entity_type, entity_id, metadata
   ) values (
-    target_organisation_id, target_actor_id, 'github.materialise',
+    target_organisation_id, null, 'github.materialise',
     'github_collection_runs', run_row.id::text,
     summary_value || pg_catalog.jsonb_build_object(
       'mapping_version', target_mapping_version,
-      'mapping_checksum', target_mapping_checksum
+      'mapping_checksum', target_mapping_checksum,
+      'approval_id', approval_row.id,
+      'approved_by', approval_row.approved_by,
+      'automated', true
     )
   );
   return summary_value;
 end;
 $$;
 
-alter function public.materialise_github_observations_server(uuid,uuid,uuid,text,text,jsonb)
+alter function public.materialise_github_observations_server(uuid,uuid,text,text,jsonb)
 owner to postgres;
-revoke all on function public.materialise_github_observations_server(uuid,uuid,uuid,text,text,jsonb)
+revoke all on function public.materialise_github_observations_server(uuid,uuid,text,text,jsonb)
 from public, anon, authenticated, service_role;
-grant execute on function public.materialise_github_observations_server(uuid,uuid,uuid,text,text,jsonb)
+grant execute on function public.materialise_github_observations_server(uuid,uuid,text,text,jsonb)
 to service_role;
 
 create or replace function public.transition_github_finding_server(

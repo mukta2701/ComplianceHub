@@ -109,9 +109,19 @@ select ok(not has_function_privilege('anon', 'public.approve_github_mapping_pack
 select ok(not has_function_privilege('service_role', 'public.seal_github_mapping_pack_server(text,text)', 'EXECUTE'), 'service callers cannot publish a global mapping pack');
 select ok(not has_function_privilege('authenticated', 'public.seal_github_mapping_pack_server(text,text)', 'EXECUTE'), 'authenticated callers cannot seal mapping packs');
 select ok(not has_function_privilege('anon', 'public.seal_github_mapping_pack_server(text,text)', 'EXECUTE'), 'anonymous callers cannot seal mapping packs');
-select ok(has_function_privilege('service_role', 'public.materialise_github_observations_server(uuid,uuid,uuid,text,text,jsonb)', 'EXECUTE'), 'only the server boundary can materialise official results');
-select ok(not has_function_privilege('authenticated', 'public.materialise_github_observations_server(uuid,uuid,uuid,text,text,jsonb)', 'EXECUTE'), 'authenticated callers cannot target another workspace through the materialiser');
-select ok(not has_function_privilege('anon', 'public.materialise_github_observations_server(uuid,uuid,uuid,text,text,jsonb)', 'EXECUTE'), 'anonymous callers cannot materialise official results');
+select has_function(
+  'public', 'materialise_github_observations_server',
+  array['uuid','uuid','text','text','jsonb'],
+  'automated materialisation requires no fictitious human actor input'
+);
+select hasnt_function(
+  'public', 'materialise_github_observations_server',
+  array['uuid','uuid','uuid','text','text','jsonb'],
+  'the actor-targetable materialisation interface is removed'
+);
+select ok(has_function_privilege('service_role', 'public.materialise_github_observations_server(uuid,uuid,text,text,jsonb)', 'EXECUTE'), 'only the server boundary can materialise official results');
+select ok(not has_function_privilege('authenticated', 'public.materialise_github_observations_server(uuid,uuid,text,text,jsonb)', 'EXECUTE'), 'authenticated callers cannot target another workspace through the materialiser');
+select ok(not has_function_privilege('anon', 'public.materialise_github_observations_server(uuid,uuid,text,text,jsonb)', 'EXECUTE'), 'anonymous callers cannot materialise official results');
 select ok(not has_table_privilege('service_role', 'public.github_mapping_approvals', 'INSERT,UPDATE,DELETE'), 'service clients cannot bypass approval RPCs with direct DML');
 select ok(not has_table_privilege('service_role', 'public.github_mapping_packs', 'INSERT,UPDATE,DELETE'), 'service clients cannot bypass the trusted draft release process with direct pack DML');
 select ok(not has_table_privilege('service_role', 'public.github_mapping_entries', 'INSERT,UPDATE,DELETE'), 'service clients cannot bypass the trusted draft release process with direct entry DML');
@@ -208,7 +218,8 @@ insert into public.github_collection_runs(
  ('71000000-0000-4000-8000-000000000314','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000101','71000000-0000-4000-8000-000000000201',73001,'manual','missing-map','succeeded',null,now()-interval '3 hours',now()-interval '3 minutes',1,1,0,0,0,extensions.gen_random_uuid(),now()-interval '179 minutes',1),
  ('71000000-0000-4000-8000-000000000315','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000102','71000000-0000-4000-8000-000000000202',73001,'webhook','reconnected-fail','succeeded',null,now()-interval '3 hours',now()-interval '1 minute',1,0,1,0,0,extensions.gen_random_uuid(),now()-interval '179 minutes',1),
  ('71000000-0000-4000-8000-000000000316','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000102','71000000-0000-4000-8000-000000000202',73001,'manual','mapping-v2-fail','succeeded',null,now()-interval '3 hours',now()-interval '40 seconds',1,0,1,0,0,extensions.gen_random_uuid(),now()-interval '179 minutes',1),
- ('71000000-0000-4000-8000-000000000317','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000102','71000000-0000-4000-8000-000000000202',73001,'manual','mapping-v2-pass','succeeded',null,now()-interval '3 hours',now()-interval '20 seconds',1,1,0,0,0,extensions.gen_random_uuid(),now()-interval '179 minutes',1);
+ ('71000000-0000-4000-8000-000000000317','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000102','71000000-0000-4000-8000-000000000202',73001,'manual','mapping-v2-pass','succeeded',null,now()-interval '3 hours',now()-interval '20 seconds',1,1,0,0,0,extensions.gen_random_uuid(),now()-interval '179 minutes',1),
+ ('71000000-0000-4000-8000-000000000318','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000102','71000000-0000-4000-8000-000000000202',73001,'schedule','post-approver-removal-pass','succeeded',null,now()-interval '3 hours',now()-interval '5 seconds',1,1,0,0,0,extensions.gen_random_uuid(),now()-interval '179 minutes',1);
 
 insert into public.github_observations(
  id,organisation_id,installation_id,repository_id,provider_repository_id,collection_run_id,
@@ -231,7 +242,8 @@ insert into public.github_observations(
  ('71000000-0000-4000-8000-000000000414','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000101','71000000-0000-4000-8000-000000000201',73001,'71000000-0000-4000-8000-000000000314','missing-map','github.branch.stale_approvals','github-repository-v1','github_repository','Compliance-Test/portal','pass',null,'Unmapped passing observation','The test pack cannot resolve its ISO code.',null,now()-interval '4 minutes',now()+interval '35 hours','https://github.com/Compliance-Test/portal',repeat('e',64),null),
  ('71000000-0000-4000-8000-000000000415','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000102','71000000-0000-4000-8000-000000000202',73001,'71000000-0000-4000-8000-000000000315','reconnected-fail','github.branch.stale_approvals','github-repository-v1','github_repository','Compliance-Test/portal','fail','medium','Failure after reconnection','The same stable repository remains non-compliant after GitHub App reconnection.','Dismiss stale approvals when new commits are pushed.',now()-interval '2 minutes',now()+interval '35 hours','https://github.com/Compliance-Test/portal',repeat('f',64),null),
  ('71000000-0000-4000-8000-000000000416','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000102','71000000-0000-4000-8000-000000000202',73001,'71000000-0000-4000-8000-000000000316','mapping-v2-fail','github.branch.stale_approvals','github-repository-v1','github_repository','Compliance-Test/portal','fail','medium','Failure under mapping v2','A newer approved mapping still detects the same stable technical condition.','Dismiss stale approvals when new commits are pushed.',now()-interval '40 seconds',now()+interval '35 hours','https://github.com/Compliance-Test/portal',repeat('0',64),null),
- ('71000000-0000-4000-8000-000000000417','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000102','71000000-0000-4000-8000-000000000202',73001,'71000000-0000-4000-8000-000000000317','mapping-v2-pass','github.branch.stale_approvals','github-repository-v1','github_repository','Compliance-Test/portal','pass',null,'Pass under mapping v2','A newer fresh verification under the approved mapping resolves the same finding.',null,now()-interval '20 seconds',now()+interval '35 hours','https://github.com/Compliance-Test/portal',repeat('9',64),null);
+ ('71000000-0000-4000-8000-000000000417','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000102','71000000-0000-4000-8000-000000000202',73001,'71000000-0000-4000-8000-000000000317','mapping-v2-pass','github.branch.stale_approvals','github-repository-v1','github_repository','Compliance-Test/portal','pass',null,'Pass under mapping v2','A newer fresh verification under the approved mapping resolves the same finding.',null,now()-interval '20 seconds',now()+interval '35 hours','https://github.com/Compliance-Test/portal',repeat('9',64),null),
+ ('71000000-0000-4000-8000-000000000418','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000102','71000000-0000-4000-8000-000000000202',73001,'71000000-0000-4000-8000-000000000318','post-approver-removal-pass','github.branch.stale_approvals','github-repository-v1','github_repository','Compliance-Test/portal','pass',null,'Scheduled pass after approver removal','The active approval remains the automated reconciliation authority.',null,now()-interval '5 seconds',now()+interval '35 hours','https://github.com/Compliance-Test/portal',repeat('8',64),null);
 commit;
 
 create or replace function pg_temp.github_decision(target_observation_id uuid, target_kind text)
@@ -481,17 +493,8 @@ select throws_ok(
   'P0001', 'official GitHub findings require verified materialisation',
   'a generic service client cannot forge an official GitHub finding outside materialisation'
 );
-select throws_ok(
-  $$ select public.materialise_github_observations_server(
-    '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000003','71000000-0000-4000-8000-000000000301',
-    'github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',
-    pg_temp.github_decision('71000000-0000-4000-8000-000000000401','evidence')
-  ) $$,
-  '42501', 'GitHub materialisation requires a current workspace Owner',
-  'the server materialiser revalidates its explicit actor against the exact workspace'
-);
 select set_config('app.material_summary',public.materialise_github_observations_server(
-  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000301',
+  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000301',
   'github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',
   pg_temp.github_decision('71000000-0000-4000-8000-000000000401','evidence')
 )::text,false);
@@ -559,7 +562,7 @@ reset role;
 set role service_role;
 
 select set_config('app.material_summary',public.materialise_github_observations_server(
-  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000301',
+  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000301',
   'github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',
   pg_temp.github_decision('71000000-0000-4000-8000-000000000401','evidence')
 )::text,false);
@@ -567,7 +570,7 @@ select is((current_setting('app.material_summary')::jsonb->>'skipped')::int,1,'r
 select is((select count(*) from public.evidence where organisation_id='71000000-0000-4000-8000-000000000001'),1::bigint,'a replay does not duplicate evidence');
 
 select set_config('app.material_summary',public.materialise_github_observations_server(
-  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000302',
+  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000302',
   'github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',
   pg_temp.github_decision('71000000-0000-4000-8000-000000000402','evidence')
 )::text,false);
@@ -577,7 +580,7 @@ select is((select count(*) from public.evidence where organisation_id='71000000-
 select is((select count(*) from public.github_evidence_provenance where supersedes_evidence_id is not null),1::bigint,'the new provenance records one supersession lineage edge');
 
 select set_config('app.material_summary',public.materialise_github_observations_server(
-  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000305',
+  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000305',
   'github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',
   pg_temp.github_decision('71000000-0000-4000-8000-000000000405','evidence')
 )::text,false);
@@ -585,7 +588,7 @@ select is((current_setting('app.material_summary')::jsonb->>'skipped')::int,1,'a
 select is((select count(*) from public.evidence where organisation_id='71000000-0000-4000-8000-000000000001'),2::bigint,'stale evidence input creates no record');
 
 select set_config('app.material_summary',public.materialise_github_observations_server(
-  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000303',
+  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000303',
   'github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',
   pg_temp.github_decision('71000000-0000-4000-8000-000000000403','finding')
 )::text,false);
@@ -593,7 +596,7 @@ select is((current_setting('app.material_summary')::jsonb->>'findings_created'):
 select is((select count(*) from public.monitoring_findings where organisation_id='71000000-0000-4000-8000-000000000001' and finding_origin='github'),1::bigint,'the stable GitHub finding identity deduplicates separately from legacy monitors');
 
 select set_config('app.material_summary',public.materialise_github_observations_server(
-  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000304',
+  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000304',
   'github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',
   pg_temp.github_decision('71000000-0000-4000-8000-000000000404','finding')
 )::text,false);
@@ -602,26 +605,26 @@ select is((select count(*) from public.monitoring_findings where organisation_id
 select is((select latest_failed_observation_id from public.github_finding_provenance), '71000000-0000-4000-8000-000000000404'::uuid, 'finding provenance advances to the newest failure');
 
 select set_config('app.material_summary',public.materialise_github_observations_server(
-  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000306',
+  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000306',
   'github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',
   pg_temp.github_decision('71000000-0000-4000-8000-000000000406','evidence')
 )::text,false);
 select is((select status::text from public.monitoring_findings where finding_origin='github'),'open','a pass older than the newest failure cannot resolve the finding');
 
 select set_config('app.material_summary',public.materialise_github_observations_server(
-  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000307',
+  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000307',
   'github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',
   pg_temp.github_decision('71000000-0000-4000-8000-000000000407','explanatory')
 )::text,false);
 select is((current_setting('app.material_summary')::jsonb->>'skipped')::int,1,'unknown observations remain explanatory');
 select set_config('app.material_summary',public.materialise_github_observations_server(
-  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000308',
+  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000308',
   'github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',
   pg_temp.github_decision('71000000-0000-4000-8000-000000000408','explanatory')
 )::text,false);
 select is((select status::text from public.monitoring_findings where finding_origin='github'),'open','not-applicable observations cannot resolve a finding');
 select set_config('app.material_summary',public.materialise_github_observations_server(
-  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000309',
+  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000309',
   'github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',
   pg_temp.github_decision('71000000-0000-4000-8000-000000000409','evidence')
 )::text,false);
@@ -672,7 +675,7 @@ reset role;
 
 set role service_role;
 select set_config('app.material_summary',public.materialise_github_observations_server(
-  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000310',
+  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000310',
   'github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',
   pg_temp.github_decision('71000000-0000-4000-8000-000000000410','evidence')
 )::text,false);
@@ -680,7 +683,7 @@ select is((current_setting('app.material_summary')::jsonb->>'findings_resolved')
 select is((select status::text from public.monitoring_findings where finding_origin='github'),'resolved','fresh verification persists the resolved state');
 
 select set_config('app.material_summary',public.materialise_github_observations_server(
-  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000311',
+  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000311',
   'github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',
   pg_temp.github_decision('71000000-0000-4000-8000-000000000411','finding')
 )::text,false);
@@ -692,14 +695,14 @@ select lives_ok(
   'risk acceptance is a valid audited state'
 );
 select set_config('app.material_summary',public.materialise_github_observations_server(
-  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000313',
+  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000313',
   'github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',
   pg_temp.github_decision('71000000-0000-4000-8000-000000000413','finding')
 )::text,false);
 select is((select status::text from public.monitoring_findings where finding_origin='github'),'risk_accepted','a repeat technical failure does not turn risk acceptance into a pass');
 
 select set_config('app.material_summary',public.materialise_github_observations_server(
-  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000315',
+  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000315',
   'github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',
   pg_temp.github_decision('71000000-0000-4000-8000-000000000415','finding')
 )::text,false);
@@ -739,7 +742,7 @@ select is(
   'the sealed new version becomes the one active workspace approval'
 );
 select set_config('app.material_summary',public.materialise_github_observations_server(
-  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000316',
+  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000316',
   'github-iso-27001-v2','498642cd3df84b3a8f480af088ac9d75ae247be136f22292ab51ec40fdf8aeab',
   pg_temp.github_decision('71000000-0000-4000-8000-000000000416','finding')
 )::text,false);
@@ -765,7 +768,7 @@ select is(
   'the stable finding exposes its latest reviewed mapping version without changing identity'
 );
 select set_config('app.material_summary',public.materialise_github_observations_server(
-  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000317',
+  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000317',
   'github-iso-27001-v2','498642cd3df84b3a8f480af088ac9d75ae247be136f22292ab51ec40fdf8aeab',
   pg_temp.github_decision('71000000-0000-4000-8000-000000000417','evidence')
 )::text,false);
@@ -832,7 +835,7 @@ select set_config('app.bad_approval',public.approve_github_mapping_pack_server(
 select set_config('app.evidence_before_bad',(select count(*)::text from public.evidence where organisation_id='71000000-0000-4000-8000-000000000001'),false);
 select throws_ok(
   $$ select public.materialise_github_observations_server(
-    '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000314',
+    '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000314',
     'github-test-missing-v1',repeat('c',64),
     pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
       'observation_id','71000000-0000-4000-8000-000000000414','treatment_kind','evidence',
@@ -848,6 +851,102 @@ select set_config('app.github_approval',public.approve_github_mapping_pack_serve
   'github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f'
 )::text,false);
 reset role;
+
+-- Automated reconciliation is authorised by the still-active immutable
+-- approval, not by inventing a current human action actor for the service.
+update public.memberships
+set role='owner'
+where organisation_id='71000000-0000-4000-8000-000000000001'
+  and user_id='71000000-0000-4000-8000-000000000002';
+delete from public.memberships
+where organisation_id='71000000-0000-4000-8000-000000000001'
+  and user_id='71000000-0000-4000-8000-000000000001';
+select is(
+  (select approved_by from public.github_mapping_approvals
+   where id=current_setting('app.github_approval')::uuid and revoked_at is null),
+  '71000000-0000-4000-8000-000000000001'::uuid,
+  'the active approval retains the original approving Owner'
+);
+select results_eq(
+  $$ select user_id from public.memberships
+     where organisation_id='71000000-0000-4000-8000-000000000001' and role='owner'
+     order by user_id $$,
+  $$ values ('71000000-0000-4000-8000-000000000002'::uuid) $$,
+  'a different Owner remains after the original approver membership is removed'
+);
+set role service_role;
+select set_config('app.material_summary',public.materialise_github_observations_server(
+  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000318',
+  'github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',
+  pg_temp.github_decision('71000000-0000-4000-8000-000000000418','evidence')
+)::text,false);
+select is(
+  (current_setting('app.material_summary')::jsonb->>'evidence_created')::int,
+  1,
+  'service-only scheduled reconciliation continues solely under the active approval'
+);
+reset role;
+select results_eq(
+  $$ select evidence.created_by, evidence.owner_id, provenance.approval_id
+     from public.github_evidence_provenance provenance
+     join public.evidence evidence
+       on evidence.id=provenance.evidence_id
+      and evidence.organisation_id=provenance.organisation_id
+     where provenance.observation_id='71000000-0000-4000-8000-000000000418' $$,
+  $$ values (
+       '71000000-0000-4000-8000-000000000001'::uuid,
+       '71000000-0000-4000-8000-000000000001'::uuid,
+       current_setting('app.github_approval')::uuid
+     ) $$,
+  'created records derive attribution and provenance from the immutable approval lineage'
+);
+select is(
+  (select count(*) from public.evidence_links link
+   join public.github_evidence_provenance provenance on provenance.evidence_id=link.evidence_id
+   where provenance.observation_id='71000000-0000-4000-8000-000000000418'
+     and link.created_by='71000000-0000-4000-8000-000000000001'),
+  1::bigint,
+  'mapped control links derive created_by from the original approval'
+);
+select results_eq(
+  $$ select actor_id,metadata->>'approval_id',metadata->>'approved_by',metadata->>'automated'
+     from public.audit_events
+     where organisation_id='71000000-0000-4000-8000-000000000001'
+       and action='github.materialise'
+       and entity_type='github_collection_runs'
+       and entity_id='71000000-0000-4000-8000-000000000318' $$,
+  $$ values (
+       null::uuid,
+       current_setting('app.github_approval')::text,
+       '71000000-0000-4000-8000-000000000001'::text,
+       'true'::text
+     ) $$,
+  'automated audit truthfully binds approval lineage without attributing a human action actor'
+);
+select ok(
+  (select audit.actor_id is null
+   from public.audit_events audit
+   join public.github_evidence_provenance provenance
+     on audit.entity_type='github_evidence_provenance'
+    and audit.entity_id=provenance.id::text
+   where provenance.observation_id='71000000-0000-4000-8000-000000000418'),
+  'automated provenance triggers cannot inherit a stale or caller-supplied human JWT actor'
+);
+select is(
+  (select count(*) from public.github_finding_transitions
+   where reason in (
+     'failed_observation_created','failed_observation_refreshed',
+     'failed_observation_reopened','fresh_pass_resolved'
+   ) and actor_id is not null),
+  0::bigint,
+  'automated finding transitions do not attribute a human action actor'
+);
+select is(
+  (select actor_id from public.github_finding_transitions
+   where observation_id is null and approval_id is null and to_status='risk_accepted'),
+  '71000000-0000-4000-8000-000000000001'::uuid,
+  'human finding transitions still retain their exact verified Owner actor'
+);
 
 insert into public.evidence(
   id,organisation_id,title,kind,url,description,owner_id,collected_on,valid_until,status,created_by
@@ -886,7 +985,7 @@ select is((select count(*) from public.soa_items where organisation_id='71000000
 select is((select count(*) from public.assessment_sessions where organisation_id='71000000-0000-4000-8000-000000000001'),current_setting('app.protected_assessments')::bigint,'materialisation never writes assessments');
 select is((select count(*) from public.risks where organisation_id='71000000-0000-4000-8000-000000000001'),current_setting('app.protected_risks')::bigint,'materialisation never writes risks');
 select is((select count(*) from public.leadership_report_snapshots where organisation_id='71000000-0000-4000-8000-000000000001'),current_setting('app.protected_leadership')::bigint,'materialisation never writes leadership snapshots');
-select cmp_ok((select count(*) from public.audit_events where organisation_id='71000000-0000-4000-8000-000000000001' and action='github.materialise'),'>',0::bigint,'materialisation emits bounded safe audit summaries');
+select cmp_ok((select count(*) from public.audit_events where organisation_id='71000000-0000-4000-8000-000000000001' and action='github.materialise'),'>',0::bigint,'materialisation emits bounded safe automated audit summaries');
 select cmp_ok((select count(*) from public.audit_events where organisation_id='71000000-0000-4000-8000-000000000001' and entity_type='github_finding_transitions'),'>',0::bigint,'finding transitions emit immutable audit events');
 
 -- Hold the first remote call open after the function returns. The second call
@@ -900,7 +999,7 @@ select extensions.dblink_exec('github_materialise_b','set role service_role');
 select extensions.dblink_exec('github_materialise_a','begin');
 select extensions.dblink_send_query('github_materialise_a',$remote$
   select public.materialise_github_observations_server(
-    '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000312',
+    '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000312',
     'github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',
     '[{"observation_id":"71000000-0000-4000-8000-000000000412","treatment_kind":"evidence","iso_control_references":["A.8.32"],"failure_severity":"medium","remediation":"Dismiss stale approvals when new commits are pushed."}]'::jsonb
   )
@@ -909,7 +1008,7 @@ insert into github_materialisation_concurrency_results
 select summary from extensions.dblink_get_result('github_materialise_a') as result(summary jsonb);
 select extensions.dblink_send_query('github_materialise_b',$remote$
   select public.materialise_github_observations_server(
-    '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000312',
+    '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000312',
     'github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',
     '[{"observation_id":"71000000-0000-4000-8000-000000000412","treatment_kind":"evidence","iso_control_references":["A.8.32"],"failure_severity":"medium","remediation":"Dismiss stale approvals when new commits are pushed."}]'::jsonb
   )
