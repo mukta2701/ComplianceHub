@@ -147,7 +147,7 @@ export function buildMonitorDependencies(
         severity: finding.severity, title: finding.title, detail: finding.detail,
         finding_origin: "legacy", mapping_version: "legacy",
         status: "open", detected_at: new Date().toISOString(), resolved_at: null,
-      }, { onConflict: "organisation_id,finding_origin,stable_subject_identity,check_id,mapping_version" });
+      }, { onConflict: "organisation_id,finding_origin,stable_subject_identity,check_id" });
       if (error) throw error;
     },
     resolveFindings: async (organisationId, keys) => {

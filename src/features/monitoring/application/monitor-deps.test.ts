@@ -135,7 +135,7 @@ describe("buildMonitorDependencies WhatsApp delivery", () => {
 
     expect(builders[1]!.upsert).toHaveBeenCalledWith(
       expect.objectContaining({ finding_origin: "legacy", mapping_version: "legacy" }),
-      { onConflict: "organisation_id,finding_origin,stable_subject_identity,check_id,mapping_version" },
+      { onConflict: "organisation_id,finding_origin,stable_subject_identity,check_id" },
     );
 
     const resolution = builders[2]!;

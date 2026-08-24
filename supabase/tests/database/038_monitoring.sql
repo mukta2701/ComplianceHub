@@ -48,7 +48,7 @@ select lives_ok(
      ) values (
        current_setting('app.org_a')::uuid,'github.branch_protection','github_repo','acme/isms','high','origin-aware upsert','legacy','legacy'
      ) on conflict (
-       organisation_id,finding_origin,stable_subject_identity,check_id,mapping_version
+       organisation_id,finding_origin,stable_subject_identity,check_id
      ) do update set title=excluded.title $$,
   'the legacy monitor upsert targets the deployed origin-aware unique identity'
 );

@@ -94,9 +94,13 @@ create table public.github_mapping_packs (
     pg_catalog.char_length(title) between 1 and 160
     and title !~ '[<>[:cntrl:]]'
   ),
-  checksum text not null unique check (checksum ~ '^[0-9a-f]{64}$'),
-  published_at timestamptz not null,
+  checksum text unique check (checksum is null or checksum ~ '^[0-9a-f]{64}$'),
+  published_at timestamptz,
   created_at timestamptz not null default pg_catalog.now(),
+  constraint github_mapping_packs_sealed_state_check check (
+    (checksum is null and published_at is null)
+    or (checksum is not null and published_at is not null)
+  ),
   constraint github_mapping_packs_id_version_key unique (id, version),
   constraint github_mapping_packs_id_checksum_key unique (id, checksum),
   constraint github_mapping_packs_id_identity_key unique (id, version, checksum)
@@ -248,7 +252,7 @@ alter table public.monitoring_findings
   add constraint monitoring_findings_origin_dedup_key
     unique (
       organisation_id, finding_origin, stable_subject_identity,
-      check_id, mapping_version
+      check_id
     );
 
 create table public.github_finding_provenance (
@@ -292,7 +296,7 @@ create table public.github_finding_provenance (
   constraint github_finding_provenance_finding_key unique (finding_id),
   constraint github_finding_provenance_org_identity_key unique (organisation_id, identity_key),
   constraint github_finding_provenance_stable_identity_key unique (
-    organisation_id, provider_repository_id, check_id, mapping_version
+    organisation_id, provider_repository_id, check_id
   ),
   constraint github_finding_provenance_finding_tenant_fk
     foreign key (finding_id, organisation_id)
@@ -344,7 +348,7 @@ create table public.github_finding_provenance (
       extensions.digest(
         pg_catalog.convert_to(
           pg_catalog.jsonb_build_array(
-            organisation_id, provider_repository_id, check_id, mapping_version
+            organisation_id, provider_repository_id, check_id
           )::text,
           'UTF8'
         ),
@@ -374,7 +378,7 @@ create table public.github_finding_provenance (
 );
 
 create index github_finding_provenance_repository_idx
-on public.github_finding_provenance(provider_repository_id, organisation_id, mapping_version);
+on public.github_finding_provenance(provider_repository_id, organisation_id, check_id);
 create index github_finding_provenance_latest_run_idx
 on public.github_finding_provenance(latest_collection_run_id, organisation_id);
 create index github_finding_provenance_latest_approval_idx
@@ -392,6 +396,15 @@ create table public.github_finding_transitions (
     and reason !~ '[<>[:cntrl:]]'
   ),
   observation_id uuid,
+  approval_id uuid,
+  mapping_pack_id uuid,
+  mapping_version text check (
+    mapping_version is null
+    or (
+      pg_catalog.char_length(mapping_version) between 1 and 80
+      and mapping_version !~ '[<>[:cntrl:]]'
+    )
+  ),
   occurred_at timestamptz not null default pg_catalog.now(),
   constraint github_finding_transitions_finding_tenant_fk
     foreign key (finding_id, organisation_id)
@@ -399,9 +412,29 @@ create table public.github_finding_transitions (
   constraint github_finding_transitions_observation_tenant_fk
     foreign key (observation_id, organisation_id)
     references public.github_observations(id, organisation_id) on delete restrict,
+  constraint github_finding_transitions_approval_ancestry_fk
+    foreign key (approval_id, organisation_id, mapping_pack_id)
+    references public.github_mapping_approvals(id, organisation_id, mapping_pack_id) on delete restrict,
+  constraint github_finding_transitions_mapping_pack_identity_fk
+    foreign key (mapping_pack_id, mapping_version)
+    references public.github_mapping_packs(id, version) on delete restrict,
   constraint github_finding_transitions_automated_reason_check check (
-    (observation_id is null and reason not in ('failed_observation_created','failed_observation_reopened','fresh_pass_resolved'))
-    or (observation_id is not null)
+    (
+      observation_id is null
+      and approval_id is null
+      and mapping_pack_id is null
+      and mapping_version is null
+      and reason not in (
+        'failed_observation_created','failed_observation_refreshed',
+        'failed_observation_reopened','fresh_pass_resolved'
+      )
+    )
+    or (
+      observation_id is not null
+      and approval_id is not null
+      and mapping_pack_id is not null
+      and mapping_version is not null
+    )
   )
 );
 
@@ -410,6 +443,9 @@ on public.github_finding_transitions(finding_id, organisation_id, occurred_at de
 create index github_finding_transitions_observation_idx
 on public.github_finding_transitions(observation_id, organisation_id)
 where observation_id is not null;
+create index github_finding_transitions_approval_idx
+on public.github_finding_transitions(approval_id, organisation_id, mapping_pack_id)
+where approval_id is not null;
 
 insert into public.github_mapping_packs(id, version, title, checksum, published_at)
 values (
@@ -440,23 +476,152 @@ insert into public.github_mapping_entries(
 ('91000000-0000-4000-8000-000000000114','91000000-0000-4000-8000-000000000001','github.workflow.security','github-repository-v1',array['A.8.25','A.8.29'],'high','Enable an approved security workflow and resolve its failures.',pg_catalog.jsonb_build_object('pass',pg_catalog.jsonb_build_object('kind','evidence','summary','A passing github.workflow.security observation provides approved GitHub evidence.'),'fail',pg_catalog.jsonb_build_object('kind','finding','summary','A failed github.workflow.security observation creates or refreshes a finding.'),'unknown',pg_catalog.jsonb_build_object('kind','explanatory','summary','GitHub could not establish github.workflow.security; no compliance-positive record is created.'),'not_applicable',pg_catalog.jsonb_build_object('kind','explanatory','summary','github.workflow.security is not applicable to the observed repository state.'))),
 ('91000000-0000-4000-8000-000000000115','91000000-0000-4000-8000-000000000001','github.administration.outside_collaborator_admins','github-repository-v1',array['A.5.18','A.8.2'],'high','Remove administrator access from outside collaborators.',pg_catalog.jsonb_build_object('pass',pg_catalog.jsonb_build_object('kind','evidence','summary','A passing github.administration.outside_collaborator_admins observation provides approved GitHub evidence.'),'fail',pg_catalog.jsonb_build_object('kind','finding','summary','A failed github.administration.outside_collaborator_admins observation creates or refreshes a finding.'),'unknown',pg_catalog.jsonb_build_object('kind','explanatory','summary','GitHub could not establish github.administration.outside_collaborator_admins; no compliance-positive record is created.'),'not_applicable',pg_catalog.jsonb_build_object('kind','explanatory','summary','github.administration.outside_collaborator_admins is not applicable to the observed repository state.')));
 
-create or replace function public.reject_github_mapping_pack_change()
+create or replace function public.github_mapping_pack_checksum(target_mapping_pack_id uuid)
+returns text
+language sql
+stable
+set search_path = ''
+as $$
+  with canonical_entries as (
+    select
+      entry.check_id,
+      '{"checkId":' || pg_catalog.to_json(entry.check_id)::text
+      || ',"failureSeverity":' || pg_catalog.to_json(entry.failure_severity::text)::text
+      || ',"isoControlReferences":[' || (
+        select pg_catalog.string_agg(
+          pg_catalog.to_json(reference_value)::text,
+          ',' order by reference_value collate pg_catalog."C"
+        )
+        from pg_catalog.unnest(entry.iso_control_references)
+          as reference_list(reference_value)
+      ) || ']'
+      || ',"remediation":' || pg_catalog.to_json(entry.remediation)::text
+      || ',"ruleVersion":' || pg_catalog.to_json(entry.rule_version)::text
+      || ',"treatments":{'
+      || '"fail":{"kind":' || pg_catalog.to_json(entry.treatments #>> '{fail,kind}')::text
+      || ',"summary":' || pg_catalog.to_json(entry.treatments #>> '{fail,summary}')::text || '}'
+      || ',"not_applicable":{"kind":' || pg_catalog.to_json(entry.treatments #>> '{not_applicable,kind}')::text
+      || ',"summary":' || pg_catalog.to_json(entry.treatments #>> '{not_applicable,summary}')::text || '}'
+      || ',"pass":{"kind":' || pg_catalog.to_json(entry.treatments #>> '{pass,kind}')::text
+      || ',"summary":' || pg_catalog.to_json(entry.treatments #>> '{pass,summary}')::text || '}'
+      || ',"unknown":{"kind":' || pg_catalog.to_json(entry.treatments #>> '{unknown,kind}')::text
+      || ',"summary":' || pg_catalog.to_json(entry.treatments #>> '{unknown,summary}')::text || '}'
+      || '}}' as canonical_entry
+    from public.github_mapping_entries entry
+    where entry.mapping_pack_id = target_mapping_pack_id
+  ),
+  canonical_pack as (
+    select
+      '{"mappings":['
+      || pg_catalog.coalesce(
+        pg_catalog.string_agg(
+          canonical_entries.canonical_entry,
+          ',' order by canonical_entries.check_id collate pg_catalog."C"
+        ),
+        ''
+      )
+      || '],"title":' || pg_catalog.to_json(pack.title)::text
+      || ',"version":' || pg_catalog.to_json(pack.version)::text
+      || '}' as canonical_value
+    from public.github_mapping_packs pack
+    left join canonical_entries on true
+    where pack.id = target_mapping_pack_id
+    group by pack.id, pack.title, pack.version
+  )
+  select pg_catalog.encode(
+    extensions.digest(
+      pg_catalog.convert_to(canonical_pack.canonical_value, 'UTF8'),
+      'sha256'
+    ),
+    'hex'
+  )
+  from canonical_pack;
+$$;
+
+alter function public.github_mapping_pack_checksum(uuid) owner to postgres;
+revoke all on function public.github_mapping_pack_checksum(uuid)
+from public, anon, authenticated, service_role;
+
+create or replace function public.guard_github_mapping_pack_change()
 returns trigger
 language plpgsql
 set search_path = ''
 as $$
 begin
-  raise exception 'GitHub mapping packs are immutable' using errcode = 'P0001';
+  if old.published_at is not null then
+    raise exception 'GitHub mapping packs are immutable' using errcode = 'P0001';
+  end if;
+  if tg_op = 'DELETE' then
+    return old;
+  end if;
+  if new.id is distinct from old.id
+    or new.version is distinct from old.version
+    or new.title is distinct from old.title
+    or new.created_at is distinct from old.created_at
+  then
+    raise exception 'GitHub mapping pack draft identity is immutable' using errcode = 'P0001';
+  end if;
+  if new.checksum is not null or new.published_at is not null then
+    if current_user <> 'postgres'
+      or pg_catalog.coalesce(
+        pg_catalog.current_setting('compliancehub.github_mapping_sealer', true), ''
+      ) <> 'on'
+      or new.checksum is null
+      or new.published_at is null
+    then
+      raise exception 'GitHub mapping packs can only be sealed by the verified server workflow'
+        using errcode = 'P0001';
+    end if;
+  end if;
+  return new;
 end;
 $$;
 
-create or replace function public.reject_github_mapping_entry_change()
+create or replace function public.guard_github_mapping_entry_change()
 returns trigger
 language plpgsql
 set search_path = ''
 as $$
+declare
+  target_pack_id uuid;
+  target_published_at timestamptz;
 begin
-  raise exception 'GitHub mapping entries are immutable' using errcode = 'P0001';
+  if tg_op in ('UPDATE', 'DELETE') then
+    select pack.published_at into target_published_at
+    from public.github_mapping_packs pack
+    where pack.id = old.mapping_pack_id
+    for key share;
+    if target_published_at is not null then
+      raise exception 'GitHub mapping entries are immutable' using errcode = 'P0001';
+    end if;
+  end if;
+
+  if tg_op = 'UPDATE'
+    and (
+      new.id is distinct from old.id
+      or new.mapping_pack_id is distinct from old.mapping_pack_id
+      or new.created_at is distinct from old.created_at
+    )
+  then
+    raise exception 'GitHub mapping entry draft identity is immutable' using errcode = 'P0001';
+  end if;
+
+  if tg_op in ('INSERT', 'UPDATE') then
+    target_pack_id := new.mapping_pack_id;
+    select pack.published_at into target_published_at
+    from public.github_mapping_packs pack
+    where pack.id = target_pack_id
+    for key share;
+    if not found then
+      raise exception 'GitHub mapping pack draft was not found' using errcode = '23503';
+    end if;
+    if target_published_at is not null then
+      raise exception 'GitHub mapping entries are immutable' using errcode = 'P0001';
+    end if;
+  end if;
+
+  if tg_op = 'DELETE' then return old; end if;
+  return new;
 end;
 $$;
 
@@ -515,7 +680,6 @@ begin
     or new.provider_repository_id is distinct from old.provider_repository_id
     or new.identity_key is distinct from old.identity_key
     or new.check_id is distinct from old.check_id
-    or new.mapping_version is distinct from old.mapping_version
     or new.subject_id is distinct from old.subject_id
     or new.initial_collection_run_id is distinct from old.initial_collection_run_id
     or new.initial_observation_id is distinct from old.initial_observation_id
@@ -572,12 +736,20 @@ begin
     raise exception 'monitoring finding origin is immutable' using errcode = 'P0001';
   end if;
   if old.finding_origin = 'github'
-    and (
-      new.provider_repository_id is distinct from old.provider_repository_id
-      or new.mapping_version is distinct from old.mapping_version
-    )
+    and new.provider_repository_id is distinct from old.provider_repository_id
   then
     raise exception 'official GitHub finding identity is immutable' using errcode = 'P0001';
+  end if;
+  if old.finding_origin = 'github'
+    and new.mapping_version is distinct from old.mapping_version
+    and (
+      current_user <> 'postgres'
+      or pg_catalog.coalesce(transition_mode, '') <> 'materialiser'
+      or pg_catalog.coalesce(materialiser_mode, '') <> 'on'
+    )
+  then
+    raise exception 'official GitHub finding mapping metadata is server-managed'
+      using errcode = 'P0001';
   end if;
   if old.finding_origin = 'github'
     and (
@@ -623,8 +795,8 @@ begin
 end;
 $$;
 
-revoke all on function public.reject_github_mapping_pack_change() from public, anon, authenticated, service_role;
-revoke all on function public.reject_github_mapping_entry_change() from public, anon, authenticated, service_role;
+revoke all on function public.guard_github_mapping_pack_change() from public, anon, authenticated, service_role;
+revoke all on function public.guard_github_mapping_entry_change() from public, anon, authenticated, service_role;
 revoke all on function public.guard_github_mapping_approval_change() from public, anon, authenticated, service_role;
 revoke all on function public.reject_github_evidence_provenance_change() from public, anon, authenticated, service_role;
 revoke all on function public.guard_github_finding_provenance_change() from public, anon, authenticated, service_role;
@@ -634,10 +806,10 @@ revoke all on function public.guard_official_github_evidence_link_change() from 
 
 create trigger github_mapping_packs_immutable
 before update or delete on public.github_mapping_packs
-for each statement execute function public.reject_github_mapping_pack_change();
+for each row execute function public.guard_github_mapping_pack_change();
 create trigger github_mapping_entries_immutable
 before insert or update or delete on public.github_mapping_entries
-for each statement execute function public.reject_github_mapping_entry_change();
+for each row execute function public.guard_github_mapping_entry_change();
 create trigger github_mapping_approvals_guard
 before update or delete on public.github_mapping_approvals
 for each row execute function public.guard_github_mapping_approval_change();
@@ -769,6 +941,98 @@ grant select on public.github_mapping_approvals to authenticated, service_role;
 grant select on public.github_evidence_provenance to authenticated, service_role;
 grant select on public.github_finding_provenance to authenticated, service_role;
 grant select on public.github_finding_transitions to authenticated, service_role;
+
+create or replace function public.seal_github_mapping_pack_server(
+  target_version text,
+  target_checksum text
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  pack_row public.github_mapping_packs;
+  baseline_pack_id uuid;
+  canonical_checksum text;
+begin
+  if target_version is null
+    or pg_catalog.char_length(target_version) not between 1 and 80
+    or target_checksum is null
+    or target_checksum !~ '^[0-9a-f]{64}$'
+  then
+    raise exception 'invalid GitHub mapping pack seal request' using errcode = '22023';
+  end if;
+
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended('github-mapping-pack-seal:' || target_version, 0)
+  );
+
+  select * into pack_row
+  from public.github_mapping_packs pack
+  where pack.version = target_version
+  for update;
+  if not found then
+    raise exception 'GitHub mapping pack draft was not found' using errcode = '22023';
+  end if;
+  if pack_row.published_at is not null then
+    if pack_row.checksum = target_checksum then return pack_row.id; end if;
+    raise exception 'GitHub mapping packs are immutable' using errcode = 'P0001';
+  end if;
+
+  select pack.id into baseline_pack_id
+  from public.github_mapping_packs pack
+  where pack.version = 'github-iso-27001-v1'
+    and pack.published_at is not null;
+  if baseline_pack_id is null
+    or (
+      select pg_catalog.count(*)
+      from public.github_mapping_entries entry
+      where entry.mapping_pack_id = pack_row.id
+    ) <> (
+      select pg_catalog.count(*)
+      from public.github_mapping_entries entry
+      where entry.mapping_pack_id = baseline_pack_id
+    )
+    or exists (
+      select 1
+      from public.github_mapping_entries baseline_entry
+      where baseline_entry.mapping_pack_id = baseline_pack_id
+        and not exists (
+          select 1
+          from public.github_mapping_entries draft_entry
+          where draft_entry.mapping_pack_id = pack_row.id
+            and draft_entry.check_id = baseline_entry.check_id
+        )
+      )
+  then
+    raise exception 'GitHub mapping pack is incomplete' using errcode = '22023';
+  end if;
+
+  canonical_checksum := public.github_mapping_pack_checksum(pack_row.id);
+  if canonical_checksum is null or canonical_checksum <> target_checksum then
+    raise exception 'GitHub mapping pack checksum does not match canonical content'
+      using errcode = '22023';
+  end if;
+
+  perform pg_catalog.set_config('compliancehub.github_mapping_sealer', 'on', true);
+  update public.github_mapping_packs
+  set checksum = canonical_checksum,
+      published_at = pg_catalog.now()
+  where id = pack_row.id
+    and published_at is null;
+  if not found then
+    raise exception 'GitHub mapping pack could not be sealed' using errcode = 'P0001';
+  end if;
+  return pack_row.id;
+end;
+$$;
+
+alter function public.seal_github_mapping_pack_server(text,text) owner to postgres;
+revoke all on function public.seal_github_mapping_pack_server(text,text)
+from public, anon, authenticated, service_role;
+grant execute on function public.seal_github_mapping_pack_server(text,text)
+to service_role;
 
 create or replace function public.approve_github_mapping_pack_server(
   target_organisation_id uuid,
@@ -1238,8 +1502,7 @@ begin
           pg_catalog.jsonb_build_array(
             target_organisation_id,
             observation_row.provider_repository_id,
-            observation_row.check_id,
-            target_mapping_version
+            observation_row.check_id
           )::text,
           'UTF8'
         ),
@@ -1412,7 +1675,8 @@ begin
         if found and finding_row.status::text <> 'resolved' then
           update public.monitoring_findings
           set status = 'resolved',
-              resolved_at = observation_row.observed_at
+              resolved_at = observation_row.observed_at,
+              mapping_version = target_mapping_version
           where id = finding_row.id
             and organisation_id = target_organisation_id;
 
@@ -1423,6 +1687,7 @@ begin
               latest_observation_id = observation_row.id,
               latest_approval_id = approval_row.id,
               latest_mapping_pack_id = approval_row.mapping_pack_id,
+              mapping_version = target_mapping_version,
               resolved_by_installation_id = observation_row.installation_id,
               resolved_by_repository_id = observation_row.repository_id,
               resolved_by_collection_run_id = run_row.id,
@@ -1434,11 +1699,13 @@ begin
 
           insert into public.github_finding_transitions(
             organisation_id, finding_id, actor_id, from_status, to_status,
-            reason, observation_id, occurred_at
+            reason, observation_id, approval_id, mapping_pack_id,
+            mapping_version, occurred_at
           ) values (
             target_organisation_id, finding_row.id, target_actor_id,
             finding_row.status, 'resolved', 'fresh_pass_resolved',
-            observation_row.id, observation_row.observed_at
+            observation_row.id, approval_row.id, approval_row.mapping_pack_id,
+            target_mapping_version, observation_row.observed_at
           );
           findings_resolved := findings_resolved + 1;
         end if;
@@ -1506,11 +1773,13 @@ begin
 
       insert into public.github_finding_transitions(
         organisation_id, finding_id, actor_id, from_status, to_status,
-        reason, observation_id, occurred_at
+        reason, observation_id, approval_id, mapping_pack_id,
+        mapping_version, occurred_at
       ) values (
         target_organisation_id, created_finding_id, target_actor_id,
         null, 'open', 'failed_observation_created',
-        observation_row.id, observation_row.observed_at
+        observation_row.id, approval_row.id, approval_row.mapping_pack_id,
+        target_mapping_version, observation_row.observed_at
       );
       findings_created := findings_created + 1;
       continue;
@@ -1542,7 +1811,8 @@ begin
           else finding_row.status
         end,
         detected_at = observation_row.observed_at,
-        resolved_at = null
+        resolved_at = null,
+        mapping_version = target_mapping_version
     where id = finding_row.id
       and organisation_id = target_organisation_id;
 
@@ -1553,6 +1823,7 @@ begin
         latest_observation_id = observation_row.id,
         latest_approval_id = approval_row.id,
         latest_mapping_pack_id = approval_row.mapping_pack_id,
+        mapping_version = target_mapping_version,
         latest_failed_installation_id = observation_row.installation_id,
         latest_failed_repository_id = observation_row.repository_id,
         latest_failed_collection_run_id = run_row.id,
@@ -1570,14 +1841,26 @@ begin
     if finding_row.status::text = 'resolved' then
       insert into public.github_finding_transitions(
         organisation_id, finding_id, actor_id, from_status, to_status,
-        reason, observation_id, occurred_at
+        reason, observation_id, approval_id, mapping_pack_id,
+        mapping_version, occurred_at
       ) values (
         target_organisation_id, finding_row.id, target_actor_id,
         finding_row.status, 'open', 'failed_observation_reopened',
-        observation_row.id, observation_row.observed_at
+        observation_row.id, approval_row.id, approval_row.mapping_pack_id,
+        target_mapping_version, observation_row.observed_at
       );
       findings_reopened := findings_reopened + 1;
     else
+      insert into public.github_finding_transitions(
+        organisation_id, finding_id, actor_id, from_status, to_status,
+        reason, observation_id, approval_id, mapping_pack_id,
+        mapping_version, occurred_at
+      ) values (
+        target_organisation_id, finding_row.id, target_actor_id,
+        finding_row.status, finding_row.status, 'failed_observation_refreshed',
+        observation_row.id, approval_row.id, approval_row.mapping_pack_id,
+        target_mapping_version, observation_row.observed_at
+      );
       findings_refreshed := findings_refreshed + 1;
     end if;
   end loop;

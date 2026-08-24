@@ -24,8 +24,12 @@ delete from public.github_repositories where organisation_id in ('71000000-0000-
 delete from public.github_installations where organisation_id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
 delete from public.memberships where organisation_id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
 delete from public.organisations where id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
-delete from public.github_mapping_entries where mapping_pack_id in (select id from public.github_mapping_packs where version = 'github-test-missing-v1');
-delete from public.github_mapping_packs where version = 'github-test-missing-v1';
+delete from public.github_mapping_entries where mapping_pack_id in (
+  select id from public.github_mapping_packs
+  where version in ('github-test-missing-v1','github-test-incomplete-v2','github-iso-27001-v2')
+);
+delete from public.github_mapping_packs
+where version in ('github-test-missing-v1','github-test-incomplete-v2','github-iso-27001-v2');
 delete from public.profiles where id::text like '71000000-0000-4000-8000-00000000000%';
 delete from auth.users where id::text like '71000000-0000-4000-8000-00000000000%';
 commit;
@@ -43,14 +47,24 @@ select has_fk('public', 'github_evidence_provenance', 'github_evidence_provenanc
 select has_fk('public', 'github_finding_provenance', 'github_finding_provenance_latest_observation_ancestry_fk');
 select has_fk('public', 'github_finding_provenance', 'github_finding_provenance_latest_approval_ancestry_fk');
 select has_column('public', 'monitoring_findings', 'stable_subject_identity', 'finding deduplication stores a stable origin-specific subject identity');
-select has_column('public', 'monitoring_findings', 'mapping_version', 'finding deduplication includes the reviewed mapping version');
+select has_column('public', 'monitoring_findings', 'mapping_version', 'findings retain the latest reviewed mapping version outside their stable identity');
 select has_column('public', 'github_finding_provenance', 'provider_repository_id', 'finding provenance retains the stable GitHub repository identity');
 select has_column('public', 'github_finding_provenance', 'latest_installation_id', 'latest finding ancestry can advance across a GitHub App reinstallation');
 select has_fk('public', 'github_finding_provenance', 'github_finding_provenance_latest_repository_ancestry_fk');
+select has_column('public', 'github_finding_transitions', 'approval_id', 'automated finding history retains the exact mapping approval');
+select has_column('public', 'github_finding_transitions', 'mapping_pack_id', 'automated finding history retains the exact mapping pack');
+select has_column('public', 'github_finding_transitions', 'mapping_version', 'automated finding history retains the exact mapping version');
 select is(
   (select checksum from public.github_mapping_packs where version = 'github-iso-27001-v1'),
   'b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',
   'the SQL seed matches the reviewed TypeScript mapping-pack checksum'
+);
+select is(
+  public.github_mapping_pack_checksum(
+    (select id from public.github_mapping_packs where version='github-iso-27001-v1')
+  ),
+  'b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',
+  'the database canonical checksum contract exactly reproduces the Task 1 checksum'
 );
 select is(
   (select count(*) from public.github_mapping_entries entry join public.github_mapping_packs pack on pack.id=entry.mapping_pack_id where pack.version='github-iso-27001-v1'),
@@ -92,13 +106,20 @@ select is(
 select ok(has_function_privilege('service_role', 'public.approve_github_mapping_pack_server(uuid,uuid,text,text)', 'EXECUTE'), 'only the server boundary can approve mapping packs');
 select ok(not has_function_privilege('authenticated', 'public.approve_github_mapping_pack_server(uuid,uuid,text,text)', 'EXECUTE'), 'authenticated callers cannot target a workspace approval RPC directly');
 select ok(not has_function_privilege('anon', 'public.approve_github_mapping_pack_server(uuid,uuid,text,text)', 'EXECUTE'), 'anonymous callers cannot approve mapping packs');
+select ok(has_function_privilege('service_role', 'public.seal_github_mapping_pack_server(text,text)', 'EXECUTE'), 'only the server boundary can seal a reviewed mapping pack');
+select ok(not has_function_privilege('authenticated', 'public.seal_github_mapping_pack_server(text,text)', 'EXECUTE'), 'authenticated callers cannot seal mapping packs');
+select ok(not has_function_privilege('anon', 'public.seal_github_mapping_pack_server(text,text)', 'EXECUTE'), 'anonymous callers cannot seal mapping packs');
 select ok(has_function_privilege('service_role', 'public.materialise_github_observations_server(uuid,uuid,uuid,text,text,jsonb)', 'EXECUTE'), 'only the server boundary can materialise official results');
 select ok(not has_function_privilege('authenticated', 'public.materialise_github_observations_server(uuid,uuid,uuid,text,text,jsonb)', 'EXECUTE'), 'authenticated callers cannot target another workspace through the materialiser');
 select ok(not has_function_privilege('anon', 'public.materialise_github_observations_server(uuid,uuid,uuid,text,text,jsonb)', 'EXECUTE'), 'anonymous callers cannot materialise official results');
 select ok(not has_table_privilege('service_role', 'public.github_mapping_approvals', 'INSERT,UPDATE,DELETE'), 'service clients cannot bypass approval RPCs with direct DML');
+select ok(not has_table_privilege('service_role', 'public.github_mapping_packs', 'INSERT,UPDATE,DELETE'), 'service clients cannot bypass the trusted draft release process with direct pack DML');
+select ok(not has_table_privilege('service_role', 'public.github_mapping_entries', 'INSERT,UPDATE,DELETE'), 'service clients cannot bypass the trusted draft release process with direct entry DML');
 select ok(not has_table_privilege('service_role', 'public.github_evidence_provenance', 'INSERT,UPDATE,DELETE'), 'service clients cannot forge evidence provenance directly');
 select ok(not has_table_privilege('service_role', 'public.github_finding_provenance', 'INSERT,UPDATE,DELETE'), 'service clients cannot forge finding provenance directly');
 select ok(not has_table_privilege('authenticated', 'public.github_mapping_approvals', 'INSERT,UPDATE,DELETE'), 'authenticated clients cannot write approvals directly');
+select ok(not has_table_privilege('authenticated', 'public.github_mapping_packs', 'INSERT,UPDATE,DELETE'), 'authenticated clients cannot construct or seal mapping packs directly');
+select ok(not has_table_privilege('authenticated', 'public.github_mapping_entries', 'INSERT,UPDATE,DELETE'), 'authenticated clients cannot edit mapping entries directly');
 select ok(not has_table_privilege('authenticated', 'public.github_evidence_provenance', 'INSERT,UPDATE,DELETE'), 'authenticated clients cannot write evidence provenance directly');
 select ok(not has_table_privilege('authenticated', 'public.github_finding_provenance', 'INSERT,UPDATE,DELETE'), 'authenticated clients cannot write finding provenance directly');
 select ok(not has_table_privilege('anon', 'public.github_mapping_packs', 'SELECT'), 'anonymous callers cannot inspect mapping packs');
@@ -185,7 +206,9 @@ insert into public.github_collection_runs(
  ('71000000-0000-4000-8000-000000000312','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000101','71000000-0000-4000-8000-000000000201',73001,'manual','concurrent-pass','succeeded',null,now()-interval '3 hours',now()-interval '7 minutes',1,1,0,0,0,extensions.gen_random_uuid(),now()-interval '179 minutes',1),
  ('71000000-0000-4000-8000-000000000313','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000101','71000000-0000-4000-8000-000000000201',73001,'manual','risk-fail','succeeded',null,now()-interval '3 hours',now()-interval '5 minutes',1,0,1,0,0,extensions.gen_random_uuid(),now()-interval '179 minutes',1),
  ('71000000-0000-4000-8000-000000000314','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000101','71000000-0000-4000-8000-000000000201',73001,'manual','missing-map','succeeded',null,now()-interval '3 hours',now()-interval '3 minutes',1,1,0,0,0,extensions.gen_random_uuid(),now()-interval '179 minutes',1),
- ('71000000-0000-4000-8000-000000000315','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000102','71000000-0000-4000-8000-000000000202',73001,'webhook','reconnected-fail','succeeded',null,now()-interval '3 hours',now()-interval '1 minute',1,0,1,0,0,extensions.gen_random_uuid(),now()-interval '179 minutes',1);
+ ('71000000-0000-4000-8000-000000000315','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000102','71000000-0000-4000-8000-000000000202',73001,'webhook','reconnected-fail','succeeded',null,now()-interval '3 hours',now()-interval '1 minute',1,0,1,0,0,extensions.gen_random_uuid(),now()-interval '179 minutes',1),
+ ('71000000-0000-4000-8000-000000000316','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000102','71000000-0000-4000-8000-000000000202',73001,'manual','mapping-v2-fail','succeeded',null,now()-interval '3 hours',now()-interval '40 seconds',1,0,1,0,0,extensions.gen_random_uuid(),now()-interval '179 minutes',1),
+ ('71000000-0000-4000-8000-000000000317','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000102','71000000-0000-4000-8000-000000000202',73001,'manual','mapping-v2-pass','succeeded',null,now()-interval '3 hours',now()-interval '20 seconds',1,1,0,0,0,extensions.gen_random_uuid(),now()-interval '179 minutes',1);
 
 insert into public.github_observations(
  id,organisation_id,installation_id,repository_id,provider_repository_id,collection_run_id,
@@ -206,7 +229,9 @@ insert into public.github_observations(
  ('71000000-0000-4000-8000-000000000412','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000101','71000000-0000-4000-8000-000000000201',73001,'71000000-0000-4000-8000-000000000312','concurrent-pass','github.branch.stale_approvals','github-repository-v1','github_repository','Compliance-Test/portal','pass',null,'Concurrent fresh pass','Concurrent calls must materialise this once.',null,now()-interval '8 minutes',now()+interval '35 hours','https://github.com/Compliance-Test/portal',repeat('c',64),null),
  ('71000000-0000-4000-8000-000000000413','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000101','71000000-0000-4000-8000-000000000201',73001,'71000000-0000-4000-8000-000000000313','risk-fail','github.branch.stale_approvals','github-repository-v1','github_repository','Compliance-Test/portal','fail','medium','Accepted risk remains detected','Risk acceptance does not change the technical result.','Dismiss stale approvals when new commits are pushed.',now()-interval '6 minutes',now()+interval '35 hours','https://github.com/Compliance-Test/portal',repeat('d',64),null),
  ('71000000-0000-4000-8000-000000000414','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000101','71000000-0000-4000-8000-000000000201',73001,'71000000-0000-4000-8000-000000000314','missing-map','github.branch.stale_approvals','github-repository-v1','github_repository','Compliance-Test/portal','pass',null,'Unmapped passing observation','The test pack cannot resolve its ISO code.',null,now()-interval '4 minutes',now()+interval '35 hours','https://github.com/Compliance-Test/portal',repeat('e',64),null),
- ('71000000-0000-4000-8000-000000000415','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000102','71000000-0000-4000-8000-000000000202',73001,'71000000-0000-4000-8000-000000000315','reconnected-fail','github.branch.stale_approvals','github-repository-v1','github_repository','Compliance-Test/portal','fail','medium','Failure after reconnection','The same stable repository remains non-compliant after GitHub App reconnection.','Dismiss stale approvals when new commits are pushed.',now()-interval '2 minutes',now()+interval '35 hours','https://github.com/Compliance-Test/portal',repeat('f',64),null);
+ ('71000000-0000-4000-8000-000000000415','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000102','71000000-0000-4000-8000-000000000202',73001,'71000000-0000-4000-8000-000000000315','reconnected-fail','github.branch.stale_approvals','github-repository-v1','github_repository','Compliance-Test/portal','fail','medium','Failure after reconnection','The same stable repository remains non-compliant after GitHub App reconnection.','Dismiss stale approvals when new commits are pushed.',now()-interval '2 minutes',now()+interval '35 hours','https://github.com/Compliance-Test/portal',repeat('f',64),null),
+ ('71000000-0000-4000-8000-000000000416','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000102','71000000-0000-4000-8000-000000000202',73001,'71000000-0000-4000-8000-000000000316','mapping-v2-fail','github.branch.stale_approvals','github-repository-v1','github_repository','Compliance-Test/portal','fail','medium','Failure under mapping v2','A newer approved mapping still detects the same stable technical condition.','Dismiss stale approvals when new commits are pushed.',now()-interval '40 seconds',now()+interval '35 hours','https://github.com/Compliance-Test/portal',repeat('0',64),null),
+ ('71000000-0000-4000-8000-000000000417','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000102','71000000-0000-4000-8000-000000000202',73001,'71000000-0000-4000-8000-000000000317','mapping-v2-pass','github.branch.stale_approvals','github-repository-v1','github_repository','Compliance-Test/portal','pass',null,'Pass under mapping v2','A newer fresh verification under the approved mapping resolves the same finding.',null,now()-interval '20 seconds',now()+interval '35 hours','https://github.com/Compliance-Test/portal',repeat('9',64),null);
 commit;
 
 create or replace function pg_temp.github_decision(target_observation_id uuid, target_kind text)
@@ -281,6 +306,131 @@ select set_config(
   false
 );
 reset role;
+
+select lives_ok(
+  $$ insert into public.github_mapping_packs(id,version,title) values (
+       '71000000-0000-4000-8000-000000000503','github-iso-27001-v2',
+       'Standard GitHub to ISO/IEC 27001:2022 mapping pack v2'
+     ) $$,
+  'a trusted release process can create an unpublished mapping-pack draft'
+);
+select is(
+  (select checksum is null and published_at is null
+   from public.github_mapping_packs where version='github-iso-27001-v2'),
+  true,
+  'a new mapping pack remains unsealed until its complete content is reviewed'
+);
+select lives_ok(
+  $$ insert into public.github_mapping_entries(
+       mapping_pack_id,check_id,rule_version,iso_control_references,
+       failure_severity,remediation,treatments
+     )
+     select
+       '71000000-0000-4000-8000-000000000503',entry.check_id,entry.rule_version,
+       entry.iso_control_references,entry.failure_severity,entry.remediation,entry.treatments
+     from public.github_mapping_entries entry
+     join public.github_mapping_packs pack on pack.id=entry.mapping_pack_id
+     where pack.version='github-iso-27001-v1' $$,
+  'all reviewed mappings can be assembled while the new pack is a draft'
+);
+select lives_ok(
+  $$ insert into public.github_mapping_packs(id,version,title) values (
+       '71000000-0000-4000-8000-000000000504','github-test-incomplete-v2',
+       'Deliberately incomplete GitHub mapping pack'
+     ) $$,
+  'an incomplete pack starts as an unpublished draft'
+);
+select lives_ok(
+  $$ insert into public.github_mapping_entries(
+       mapping_pack_id,check_id,rule_version,iso_control_references,
+       failure_severity,remediation,treatments
+     )
+     select
+       '71000000-0000-4000-8000-000000000504',entry.check_id,entry.rule_version,
+       entry.iso_control_references,entry.failure_severity,entry.remediation,entry.treatments
+     from public.github_mapping_entries entry
+     join public.github_mapping_packs pack on pack.id=entry.mapping_pack_id
+     where pack.version='github-iso-27001-v1'
+       and entry.check_id <> 'github.repository.visibility' $$,
+  'draft construction can be inspected before sealing'
+);
+select lives_ok(
+  $$ update public.github_mapping_entries
+     set remediation='A trusted reviewer can refine draft content before sealing.'
+     where mapping_pack_id='71000000-0000-4000-8000-000000000504'
+       and check_id='github.repository.archived' $$,
+  'trusted reviewers can refine entry content while a pack remains a draft'
+);
+
+set role service_role;
+select throws_ok(
+  $$ select public.approve_github_mapping_pack_server(
+       '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001',
+       'github-iso-27001-v2','498642cd3df84b3a8f480af088ac9d75ae247be136f22292ab51ec40fdf8aeab'
+     ) $$,
+  '22023', 'reviewed GitHub mapping pack identity does not match',
+  'an unpublished draft cannot be approved'
+);
+select throws_ok(
+  $$ select public.seal_github_mapping_pack_server(
+       'github-test-incomplete-v2',repeat('0',64)
+     ) $$,
+  '22023', 'GitHub mapping pack is incomplete',
+  'a draft missing one reviewed check cannot be sealed'
+);
+select throws_ok(
+  $$ select public.seal_github_mapping_pack_server(
+       'github-iso-27001-v2',repeat('0',64)
+     ) $$,
+  '22023', 'GitHub mapping pack checksum does not match canonical content',
+  'a complete draft cannot be sealed with a non-canonical checksum'
+);
+select is(
+  public.seal_github_mapping_pack_server(
+    'github-iso-27001-v2','498642cd3df84b3a8f480af088ac9d75ae247be136f22292ab51ec40fdf8aeab'
+  ),
+  '71000000-0000-4000-8000-000000000503'::uuid,
+  'a complete new version seals once with its exact deterministic checksum'
+);
+reset role;
+
+select is(
+  (select checksum from public.github_mapping_packs where version='github-iso-27001-v2'),
+  '498642cd3df84b3a8f480af088ac9d75ae247be136f22292ab51ec40fdf8aeab',
+  'the sealed pack stores the checksum independently produced by the Task 1 contract'
+);
+select ok(
+  (select published_at is not null from public.github_mapping_packs where version='github-iso-27001-v2'),
+  'sealing publishes the reviewed mapping pack atomically'
+);
+select throws_ok(
+  $$ update public.github_mapping_packs set title='tampered' where version='github-iso-27001-v2' $$,
+  'P0001', 'GitHub mapping packs are immutable', 'a sealed pack cannot be updated'
+);
+select throws_ok(
+  $$ delete from public.github_mapping_packs where version='github-iso-27001-v2' $$,
+  'P0001', 'GitHub mapping packs are immutable', 'a sealed pack cannot be deleted'
+);
+select throws_ok(
+  $$ insert into public.github_mapping_entries(
+       mapping_pack_id,check_id,rule_version,iso_control_references,failure_severity,remediation,treatments
+     ) values (
+       '71000000-0000-4000-8000-000000000503','github.test.append','github-repository-v1',array['A.8.32'],'medium',
+       'This direct append must never become part of a published mapping pack.',
+       '{"pass":{"kind":"evidence","summary":"Passing creates evidence."},"fail":{"kind":"finding","summary":"Failure creates a finding."},"unknown":{"kind":"explanatory","summary":"Unknown is explanatory."},"not_applicable":{"kind":"explanatory","summary":"Not applicable is explanatory."}}'
+     ) $$,
+  'P0001', 'GitHub mapping entries are immutable', 'sealed mapping-pack content rejects direct inserts'
+);
+select throws_ok(
+  $$ update public.github_mapping_entries set remediation='tampered'
+     where mapping_pack_id='71000000-0000-4000-8000-000000000503' $$,
+  'P0001', 'GitHub mapping entries are immutable', 'sealed mapping-pack content rejects updates'
+);
+select throws_ok(
+  $$ delete from public.github_mapping_entries
+     where mapping_pack_id='71000000-0000-4000-8000-000000000503' $$,
+  'P0001', 'GitHub mapping entries are immutable', 'sealed mapping-pack content rejects deletes'
+);
 
 select throws_ok(
   $$ update public.github_mapping_packs set title='tampered' where version='github-test-missing-v1' $$,
@@ -489,7 +639,7 @@ select throws_ok(
   $$ select public.transition_github_finding_server('71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001',(select id from public.monitoring_findings where finding_origin='github'),'resolved','Human closure is not verification.') $$,
   '22023', 'a GitHub finding resolves only through a newer fresh pass', 'a human transition cannot mark the finding resolved'
 );
-select is((select count(*) from public.github_finding_transitions where actor_id='71000000-0000-4000-8000-000000000001'),4::bigint,'every valid human finding-state transition is retained with its actor and reason');
+select is((select count(*) from public.github_finding_transitions where actor_id='71000000-0000-4000-8000-000000000001' and observation_id is null),4::bigint,'every valid human finding-state transition is retained with its actor and reason');
 reset role;
 
 set role authenticated;
@@ -555,9 +705,115 @@ select is((select latest_failed_observation_id from public.github_finding_proven
 select is(
   (select identity_key from public.github_finding_provenance),
   pg_catalog.encode(extensions.digest(pg_catalog.convert_to(pg_catalog.jsonb_build_array(
-    '71000000-0000-4000-8000-000000000001'::uuid,73001::bigint,'github.branch.stale_approvals','github-iso-27001-v1'
+    '71000000-0000-4000-8000-000000000001'::uuid,73001::bigint,'github.branch.stale_approvals'
   )::text,'UTF8'),'sha256'),'hex'),
-  'GitHub finding identity is exactly workspace, provider repository, check, and mapping version'
+  'GitHub finding identity is exactly workspace, stable repository, and check, independent of mapping version'
+);
+
+select set_config('app.github_v2_approval',public.approve_github_mapping_pack_server(
+  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001',
+  'github-iso-27001-v2','498642cd3df84b3a8f480af088ac9d75ae247be136f22292ab51ec40fdf8aeab'
+)::text,false);
+select isnt(
+  current_setting('app.github_v2_approval')::uuid,
+  current_setting('app.github_approval')::uuid,
+  'approving a sealed new version records a distinct immutable approval'
+);
+select is(
+  (select pack.version
+   from public.github_mapping_approvals approval
+   join public.github_mapping_packs pack on pack.id=approval.mapping_pack_id
+   where approval.id=current_setting('app.github_v2_approval')::uuid
+     and approval.revoked_at is null),
+  'github-iso-27001-v2',
+  'the sealed new version becomes the one active workspace approval'
+);
+select set_config('app.material_summary',public.materialise_github_observations_server(
+  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000316',
+  'github-iso-27001-v2','498642cd3df84b3a8f480af088ac9d75ae247be136f22292ab51ec40fdf8aeab',
+  pg_temp.github_decision('71000000-0000-4000-8000-000000000416','finding')
+)::text,false);
+select is(
+  (current_setting('app.material_summary')::jsonb->>'findings_refreshed')::int,
+  1,
+  'a newer failure under mapping v2 refreshes the pre-existing v1 finding'
+);
+select is(
+  (select count(*) from public.monitoring_findings
+   where organisation_id='71000000-0000-4000-8000-000000000001' and finding_origin='github'),
+  1::bigint,
+  'a mapping-version change cannot duplicate the stable technical finding'
+);
+select is(
+  (select status::text from public.monitoring_findings where finding_origin='github'),
+  'risk_accepted',
+  'the v2 failure preserves the unresolved human lifecycle state'
+);
+select is(
+  (select mapping_version from public.monitoring_findings where finding_origin='github'),
+  'github-iso-27001-v2',
+  'the stable finding exposes its latest reviewed mapping version without changing identity'
+);
+select set_config('app.material_summary',public.materialise_github_observations_server(
+  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000317',
+  'github-iso-27001-v2','498642cd3df84b3a8f480af088ac9d75ae247be136f22292ab51ec40fdf8aeab',
+  pg_temp.github_decision('71000000-0000-4000-8000-000000000417','evidence')
+)::text,false);
+select is(
+  (current_setting('app.material_summary')::jsonb->>'findings_resolved')::int,
+  1,
+  'a newer fresh pass under mapping v2 resolves the same v1-created finding'
+);
+select is(
+  (select count(*) from public.monitoring_findings
+   where organisation_id='71000000-0000-4000-8000-000000000001' and finding_origin='github'),
+  1::bigint,
+  'the v1 failure and v2 fail/pass lifecycle retains exactly one finding'
+);
+select is(
+  (select status::text from public.monitoring_findings where finding_origin='github'),
+  'resolved',
+  'the same stable finding records the newer verified resolution'
+);
+select results_eq(
+  $$ select distinct transition.mapping_version
+     from public.github_finding_transitions transition
+     where transition.finding_id=(select id from public.monitoring_findings where finding_origin='github')
+       and transition.observation_id is not null
+     order by transition.mapping_version $$,
+  $$ values ('github-iso-27001-v1'::text),('github-iso-27001-v2'::text) $$,
+  'append-only finding history retains both reviewed mapping versions'
+);
+select is(
+  (select count(distinct transition.approval_id)
+   from public.github_finding_transitions transition
+   where transition.finding_id=(select id from public.monitoring_findings where finding_origin='github')
+     and transition.observation_id is not null),
+  2::bigint,
+  'append-only finding history retains both exact mapping approvals'
+);
+select results_eq(
+  $$ select transition.reason,transition.from_status::text,transition.to_status::text,
+            transition.mapping_version,transition.approval_id
+     from public.github_finding_transitions transition
+     where transition.observation_id in (
+       '71000000-0000-4000-8000-000000000416','71000000-0000-4000-8000-000000000417'
+     )
+     order by transition.observation_id $$,
+  $$ values
+     ('failed_observation_refreshed'::text,'risk_accepted'::text,'risk_accepted'::text,
+      'github-iso-27001-v2'::text,current_setting('app.github_v2_approval')::uuid),
+     ('fresh_pass_resolved'::text,'risk_accepted'::text,'resolved'::text,
+      'github-iso-27001-v2'::text,current_setting('app.github_v2_approval')::uuid) $$,
+  'v2 refresh and resolution transitions retain the exact approval and safe state changes'
+);
+select results_eq(
+  $$ select initial_pack.version,latest_pack.version
+     from public.github_finding_provenance provenance
+     join public.github_mapping_packs initial_pack on initial_pack.id=provenance.initial_mapping_pack_id
+     join public.github_mapping_packs latest_pack on latest_pack.id=provenance.latest_mapping_pack_id $$,
+  $$ values ('github-iso-27001-v1'::text,'github-iso-27001-v2'::text) $$,
+  'finding provenance preserves initial v1 ancestry while advancing latest ancestry to v2'
 );
 
 select set_config('app.bad_approval',public.approve_github_mapping_pack_server(
@@ -679,8 +935,12 @@ delete from public.github_repositories where organisation_id in ('71000000-0000-
 delete from public.github_installations where organisation_id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
 delete from public.memberships where organisation_id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
 delete from public.organisations where id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
-delete from public.github_mapping_entries where mapping_pack_id in (select id from public.github_mapping_packs where version='github-test-missing-v1');
-delete from public.github_mapping_packs where version='github-test-missing-v1';
+delete from public.github_mapping_entries where mapping_pack_id in (
+  select id from public.github_mapping_packs
+  where version in ('github-test-missing-v1','github-test-incomplete-v2','github-iso-27001-v2')
+);
+delete from public.github_mapping_packs
+where version in ('github-test-missing-v1','github-test-incomplete-v2','github-iso-27001-v2');
 delete from public.profiles where id::text like '71000000-0000-4000-8000-00000000000%';
 delete from auth.users where id::text like '71000000-0000-4000-8000-00000000000%';
 commit;
