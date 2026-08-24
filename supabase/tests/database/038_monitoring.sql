@@ -1,5 +1,5 @@
 begin;
-select plan(10);
+select plan(13);
 
 -- Monitoring runs on the RLS-bypassing service client, so tenant isolation rests
 -- entirely on the tables' own RLS. This suite proves that safety net directly:
@@ -42,24 +42,43 @@ select throws_ok(
   $$ insert into public.monitoring_findings(organisation_id,check_id,subject_type,subject_id,severity,title)
      values(current_setting('app.org_a')::uuid,'github.branch_protection','github_repo','acme/isms','high','dup') $$,
   '23505', NULL, 'the dedup key blocks a duplicate finding on the same subject');
+select set_config('compliancehub.github_materialiser','on',true);
+select set_config('compliancehub.github_finding_transition','materialiser',true);
+select lives_ok(
+  $$ insert into public.monitoring_findings(organisation_id,check_id,control_ref,subject_type,subject_id,severity,title,finding_origin)
+     values(current_setting('app.org_a')::uuid,'github.branch_protection','A.8.32','github_repo','acme/isms','high','Official GitHub result','github') $$,
+  'official GitHub findings cannot collide with legacy monitor findings'
+);
 
 set local role authenticated;
 
 -- A member can READ the org's findings.
 select set_config('request.jwt.claims','{"sub":"60000000-0000-4000-8000-000000000002","email":"mon-member-a@example.test","role":"authenticated"}',true);
 select is((select count(*)::int from public.monitoring_findings where organisation_id=current_setting('app.org_a')::uuid),
-  1, 'a member can read the org findings');
+  2, 'a member can read the org findings');
 
 -- A member CANNOT resolve a finding (owner-only UPDATE policy → silent no-op).
-update public.monitoring_findings set status='resolved' where organisation_id=current_setting('app.org_a')::uuid;
+update public.monitoring_findings set status='resolved' where organisation_id=current_setting('app.org_a')::uuid and finding_origin='legacy';
 select is((select status::text from public.monitoring_findings where organisation_id=current_setting('app.org_a')::uuid limit 1),
   'open', 'a member cannot resolve a finding (owner-only update)');
 
 -- The owner CAN resolve it.
 select set_config('request.jwt.claims','{"sub":"60000000-0000-4000-8000-000000000001","email":"mon-owner-a@example.test","role":"authenticated"}',true);
-update public.monitoring_findings set status='resolved',resolved_at=now() where organisation_id=current_setting('app.org_a')::uuid;
-select is((select status::text from public.monitoring_findings where organisation_id=current_setting('app.org_a')::uuid limit 1),
+update public.monitoring_findings set status='resolved',resolved_at=now() where organisation_id=current_setting('app.org_a')::uuid and finding_origin='legacy';
+select is((select status::text from public.monitoring_findings where organisation_id=current_setting('app.org_a')::uuid and finding_origin='legacy'),
   'resolved', 'an owner can resolve a finding');
+select throws_ok(
+  $$ update public.monitoring_findings set status='resolved',resolved_at=now()
+     where organisation_id=current_setting('app.org_a')::uuid and finding_origin='github' $$,
+  'P0001', 'GitHub findings require a verified transition',
+  'an owner cannot directly resolve an official GitHub finding without a fresh passing observation'
+);
+select results_eq(
+  $$ select enumlabel::text from pg_catalog.pg_enum
+     where enumtypid='public.monitor_finding_status'::regtype order by enumsortorder $$,
+  $$ values ('open'::text),('acknowledged'),('in_progress'),('exception_requested'),('risk_accepted'),('resolved') $$,
+  'monitoring findings support the complete reviewed lifecycle'
+);
 
 -- An owner can add an alert channel.
 select lives_ok(

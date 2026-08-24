@@ -1,5 +1,5 @@
 begin;
-select plan(9);
+select plan(11);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data)
 values
@@ -46,6 +46,15 @@ reset role;
 select is(
   (select count(*) from public.audit_events where entity_type = 'evidence' and organisation_id = '20000000-0000-4000-8000-000000000001'),
   2::bigint, 'evidence writes are audited');
+select has_fk(
+  'public', 'github_evidence_provenance',
+  'github_evidence_provenance_evidence_tenant_fk',
+  'GitHub evidence provenance cannot cross the evidence tenant boundary'
+);
+select ok(
+  not has_table_privilege('authenticated', 'public.github_evidence_provenance', 'INSERT,UPDATE,DELETE'),
+  'authenticated clients cannot forge or rewrite GitHub evidence provenance'
+);
 
 select * from finish();
 rollback;
