@@ -98,7 +98,7 @@ select is(
 select is(
   (public.reserve_daily_digest_delivery_server(
     current_setting('app.abandoned_digest_org')::uuid,'89000000-0000-4000-8000-000000000001',
-    '2026-08-07',repeat('a',64),'{"text":"Replacement","blocks":[]}'
+    '89000000-0000-4000-8000-000000000101','2026-08-07',repeat('a',64),'{"text":"Replacement","blocks":[]}'
   )->>'state'),
   'delivery_unknown',
   'an unknown abandoned send can never be retried automatically'
@@ -177,7 +177,7 @@ select is(
 set local role service_role;
 select set_config('app.fresh_reservation',public.reserve_daily_digest_delivery_server(
   current_setting('app.abandoned_digest_org')::uuid,'89000000-0000-4000-8000-000000000001',
-  '2026-08-08',repeat('b',64),'{"text":"Fresh","blocks":[]}'
+  '89000000-0000-4000-8000-000000000101','2026-08-08',repeat('b',64),'{"text":"Fresh","blocks":[]}'
 )::text,true);
 select is(
   public.expire_abandoned_daily_digest_deliveries_server(current_setting('app.abandoned_digest_org')::uuid,'2026-08-08'),

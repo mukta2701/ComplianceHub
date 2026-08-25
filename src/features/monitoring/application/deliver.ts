@@ -1,4 +1,5 @@
 import type { CheckSeverity } from "../domain/monitor-provider";
+import { approveSlackDestination } from "@/features/mcp/application/slack-destination-policy";
 
 // Outbound alert delivery. A finding is delivered to every configured channel
 // whose min_severity it meets. The pure helpers (severity gate, Slack payload)
@@ -120,9 +121,16 @@ export async function deliverAlert(
   try {
     switch (channel.type) {
       case "slack": {
+        if (channel.config.slackDestinationStatus === "not_approved") {
+          return { ...base, status: "failed", reason: "Slack destination is not approved" };
+        }
         const webhookUrl = typeof channel.config.webhookUrl === "string" ? channel.config.webhookUrl : "";
         if (!webhookUrl) return { ...base, status: "skipped", reason: "no webhookUrl configured" };
-        await ports.postSlack(webhookUrl, buildSlackPayload(finding));
+        const approved = approveSlackDestination(webhookUrl);
+        if (approved.status !== "approved") {
+          return { ...base, status: "failed", reason: "Slack destination is not approved" };
+        }
+        await ports.postSlack(approved.canonicalUrl, buildSlackPayload(finding));
         return { ...base, status: "delivered" };
       }
       case "in_app": {

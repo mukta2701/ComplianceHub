@@ -54,7 +54,7 @@ The personal staging project for this rollout is project ref
 `ytenjiyjdcrjkgwmciqw`. Confirm that exact ref in both the Supabase dashboard and
 CLI before linking or applying anything, then take and verify a recoverable
 backup. From the last deployed schema, both `supabase migration list` and
-`supabase db push --dry-run` must show exactly these eighteen pending additive
+`supabase db push --dry-run` must show exactly these nineteen pending additive
 migrations, in this order:
 
 1. `20260817010000_github_collection_foundation.sql`
@@ -75,6 +75,7 @@ migrations, in this order:
 16. `20260824212223_github_materialisation_jobs.sql`
 17. `20260825014236_github_official_results_and_mcp_read.sql`
 18. `20260825040825_mcp_github_digest_v2.sql`
+19. `20260825053718_restrict_slack_delivery_destination.sql`
 
 Stop if the project ref, ordering, or pending set differs. After the backup is
 verified, apply that reviewed set once with `supabase db push`, rerun
@@ -83,7 +84,7 @@ view, and service-only claim/finalise/inspection RPC signatures. Confirm that a
 materialisation job at its 25-attempt ceiling becomes visible as `exhausted`
 instead of being reclaimed or reported healthy. Only then set the protected environment
 variables `HOSTED_SUPABASE_PROJECT_REF=ytenjiyjdcrjkgwmciqw` and
-`HOSTED_SUPABASE_MIGRATION_VERSION=20260825040825`. The deploy preflight binds
+`HOSTED_SUPABASE_MIGRATION_VERSION=20260825053718`. The deploy preflight binds
 both attestations to the exact `NEXT_PUBLIC_SUPABASE_URL`; changing the target
 project invalidates the gate. These attestations are not substitutes for the
 list, dry run, backup, or direct verification. The migrations remain compatible
@@ -125,11 +126,13 @@ an Azure Container Registry. Render, AWS, and Vercel hosting are not used.
    public repository's package inherits public visibility, so Container Apps
    needs no long-lived registry credential. The workflow deploys the immutable
    image digest, not a mutable tag.
-8. The first rollout may initialise slot `a` only when all three legacy secret
+8. The first rollout may initialise slot `a` only when all four core secret
    references are absent. Later rollouts write credentials to the opposite slot
    only after proving the legacy references are coherent and the prior GitHub
    reference set is either absent (the one-time upgrade) or all eight values in
-   the same slot; partial or mixed state fails closed. It creates a new revision
+   the same slot. The Slack allow-digest reference may likewise be absent only
+   for this one-time upgrade; once present it must match the core slot. Partial
+   or mixed state fails closed. It creates a new revision
    even on a rerun, waits for that exact
    revision to be Healthy/Running and `latestReadyRevisionName`, then validates
    that the canonical origin exactly matches the Container App ingress FQDN
@@ -157,8 +160,8 @@ GitHub environment variables:
 | `SUPABASE_OAUTH_ISSUER` | `https://<project-ref>.supabase.co/auth/v1` |
 | `SUPABASE_OAUTH_JWKS_URL` | `<issuer>/.well-known/jwks.json` |
 | `MCP_JWT_ALGORITHMS` | `RS256,ES256` |
-| `HOSTED_SUPABASE_PROJECT_REF` | `ytenjiyjdcrjkgwmciqw`, only after the exact hosted project, backup, and eighteen-migration checkpoint above pass |
-| `HOSTED_SUPABASE_MIGRATION_VERSION` | `20260825040825`, only after the eighteen-migration checkpoint above passes |
+| `HOSTED_SUPABASE_PROJECT_REF` | `ytenjiyjdcrjkgwmciqw`, only after the exact hosted project, backup, and nineteen-migration checkpoint above pass |
+| `HOSTED_SUPABASE_MIGRATION_VERSION` | `20260825053718`, only after the nineteen-migration checkpoint above passes |
 | `REGISTERED_GITHUB_APP_SITE_URL` | Exact canonical origin registered in GitHub; must equal `NEXT_PUBLIC_SITE_URL` |
 
 GitHub environment secrets:
@@ -176,6 +179,7 @@ printing their values.
 | `SUPABASE_SERVICE_ROLE_KEY` | Server-only cron and validated digest lifecycle |
 | `APP_ENCRYPTION_KEY` | Stable AES-256-GCM application key |
 | `CRON_SECRET` | Authenticates maintenance workflow calls |
+| `SLACK_ALLOWED_WEBHOOK_SHA256` | Exact lowercase SHA-256 of the canonical Mukta-owned, server-approved private Slack destination; server-only and blank until verified |
 | `AZURE_GITHUB_APP_ID` | Maps to runtime `GITHUB_APP_ID`; numeric private App ID |
 | `AZURE_GITHUB_APP_CLIENT_ID` | Maps to runtime `GITHUB_APP_CLIENT_ID`; App OAuth client ID |
 | `AZURE_GITHUB_APP_CLIENT_SECRET` | Maps to runtime `GITHUB_APP_CLIENT_SECRET`; App OAuth client secret |
@@ -215,6 +219,7 @@ Application environment variables (names must match `.env.example`):
 | `SUPABASE_SERVICE_ROLE_KEY` | yes | **Server-only.** Used by cron routes and the MCP daily-digest delivery boundary only after user-scoped Owner, current-fact, and message validation. Never expose it to the client. |
 | `NEXT_PUBLIC_SITE_URL` | yes | Your real site origin, e.g. `https://app.example.com`. It is the canonical origin for invitation and Auth redirects; production fails closed if it is absent. |
 | `CRON_SECRET` | yes | High-entropy random string; gates all maintenance cron routes. |
+| `SLACK_ALLOWED_WEBHOOK_SHA256` | for every real Slack write | **Server-only.** Exact lowercase SHA-256 of the canonical Mukta-owned, server-approved private Slack destination. Blank or malformed configuration blocks delivery. Never expose it in a build argument, browser variable, health response, UI, or log. |
 | `GITHUB_APP_ID` | for GitHub shadow pilot | **Server-only.** Numeric identifier of the approved private GitHub App. |
 | `GITHUB_APP_CLIENT_ID` | for GitHub shadow pilot | **Server-only.** OAuth client identifier used only by setup/callback routes. |
 | `GITHUB_APP_CLIENT_SECRET` | for GitHub shadow pilot | **Server-only.** OAuth client secret used for PKCE callback exchange and the integrity-protected flow cookie. |
@@ -538,7 +543,11 @@ private and must not be submitted to the public plugin directory. Its
 6. Run digest generation in shadow mode without calling the post tool. Manually
    compare every number, date, control reference, and selected priority with the
    returned fact bundle.
-7. Enable one private Slack test channel as the organisation's digest channel.
+7. After Mukta verifies the intended incoming webhook, configure its exact
+   canonical URL digest as the server-only `SLACK_ALLOWED_WEBHOOK_SHA256`
+   deployment secret. Enable only that Mukta-owned, server-approved private
+   Slack destination as the organisation's digest channel. A label or channel
+   name is display text, never destination identity.
    Run three manual London-date deliveries and verify one delivery row, one
    immutable attempt history, one safe audit trail, and no duplicate for each
    date. Exercise a confirmed Slack rejection and an ambiguous network outcome;
@@ -552,7 +561,7 @@ private and must not be submitted to the public plugin directory. Its
 
    > This is the trusted hosted scheduled-post invocation. Use
    > `$daily-compliance-brief` for today's Europe/London date and deliver the
-   > result to the configured Slack channel. Resolve the single accessible
+   > result to the server-approved private Slack destination. Resolve the single accessible
    > ComplianceHub workspace, or use the exact saved workspace UUID, call
    > `prepare_daily_digest`, and stop successfully if already
    > delivered. Summarise only returned facts using the skill's exact composition
@@ -573,9 +582,13 @@ scheduled job cannot substitute for the hosted Owner OAuth connection.
 
 ## 6. Slack alert channel (optional) **(you)**
 
-1. Create a Slack incoming webhook for the intended workspace/channel.
+1. Mukta creates and verifies one incoming webhook for the intended private
+   destination. Compute the lowercase SHA-256 of its canonical URL using an
+   approved secret-entry workflow and store only that digest as the server-only
+   `SLACK_ALLOWED_WEBHOOK_SHA256` deployment secret.
 2. In **Settings → Connections → Alert channels**, add the webhook and minimum
-   severity. The encrypted webhook is never selected back into the page.
+   severity. Only the Mukta-owned, server-approved private Slack destination is
+   accepted; the encrypted webhook is never selected back into the page.
 3. Disable or remove the channel to stop delivery. In-app notifications remain
    always on; disabled Slack channels are excluded by the monitoring worker.
 

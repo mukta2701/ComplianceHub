@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { buildDailyDigestFacts, hashDailyDigestFacts } from "../domain/digest";
 import { isDestructiveIntegrationTargetAllowed } from "@/test/destructive-integration-target";
 import { prepareDailyDigest } from "./mcp-reads";
@@ -35,9 +35,14 @@ const runId = randomUUID().slice(0, 8);
 const password = `Digest-${randomUUID()}-9a!`;
 let userId = "";
 let workspaceId = "";
+let channelId = "";
 let ownerClient: SupabaseClient;
+const APPROVED_SLACK_WEBHOOK = "https://hooks.slack.com/services/T_TEST/B_TEST/S_TEST";
+const APPROVED_SLACK_WEBHOOK_SHA256 = "36b243d5b0e2304cbdf6f5bf362061b4f0e5cdc842c7f407af9253d0207cce52";
+const previousSlackAllowedWebhookSha256 = process.env.SLACK_ALLOWED_WEBHOOK_SHA256;
 
 beforeAll(async () => {
+  process.env.SLACK_ALLOWED_WEBHOOK_SHA256 = APPROVED_SLACK_WEBHOOK_SHA256;
   const created = await admin.auth.admin.createUser({
     email: `digest-concurrency-${runId}@example.test`,
     password,
@@ -65,18 +70,24 @@ beforeAll(async () => {
     organisation_id: workspaceId,
     type: "slack",
     label: "Concurrency test",
-    config: { webhookUrl: "test-encrypted" },
+    config: { webhookUrl: "v1:test-iv:test-tag:test-data", webhookSha256: APPROVED_SLACK_WEBHOOK_SHA256 },
     connected_by: userId,
     enabled: true,
     daily_digest_enabled: false,
   }).select("id").single();
   if (channel.error || !channel.data) throw channel.error ?? new Error("Digest channel setup failed");
+  channelId = channel.data.id;
   const selected = await ownerClient.rpc("set_daily_digest_channel", {
     target_organisation_id: workspaceId,
     target_channel_id: channel.data.id,
   });
   if (selected.error || selected.data !== true) throw selected.error ?? new Error("Digest channel setup failed");
 }, 30_000);
+
+afterAll(() => {
+  if (previousSlackAllowedWebhookSha256 === undefined) delete process.env.SLACK_ALLOWED_WEBHOOK_SHA256;
+  else process.env.SLACK_ALLOWED_WEBHOOK_SHA256 = previousSlackAllowedWebhookSha256;
+});
 
 // Tenant teardown is intentionally unavailable: organisation deletion would
 // cascade into immutable audit history, and deleting the sole Owner would
@@ -146,6 +157,7 @@ describe("concurrent daily digest delivery", () => {
         const { data, error } = await client.rpc("reserve_daily_digest_delivery_server", {
           target_organisation_id: input.workspaceId,
           target_actor_id: input.actorUserId,
+          target_expected_channel_id: input.expectedChannelId,
           target_digest_on: input.localDate,
           target_fact_hash: input.factHash,
           target_message: input.message,
@@ -153,8 +165,12 @@ describe("concurrent daily digest delivery", () => {
         if (error) throw error;
         return data as Awaited<ReturnType<PostDailyDigestDependencies["reserve"]>>;
       },
-      loadEncryptedWebhook: async () => "test-encrypted",
-      decryptWebhook: () => "https://hooks.slack.com/services/T/B/secret",
+      loadSelectedSlackDestination: async () => ({
+        channelId,
+        encryptedWebhook: "v1:test-iv:test-tag:test-data",
+        webhookSha256: APPROVED_SLACK_WEBHOOK_SHA256,
+      }),
+      decryptWebhook: () => APPROVED_SLACK_WEBHOOK,
       isChannelActive: async (client, input) => {
         const { data, error } = await client.from("alert_channels").select("id")
           .eq("id", input.channelId)

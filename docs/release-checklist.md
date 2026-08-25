@@ -3,9 +3,10 @@
 - [ ] Project owner has reviewed and approved every assessment question and remediation.
 - [ ] Legal, privacy, certification, and open-source disclaimers are visible and accurate.
 - [ ] Production Supabase project uses the intended region and all migrations pass.
-- [ ] Hosted Supabase personal staging project ref `ytenjiyjdcrjkgwmciqw` has a verified backup; `supabase migration list` and `supabase db push --dry-run` showed exactly the eighteen reviewed migrations through `20260825040825` in order; they were verified before any application deployment; and `HOSTED_SUPABASE_PROJECT_REF` plus `HOSTED_SUPABASE_MIGRATION_VERSION` were set only afterwards and match `NEXT_PUBLIC_SUPABASE_URL`.
+- [ ] Hosted Supabase personal staging project ref `ytenjiyjdcrjkgwmciqw` has a verified backup; `supabase migration list` and `supabase db push --dry-run` showed exactly the nineteen reviewed migrations through `20260825053718` in order; they were verified before any application deployment; and `HOSTED_SUPABASE_PROJECT_REF` plus `HOSTED_SUPABASE_MIGRATION_VERSION` were set only afterwards and match `NEXT_PUBLIC_SUPABASE_URL`.
 - [ ] Cross-tenant RLS tests, immutable-record tests, and stale-write tests pass.
 - [ ] Service-role and cron credentials are server-only, rotated, and stored in deployment secrets.
+- [ ] Mukta has verified one Mukta-owned, server-approved private Slack destination; its canonical webhook SHA-256 is stored only in `SLACK_ALLOWED_WEBHOOK_SHA256`, the A/B secret references are coherent, and blank/malformed/mismatched/legacy configurations fail without a Slack write.
 - [ ] An Adtecher organisation owner approved the private GitHub App, one dedicated selected repository, exact read-only permissions/events, SSL verification, OAuth-during-install disabled, Redirect-on-update enabled, and the callback/setup/webhook URLs at the canonical origin.
 - [ ] `REGISTERED_GITHUB_APP_SITE_URL` exactly equals `NEXT_PUBLIC_SITE_URL` and that origin exactly matches the Azure Container App ingress FQDN; all eight server-only GitHub values are present under their valid `AZURE_GITHUB_*` secret aliases in the protected personal `azure-staging` environment; the private key is PKCS#8 with literal escaped `\n`; no GitHub value is present in build inputs, local files, or client output.
 - [ ] Do not merge to `main` or deploy while either hosted Supabase or GitHub App checkpoint above is incomplete; `main` auto-deploys after CI and the environment currently has no required reviewer gate.
@@ -44,9 +45,9 @@ hosted, Azure, Slack, GitHub-owner, email, or backup checkpoints above.
   tables are present.
 - [x] Focused GitHub production shadow run: Chromium + mobile 2/2; local
   personal-pilot readiness unchanged.
-- [x] Slack connector smoke test posted and re-read one non-sensitive message in
-  `#compliancehub-adtecher-pilot` ([message](https://kt-sme.slack.com/archives/C0BQDARKE4F/p1787049744090669)); this verifies the connected Slack
-  destination only, not the ComplianceHub webhook or scheduled digest delivery.
+- [ ] No earlier third-party workspace/channel smoke is accepted as release
+  evidence. Prove the application-owned digest and monitoring paths only against
+  Mukta's server-approved private Slack destination after the owner checkpoint.
 - [x] `npm run test:db:upgrade`: passed earlier in the disposable/local upgrade
   gate (14 upgrade assertions, with the database restored afterwards); it was
   not rerun in this final fixture-preserving pass.

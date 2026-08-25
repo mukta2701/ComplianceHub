@@ -2,6 +2,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { memoizeOwners } from "@/features/automation/application/owner-resolver";
 import { decryptSecret } from "@/lib/security/secrets";
 import { postSlackIncomingWebhook } from "@/lib/integrations/slack-incoming-webhook";
+import {
+  approveSlackDestination,
+  approveStoredSlackDestination,
+} from "@/features/mcp/application/slack-destination-policy";
 import { resolveMonitorProvider } from "./monitor-registry";
 import { deliverAlert, type AlertChannel, type AlertFinding, type DeliverPorts } from "./deliver";
 import { findingKey, type MonitorDependencies, type MonitorSource } from "./monitor-run";
@@ -24,7 +28,9 @@ function notificationKind(severity: CheckSeverity): "policy_violation" | "contro
 }
 
 export async function postMonitoringSlackWebhook(webhookUrl: string, payload: unknown): Promise<void> {
-  const result = await postSlackIncomingWebhook(webhookUrl, payload);
+  const approved = approveSlackDestination(webhookUrl);
+  if (approved.status !== "approved") throw new Error("Slack destination is not approved");
+  const result = await postSlackIncomingWebhook(approved.canonicalUrl, payload);
   if (result.kind !== "response" || result.status < 200 || result.status >= 300) {
     throw new Error("Slack webhook delivery failed");
   }
@@ -180,12 +186,41 @@ export function buildMonitorDependencies(
         return data ?? [];
       });
       return rows.map((row): AlertChannel => {
-        // The webhook is stored encrypted; decrypt it so the delivery adapter can POST.
         const rawConfig = (row.config ?? {}) as Record<string, unknown>;
-        const config = typeof rawConfig.webhookUrl === "string"
-          ? { ...rawConfig, webhookUrl: decryptSecret(rawConfig.webhookUrl) ?? "" }
-          : rawConfig;
-        return { id: row.id, type: row.type, config, minSeverity: row.min_severity as CheckSeverity };
+        if (row.type !== "slack") {
+          return { id: row.id, type: row.type, config: rawConfig, minSeverity: row.min_severity as CheckSeverity };
+        }
+
+        // Fail closed before decrypting legacy/malformed/mismatched rows. The
+        // marker keeps this channel in the result so one rejected destination
+        // becomes an isolated generic failure rather than starving other work.
+        const stored = approveStoredSlackDestination(rawConfig);
+        if (stored.status !== "approved") {
+          return {
+            id: row.id,
+            type: row.type,
+            config: { slackDestinationStatus: "not_approved" },
+            minSeverity: row.min_severity as CheckSeverity,
+          };
+        }
+        try {
+          const decrypted = decryptSecret(stored.encryptedWebhook);
+          const approved = decrypted ? approveSlackDestination(decrypted) : { status: "not_approved" as const };
+          if (approved.status !== "approved") throw new Error("not approved");
+          return {
+            id: row.id,
+            type: row.type,
+            config: { webhookUrl: approved.canonicalUrl },
+            minSeverity: row.min_severity as CheckSeverity,
+          };
+        } catch {
+          return {
+            id: row.id,
+            type: row.type,
+            config: { slackDestinationStatus: "not_approved" },
+            minSeverity: row.min_severity as CheckSeverity,
+          };
+        }
       });
     },
     deliver: (channel, finding) => deliverAlert(channel, finding, ports),

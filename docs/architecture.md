@@ -19,7 +19,12 @@ immutable official GitHub results, leadership reports, and digest preparation.
 `prepare_daily_digest` is deliberately
 side-effect free. The separate Owner-only `post_daily_digest` tool is an
 external Slack write, not part of the read surface; it revalidates the fact hash, reserves one
-delivery row, encrypts the configured Slack incoming-webhook URL at rest, and
+delivery row against the exact prevalidated expected channel, encrypts the
+configured webhook URL at rest, and permits only the Mukta-owned,
+server-approved private Slack destination whose canonical URL matches the
+server-only allow digest. Monitoring uses the same fail-closed policy before
+decryption and again immediately before transport. Labels never select a
+destination. The digest flow
 finalises a terminal delivery state without automatic retries after an unknown
 network outcome.
 

@@ -40,10 +40,11 @@
   authenticated initialize/tools/list, and revocation all passed. The local
   audience row is configured for `http://127.0.0.1:3000/mcp` only.
 - Slack evidence: local digest reservation/finalisation and concurrency tests
-  pass with an injected transport. One clearly labelled, non-sensitive
-  connector smoke message was posted and re-read in the private pilot channel;
-  no compliance data was posted, and the application-owned webhook/daily
-  digest path remains unproven.
+  pass with an injected transport. Any earlier Ankit, AdTecher, or KT-SME
+  workspace/channel smoke is invalid historical evidence and not authorised for use.
+  No current external Slack acceptance is claimed. The
+  only permitted future proof is an explicitly verified Mukta-owned,
+  server-approved private Slack destination.
 - GitHub evidence: the local personal pilot collected the selected
   `mukta2701/ComplianceHub` repository and kept readiness unchanged. This is not
   Adtecher acceptance.

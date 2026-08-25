@@ -124,17 +124,20 @@ jobs:
           current_service_ref="$(jq -r '.[] | select(.name == "SUPABASE_SERVICE_ROLE_KEY") | .secretRef // empty' <<< "$current_environment")"
           current_encryption_ref="$(jq -r '.[] | select(.name == "APP_ENCRYPTION_KEY") | .secretRef // empty' <<< "$current_environment")"
           current_cron_ref="$(jq -r '.[] | select(.name == "CRON_SECRET") | .secretRef // empty' <<< "$current_environment")"
-          if [ -z "$current_service_ref" ] && [ -z "$current_encryption_ref" ] && [ -z "$current_cron_ref" ]; then
+          current_slack_allowed_ref="$(jq -r '.[] | select(.name == "SLACK_ALLOWED_WEBHOOK_SHA256") | .secretRef // empty' <<< "$current_environment")"
+          if [ -z "$current_service_ref" ] && [ -z "$current_encryption_ref" ] && [ -z "$current_cron_ref" ] && [ -z "$current_slack_allowed_ref" ]; then
             current_slot=""
             secret_slot="a"
           elif [ "$current_service_ref" = "supabase-service-role-a" ] \
             && [ "$current_encryption_ref" = "app-encryption-a" ] \
-            && [ "$current_cron_ref" = "cron-secret-a" ]; then
+            && [ "$current_cron_ref" = "cron-secret-a" ] \
+            && { [ -z "$current_slack_allowed_ref" ] || [ "$current_slack_allowed_ref" = "slack-allowed-webhook-a" ]; }; then
             current_slot="a"
             secret_slot="b"
           elif [ "$current_service_ref" = "supabase-service-role-b" ] \
             && [ "$current_encryption_ref" = "app-encryption-b" ] \
-            && [ "$current_cron_ref" = "cron-secret-b" ]; then
+            && [ "$current_cron_ref" = "cron-secret-b" ] \
+            && { [ -z "$current_slack_allowed_ref" ] || [ "$current_slack_allowed_ref" = "slack-allowed-webhook-b" ]; }; then
             current_slot="b"
             secret_slot="a"
           else
@@ -181,6 +184,7 @@ jobs:
             echo "service-role-ref=supabase-service-role-$secret_slot"
             echo "encryption-ref=app-encryption-$secret_slot"
             echo "cron-ref=cron-secret-$secret_slot"
+            echo "slack-allowed-ref=slack-allowed-webhook-$secret_slot"
             echo "github-slot=github-app-$secret_slot"
             echo "github-app-id-ref=github-app-id-$secret_slot"
             echo "github-client-id-ref=github-client-id-$secret_slot"
@@ -198,6 +202,7 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           APP_ENCRYPTION_KEY: ${{ secrets.APP_ENCRYPTION_KEY }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          SLACK_ALLOWED_WEBHOOK_SHA256: ${{ secrets.SLACK_ALLOWED_WEBHOOK_SHA256 }}
           GITHUB_APP_ID: ${{ secrets.AZURE_GITHUB_APP_ID }}
           GITHUB_APP_CLIENT_ID: ${{ secrets.AZURE_GITHUB_APP_CLIENT_ID }}
           GITHUB_APP_CLIENT_SECRET: ${{ secrets.AZURE_GITHUB_APP_CLIENT_SECRET }}
@@ -217,6 +222,7 @@ jobs:
             "$SUPABASE_SERVICE_ROLE_KEY"
             "$APP_ENCRYPTION_KEY"
             "$CRON_SECRET"
+            "$SLACK_ALLOWED_WEBHOOK_SHA256"
             "$GITHUB_APP_ID"
             "$GITHUB_APP_CLIENT_ID"
             "$GITHUB_APP_CLIENT_SECRET"
@@ -236,7 +242,7 @@ jobs:
           done
           [[ "$HOSTED_SUPABASE_PROJECT_REF" =~ ^[a-z0-9]{20}$ ]]
           test "$SUPABASE_URL" = "https://$HOSTED_SUPABASE_PROJECT_REF.supabase.co"
-          test "$HOSTED_SUPABASE_MIGRATION_VERSION" = "20260825040825"
+          test "$HOSTED_SUPABASE_MIGRATION_VERSION" = "20260825053718"
           test "$REGISTERED_GITHUB_APP_SITE_URL" = "$CANONICAL_SITE_URL"
           container_app_fqdn="$(az containerapp show \
             --resource-group "$AZURE_RESOURCE_GROUP" \
@@ -246,6 +252,7 @@ jobs:
           test -n "$container_app_fqdn"
           test "$CANONICAL_SITE_URL" = "https://$container_app_fqdn"
           [[ "$GITHUB_APP_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$SLACK_ALLOWED_WEBHOOK_SHA256" =~ ^[0-9a-f]{64}$ ]]
           [[ "$GITHUB_ALLOWED_ACCOUNT_ID" =~ ^[1-9][0-9]*$ ]]
           test "${#GITHUB_ALLOWED_ACCOUNT_ID}" -le 16
           (( 10#$GITHUB_ALLOWED_ACCOUNT_ID <= 9007199254740991 ))
@@ -273,6 +280,7 @@ jobs:
               "${{ steps.rollout.outputs.service-role-ref }}=$SUPABASE_SERVICE_ROLE_KEY" \
               "${{ steps.rollout.outputs.encryption-ref }}=$APP_ENCRYPTION_KEY" \
               "${{ steps.rollout.outputs.cron-ref }}=$CRON_SECRET" \
+              "${{ steps.rollout.outputs.slack-allowed-ref }}=$SLACK_ALLOWED_WEBHOOK_SHA256" \
               "${{ steps.rollout.outputs.github-app-id-ref }}=$GITHUB_APP_ID" \
               "${{ steps.rollout.outputs.github-client-id-ref }}=$GITHUB_APP_CLIENT_ID" \
               "${{ steps.rollout.outputs.github-client-secret-ref }}=$GITHUB_APP_CLIENT_SECRET" \
@@ -312,6 +320,7 @@ jobs:
               "SUPABASE_SERVICE_ROLE_KEY=secretref:${{ steps.rollout.outputs.service-role-ref }}" \
               "APP_ENCRYPTION_KEY=secretref:${{ steps.rollout.outputs.encryption-ref }}" \
               "CRON_SECRET=secretref:${{ steps.rollout.outputs.cron-ref }}" \
+              "SLACK_ALLOWED_WEBHOOK_SHA256=secretref:${{ steps.rollout.outputs.slack-allowed-ref }}" \
               "GITHUB_APP_ID=secretref:${{ steps.rollout.outputs.github-app-id-ref }}" \
               "GITHUB_APP_CLIENT_ID=secretref:${{ steps.rollout.outputs.github-client-id-ref }}" \
               "GITHUB_APP_CLIENT_SECRET=secretref:${{ steps.rollout.outputs.github-client-secret-ref }}" \

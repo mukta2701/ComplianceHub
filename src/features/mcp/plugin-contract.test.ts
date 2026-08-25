@@ -9,7 +9,7 @@ describe("private ComplianceHub plugin safety contract", () => {
   it("makes prepare-only the default and requires explicit delivery intent", () => {
     const skill = read("plugins/compliancehub-internal/skills/daily-compliance-brief/SKILL.md");
     const manifest = JSON.parse(read("plugins/compliancehub-internal/.codex-plugin/plugin.json")) as {
-      interface: { defaultPrompt: string[] };
+      interface: { defaultPrompt: string[]; longDescription: string };
     };
     const openAi = read("plugins/compliancehub-internal/skills/daily-compliance-brief/agents/openai.yaml");
 
@@ -24,9 +24,31 @@ describe("private ComplianceHub plugin safety contract", () => {
     expect(skill).toMatch(/historical[\s\S]*never[\s\S]*(?:pass|passing)/i);
     expect(skill).toMatch(/ordinary chat[\s\S]*scheduled[\s\S]*not enough/i);
     expect(skill).toMatch(/`delivery_failed`[\s\S]*continue composing[\s\S]*PREPARE-ONLY/i);
+    expect(skill).toMatch(/server-approved[\s\S]*private Slack destination/i);
+    expect(skill).toMatch(/never request or supply[\s\S]*destination/i);
+    expect(manifest.interface.longDescription).toMatch(/server-approved private Slack destination/i);
     expect(manifest.interface.defaultPrompt[0]).toMatch(/without posting/i);
     expect(manifest.interface.defaultPrompt.length).toBeLessThanOrEqual(3);
     expect(openAi).toMatch(/default_prompt:.*without posting/i);
+  });
+
+  it("documents the Mukta-only fail-closed Slack boundary without treating labels or old workspace evidence as authority", () => {
+    const env = read(".env.example");
+    const deployment = read("docs/deployment.md");
+    const release = read("docs/release-checklist.md");
+    const handoff = read("docs/codex-overnight-notes.md");
+    const pilot = read("docs/deployment/github-shadow-pilot.md");
+    const architecture = read("docs/architecture.md");
+    const backlog = read("docs/feature-backlog.md");
+
+    expect(env).toMatch(/SLACK_ALLOWED_WEBHOOK_SHA256=[^\S\r\n]*$/m);
+    expect(env).toMatch(/server-only[\s\S]*lowercase[\s\S]*SHA-256[\s\S]*blank/i);
+    for (const activeGuide of [deployment, release, pilot, architecture, backlog]) {
+      expect(activeGuide).toMatch(/Mukta-owned[\s\S]*server-approved[\s\S]*private Slack destination/i);
+    }
+    expect(release).not.toContain("kt-sme.slack.com");
+    expect(release).not.toContain("#compliancehub-adtecher-pilot");
+    expect(handoff).toMatch(/invalid historical evidence[\s\S]*not authorised for use/i);
   });
 
   it("gives every MCP client the same write-intent boundary", () => {

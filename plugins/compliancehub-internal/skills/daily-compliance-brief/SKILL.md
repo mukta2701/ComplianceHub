@@ -37,7 +37,7 @@ Owner role is necessary but not sufficient to post.
    - `delivery_failed`: continue composing. PREPARE-ONLY returns a candidate without posting; POST may retry this confirmed failure once.
 5. Compose using the contract below.
 6. In PREPARE-ONLY, return the candidate, say it was not posted, and make zero post calls.
-7. In POST, call `post_daily_digest` exactly once with the unchanged workspace, date, fact hash, headline, priorities, and actions. Never request or supply a Slack destination.
+7. In POST, call `post_daily_digest` exactly once with the unchanged workspace, date, fact hash, headline, priorities, and actions. Delivery can go only to the Mukta-owned, server-approved private Slack destination. Never request or supply a destination, webhook, digest, label, or override.
 8. Report `delivered` as success; otherwise report the safe error and recovery. Never claim delivery after `DELIVERY_UNKNOWN`.
 
 ## Exact composition contract
@@ -72,4 +72,4 @@ Provide one headline up to 120 characters, up to five priorities, and up to five
 
 Pass `factHash`, workspace, and date unchanged. Treat truncated arrays as incomplete. Exclude bodies, member details, credentials, webhook data, secrets, URLs, and unsupported personal data. Invent no causes, trends, assurances, ownership, deadlines, or progress.
 
-Posting is the only write and uses the server-configured channel. Do not create tasks, alter compliance records, change Slack configuration, or perform other mutations.
+Posting is the only write and uses the server-approved private Slack destination. Do not create tasks, alter compliance records, change Slack configuration, or perform other mutations.

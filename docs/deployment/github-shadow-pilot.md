@@ -1,6 +1,6 @@
-# GitHub shadow pilot evidence
+# Mukta-only GitHub shadow pilot evidence
 
-This is the redacted operator worksheet for the personal/AdTecher GitHub shadow
+This is the redacted operator worksheet for Mukta's personal GitHub shadow
 pilot. It is intentionally not a completion certificate: shadow collection must
 remain read-only and must not change readiness, evidence, findings, MCP answers,
 or Slack output.
@@ -13,13 +13,16 @@ or Slack output.
       intended owner account and repository. Record only the repository name,
       installation ID, and reviewed permission/event set; never record keys.
 - [ ] Verify the hosted Supabase backup and the complete pending migration set
-      through `20260825040825` before setting the protected schema attestation.
+      through `20260825053718` before setting the protected schema attestation.
 - [ ] Confirm all eight server-only `AZURE_GITHUB_*` values are present in the
       protected environment, with the private key in escaped-newline PKCS#8
       form. Do not copy values into this document or build inputs.
 - [ ] Capture a baseline for readiness percentage, evidence count, finding
       count, MCP fact responses, and Slack digest ledger rows for the pilot
       organisation.
+- [ ] If Slack is exercised separately, confirm it is Mukta-owned and is the
+      server-approved private Slack destination. GitHub collection itself makes
+      no Slack write and a channel label is never treated as authority.
 
 ## Controlled collection
 

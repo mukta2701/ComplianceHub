@@ -164,14 +164,19 @@ workflow. Digest claims are derived from a prepared fact hash that covers the
 exact GitHub partition, prior-delivery baseline, immutable lifecycle changes,
 and truncation state;
 reservation/finalisation RPCs make concurrent calls idempotent, webhook URLs are
-encrypted at rest, and delivery outcomes are terminally classified. A private
+encrypted at rest, and delivery outcomes are terminally classified. Every real
+Slack write now fails closed to one Mukta-owned, server-approved private Slack destination
+using a server-only canonical-URL digest; legacy/mismatched rows are
+rejected before decryption and the reservation is bound to the exact expected
+channel. A private
 ComplianceHub plugin and daily-brief skill keep preparation side-effect-free
 unless the user explicitly requests a send. Hosted OAuth and a real Slack
 webhook remain go-live checkpoints, not local defaults.
 
 **Suggested improvements:**
 - Complete hosted MCP Inspector/Codex/Claude OAuth acceptance against the canonical Azure origin.
-- Configure a real Slack incoming webhook and record three redacted shadow deliveries, including failure/unknown handling.
+- After Mukta approves the private destination and deploy secret, record three
+  redacted application-owned deliveries, including failure/unknown handling.
 - Add operator-facing schedule status and a bounded retry/recovery dashboard for abandoned digest reservations.
 
 ## GitHub verified collection and materialisation (pipeline shipped)

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildDailyDigestFacts, buildSlackDigestPayload, hashDailyDigestFacts } from "../domain/digest";
 import {
   postDailyDigest,
@@ -12,6 +12,8 @@ const USER_ID = "10000000-0000-4000-8000-000000000001";
 const WORKSPACE_ID = "20000000-0000-4000-8000-000000000001";
 const CHANNEL_ID = "30000000-0000-4000-8000-000000000001";
 const DELIVERY_ID = "40000000-0000-4000-8000-000000000001";
+const APPROVED_SLACK_WEBHOOK = "https://hooks.slack.com/services/T_TEST/B_TEST/S_TEST";
+const APPROVED_SLACK_WEBHOOK_SHA256 = "36b243d5b0e2304cbdf6f5bf362061b4f0e5cdc842c7f407af9253d0207cce52";
 const DELIVERY_CLIENT = { kind: "server-only-delivery-client" } as unknown as import("@supabase/supabase-js").SupabaseClient;
 
 const facts = buildDailyDigestFacts({
@@ -51,8 +53,12 @@ function dependencies(overrides: Partial<PostDailyDigestDependencies> = {}): Pos
       attemptNumber: 1,
       message: payload,
     })),
-    loadEncryptedWebhook: vi.fn(async () => "encrypted-webhook"),
-    decryptWebhook: vi.fn(() => "https://hooks.slack.com/services/T/B/secret"),
+    loadSelectedSlackDestination: vi.fn(async () => ({
+      channelId: CHANNEL_ID,
+      encryptedWebhook: "v1:iv:tag:data",
+      webhookSha256: APPROVED_SLACK_WEBHOOK_SHA256,
+    })),
+    decryptWebhook: vi.fn(() => APPROVED_SLACK_WEBHOOK),
     isChannelActive: vi.fn(async () => true),
     deliver: vi.fn(async () => ({ outcome: "delivered" as const })),
     finalize: vi.fn(async () => true),
@@ -68,12 +74,16 @@ const request = {
 };
 
 describe("postDailyDigest", () => {
+  beforeEach(() => vi.stubEnv("SLACK_ALLOWED_WEBHOOK_SHA256", APPROVED_SLACK_WEBHOOK_SHA256));
+  afterEach(() => vi.unstubAllEnvs());
+
   it("reserves the exact deterministic payload before posting and finalizes delivery", async () => {
     const order: string[] = [];
     const deps = dependencies({
       reserve: vi.fn(async (_client, input) => {
         order.push("reserve");
         expect(input.message).toEqual(payload);
+        expect(input.expectedChannelId).toBe(CHANNEL_ID);
         return { state: "reserved" as const, deliveryId: DELIVERY_ID, channelId: CHANNEL_ID, attemptNumber: 1, message: input.message };
       }) as PostDailyDigestDependencies["reserve"],
       deliver: vi.fn(async (_url, outgoing) => {
@@ -91,6 +101,70 @@ describe("postDailyDigest", () => {
     await expect(postDailyDigest({ supabase: {} as never, userId: USER_ID, clientId: "codex", input: request }, deps))
       .resolves.toEqual({ workspace: { id: WORKSPACE_ID, name: "Acme" }, localDate: "2026-08-07", status: "delivered", delivery: { id: DELIVERY_ID, attemptNumber: 1 } });
     expect(order).toEqual(["reserve", "network", "finalize"]);
+  });
+
+  it("rejects a missing stored digest before decryption, limiting, service capability, reservation, audit, or network", async () => {
+    const deps = dependencies({
+      loadSelectedSlackDestination: vi.fn(async () => ({
+        channelId: CHANNEL_ID,
+        encryptedWebhook: "v1:iv:tag:data",
+        webhookSha256: null,
+      })),
+    });
+
+    await expect(postDailyDigest({ supabase: {} as never, userId: USER_ID, clientId: "codex", input: request }, deps))
+      .rejects.toMatchObject({ code: "SLACK_REJECTED" });
+
+    expect(deps.decryptWebhook).not.toHaveBeenCalled();
+    expect(deps.rateLimit).not.toHaveBeenCalled();
+    expect(deps.createDeliveryClient).not.toHaveBeenCalled();
+    expect(deps.reserve).not.toHaveBeenCalled();
+    expect(deps.finalize).not.toHaveBeenCalled();
+    expect(deps.deliver).not.toHaveBeenCalled();
+  });
+
+  it("rejects a legacy plaintext webhook before decryption and every delivery mutation", async () => {
+    const deps = dependencies({
+      loadSelectedSlackDestination: vi.fn(async () => ({
+        channelId: CHANNEL_ID,
+        encryptedWebhook: APPROVED_SLACK_WEBHOOK,
+        webhookSha256: APPROVED_SLACK_WEBHOOK_SHA256,
+      })),
+    });
+
+    await expect(postDailyDigest({ supabase: {} as never, userId: USER_ID, clientId: "codex", input: request }, deps))
+      .rejects.toMatchObject({ code: "SLACK_REJECTED" });
+    expect(deps.decryptWebhook).not.toHaveBeenCalled();
+    expect(deps.rateLimit).not.toHaveBeenCalled();
+    expect(deps.createDeliveryClient).not.toHaveBeenCalled();
+    expect(deps.reserve).not.toHaveBeenCalled();
+    expect(deps.deliver).not.toHaveBeenCalled();
+  });
+
+  it("loads and approves the selected destination with the user client before constructing the service client", async () => {
+    const userClient = { kind: "user-client" } as never;
+    const order: string[] = [];
+    const deps = dependencies({
+      loadSelectedSlackDestination: vi.fn(async () => {
+        order.push("load-user");
+        return { channelId: CHANNEL_ID, encryptedWebhook: "v1:iv:tag:data", webhookSha256: APPROVED_SLACK_WEBHOOK_SHA256 };
+      }),
+      decryptWebhook: vi.fn(() => { order.push("decrypt"); return APPROVED_SLACK_WEBHOOK; }),
+      rateLimit: vi.fn(async () => { order.push("limit"); }),
+      createDeliveryClient: vi.fn(() => { order.push("service"); return DELIVERY_CLIENT; }),
+      reserve: vi.fn(async () => {
+        order.push("reserve");
+        return { state: "reserved" as const, deliveryId: DELIVERY_ID, channelId: CHANNEL_ID, attemptNumber: 1, message: payload };
+      }),
+      isChannelActive: vi.fn(async () => { order.push("active"); return true; }),
+      deliver: vi.fn(async () => { order.push("network"); return { outcome: "delivered" as const }; }),
+      finalize: vi.fn(async () => { order.push("finalize"); return true; }),
+    });
+
+    await postDailyDigest({ supabase: userClient, userId: USER_ID, clientId: "codex", input: request }, deps);
+
+    expect(deps.loadSelectedSlackDestination).toHaveBeenCalledWith(userClient, { workspaceId: WORKSPACE_ID });
+    expect(order).toEqual(["load-user", "decrypt", "limit", "service", "reserve", "active", "network", "finalize"]);
   });
 
   it.each(["admin", "member"] as const)("rejects a %s before rate limit, preparation, reservation, or network", async (role) => {
@@ -156,7 +230,7 @@ describe("postDailyDigest", () => {
       reserve: vi.fn(async () => ({ state: "reserved" as const, deliveryId: DELIVERY_ID, channelId: CHANNEL_ID, attemptNumber: 2, message: original })),
     });
     await postDailyDigest({ supabase: {} as never, userId: USER_ID, clientId: "codex", input: request }, deps);
-    expect(deps.deliver).toHaveBeenCalledWith("https://hooks.slack.com/services/T/B/secret", original);
+    expect(deps.deliver).toHaveBeenCalledWith(APPROVED_SLACK_WEBHOOK, original);
   });
 
   it("rejects a schema-v1 failed delivery whose immutable hash differs before service client, reservation, or transport", async () => {
@@ -219,7 +293,7 @@ describe("postDailyDigest", () => {
     await expect(postDailyDigest({ supabase: {} as never, userId: USER_ID, clientId: "codex", input: request }, deps))
       .rejects.toMatchObject({ code: "SLACK_REJECTED" });
     expect(deps.deliver).not.toHaveBeenCalled();
-    expect(deps.finalize).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ outcome: "failed", errorCode: "SLACK_REJECTED" }));
+    expect(deps.finalize).not.toHaveBeenCalled();
   });
 
   it("rechecks the configured channel immediately before network delivery", async () => {
@@ -235,6 +309,24 @@ describe("postDailyDigest", () => {
       actorUserId: USER_ID,
       outcome: "failed",
       errorCode: "NO_DIGEST_CHANNEL",
+    }));
+  });
+
+  it("fails a final allow-policy recheck as confirmed SLACK_REJECTED without network", async () => {
+    const deps = dependencies({
+      isChannelActive: vi.fn(async () => {
+        vi.stubEnv("SLACK_ALLOWED_WEBHOOK_SHA256", "b".repeat(64));
+        return true;
+      }),
+    });
+
+    await expect(postDailyDigest({ supabase: {} as never, userId: USER_ID, clientId: "codex", input: request }, deps))
+      .rejects.toMatchObject({ code: "SLACK_REJECTED" });
+
+    expect(deps.deliver).not.toHaveBeenCalled();
+    expect(deps.finalize).toHaveBeenCalledWith(DELIVERY_CLIENT, expect.objectContaining({
+      outcome: "failed",
+      errorCode: "SLACK_REJECTED",
     }));
   });
 
@@ -267,7 +359,7 @@ describe("postDailyDigest", () => {
     await expect(postDailyDigest({ supabase: {} as never, userId: USER_ID, clientId: "codex", input: request }, localFailure))
       .rejects.toMatchObject({ code: "SLACK_REJECTED" });
     expect(localFailure.deliver).not.toHaveBeenCalled();
-    expect(localFailure.finalize).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ outcome: "failed", errorCode: "SLACK_REJECTED" }));
+    expect(localFailure.finalize).not.toHaveBeenCalled();
 
     const transportFailure = dependencies({ deliver: vi.fn(async () => { throw new TypeError("network"); }) });
     await expect(postDailyDigest({ supabase: {} as never, userId: USER_ID, clientId: "codex", input: request }, transportFailure))
@@ -294,6 +386,7 @@ describe("daily digest reservation error mapping", () => {
     localDate: "2026-08-07",
     factHash,
     message: payload,
+    expectedChannelId: CHANNEL_ID,
   };
 
   it("maps an Owner revocation SQLSTATE to FORBIDDEN before any network call", async () => {
@@ -312,9 +405,11 @@ describe("daily digest reservation error mapping", () => {
 });
 
 describe("Slack digest transport", () => {
+  beforeEach(() => vi.stubEnv("SLACK_ALLOWED_WEBHOOK_SHA256", APPROVED_SLACK_WEBHOOK_SHA256));
+  afterEach(() => vi.unstubAllEnvs());
+
   it.each([
-    "https://hooks.slack.com/services/T/B/secret",
-    "https://hooks.slack-gov.com/services/T/B/secret",
+    APPROVED_SLACK_WEBHOOK,
   ])("accepts an official incoming-webhook URL: %s", (url) => {
     expect(validateSlackWebhookUrl(url).toString()).toBe(url);
   });
@@ -342,14 +437,14 @@ describe("Slack digest transport", () => {
     [500, "unknown", "DELIVERY_UNKNOWN"],
   ] as const)("classifies Slack HTTP %s as %s", async (status, outcome, errorCode) => {
     const fetcher = vi.fn(async () => new Response(status === 204 ? null : "do-not-read", { status }));
-    await expect(postSlackWebhook("https://hooks.slack.com/services/T/B/secret", payload, { fetcher, timeoutMs: 50 }))
+    await expect(postSlackWebhook(APPROVED_SLACK_WEBHOOK, payload, { fetcher, timeoutMs: 50 }))
       .resolves.toEqual({ outcome, ...(errorCode ? { errorCode } : {}) });
     expect(fetcher).toHaveBeenCalledWith(expect.any(URL), expect.objectContaining({ method: "POST", redirect: "error", headers: { "content-type": "application/json" } }));
   });
 
   it("classifies timeouts, DNS, TLS, and redirect failures as unknown", async () => {
     const fetcher = vi.fn(async () => { throw new TypeError("network secret detail"); });
-    await expect(postSlackWebhook("https://hooks.slack.com/services/T/B/secret", payload, { fetcher, timeoutMs: 50 }))
+    await expect(postSlackWebhook(APPROVED_SLACK_WEBHOOK, payload, { fetcher, timeoutMs: 50 }))
       .resolves.toEqual({ outcome: "unknown", errorCode: "DELIVERY_UNKNOWN" });
   });
 });

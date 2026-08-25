@@ -1,5 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const hoisted = vi.hoisted(() => ({
+  decryptSecret: vi.fn(),
+}));
+
+vi.mock("@/lib/security/secrets", () => ({ decryptSecret: hoisted.decryptSecret }));
+
 import { buildMonitorDependencies, postMonitoringSlackWebhook } from "./monitor-deps";
 import type { AlertChannel, AlertFinding } from "./deliver";
 
@@ -12,8 +19,16 @@ const finding: AlertFinding = {
 const channel: AlertChannel = {
   id: "whatsapp-1", type: "whatsapp", config: { to: "+447700900123" }, minSeverity: "high",
 };
+const APPROVED_SLACK_WEBHOOK = "https://hooks.slack.com/services/T_TEST/B_TEST/S_TEST";
+const APPROVED_SLACK_WEBHOOK_SHA256 = "36b243d5b0e2304cbdf6f5bf362061b4f0e5cdc842c7f407af9253d0207cce52";
 
 describe("buildMonitorDependencies WhatsApp delivery", () => {
+  beforeEach(() => {
+    vi.stubEnv("SLACK_ALLOWED_WEBHOOK_SHA256", APPROVED_SLACK_WEBHOOK_SHA256);
+    hoisted.decryptSecret.mockReset();
+    hoisted.decryptSecret.mockReturnValue(APPROVED_SLACK_WEBHOOK);
+  });
+
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
@@ -79,6 +94,64 @@ describe("buildMonitorDependencies WhatsApp delivery", () => {
     expect(builder.order).toHaveBeenCalledWith("id", { ascending: true });
     expect(builder.limit).toHaveBeenCalledWith(500);
     expect(builder.gt).toHaveBeenCalledWith("id", "1000");
+  });
+
+  it("rejects a legacy Slack channel before decryption and isolates it from other delivery work", async () => {
+    const builder: Record<string, ReturnType<typeof vi.fn>> = {};
+    for (const method of ["select", "eq", "is", "in", "order", "limit", "gt"]) {
+      builder[method] = vi.fn(() => builder);
+    }
+    builder.then = vi.fn((resolve) => Promise.resolve({
+      data: [{
+        id: "slack-legacy",
+        type: "slack",
+        config: { webhookUrl: APPROVED_SLACK_WEBHOOK },
+        min_severity: "high",
+      }],
+      error: null,
+    }).then(resolve));
+    const fetcher = vi.fn();
+    vi.stubGlobal("fetch", fetcher);
+    const deps = buildMonitorDependencies({ from: vi.fn(() => builder) } as unknown as SupabaseClient);
+
+    const channels = await deps.listExternalChannels("org1");
+    const result = await deps.deliver(channels[0]!, finding);
+
+    expect(hoisted.decryptSecret).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      channelId: "slack-legacy",
+      type: "slack",
+      status: "failed",
+      reason: "Slack destination is not approved",
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("decrypts only an approved stored Slack envelope and carries only the canonical URL to delivery", async () => {
+    const builder: Record<string, ReturnType<typeof vi.fn>> = {};
+    for (const method of ["select", "eq", "is", "in", "order", "limit", "gt"]) {
+      builder[method] = vi.fn(() => builder);
+    }
+    builder.then = vi.fn((resolve) => Promise.resolve({
+      data: [{
+        id: "slack-approved",
+        type: "slack",
+        config: { webhookUrl: "v1:iv:tag:data", webhookSha256: APPROVED_SLACK_WEBHOOK_SHA256 },
+        min_severity: "high",
+      }],
+      error: null,
+    }).then(resolve));
+    const deps = buildMonitorDependencies({ from: vi.fn(() => builder) } as unknown as SupabaseClient);
+
+    const channels = await deps.listExternalChannels("org1");
+
+    expect(hoisted.decryptSecret).toHaveBeenCalledOnce();
+    expect(channels).toEqual([{
+      id: "slack-approved",
+      type: "slack",
+      config: { webhookUrl: APPROVED_SLACK_WEBHOOK },
+      minSeverity: "high",
+    }]);
   });
 
   it("paginates every open finding key beyond the Supabase row ceiling", async () => {
@@ -199,12 +272,29 @@ describe("buildMonitorDependencies WhatsApp delivery", () => {
 });
 
 describe("monitoring Slack wrapper", () => {
-  afterEach(() => vi.unstubAllGlobals());
+  beforeEach(() => vi.stubEnv("SLACK_ALLOWED_WEBHOOK_SHA256", APPROVED_SLACK_WEBHOOK_SHA256));
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it("rechecks the current allow-policy before the shared transport can fetch", async () => {
+    const fetcher = vi.fn();
+    vi.stubGlobal("fetch", fetcher);
+    vi.stubEnv("SLACK_ALLOWED_WEBHOOK_SHA256", "b".repeat(64));
+
+    await expect(postMonitoringSlackWebhook(
+      APPROVED_SLACK_WEBHOOK,
+      { text: "finding" },
+    )).rejects.toThrow("Slack destination is not approved");
+
+    expect(fetcher).not.toHaveBeenCalled();
+  });
 
   it("preserves the existing throw-on-non-2xx contract through the shared hardened transport", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 503 })));
     await expect(postMonitoringSlackWebhook(
-      "https://hooks.slack.com/services/T/B/secret",
+      APPROVED_SLACK_WEBHOOK,
       { text: "finding" },
     )).rejects.toThrow("Slack webhook delivery failed");
   });
@@ -212,7 +302,7 @@ describe("monitoring Slack wrapper", () => {
   it("accepts a successful shared transport response", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })));
     await expect(postMonitoringSlackWebhook(
-      "https://hooks.slack.com/services/T/B/secret",
+      APPROVED_SLACK_WEBHOOK,
       { text: "finding" },
     )).resolves.toBeUndefined();
   });

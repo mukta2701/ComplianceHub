@@ -44,14 +44,35 @@ describe("Azure staging deployment contract", () => {
   });
 
   it("retains the previous credential slot and creates a fresh revision on rerun", () => {
-    expect(workflow).toMatch(/-z "\$current_service_ref"[\s\S]*-z "\$current_encryption_ref"[\s\S]*-z "\$current_cron_ref"[\s\S]*secret_slot="a"/);
-    expect(workflow).toMatch(/current_service_ref[\s\S]*supabase-service-role-a[\s\S]*secret_slot="b"/);
+    expect(workflow).toMatch(/-z "\$current_service_ref"[\s\S]*-z "\$current_encryption_ref"[\s\S]*-z "\$current_cron_ref"[\s\S]*-z "\$current_slack_allowed_ref"[\s\S]*secret_slot="a"/);
+    expect(workflow).toMatch(/current_service_ref[\s\S]*supabase-service-role-a[\s\S]*current_slack_allowed_ref[\s\S]*slack-allowed-webhook-a[\s\S]*secret_slot="b"/);
     expect(workflow).toMatch(/secret_slot="a"/);
     expect(workflow).toContain("run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}");
     expect(bicep).toContain("param supabaseRefName string");
     expect(bicep).toContain("secretRef: supabaseRefName");
     expect(bicep).not.toMatch(/param supabaseServiceRoleKey|string\s+supabaseServiceRoleKey/);
     expect(bicep).not.toMatch(/configuration:\s*\{[\s\S]*?secrets:\s*\[/);
+  });
+
+  it("keeps the one allowed Slack destination digest server-only and rotates it with the complete inactive slot", () => {
+    const name = "SLACK_ALLOWED_WEBHOOK_SHA256";
+    const publish = workflow.slice(workflow.indexOf("  publish:"), deployJobStart);
+    const deploy = workflow.slice(deployJobStart);
+    const stagedSecret = '"${{ steps.rollout.outputs.slack-allowed-ref }}=$SLACK_ALLOWED_WEBHOOK_SHA256"';
+    const runtimeBinding = '"SLACK_ALLOWED_WEBHOOK_SHA256=secretref:${{ steps.rollout.outputs.slack-allowed-ref }}"';
+
+    expect(publish).not.toContain(name);
+    expect(dockerfile).not.toMatch(/(?:ARG|NEXT_PUBLIC_)\s*SLACK_ALLOWED_WEBHOOK_SHA256/);
+    expect(workflow).not.toContain(`NEXT_PUBLIC_${name}`);
+    expect(clientSources).not.toContain(name);
+    expect(healthRoutes).not.toContain(name);
+    expect(deploy).toContain(`${name}: \${{ secrets.${name} }}`);
+    expect(deploy.split(stagedSecret)).toHaveLength(2);
+    expect(deploy.split(runtimeBinding)).toHaveLength(2);
+    expect(deploy).toMatch(/SLACK_ALLOWED_WEBHOOK_SHA256[\s\S]*\^\[0-9a-f\]\{64\}\$/);
+    expect(deploy).not.toMatch(/echo[^\n]*SLACK_ALLOWED_WEBHOOK_SHA256/);
+    expect(bicep).toMatch(/name: 'SLACK_ALLOWED_WEBHOOK_SHA256'[\s\S]{0,80}secretRef:/);
+    expect(bicep).toContain("param slackAllowedWebhookSha256RefName string");
   });
 
   it("keeps every GitHub App value server-only and rotates one complete inactive slot", () => {
@@ -112,13 +133,13 @@ describe("Azure staging deployment contract", () => {
   it("gates mutation on the hosted schema and registered canonical GitHub origin", () => {
     expect(workflow).toContain("HOSTED_SUPABASE_MIGRATION_VERSION");
     expect(workflow).toContain("HOSTED_SUPABASE_PROJECT_REF");
-    expect(workflow).toContain("20260825040825");
+    expect(workflow).toContain("20260825053718");
     expect(workflow).toMatch(/test "\$SUPABASE_URL" = "https:\/\/\$HOSTED_SUPABASE_PROJECT_REF\.supabase\.co"/);
     expect(workflow).toContain("REGISTERED_GITHUB_APP_SITE_URL");
     expect(workflow).toMatch(/test "\$REGISTERED_GITHUB_APP_SITE_URL" = "\$CANONICAL_SITE_URL"/);
     expect(workflow).toMatch(/properties\.configuration\.ingress\.fqdn[\s\S]*test "\$CANONICAL_SITE_URL" = "https:\/\/\$container_app_fqdn"/);
     expect(deployment).toMatch(/backup[\s\S]*supabase migration list[\s\S]*HOSTED_SUPABASE_MIGRATION_VERSION/i);
-    expect(deployment).toMatch(/eighteen pending additive\s+migrations[\s\S]*20260817010000[\s\S]*20260817020000[\s\S]*20260817030000[\s\S]*20260817192458[\s\S]*20260818030000[\s\S]*20260818040000[\s\S]*20260818050000[\s\S]*20260818060000[\s\S]*20260818070000[\s\S]*20260818100000[\s\S]*20260818110000[\s\S]*20260818120000[\s\S]*20260818130000[\s\S]*20260818140000[\s\S]*20260824184628[\s\S]*20260824212223[\s\S]*20260825014236[\s\S]*20260825040825/);
+    expect(deployment).toMatch(/nineteen pending additive\s+migrations[\s\S]*20260817010000[\s\S]*20260817020000[\s\S]*20260817030000[\s\S]*20260817192458[\s\S]*20260818030000[\s\S]*20260818040000[\s\S]*20260818050000[\s\S]*20260818060000[\s\S]*20260818070000[\s\S]*20260818100000[\s\S]*20260818110000[\s\S]*20260818120000[\s\S]*20260818130000[\s\S]*20260818140000[\s\S]*20260824184628[\s\S]*20260824212223[\s\S]*20260825014236[\s\S]*20260825040825[\s\S]*20260825053718/);
     expect(deployment).toMatch(/REGISTERED_GITHUB_APP_SITE_URL[\s\S]*NEXT_PUBLIC_SITE_URL/);
     expect(releaseChecklist).toMatch(/hosted Supabase[\s\S]*before.*application deployment/i);
     expect(releaseChecklist).toMatch(/GitHub App[\s\S]*canonical.*origin/i);

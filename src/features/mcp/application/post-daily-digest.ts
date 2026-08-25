@@ -9,6 +9,10 @@ import {
   postSlackIncomingWebhook,
   validateSlackIncomingWebhookUrl,
 } from "@/lib/integrations/slack-incoming-webhook";
+import {
+  approveSlackDestination,
+  approveStoredSlackDestination,
+} from "./slack-destination-policy";
 import { McpError, type McpErrorCode } from "../auth/errors";
 import {
   buildSlackDigestPayload,
@@ -58,9 +62,16 @@ export type DigestReservation =
 type ReserveInput = {
   actorUserId: string;
   workspaceId: string;
+  expectedChannelId: string;
   localDate: string;
   factHash: string;
   message: SlackDigestPayload;
+};
+
+type SelectedSlackDestination = {
+  channelId: string;
+  encryptedWebhook: string;
+  webhookSha256: string | null;
 };
 
 type FinalizeInput = {
@@ -77,7 +88,10 @@ export type PostDailyDigestDependencies = {
   rateLimit: (key: string) => Promise<void>;
   createDeliveryClient: () => SupabaseClient;
   reserve: (supabase: SupabaseClient, input: ReserveInput) => Promise<DigestReservation>;
-  loadEncryptedWebhook: (supabase: SupabaseClient, input: { workspaceId: string; channelId: string }) => Promise<string>;
+  loadSelectedSlackDestination: (
+    supabase: SupabaseClient,
+    input: { workspaceId: string },
+  ) => Promise<SelectedSlackDestination | null>;
   decryptWebhook: (stored: string) => string | null;
   isChannelActive: (supabase: SupabaseClient, input: { workspaceId: string; channelId: string }) => Promise<boolean>;
   deliver: (webhookUrl: string, payload: SlackDigestPayload) => Promise<SlackDeliveryOutcome>;
@@ -98,6 +112,7 @@ const reservationSchema = z.discriminatedUnion("state", [
 export async function reserveDelivery(supabase: SupabaseClient, input: ReserveInput): Promise<DigestReservation> {
   const { data, error } = await supabase.rpc("reserve_daily_digest_delivery_server", {
     target_actor_id: input.actorUserId,
+    target_expected_channel_id: input.expectedChannelId,
     target_organisation_id: input.workspaceId,
     target_digest_on: input.localDate,
     target_fact_hash: input.factHash,
@@ -109,20 +124,60 @@ export async function reserveDelivery(supabase: SupabaseClient, input: ReserveIn
   return parsed.data as DigestReservation;
 }
 
-async function loadEncryptedWebhook(
+async function loadSelectedSlackDestination(
   supabase: SupabaseClient,
-  input: { workspaceId: string; channelId: string },
-): Promise<string> {
+  input: { workspaceId: string },
+): Promise<SelectedSlackDestination | null> {
   const { data, error } = await supabase.from("alert_channels")
-    .select("config")
-    .eq("id", input.channelId)
+    .select("id,config")
     .eq("organisation_id", input.workspaceId)
     .eq("type", "slack")
+    .eq("enabled", true)
+    .eq("daily_digest_enabled", true)
+    .is("revoked_at", null)
+    .order("id", { ascending: true })
+    .limit(1)
     .maybeSingle();
-  if (error || !data) throw new McpError("SLACK_REJECTED");
-  const parsed = z.object({ config: z.object({ webhookUrl: z.string().min(1) }).passthrough() }).safeParse(data);
+  if (error) throw new McpError("INTERNAL_ERROR");
+  if (!data) return null;
+  const parsed = z.object({
+    id: uuid,
+    config: z.object({
+      webhookUrl: z.string().min(1),
+      webhookSha256: z.string().nullable().optional(),
+    }).passthrough(),
+  }).safeParse(data);
   if (!parsed.success) throw new McpError("SLACK_REJECTED");
-  return parsed.data.config.webhookUrl;
+  return {
+    channelId: parsed.data.id,
+    encryptedWebhook: parsed.data.config.webhookUrl,
+    webhookSha256: parsed.data.config.webhookSha256 ?? null,
+  };
+}
+
+async function loadApprovedSlackDestination(
+  dependencies: Pick<PostDailyDigestDependencies, "loadSelectedSlackDestination" | "decryptWebhook">,
+  supabase: SupabaseClient,
+  input: { workspaceId: string },
+): Promise<{ channelId: string; canonicalUrl: string } | null> {
+  const selected = await dependencies.loadSelectedSlackDestination(supabase, input);
+  if (!selected) return null;
+
+  const stored = approveStoredSlackDestination({
+    webhookUrl: selected.encryptedWebhook,
+    webhookSha256: selected.webhookSha256,
+  });
+  if (stored.status !== "approved") throw new McpError("SLACK_REJECTED");
+
+  try {
+    const decrypted = dependencies.decryptWebhook(stored.encryptedWebhook);
+    const approved = decrypted ? approveSlackDestination(decrypted) : { status: "not_approved" as const };
+    if (approved.status !== "approved") throw new McpError("SLACK_REJECTED");
+    return { channelId: selected.channelId, canonicalUrl: approved.canonicalUrl };
+  } catch (error) {
+    if (error instanceof McpError) throw error;
+    throw new McpError("SLACK_REJECTED");
+  }
 }
 
 async function isChannelActive(
@@ -159,7 +214,7 @@ const defaultDependencies: PostDailyDigestDependencies = {
   rateLimit: (key) => enforceRateLimit(key, { limit: 5, windowMs: 60_000 }),
   createDeliveryClient: createSupabaseServiceClient,
   reserve: reserveDelivery,
-  loadEncryptedWebhook,
+  loadSelectedSlackDestination,
   decryptWebhook: decryptSecret,
   isChannelActive,
   deliver: (webhookUrl, payload) => postSlackWebhook(webhookUrl, payload),
@@ -210,12 +265,6 @@ export async function postDailyDigest(
   const workspace = await dependencies.resolveWorkspace(request.supabase, request.userId, input.workspaceId);
   if (workspace.role !== "owner") throw new McpError("FORBIDDEN");
 
-  try {
-    await dependencies.rateLimit(actionRateLimitKey(request.userId, request.clientId));
-  } catch {
-    throw new McpError("RATE_LIMITED");
-  }
-
   const prepared = await dependencies.prepare(request.supabase, request.userId, {
     workspaceId: workspace.id,
     localDate: input.localDate,
@@ -240,58 +289,75 @@ export async function postDailyDigest(
     workspaceName: prepared.facts.workspace.name,
     localDate: prepared.facts.localDate,
   })) as SlackDigestPayload;
+
+  let selected: { channelId: string; canonicalUrl: string } | null;
+  try {
+    selected = await loadApprovedSlackDestination(dependencies, request.supabase, {
+      workspaceId: workspace.id,
+    });
+  } catch (error) {
+    if (error instanceof McpError) throw error;
+    throw new McpError("INTERNAL_ERROR");
+  }
+  if (!selected) throw new McpError("NO_DIGEST_CHANNEL");
+
+  try {
+    await dependencies.rateLimit(actionRateLimitKey(request.userId, request.clientId));
+  } catch {
+    throw new McpError("RATE_LIMITED");
+  }
+
   // The service-role capability is constructed only after the OAuth user has
-  // passed workspace, Owner, current-facts, and closed-world message checks.
+  // passed workspace, Owner, current-facts, closed-world message, and exact
+  // server-approved destination checks.
   const deliveryClient = dependencies.createDeliveryClient();
   const reservation = await dependencies.reserve(deliveryClient, {
     actorUserId: request.userId,
     workspaceId: workspace.id,
+    expectedChannelId: selected.channelId,
     localDate: input.localDate,
     factHash: input.factHash,
     message: outgoing,
   });
   if (reservation.state !== "reserved") throw new McpError(reservationStateError(reservation.state));
-
-  let validatedWebhook: string | null = null;
-  try {
-    const encrypted = await dependencies.loadEncryptedWebhook(deliveryClient, {
-      workspaceId: workspace.id,
-      channelId: reservation.channelId,
+  if (reservation.channelId !== selected.channelId) {
+    await finalizeOrDeliveryUnknown(dependencies, deliveryClient, {
+      actorUserId: request.userId,
+      deliveryId: reservation.deliveryId,
+      attemptNumber: reservation.attemptNumber,
+      outcome: "failed",
+      errorCode: "NO_DIGEST_CHANNEL",
     });
-    const webhook = dependencies.decryptWebhook(encrypted);
-    if (!webhook) throw new McpError("SLACK_REJECTED");
-    validatedWebhook = validateSlackWebhookUrl(webhook).toString();
-  } catch {
-    // No external request occurred, so a bad/missing/decryption-failed stored
-    // configuration is a confirmed failure and may be explicitly retried.
+    throw new McpError("NO_DIGEST_CHANNEL");
   }
 
   let result: SlackDeliveryOutcome;
-  if (!validatedWebhook) {
-    result = { outcome: "failed", errorCode: "SLACK_REJECTED" };
+  let active: boolean;
+  try {
+    active = await dependencies.isChannelActive(deliveryClient, {
+      workspaceId: workspace.id,
+      channelId: reservation.channelId,
+    });
+  } catch {
+    await finalizeOrDeliveryUnknown(dependencies, deliveryClient, {
+      actorUserId: request.userId,
+      deliveryId: reservation.deliveryId,
+      attemptNumber: reservation.attemptNumber,
+      outcome: "failed",
+      errorCode: "INTERNAL_ERROR",
+    });
+    throw new McpError("INTERNAL_ERROR");
+  }
+  if (!active) {
+    result = { outcome: "failed", errorCode: "NO_DIGEST_CHANNEL" };
   } else {
-    let active: boolean;
-    try {
-      active = await dependencies.isChannelActive(deliveryClient, {
-        workspaceId: workspace.id,
-        channelId: reservation.channelId,
-      });
-    } catch {
-      await finalizeOrDeliveryUnknown(dependencies, deliveryClient, {
-        actorUserId: request.userId,
-        deliveryId: reservation.deliveryId,
-        attemptNumber: reservation.attemptNumber,
-        outcome: "failed",
-        errorCode: "INTERNAL_ERROR",
-      });
-      throw new McpError("INTERNAL_ERROR");
-    }
-    if (!active) {
-      result = { outcome: "failed", errorCode: "NO_DIGEST_CHANNEL" };
+    const finalApproval = approveSlackDestination(selected.canonicalUrl);
+    if (finalApproval.status !== "approved") {
+      result = { outcome: "failed", errorCode: "SLACK_REJECTED" };
     } else {
       try {
         result = await dependencies.deliver(
-          validatedWebhook,
+          finalApproval.canonicalUrl,
           reservation.message,
         );
       } catch {
@@ -326,10 +392,14 @@ export async function postSlackWebhook(
   payload: SlackDigestPayload,
   options: { fetcher?: typeof fetch; timeoutMs?: number } = {},
 ): Promise<SlackDeliveryOutcome> {
+  const approved = approveSlackDestination(webhookUrl);
+  if (approved.status !== "approved") {
+    return { outcome: "failed", errorCode: "SLACK_REJECTED" };
+  }
   let result;
   try {
     result = await postSlackIncomingWebhook(
-      webhookUrl,
+      approved.canonicalUrl,
       slackPayloadSchema.parse(payload),
       options,
     );

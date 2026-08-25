@@ -1,12 +1,15 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const ORGANISATION_ID = "20000000-0000-4000-8000-000000000001";
 const USER_ID = "20000000-0000-4000-8000-000000000002";
+const APPROVED_SLACK_WEBHOOK = "https://hooks.slack.com/services/T_TEST/B_TEST/S_TEST";
+const APPROVED_SLACK_WEBHOOK_SHA256 = "36b243d5b0e2304cbdf6f5bf362061b4f0e5cdc842c7f407af9253d0207cce52";
 
 const hoisted = vi.hoisted(() => ({
   ctx: null as unknown,
   enforceRateLimit: vi.fn(),
-  encryptSecret: vi.fn((value: string | null) => value),
+  encryptSecret: vi.fn(() => "v1:iv:tag:data"),
+  decryptSecret: vi.fn(() => APPROVED_SLACK_WEBHOOK),
   revalidatePath: vi.fn(),
   createNangoConnectSession: vi.fn(),
   deleteNangoConnection: vi.fn(),
@@ -22,7 +25,10 @@ const hoisted = vi.hoisted(() => ({
 
 vi.mock("@/lib/app-context", () => ({ requireAppContext: () => Promise.resolve(hoisted.ctx) }));
 vi.mock("@/lib/security/rate-limit", () => ({ enforceRateLimit: hoisted.enforceRateLimit }));
-vi.mock("@/lib/security/secrets", () => ({ encryptSecret: hoisted.encryptSecret }));
+vi.mock("@/lib/security/secrets", () => ({
+  encryptSecret: hoisted.encryptSecret,
+  decryptSecret: hoisted.decryptSecret,
+}));
 vi.mock("@/lib/supabase/service", () => ({
   createSupabaseServiceClient: hoisted.createServiceClient,
 }));
@@ -75,12 +81,17 @@ function connectionForm() {
 describe("integration connection access", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("SLACK_ALLOWED_WEBHOOK_SHA256", APPROVED_SLACK_WEBHOOK_SHA256);
+    hoisted.encryptSecret.mockImplementation(() => "v1:iv:tag:data");
+    hoisted.decryptSecret.mockReturnValue(APPROVED_SLACK_WEBHOOK);
     hoisted.createNangoConnectSession.mockResolvedValue({ configured: false });
     hoisted.deleteNangoConnection.mockResolvedValue(undefined);
     hoisted.resolveJiraOAuthTarget.mockResolvedValue({ cloudId: "1324a887-45db-4bf4-8e99-ef0ff456d421" });
     hoisted.verifyNangoConnection.mockResolvedValue(undefined);
     hoisted.verifyGitHubOAuthTarget.mockResolvedValue(undefined);
   });
+
+  afterEach(() => vi.unstubAllEnvs());
 
   it("rejects members before writing connection credentials", async () => {
     const from = vi.fn();
@@ -531,11 +542,11 @@ describe("integration connection access", () => {
     channel.set("endpoint", "https://hooks.slack.com/services/T/B/X"); channel.set("minSeverity", "high");
 
     await expect(addMonitorSourceAction(source)).rejects.toThrow("Only workspace operators can manage integrations");
-    await expect(addAlertChannelAction(channel)).rejects.toThrow("Only workspace operators can manage integrations");
+    await expect(addAlertChannelAction(channel)).rejects.toThrow("Only a workspace Owner can manage Slack destinations");
     expect(from).not.toHaveBeenCalled();
   });
 
-  it("allows an Admin to add monitoring and Slack configuration without exposing secrets", async () => {
+  it("allows an Admin to add monitoring configuration but rejects Slack configuration before mutation", async () => {
     const insert = vi.fn().mockResolvedValue({ error: null });
     hoisted.ctx = {
       supabase: { from: vi.fn(() => ({ insert })) }, user: { id: USER_ID },
@@ -544,13 +555,52 @@ describe("integration connection access", () => {
     const source = new FormData();
     source.set("owner", "acme"); source.set("repo", "isms"); source.set("label", "Production GitHub");
     const channel = new FormData();
-    channel.set("endpoint", "https://hooks.slack.com/services/T/B/X"); channel.set("minSeverity", "high");
+    channel.set("endpoint", APPROVED_SLACK_WEBHOOK); channel.set("minSeverity", "high");
 
     await addMonitorSourceAction(source);
-    await addAlertChannelAction(channel);
+    await expect(addAlertChannelAction(channel)).rejects.toThrow("Only a workspace Owner");
 
     expect(insert).toHaveBeenCalledWith(expect.objectContaining({ organisation_id: ORGANISATION_ID, enabled: true }));
-    expect(hoisted.encryptSecret).toHaveBeenCalledWith("https://hooks.slack.com/services/T/B/X");
+    expect(hoisted.encryptSecret).not.toHaveBeenCalledWith(APPROVED_SLACK_WEBHOOK);
+  });
+
+  it("fails an unapproved Slack destination before rate limiting, encryption, persistence, or revalidation", async () => {
+    vi.stubEnv("SLACK_ALLOWED_WEBHOOK_SHA256", "b".repeat(64));
+    const from = vi.fn();
+    hoisted.ctx = {
+      supabase: { from }, user: { id: USER_ID },
+      organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
+    };
+    const channel = new FormData();
+    channel.set("endpoint", APPROVED_SLACK_WEBHOOK); channel.set("minSeverity", "high");
+
+    await expect(addAlertChannelAction(channel)).rejects.toThrow("Slack destination is not approved");
+
+    expect(hoisted.enforceRateLimit).not.toHaveBeenCalled();
+    expect(hoisted.encryptSecret).not.toHaveBeenCalled();
+    expect(from).not.toHaveBeenCalled();
+    expect(hoisted.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("stores only the canonical approved URL envelope and its computed digest", async () => {
+    const insert = vi.fn().mockResolvedValue({ error: null });
+    hoisted.ctx = {
+      supabase: { from: vi.fn(() => ({ insert })) }, user: { id: USER_ID },
+      organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
+    };
+    const channel = new FormData();
+    channel.set("endpoint", "HTTPS://HOOKS.SLACK.COM/services/T_TEST/B_TEST/S_TEST");
+    channel.set("minSeverity", "high");
+
+    await addAlertChannelAction(channel);
+
+    expect(hoisted.encryptSecret).toHaveBeenCalledWith(APPROVED_SLACK_WEBHOOK);
+    expect(insert).toHaveBeenCalledWith(expect.objectContaining({
+      config: {
+        webhookUrl: "v1:iv:tag:data",
+        webhookSha256: APPROVED_SLACK_WEBHOOK_SHA256,
+      },
+    }));
   });
 
   it("accepts Slack Gov incoming-webhook URLs", async () => {
@@ -560,11 +610,13 @@ describe("integration connection access", () => {
       organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
     };
     const channel = new FormData();
-    channel.set("endpoint", "https://hooks.slack-gov.com/services/T/B/X"); channel.set("minSeverity", "high");
+    const govUrl = "https://hooks.slack-gov.com/services/T_TEST/B_TEST/S_TEST";
+    vi.stubEnv("SLACK_ALLOWED_WEBHOOK_SHA256", "5430f2455f30bd64452ca6f7f517ca3e3d74d05151a68355dcb8252fc121cb60");
+    channel.set("endpoint", govUrl); channel.set("minSeverity", "high");
 
     await addAlertChannelAction(channel);
 
-    expect(hoisted.encryptSecret).toHaveBeenCalledWith("https://hooks.slack-gov.com/services/T/B/X");
+    expect(hoisted.encryptSecret).toHaveBeenCalledWith(govUrl);
   });
 
   it("rejects malformed official-looking Slack webhook URLs before writing", async () => {
@@ -604,12 +656,56 @@ describe("integration connection access", () => {
     expect(builder.eq).toHaveBeenCalledWith("organisation_id", ORGANISATION_ID);
   });
 
+  it("rejects enabling a legacy or mismatched Slack destination before update", async () => {
+    const builder: Record<string, ReturnType<typeof vi.fn>> = {};
+    for (const method of ["select", "eq", "is", "update"]) builder[method] = vi.fn(() => builder);
+    builder.maybeSingle = vi.fn().mockResolvedValue({
+      data: { config: { webhookUrl: APPROVED_SLACK_WEBHOOK } },
+      error: null,
+    });
+    hoisted.ctx = {
+      supabase: { from: vi.fn(() => builder) }, user: { id: USER_ID },
+      organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
+    };
+    const form = new FormData();
+    form.set("id", "10000000-0000-4000-8000-000000000099"); form.set("enabled", "true");
+
+    await expect(setAlertChannelEnabledAction(form)).rejects.toThrow("Slack destination is not approved");
+
+    expect(hoisted.decryptSecret).not.toHaveBeenCalled();
+    expect(builder.update).not.toHaveBeenCalled();
+    expect(hoisted.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("keeps the Slack disable stop path available when no allow digest is configured", async () => {
+    vi.stubEnv("SLACK_ALLOWED_WEBHOOK_SHA256", undefined);
+    const builder: Record<string, ReturnType<typeof vi.fn>> = {};
+    for (const method of ["update", "eq", "select"]) builder[method] = vi.fn(() => builder);
+    builder.maybeSingle = vi.fn().mockResolvedValue({ data: { id: "10000000-0000-4000-8000-000000000099" }, error: null });
+    hoisted.ctx = {
+      supabase: { from: vi.fn(() => builder) }, user: { id: USER_ID },
+      organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
+    };
+    const form = new FormData();
+    form.set("id", "10000000-0000-4000-8000-000000000099"); form.set("enabled", "false");
+
+    await expect(setAlertChannelEnabledAction(form)).resolves.toBeUndefined();
+    expect(builder.update).toHaveBeenCalledWith({ enabled: false });
+    expect(hoisted.decryptSecret).not.toHaveBeenCalled();
+  });
+
   it("lets only an Owner atomically select the daily digest channel", async () => {
     const rpc = vi.fn().mockResolvedValue({ data: true, error: null });
+    const builder: Record<string, ReturnType<typeof vi.fn>> = {};
+    for (const method of ["select", "eq", "is"]) builder[method] = vi.fn(() => builder);
+    builder.maybeSingle = vi.fn().mockResolvedValue({
+      data: { config: { webhookUrl: "v1:iv:tag:data", webhookSha256: APPROVED_SLACK_WEBHOOK_SHA256 } },
+      error: null,
+    });
     const form = new FormData();
     form.set("channelId", "10000000-0000-4000-8000-000000000099");
     hoisted.ctx = {
-      supabase: { rpc }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
+      supabase: { rpc, from: vi.fn(() => builder) }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
     };
 
     await setDailyDigestChannelAction(form);
@@ -621,10 +717,29 @@ describe("integration connection access", () => {
     expect(hoisted.revalidatePath).toHaveBeenCalledWith("/app/integrations");
 
     hoisted.ctx = {
-      supabase: { rpc }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "admin" },
+      supabase: { rpc, from: vi.fn(() => builder) }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "admin" },
     };
     await expect(setDailyDigestChannelAction(form)).rejects.toThrow("Only a workspace Owner");
     expect(rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects selecting a legacy Slack destination before RPC or decryption", async () => {
+    const builder: Record<string, ReturnType<typeof vi.fn>> = {};
+    for (const method of ["select", "eq", "is"]) builder[method] = vi.fn(() => builder);
+    builder.maybeSingle = vi.fn().mockResolvedValue({
+      data: { config: { webhookUrl: APPROVED_SLACK_WEBHOOK } }, error: null,
+    });
+    const rpc = vi.fn();
+    hoisted.ctx = {
+      supabase: { from: vi.fn(() => builder), rpc }, user: { id: USER_ID },
+      organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
+    };
+    const form = new FormData();
+    form.set("channelId", "10000000-0000-4000-8000-000000000099");
+
+    await expect(setDailyDigestChannelAction(form)).rejects.toThrow("Slack destination is not approved");
+    expect(hoisted.decryptSecret).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
   });
 
   it("maps an empty digest destination to null and rejects unsuccessful RPC outcomes", async () => {

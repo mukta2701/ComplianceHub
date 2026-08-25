@@ -64,7 +64,7 @@ insert into public.monitoring_findings(
  ('88000000-0000-4000-8000-000000000405',current_setting('app.bundle_org')::uuid,'bundle-risk','A.8.32','github_repository','bundle/risk','medium','Bundle risk-accepted finding','risk_accepted','2026-08-06 08:04:00+00',null),
  ('88000000-0000-4000-8000-000000000406',current_setting('app.bundle_org')::uuid,'bundle-resolved','A.8.32','github_repository','bundle/resolved','medium','Bundle resolved finding','resolved','2026-08-06 08:05:00+00','2026-08-06 08:06:00+00');
 select public.reserve_daily_digest_delivery_server(
-  current_setting('app.bundle_org')::uuid,'88000000-0000-4000-8000-000000000001','2026-08-06',repeat('a',64),
+  current_setting('app.bundle_org')::uuid,'88000000-0000-4000-8000-000000000001','88000000-0000-4000-8000-000000000201','2026-08-06',repeat('a',64),
   '{"text":"Reserved","blocks":[]}'::jsonb
 );
 set local role authenticated;

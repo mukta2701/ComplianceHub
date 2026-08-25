@@ -18,6 +18,7 @@ param mcpJwtAlgorithms string = 'RS256,ES256'
 param supabaseRefName string
 param encryptionRefName string
 param cronRefName string
+param slackAllowedWebhookSha256RefName string
 param githubAppIdRefName string
 param githubAppClientIdRefName string
 param githubAppClientCredentialRefName string
@@ -70,6 +71,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
             { name: 'SUPABASE_SERVICE_ROLE_KEY', secretRef: supabaseRefName }
             { name: 'APP_ENCRYPTION_KEY', secretRef: encryptionRefName }
             { name: 'CRON_SECRET', secretRef: cronRefName }
+            { name: 'SLACK_ALLOWED_WEBHOOK_SHA256', secretRef: slackAllowedWebhookSha256RefName }
             { name: 'GITHUB_APP_ID', secretRef: githubAppIdRefName }
             { name: 'GITHUB_APP_CLIENT_ID', secretRef: githubAppClientIdRefName }
             { name: 'GITHUB_APP_CLIENT_SECRET', secretRef: githubAppClientCredentialRefName }
