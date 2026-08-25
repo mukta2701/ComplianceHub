@@ -18,7 +18,11 @@ or Slack output.
       deploy `bridge` with migration `20260825040825`, verify the non-secret
       `v1`/`bridge` capability and exact release SHA, apply additive migration
       `20260825053718`, then manually deploy `final`/`strict`. Never use bridge
-      for an automatic deployment.
+      for an automatic deployment. The first final must follow that exact
+      bridge revision. In steady-state operation, subsequent manual final and
+      automatic deployments remain strict and accept only an exact `v1`
+      predecessor in captured `bridge` or `strict` mode; rollback must match
+      that captured previous mode and release SHA.
 - [ ] Confirm all eight server-only `AZURE_GITHUB_*` values are present in the
       protected environment, with the private key in escaped-newline PKCS#8
       form. Do not copy values into this document or build inputs.

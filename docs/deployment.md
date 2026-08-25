@@ -92,11 +92,15 @@ the bridge revision is healthy:
    `bridge`, and the exact release SHA. Then apply only additive migration 19,
    rerun the migration list and database checks, and set
    `HOSTED_SUPABASE_MIGRATION_VERSION=20260825053718`.
-3. Manually dispatch `rollout_phase=final`. Final requires the exact healthy
-   policy-capable bridge revision, coherent same-slot Slack/core references,
-   and migration `20260825053718`; it deploys
-   `DAILY_DIGEST_RESERVATION_MODE=strict`. Every automatic `workflow_run`
-   deployment is final/strict and cannot create or reuse a bridge.
+3. Manually dispatch `rollout_phase=final`. The first final requires the exact
+   healthy policy-capable bridge revision, coherent same-slot Slack/core
+   references, and migration `20260825053718`; it deploys
+   `DAILY_DIGEST_RESERVATION_MODE=strict`. In steady-state operation, subsequent
+   manual final and automatic `workflow_run` deployments remain strict and may
+   follow an exact policy-capable predecessor whose captured mode is either
+   `bridge` or `strict`. A blank mode, missing `v1` marker, mismatched release
+   SHA, or non-final schema still fails before mutation, so the initial manual
+   bridge remains mandatory.
 
 After migration 19, verify the GitHub tables, security-invoker summary view, and
 both service-only reservation overloads plus the claim/finalise/inspection RPC
@@ -152,14 +156,17 @@ an Azure Container Registry. Render, AWS, and Vercel hosting are not used.
    reference; there is no general blank-reference exception. Immediately before
    the first secret mutation, the workflow re-reads and compares the captured
    `latestReadyRevisionName`, immutable image, and complete secret-reference
-   fingerprint. Final also proves that the exact rollback revision is the
-   policy-capable bridge image by matching its non-secret health marker, mode,
-   and release SHA. It then creates one new revision, binds the inactive secret
+   fingerprint. The first final proves that the exact rollback revision is the
+   policy-capable bridge image; a steady-state final accepts a policy-capable
+   `bridge` or `strict` predecessor. Both paths match the non-secret health
+   marker, captured mode, and release SHA. The workflow then creates one new
+   revision, binds the inactive secret
    slot exactly once, waits for that exact revision to be Healthy/Running and
    `latestReadyRevisionName`, and validates the marker/release identity before
    OAuth/MCP smoke. On failure or cancellation it copies only the captured
    previous revision, verifies the copied image and references are identical,
-   and for a final rollback proves the restored `v1`/`bridge`/release identity.
+   and for a final rollback proves the restored `v1`, exact captured previous
+   mode (`bridge` or `strict`), and release identity.
 9. Do not merge or deploy this release until the hosted migration checkpoint and
    GitHub organisation-owner registration checkpoint below are complete. The
    current environment has no GitHub App values, `main` auto-deploys after CI,

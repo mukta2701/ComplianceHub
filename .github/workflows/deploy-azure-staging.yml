@@ -242,7 +242,10 @@ jobs:
           fi
           verify_previous_capability="false"
           if [ "$ROLLOUT_PHASE" = "final" ]; then
-            test "$current_reservation_mode" = "bridge"
+            case "$current_reservation_mode" in
+              bridge|strict) ;;
+              *) exit 1 ;;
+            esac
             [[ "$current_release_sha" =~ ^[0-9a-f]{40}$ ]]
             verify_previous_capability="true"
           elif [ -n "$current_reservation_mode" ] || [ -n "$current_release_sha" ]; then
@@ -254,10 +257,11 @@ jobs:
           if [ "$verify_previous_capability" = "true" ]; then
             previous_health="$(curl --fail-with-body --retry 5 --retry-all-errors --retry-delay 5 --retry-max-time 120 --connect-timeout 10 --max-time 120 "https://$previous_revision_fqdn/api/health/live")"
             jq --exit-status \
+              --arg reservationMode "$current_reservation_mode" \
               --arg releaseSha "$current_release_sha" \
               '.status == "ok"
                 and .slackDestinationPolicy == "v1"
-                and .dailyDigestReservationMode == "bridge"
+                and .dailyDigestReservationMode == $reservationMode
                 and .releaseSha == $releaseSha
                 and (keys | sort) == (["dailyDigestReservationMode","releaseSha","slackDestinationPolicy","status"] | sort)' \
               <<< "$previous_health" >/dev/null
@@ -612,10 +616,11 @@ jobs:
           rollback_live_health="$(curl --fail-with-body --retry 5 --retry-all-errors --retry-delay 5 --retry-max-time 120 --connect-timeout 10 --max-time 120 "https://$rollback_revision_fqdn/api/health/live")"
           if [ "$rollback_capability_required" = "true" ]; then
             jq --exit-status \
+              --arg reservationMode "${{ steps.rollout.outputs.previous-reservation-mode }}" \
               --arg releaseSha "${{ steps.rollout.outputs.previous-release-sha }}" \
               '.status == "ok"
                 and .slackDestinationPolicy == "v1"
-                and .dailyDigestReservationMode == "bridge"
+                and .dailyDigestReservationMode == $reservationMode
                 and .releaseSha == $releaseSha' \
               <<< "$rollback_live_health" >/dev/null
           else

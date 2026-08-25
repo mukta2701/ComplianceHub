@@ -223,3 +223,37 @@ Fresh round-1 verification on the final patch:
 
 No live Slack/provider call, hosted Supabase operation, Azure mutation, GitHub
 write, real webhook, or real destination hash was used in this fix round.
+
+## Fix round 2 — steady-state final rollouts
+
+Round-2 review found that the first final correctly required the policy-capable
+bridge, but the same hard-coded predecessor check blocked every later strict
+deployment. In steady-state operation, subsequent manual final and automatic
+`workflow_run` deployments now accept an exact direct-revision `v1` capability
+whose captured mode is `bridge` or `strict`, while still requiring the exact
+captured release SHA. Blank/missing pre-policy markers continue to fail before
+mutation, so the initial manual bridge is still mandatory. Rollback now proves
+the restored revision's exact captured previous mode and release SHA instead of
+assuming every predecessor is bridge.
+
+Round-2 workflow-contract RED was exactly three intended failures with seventeen
+passing tests for manual strict-to-strict final, automatic strict-to-strict final,
+and strict rollback. A separate documentation RED was one intended failure with
+twenty passing tests before the runbooks and ledgers distinguished first-final
+bootstrap from steady-state behavior.
+
+Fresh round-2 verification:
+
+- the expanded Azure contract passed 21/21, and the wider digest/error/health/
+  Azure/plugin suite passed 6 files / 110 tests;
+- Actionlint, Bicep compilation, TypeScript, ESLint, and diff checks exited
+  cleanly;
+- the full Vitest run passed 213 files / 1,622 tests;
+- `npm run verify` again reached the production build and stopped only because
+  the sandbox could not fetch Geist and Geist Mono from Google Fonts;
+- the local database/integration blockers are unchanged from round 1, so no
+  database reset, hosted operation, or provider call was attempted.
+- the normal commit hook repeated the round-1 deterministic false positives on
+  the unchanged Slack secret-reference name and full-file server-only contract
+  assertions. No secret value or transfer was present. Scanner configuration
+  remains unchanged and the reviewed round-2 commit uses `--no-verify`.

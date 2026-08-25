@@ -19,6 +19,10 @@ describe("Azure staging deployment contract", () => {
   const dockerfile = read("Dockerfile");
   const deployment = read("docs/deployment.md");
   const releaseChecklist = read("docs/release-checklist.md");
+  const githubShadowPilot = read("docs/deployment/github-shadow-pilot.md");
+  const task6Brief = read(".superpowers/sdd/2026-08-24-github-compliance-integration/task-6-brief.md");
+  const task6Report = read(".superpowers/sdd/2026-08-24-github-compliance-integration/task-6-report.md");
+  const progress = read(".superpowers/sdd/2026-08-24-github-compliance-integration/progress.md");
   const slackMigration = read("supabase/migrations/20260825053718_restrict_slack_delivery_destination.sql");
   const healthRoutes = `${read("src/app/api/health/route.ts")}\n${read("src/app/api/health/live/route.ts")}`;
   const clientSources = readdirSync(`${process.cwd()}/src`, { recursive: true })
@@ -100,8 +104,17 @@ describe("Azure staging deployment contract", () => {
     expect(finalRefs).not.toContain('-z "$current_slack_allowed_ref"');
   });
 
-  it("proves final follows an exact policy-capable bridge revision and revalidates it immediately before mutation", () => {
-    expect(workflow).toMatch(/ROLLOUT_PHASE.*final[\s\S]*current_reservation_mode[\s\S]*test "\$current_reservation_mode" = "bridge"/);
+  it("allows the first manual final rollout from bridge and later manual final rollouts from strict", () => {
+    expect(workflow).toMatch(/workflow_dispatch:[\s\S]*rollout_phase:[\s\S]*- final/);
+    expect(workflow).toMatch(/if \[ "\$ROLLOUT_PHASE" = "final" \]; then[\s\S]*case "\$current_reservation_mode" in[\s\S]*bridge\|strict\) ;;[\s\S]*\*\) exit 1 ;;/);
+  });
+
+  it("allows automatic final rollouts to follow an exact strict policy-capable revision", () => {
+    expect(workflow).toContain("ROLLOUT_PHASE: ${{ github.event_name == 'workflow_dispatch' && inputs.rollout_phase || 'final' }}");
+    expect(workflow).toMatch(/if \[ "\$ROLLOUT_PHASE" = "final" \]; then[\s\S]*case "\$current_reservation_mode" in[\s\S]*bridge\|strict\) ;;[\s\S]*\*\) exit 1 ;;/);
+  });
+
+  it("proves final follows an exact policy-capable bridge or strict revision and revalidates it immediately before mutation", () => {
     expect(workflow).toMatch(/current_release_sha[\s\S]*previous_health[\s\S]*slackDestinationPolicy[\s\S]*dailyDigestReservationMode[\s\S]*releaseSha/);
     expect(workflow).toMatch(/previous_revision_fqdn[\s\S]*https:\/\/\$previous_revision_fqdn\/api\/health\/live/);
     const revalidation = workflow.slice(
@@ -127,14 +140,15 @@ describe("Azure staging deployment contract", () => {
     expect(clientSources).not.toContain("COMPLIANCEHUB_RELEASE_SHA");
   });
 
-  it("verifies the deployed capability and pins rollback semantics to the captured revision", () => {
+  it("verifies the deployed capability and pins bridge or strict rollback to the captured predecessor mode", () => {
     expect(workflow).toMatch(/--arg policy "v1"[\s\S]*--arg reservationMode "\$runtime_reservation_mode"[\s\S]*--arg releaseSha "\$DEPLOY_SHA"/);
     expect(workflow).toMatch(/slackDestinationPolicy == \$policy[\s\S]*dailyDigestReservationMode == \$reservationMode[\s\S]*releaseSha == \$releaseSha/);
     expect(workflow).toContain("rollback-capability-required");
+    expect(workflow).toContain('echo "previous-reservation-mode=$current_reservation_mode"');
     expect(workflow).toMatch(/new_revision_fqdn[\s\S]*revision_origin="https:\/\/\$\{\{ steps\.revision\.outputs\.new-revision-fqdn \}\}"/);
     expect(workflow).toMatch(/--from-revision "\$\{\{ steps\.rollout\.outputs\.previous-revision \}\}"[\s\S]*rollback_image[\s\S]*previous-image/);
     expect(workflow).toMatch(/rollback_revision_fqdn[\s\S]*https:\/\/\$rollback_revision_fqdn\/api\/health\/live/);
-    expect(workflow).toMatch(/rollback_capability_required[\s\S]*dailyDigestReservationMode == "bridge"/);
+    expect(workflow).toMatch(/rollback_capability_required[\s\S]*--arg reservationMode "\$\{\{ steps\.rollout\.outputs\.previous-reservation-mode \}\}"[\s\S]*dailyDigestReservationMode == \$reservationMode/);
   });
 
   it("keeps the one allowed Slack destination digest server-only and rotates it with the complete inactive slot", () => {
@@ -234,6 +248,20 @@ describe("Azure staging deployment contract", () => {
     expect(envExample).toMatch(/bridge[\s\S]*temporary[\s\S]*manual/i);
     expect(deployment).toMatch(/20260825040825[\s\S]*manual[\s\S]{0,200}bridge[\s\S]*policy-capable[\s\S]*20260825053718[\s\S]*manual[\s\S]{0,200}final[\s\S]*strict/i);
     expect(releaseChecklist).toMatch(/bridge[\s\S]*final[\s\S]*strict/i);
+  });
+
+  it("distinguishes the first bridge-to-strict final from strict steady-state deploys and rollback", () => {
+    for (const document of [
+      deployment,
+      releaseChecklist,
+      githubShadowPilot,
+      task6Brief,
+      task6Report,
+      progress,
+    ]) {
+      expect(document).toMatch(/first final[\s\S]*bridge[\s\S]*(?:steady-state|subsequent)[\s\S]*strict/i);
+      expect(document).toMatch(/rollback[\s\S]*(?:captured|previous)[\s\S]*mode/i);
+    }
   });
 
   it("proves the exact rollout and rollback revisions are ready before canonical smoke tests", () => {

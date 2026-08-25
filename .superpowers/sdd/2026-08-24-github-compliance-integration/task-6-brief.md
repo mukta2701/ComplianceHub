@@ -72,9 +72,13 @@ configuration or delivery-ledger mutation.
 - Use an explicit manual `bridge` then manual `final` rollout. Bridge alone may
   attest migration `20260825040825`, tolerate absent bootstrap/Slack refs, and
   fall back once on exact PostgREST `PGRST202`. Final and every automatic run are
-  strict, require migration `20260825053718`, a policy-capable bridge revision,
-  and exact same-slot references. Health exposes only policy version, mode, and
-  release SHA so the workflow can correlate the exact rollback revision.
+  strict and require migration `20260825053718` plus exact same-slot references.
+  The first final requires the exact policy-capable bridge revision. In
+  steady-state operation, subsequent manual final and automatic runs may follow
+  an exact policy-capable predecessor in `bridge` or `strict` mode. Health
+  exposes only policy version, mode, and release SHA so the workflow can
+  correlate the exact rollback revision and require its captured previous mode
+  and release SHA instead of hard-coding bridge.
 
 ## Tests first
 
