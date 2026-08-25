@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { z } from "zod";
 import { requireAppContext } from "@/lib/app-context";
 import type { CheckSeverity } from "@/features/monitoring/domain/monitor-provider";
 import { Card, PageIntro, Pill } from "@/components/ui";
@@ -17,6 +18,11 @@ import {
   ACTIVE_MONITORING_FINDING_STATUSES,
   type ActiveMonitoringFindingStatus,
 } from "@/features/monitoring/domain/finding-status";
+import {
+  loadOfficialGitHubFindingProvenance,
+  parseOfficialRecordSelection,
+} from "@/features/github/application/github-record-provenance";
+import { OfficialGitHubFindingCard } from "@/features/github/components/github-record-provenance";
 
 const SEVERITY_TONE: Record<CheckSeverity, StatusTone> = { critical: "risk", high: "risk", medium: "attention", low: "neutral" };
 const SEVERITY_PILL: Record<CheckSeverity, string> = { critical: "red", high: "red", medium: "amber", low: "blue" };
@@ -28,33 +34,54 @@ const STATUS_PILL: Record<ActiveMonitoringFindingStatus, string> = {
   risk_accepted: "blue",
 };
 
-type Finding = {
-  id: string;
-  control_ref: string;
-  subject_id: string;
-  severity: CheckSeverity;
-  title: string;
-  detail: string;
-  status: ActiveMonitoringFindingStatus;
-  task_id: string | null;
-  detected_at: string;
-};
-type Source = { id: string; provider: string; label: string; created_at: string };
+const findingRowsSchema = z.array(z.object({
+  id: z.uuid(),
+  control_ref: z.string().max(40),
+  subject_id: z.string().min(1).max(200),
+  severity: z.enum(["low", "medium", "high", "critical"]),
+  title: z.string().min(1).max(300),
+  detail: z.string().max(4_000),
+  status: z.enum([...ACTIVE_MONITORING_FINDING_STATUSES, "resolved"]),
+  task_id: z.uuid().nullable(),
+  detected_at: z.string().datetime({ offset: true }),
+  finding_origin: z.enum(["legacy", "github"]),
+}).strict()).max(100);
+const sourceRowsSchema = z.array(z.object({
+  id: z.uuid(), provider: z.literal("github"), label: z.string().max(160),
+  created_at: z.string().datetime({ offset: true }),
+}).strict()).max(100);
+type ParsedFinding = z.infer<typeof findingRowsSchema>[number];
+
+function isActiveFinding(
+  finding: ParsedFinding,
+): finding is ParsedFinding & { status: ActiveMonitoringFindingStatus } {
+  return finding.status !== "resolved";
+}
 
 function providerLabel(provider: string): string {
   return provider.length > 0 ? provider[0].toUpperCase() + provider.slice(1) : "System";
 }
 
-export default async function MonitoringPage() {
+export default async function MonitoringPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ finding?: string | string[] }>;
+} = { searchParams: Promise.resolve({}) }) {
   const { supabase, organisation, membership } = await requireAppContext();
+  const params = await searchParams;
+  const requestedFinding = parseOfficialRecordSelection(params.finding);
   if (membership.role === "member") {
-    return <MemberMonitoring data={await loadMemberMonitoring(supabase, organisation.id)} />;
+    const data = await loadMemberMonitoring(supabase, organisation.id);
+    const selectedFinding = requestedFinding && data.officialGitHubFindings.some((record) => record.findingId === requestedFinding)
+      ? requestedFinding
+      : null;
+    return <MemberMonitoring data={data} selectedFinding={selectedFinding} />;
   }
 
   const canManageMonitoringFindings = hasCapability(membership.role, "manage_monitoring_findings");
   const [findingResult, sourceResult] = await Promise.all([
     supabase.from("monitoring_findings")
-      .select("id,control_ref,subject_id,severity,title,detail,status,task_id,detected_at")
+      .select("id,control_ref,subject_id,severity,title,detail,status,task_id,detected_at,finding_origin")
       .eq("organisation_id", organisation.id)
       .in("status", [...ACTIVE_MONITORING_FINDING_STATUSES])
       .order("detected_at", { ascending: false })
@@ -65,15 +92,32 @@ export default async function MonitoringPage() {
       .eq("organisation_id", organisation.id)
       .eq("enabled", true)
       .is("revoked_at", null)
-      .order("created_at", { ascending: false }),
+      .order("created_at", { ascending: false })
+      .limit(100),
   ]);
   if (findingResult.error || sourceResult.error) throw new Error("Could not load monitoring");
 
   // Keep the rendered set active-only even if a non-PostgREST test adapter or
   // stale cache ever returns a row outside the requested status filter.
-  const activeStatuses = new Set<string>(ACTIVE_MONITORING_FINDING_STATUSES);
-  const findings = ((findingResult.data ?? []) as Finding[]).filter((finding) => activeStatuses.has(finding.status));
-  const sources = (sourceResult.data ?? []) as Source[];
+  const parsedFindings = findingRowsSchema.safeParse(findingResult.data ?? []);
+  const parsedSources = sourceRowsSchema.safeParse(sourceResult.data ?? []);
+  if (!parsedFindings.success || !parsedSources.success) throw new Error("Could not load monitoring");
+  const findings = parsedFindings.data.filter(isActiveFinding);
+  const githubTargets = findings
+    .filter((finding) => finding.finding_origin === "github")
+    .map((finding) => ({ findingId: finding.id, status: finding.status }));
+  const officialGitHubFindings = await loadOfficialGitHubFindingProvenance(
+    supabase,
+    organisation.id,
+    githubTargets,
+  );
+  if (officialGitHubFindings.length !== githubTargets.length
+    || officialGitHubFindings.some((record) => !githubTargets.some((target) => target.findingId === record.findingId))) {
+    throw new Error("Could not load monitoring");
+  }
+  const officialByFinding = new Map(officialGitHubFindings.map((record) => [record.findingId, record]));
+  const selectedFinding = requestedFinding && officialByFinding.has(requestedFinding) ? requestedFinding : null;
+  const sources = parsedSources.data;
   const highOrCritical = findings.filter((finding) => finding.severity === "high" || finding.severity === "critical").length;
 
   return <>
@@ -110,7 +154,21 @@ export default async function MonitoringPage() {
     <Card>
       <div className="card-head"><div><h3>Active findings</h3><p>Current violations and drift, newest first</p></div></div>
       {findings.length > 0 ? <ul className="finding-list">
-        {findings.map((finding) => <li key={finding.id} data-status={finding.status}>
+        {findings.map((finding) => {
+          const official = officialByFinding.get(finding.id);
+          if (finding.finding_origin === "github") {
+            if (!official) throw new Error("Could not load monitoring");
+            return <li key={finding.id} data-status={finding.status}>
+            <OfficialGitHubFindingCard
+              record={official}
+              status={finding.status}
+              taskId={finding.task_id}
+              role={membership.role}
+              selected={selectedFinding === finding.id}
+            />
+          </li>;
+          }
+          return <li key={finding.id} data-status={finding.status}>
           <div className="finding-head">
             <Pill tone={SEVERITY_PILL[finding.severity]}>{finding.severity}</Pill>
             <strong>{finding.title}</strong>
@@ -128,7 +186,8 @@ export default async function MonitoringPage() {
             {!finding.task_id && <form action={raiseTaskFromFindingAction}><input type="hidden" name="id" value={finding.id} /><button className="button secondary">Raise task</button></form>}
             <form action={resolveFindingAction}><input type="hidden" name="id" value={finding.id} /><button className="button secondary">Resolve</button></form>
           </div>}
-        </li>)}
+        </li>;
+        })}
       </ul> : <p className="empty-note">No active findings are currently visible.</p>}
     </Card>
   </>;

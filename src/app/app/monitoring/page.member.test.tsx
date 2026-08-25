@@ -24,7 +24,7 @@ import MonitoringPage from "./page";
 
 describe("Member monitoring page branch", () => {
   it("returns the Member-safe view before loading source config or alert channels", async () => {
-    hoisted.loadMemberMonitoring.mockResolvedValue({ connectedSystems: [], findings: [] });
+    hoisted.loadMemberMonitoring.mockResolvedValue({ connectedSystems: [], findings: [], officialGitHubFindings: [] });
 
     render(await MonitoringPage());
 

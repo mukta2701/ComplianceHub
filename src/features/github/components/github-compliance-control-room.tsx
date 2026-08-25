@@ -260,8 +260,8 @@ function RepositoryOfficialCard({
         <small>Rule {result.ruleVersion} · Mapping {result.mappingVersion}</small>
         <small>Observed <time dateTime={result.observedAt}>{result.observedAt}</time> · fresh until <time dateTime={result.freshUntil}>{result.freshUntil}</time></small>
         <span className="github-result-links">
-          {result.evidenceId && <a href="/app/evidence" aria-label={`View evidence for ${result.checkId}`}>View evidence</a>}
-          {result.findingId && <a href="/app/monitoring" aria-label={`View finding for ${result.checkId}`}>View finding</a>}
+          {result.evidenceId && <a href={`/app/evidence?evidence=${result.evidenceId}#evidence-${result.evidenceId}`} aria-label={`View evidence for ${result.checkId}`}>View evidence</a>}
+          {result.findingId && <a href={`/app/monitoring?finding=${result.findingId}#finding-${result.findingId}`} aria-label={`View finding for ${result.checkId}`}>View finding</a>}
         </span>
       </li>)}</ul>
     </details>}

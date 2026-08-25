@@ -466,6 +466,26 @@ a.heat-cell:hover{outline:2px solid var(--ink);outline-offset:-2px}
 .github-control-room button:focus-visible,.github-control-room input:focus-visible,.github-control-room select:focus-visible,.github-control-room a:focus-visible,.github-control-room summary:focus-visible{outline:none;box-shadow:var(--ch-focus-ring)}
 @media(max-width:760px){.github-control-room-steps{grid-template-columns:1fr 1fr}.github-control-room-section,.github-control-room-hero{padding:var(--ch-space-4)}.github-control-room-heading,.github-official-repository>header,.github-owner-decision{align-items:stretch;flex-direction:column}.github-mapping-identity,.github-mapping-list,.github-outcome-counts,.github-approval-history li{grid-template-columns:1fr}.github-owner-decision .button,.github-recovery-actions .button{width:100%}.github-recovery-actions{align-items:stretch;flex-direction:column}.github-control-room-pagination{grid-template-columns:1fr 1fr}.github-control-room-pagination>span{grid-column:1/-1;grid-row:1;text-align:center}.github-control-room-pagination>a{grid-row:2}.github-control-room-status{padding-left:var(--ch-space-4);padding-right:var(--ch-space-4)}}
 
+.github-official-record{min-width:0;padding:var(--ch-space-5);border:1px solid var(--ch-border);border-radius:12px;background:var(--ch-surface);scroll-margin-top:var(--ch-space-6)}
+.github-official-record[data-selected="true"]{border-color:var(--ch-primary);box-shadow:0 0 0 3px color-mix(in srgb,var(--ch-primary) 18%,transparent)}
+.github-official-record:focus-visible{outline:none;box-shadow:var(--ch-focus-ring)}
+.github-official-record .finding-head h2,.github-official-record .finding-head h3{min-width:0;margin:0;font-size:15px;overflow-wrap:anywhere}
+.github-official-record-head{display:flex;align-items:center;justify-content:space-between;gap:var(--ch-space-3);margin-top:var(--ch-space-3)}
+.github-official-record-head>a{min-width:0;color:var(--ch-primary);font-size:12px;font-weight:800;overflow-wrap:anywhere}
+.github-official-record-summary{margin:var(--ch-space-3) 0;color:var(--ch-text);font-size:12px;line-height:1.55}
+.github-official-provenance,.github-finding-detection{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;margin:0;background:var(--ch-border);border:1px solid var(--ch-border);border-radius:9px;overflow:hidden}
+.github-official-provenance>div,.github-finding-detection>div{min-width:0;padding:10px;background:var(--ch-canvas)}
+.github-official-provenance dt,.github-finding-detection dt{color:var(--ch-text-muted);font-size:9.5px;font-weight:750;letter-spacing:.03em;text-transform:uppercase}
+.github-official-provenance dd,.github-finding-detection dd{min-width:0;margin:4px 0 0;font-size:10.5px;line-height:1.45;overflow-wrap:anywhere}
+.github-official-provenance code{font-size:10px;word-break:break-word}
+.github-official-provenance-wide{grid-column:1/-1}
+.github-finding-detection{grid-template-columns:repeat(2,minmax(0,1fr));margin-top:var(--ch-space-3)}
+.github-official-boundary{margin:var(--ch-space-3) 0 0;padding:10px 12px;border-left:3px solid var(--ch-attention);background:var(--ch-attention-soft);color:var(--ch-text-muted);font-size:11px;line-height:1.5}
+.github-finding-review{display:flex;align-items:end;gap:var(--ch-space-3);flex-wrap:wrap;margin-top:var(--ch-space-3)}
+.github-finding-review-controls{display:flex;align-items:end;gap:var(--ch-space-3);flex:1 1 360px}.github-finding-review-controls label{display:grid;gap:5px;flex:1;color:var(--ch-text-muted);font-size:10.5px;font-weight:750}.github-finding-review-controls select{min-width:0;min-height:40px;padding:8px 10px;border:1px solid var(--ch-border);border-radius:8px;background:var(--ch-surface);color:var(--ch-text)}
+.github-finding-review>p[role="status"]{flex-basis:100%;min-height:18px;margin:0;color:var(--ch-text-muted);font-size:10.5px}
+@media(max-width:760px){.github-official-record{padding:var(--ch-space-4)}.github-official-record-head,.github-finding-review,.github-finding-review-controls{align-items:stretch;flex-direction:column}.github-official-provenance,.github-finding-detection{grid-template-columns:1fr}.github-official-provenance-wide{grid-column:auto}.github-finding-review .button,.github-finding-review-controls select{width:100%}}
+
 /* Automation inbox — review-first presentation */
 .automation-inbox{display:grid;gap:var(--ch-space-4)}
 .automation-inbox-toolbar{display:flex;align-items:end;justify-content:space-between;gap:var(--ch-space-4);padding:var(--ch-space-4);border:1px solid var(--ch-border);border-radius:10px;background:var(--ch-canvas)}

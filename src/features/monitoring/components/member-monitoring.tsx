@@ -2,6 +2,7 @@ import { Card, PageIntro, Pill } from "@/components/ui";
 import { StatusLabel, type StatusTone } from "@/components/status-label";
 import type { MemberMonitoringData } from "@/features/monitoring/application/load-member-monitoring";
 import type { CheckSeverity } from "@/features/monitoring/domain/monitor-provider";
+import { OfficialGitHubFindingCard } from "@/features/github/components/github-record-provenance";
 
 const SEVERITY_TONE: Record<CheckSeverity, StatusTone> = {
   critical: "risk",
@@ -20,7 +21,13 @@ function providerLabel(provider: string): string {
   return provider.length > 0 ? provider[0].toUpperCase() + provider.slice(1) : "System";
 }
 
-export function MemberMonitoring({ data }: { data: MemberMonitoringData }) {
+export function MemberMonitoring({
+  data,
+  selectedFinding = null,
+}: {
+  data: MemberMonitoringData;
+  selectedFinding?: string | null;
+}) {
   const highOrCritical = data.findings.filter(
     (finding) => finding.severity === "high" || finding.severity === "critical",
   ).length;
@@ -61,7 +68,21 @@ export function MemberMonitoring({ data }: { data: MemberMonitoringData }) {
       <div className="card-head"><div><h3>Active findings</h3><p>Current violations and drift, newest first</p></div></div>
       {data.findings.length > 0
         ? <ul className="finding-list">
-            {data.findings.map((finding) => <li key={finding.id} data-status={finding.status}>
+            {data.findings.map((finding) => {
+              const official = data.officialGitHubFindings.find((record) => record.findingId === finding.id);
+              if (finding.origin === "github") {
+                if (!official) throw new Error("Could not load member monitoring");
+                return <li key={finding.id} data-status={finding.status}>
+                <OfficialGitHubFindingCard
+                  record={official}
+                  status={finding.status}
+                  taskId={null}
+                  role="member"
+                  selected={selectedFinding === finding.id}
+                />
+              </li>;
+              }
+              return <li key={finding.id} data-status={finding.status}>
               <div className="finding-head">
                 <Pill tone={SEVERITY_PILL[finding.severity]}>{finding.severity}</Pill>
                 <strong>{finding.title}</strong>
@@ -72,7 +93,8 @@ export function MemberMonitoring({ data }: { data: MemberMonitoringData }) {
                 <StatusLabel tone={SEVERITY_TONE[finding.severity]}>{finding.controlRef}</StatusLabel>
                 <span>Detected {new Date(finding.detectedAt).toLocaleString("en-GB")}</span>
               </div>
-            </li>)}
+            </li>;
+            })}
           </ul>
         : <p className="empty-note">No active findings are currently visible.</p>}
     </Card>

@@ -131,8 +131,14 @@ describe("GitHubComplianceControlRoomPanel", () => {
     expect(within(repository).getByRole("link", { name: "Open Mukta2701/ComplianceHub on GitHub" })).toHaveAttribute(
       "href", "https://github.com/Mukta2701/ComplianceHub",
     );
-    expect(within(repository).getAllByRole("link", { name: /^View evidence for / })[0]).toHaveAttribute("href", "/app/evidence");
-    expect(within(repository).getAllByRole("link", { name: /^View finding for / })[0]).toHaveAttribute("href", "/app/monitoring");
+    expect(within(repository).getAllByRole("link", { name: /^View evidence for / })[0]).toHaveAttribute(
+      "href",
+      "/app/evidence?evidence=a3000000-0000-4000-8000-000000000001#evidence-a3000000-0000-4000-8000-000000000001",
+    );
+    expect(within(repository).getAllByRole("link", { name: /^View finding for / })[0]).toHaveAttribute(
+      "href",
+      "/app/monitoring?finding=a4000000-0000-4000-8000-000000000002#finding-a4000000-0000-4000-8000-000000000002",
+    );
     expect(repository).toHaveTextContent("Rule github-repository-v1 · Mapping github-iso-27001-v1");
     expect(repository).not.toHaveTextContent(/compliant|certified|secure|readiness improved/i);
   });

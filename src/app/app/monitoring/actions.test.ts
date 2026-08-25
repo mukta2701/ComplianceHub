@@ -30,6 +30,7 @@ import {
   raiseTaskFromFindingAction,
   resolveFindingAction,
   runMonitoringNowAction,
+  transitionGitHubFindingAction,
 } from "./actions";
 
 describe("runMonitoringNowAction", () => {
@@ -167,5 +168,146 @@ describe("recent monitoring alerts active workspace scope", () => {
       "organisation_id",
       "20000000-0000-4000-8000-000000000001",
     );
+  });
+});
+
+describe("official GitHub finding transitions", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function exactQuery(result: { data: unknown; error: unknown }) {
+    const builder: Record<string, ReturnType<typeof vi.fn>> = {};
+    for (const method of ["select", "eq"]) builder[method] = vi.fn(() => builder);
+    builder.maybeSingle = vi.fn().mockResolvedValue(result);
+    return builder;
+  }
+
+  it("rejects malformed input before any database, limiter, or service work", async () => {
+    const from = vi.fn();
+    hoisted.ctx = {
+      supabase: { from }, user: { id: "10000000-0000-4000-8000-000000000001" },
+      organisation: { id: "20000000-0000-4000-8000-000000000001" }, membership: { role: "owner" },
+    };
+    const form = new FormData();
+    form.set("id", "not-a-uuid");
+    form.set("status", "resolved");
+
+    await expect(transitionGitHubFindingAction(form)).resolves.toEqual({
+      ok: false,
+      message: "Choose a valid GitHub finding transition.",
+    });
+    expect(from).not.toHaveBeenCalled();
+    expect(hoisted.enforceRateLimit).not.toHaveBeenCalled();
+    expect(hoisted.createServiceClient).not.toHaveBeenCalled();
+  });
+
+  it("keeps Admin and Member callers read-only before exact-record lookup", async () => {
+    for (const role of ["admin", "member"] as const) {
+      const from = vi.fn();
+      hoisted.ctx = {
+        supabase: { from }, user: { id: "10000000-0000-4000-8000-000000000001" },
+        organisation: { id: "20000000-0000-4000-8000-000000000001" }, membership: { role },
+      };
+      const form = new FormData();
+      form.set("id", "40000000-0000-4000-8000-000000000001");
+      form.set("status", "acknowledged");
+
+      await expect(transitionGitHubFindingAction(form)).resolves.toEqual({
+        ok: false,
+        message: "Only workspace Owners can review official GitHub findings.",
+      });
+      expect(from).not.toHaveBeenCalled();
+    }
+  });
+
+  it("rejects sibling or legacy IDs before rate limiting or service construction", async () => {
+    for (const finding of [null, { id: "40000000-0000-4000-8000-000000000001", status: "open", finding_origin: "legacy" }]) {
+      const findingQuery = exactQuery({ data: finding, error: null });
+      const from = vi.fn(() => findingQuery);
+      hoisted.ctx = {
+        supabase: { from }, user: { id: "10000000-0000-4000-8000-000000000001" },
+        organisation: { id: "20000000-0000-4000-8000-000000000001" }, membership: { role: "owner" },
+      };
+      const form = new FormData();
+      form.set("id", "40000000-0000-4000-8000-000000000001");
+      form.set("status", "acknowledged");
+
+      await expect(transitionGitHubFindingAction(form)).resolves.toEqual({
+        ok: false,
+        message: "Official GitHub finding was not found in this workspace.",
+      });
+      expect(findingQuery.eq).toHaveBeenCalledWith("organisation_id", "20000000-0000-4000-8000-000000000001");
+      expect(hoisted.enforceRateLimit).not.toHaveBeenCalled();
+      expect(hoisted.createServiceClient).not.toHaveBeenCalled();
+    }
+  });
+
+  it("preflights exact active-workspace provenance, rate limits, then calls the service-only transition RPC with a closed reason", async () => {
+    const order: string[] = [];
+    const findingQuery = exactQuery({ data: { id: "40000000-0000-4000-8000-000000000001", status: "open", finding_origin: "github" }, error: null });
+    const provenanceQuery = exactQuery({ data: { finding_id: "40000000-0000-4000-8000-000000000001" }, error: null });
+    findingQuery.maybeSingle.mockImplementation(async () => { order.push("finding"); return { data: { id: "40000000-0000-4000-8000-000000000001", status: "open", finding_origin: "github" }, error: null }; });
+    provenanceQuery.maybeSingle.mockImplementation(async () => { order.push("provenance"); return { data: { finding_id: "40000000-0000-4000-8000-000000000001" }, error: null }; });
+    const from = vi.fn((table: string) => table === "monitoring_findings" ? findingQuery : provenanceQuery);
+    hoisted.enforceRateLimit.mockImplementation(async () => { order.push("limit"); });
+    const rpc = vi.fn(async () => { order.push("service"); return { data: true, error: null }; });
+    hoisted.createServiceClient.mockImplementation(() => { order.push("construct-service"); return { rpc }; });
+    hoisted.ctx = {
+      supabase: { from }, user: { id: "10000000-0000-4000-8000-000000000001" },
+      organisation: { id: "20000000-0000-4000-8000-000000000001" }, membership: { role: "owner" },
+    };
+    const form = new FormData();
+    form.set("id", "40000000-0000-4000-8000-000000000001");
+    form.set("status", "in_progress");
+
+    await expect(transitionGitHubFindingAction(form)).resolves.toEqual({
+      ok: true,
+      message: "GitHub finding moved to In progress.",
+    });
+    expect(order).toEqual(["finding", "provenance", "limit", "construct-service", "service"]);
+    expect(rpc).toHaveBeenCalledWith("transition_github_finding_server", {
+      target_organisation_id: "20000000-0000-4000-8000-000000000001",
+      target_actor_id: "10000000-0000-4000-8000-000000000001",
+      target_finding_id: "40000000-0000-4000-8000-000000000001",
+      target_status: "in_progress",
+      target_reason: "remediation_started",
+    });
+  });
+
+  it("maps database detail to one stable client-safe error", async () => {
+    const findingQuery = exactQuery({ data: { id: "40000000-0000-4000-8000-000000000001", status: "open", finding_origin: "github" }, error: null });
+    const provenanceQuery = exactQuery({ data: { finding_id: "40000000-0000-4000-8000-000000000001" }, error: null });
+    hoisted.ctx = {
+      supabase: { from: vi.fn((table: string) => table === "monitoring_findings" ? findingQuery : provenanceQuery) },
+      user: { id: "10000000-0000-4000-8000-000000000001" }, organisation: { id: "20000000-0000-4000-8000-000000000001" }, membership: { role: "owner" },
+    };
+    hoisted.createServiceClient.mockReturnValue({ rpc: vi.fn().mockResolvedValue({ data: null, error: { message: "private database detail" } }) });
+    const form = new FormData();
+    form.set("id", "40000000-0000-4000-8000-000000000001");
+    form.set("status", "risk_accepted");
+
+    await expect(transitionGitHubFindingAction(form)).resolves.toEqual({
+      ok: false,
+      message: "Could not update the official GitHub finding.",
+    });
+  });
+
+  it("reports a concurrent already-applied transition as an idempotent no-op", async () => {
+    const findingQuery = exactQuery({ data: { id: "40000000-0000-4000-8000-000000000001", status: "open", finding_origin: "github" }, error: null });
+    const provenanceQuery = exactQuery({ data: { finding_id: "40000000-0000-4000-8000-000000000001" }, error: null });
+    hoisted.ctx = {
+      supabase: { from: vi.fn((table: string) => table === "monitoring_findings" ? findingQuery : provenanceQuery) },
+      user: { id: "10000000-0000-4000-8000-000000000001" }, organisation: { id: "20000000-0000-4000-8000-000000000001" }, membership: { role: "owner" },
+    };
+    hoisted.createServiceClient.mockReturnValue({ rpc: vi.fn().mockResolvedValue({ data: false, error: null }) });
+    const form = new FormData();
+    form.set("id", "40000000-0000-4000-8000-000000000001");
+    form.set("status", "acknowledged");
+
+    await expect(transitionGitHubFindingAction(form)).resolves.toEqual({
+      ok: true,
+      message: "GitHub finding is already Acknowledged.",
+    });
   });
 });

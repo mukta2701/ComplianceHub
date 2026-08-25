@@ -4,17 +4,37 @@ import { Card, EmptyState, PageIntro, Pill } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { one } from "@/lib/supabase/one";
 import { downloadEvidenceAction, linkEvidenceAction, unlinkEvidenceAction, withdrawEvidenceAction } from "./actions";
+import {
+  loadOfficialGitHubEvidenceProvenance,
+  parseOfficialRecordSelection,
+} from "@/features/github/application/github-record-provenance";
+import { OfficialGitHubEvidenceCard } from "@/features/github/components/github-record-provenance";
 
 const TONE: Record<string, string> = { current: "green", expiring: "amber", expired: "red", superseded: "neutral", withdrawn: "neutral" };
 const PROVIDER_LABELS: Record<string, string> = { google_workspace: "Google Workspace", github: "GitHub", aws: "AWS" };
 
-export default async function EvidencePage() {
+export default async function EvidencePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ evidence?: string | string[] }>;
+} = { searchParams: Promise.resolve({}) }) {
   const { supabase, organisation } = await requireAppContext();
+  const params = await searchParams;
   const [{ data: items }, { data: controls }, { data: policies }] = await Promise.all([
     supabase.from("evidence").select("id,title,kind,url,storage_path,status,collected_on,valid_until,source_id,evidence_sources(provider),evidence_links(id,control_id,risk_id,task_id,controls(code,title),risks(reference),tasks(title))").eq("organisation_id", organisation.id).order("created_at", { ascending: false }).limit(200),
     supabase.from("controls").select("id,code,title").order("position"),
     supabase.from("policies").select("id,reference,title").eq("organisation_id", organisation.id).order("reference"),
   ]);
+  const asOf = new Date().toISOString();
+  const officialRecords = await loadOfficialGitHubEvidenceProvenance(
+    supabase,
+    organisation.id,
+    (items ?? []).map((item) => item.id),
+    asOf,
+  );
+  const officialByEvidence = new Map(officialRecords.map((record) => [record.evidenceId, record]));
+  const requestedEvidence = parseOfficialRecordSelection(params.evidence);
+  const selectedEvidence = requestedEvidence && officialByEvidence.has(requestedEvidence) ? requestedEvidence : null;
   const evidence = { current: 0, expiring: 0, expired: 0 };
   for (const i of items ?? []) { const st = i.status as string; if (st === "current" || st === "expiring" || st === "expired") evidence[st] += 1; }
   const evidenceTotal = evidence.current + evidence.expiring + evidence.expired;
@@ -57,7 +77,10 @@ export default async function EvidencePage() {
         </div>
       </div>
     </Card>
-    <div style={{ display: "grid", gap: "14px" }}>{items.map((item) => <Card key={item.id} style={{ padding: "20px" }}>
+    <div style={{ display: "grid", gap: "14px" }}>{items.map((item) => {
+      const official = officialByEvidence.get(item.id);
+      if (official) return <OfficialGitHubEvidenceCard key={item.id} record={official} selected={selectedEvidence === item.id} />;
+      return <Card key={item.id} style={{ padding: "20px" }}>
       <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: "12px", alignItems: "center" }}>
         <div><h2 style={{ fontSize: "15px", margin: 0 }}>{item.title}</h2><p style={{ fontSize: "12px", color: "#596273", margin: "3px 0 0" }}>Collected {item.collected_on}{item.valid_until && ` · valid until ${item.valid_until}`}</p></div>
         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>{item.source_id && (() => { const src = one(item.evidence_sources); const provider = src?.provider ? PROVIDER_LABELS[src.provider] ?? src.provider : null; return <Pill tone="neutral">{provider ? `Auto · ${provider}` : "Auto"}</Pill>; })()}<Pill tone={TONE[item.status]}>{item.status}</Pill>
@@ -70,7 +93,8 @@ export default async function EvidencePage() {
         {item.evidence_links?.map((link) => { const c = one(link.controls); const r = one(link.risks); const t = one(link.tasks); return <span key={link.id} className="pill neutral">{c ? `${c.code}: ${c.title}` : r ? `Risk ${r.reference}` : `Task: ${t?.title}`}<form action={unlinkEvidenceAction} style={{ display: "inline" }}><input type="hidden" name="linkId" value={link.id} /><button aria-label="Remove link" style={{ border: 0, background: "none", color: "#8b94a2", marginLeft: "4px" }}>×</button></form></span>; })}
         <form action={linkEvidenceAction} style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}><input type="hidden" name="evidenceId" value={item.id} /><select name="target" defaultValue="" aria-label={`Link ${item.title} to a control`} className="field"><option value="" disabled>Link to control…</option>{linkOptions}</select><button className="button secondary" style={{ minHeight: "32px", padding: "6px 12px" }}>Link</button></form>
       </div>
-    </Card>)}
+    </Card>;
+    })}
     </div>
     </>)}
   </>;
