@@ -92,6 +92,19 @@ Independent-review RED/GREEN:
 - Database runtime remained unavailable: focused `073` stopped before any
   assertion with `LegacyDbConnectError: PgClient: Failed to connect`.
 
+Final chronology cleanup RED/GREEN:
+
+- A new domain regression and malformed-bundle regression both failed because
+  changes materialised exactly at the prior delivery baseline were accepted;
+  the focused run had those two intended failures and 72 passing tests.
+- Domain normalization and the strict bundle parser now require every change
+  `materialisedAt` to be strictly later than `baseline.deliveredAt`. The same
+  focus passes 74 tests. A delayed-materialisation fixture proves that
+  `occurredAt` and observation time may remain at or before the baseline when
+  the official materialisation itself is later.
+- This cleanup changes no migration, SQL RPC, reservation/finalisation path,
+  transport, schema version, or deployment attestation.
+
 ## Direct database contract
 
 `073_mcp_github_digest_v2.sql` has an exact `plan(60)` and 60 uniquely labelled
@@ -167,6 +180,9 @@ These strict gates remain mandatory before deployment and were not weakened:
 - `BuildDailyDigestFactsInput.github` is required. The domain fails closed at
   runtime as well as compile time instead of synthesising a verified all-zero
   GitHub section when the projection is absent.
+- Both application and domain reject pre-baseline/equal-baseline change
+  materialisation. They intentionally do not compare `occurredAt` with the
+  baseline because delayed official materialisation remains a valid new delta.
 
 ## Commit privacy hook
 

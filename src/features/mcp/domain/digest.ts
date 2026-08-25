@@ -339,6 +339,9 @@ function normalizeGitHubFacts(input: DigestGitHubFactsInput): DigestGitHubFacts 
   }
   validateCountedSection("change", counts.total, changes.length, input.changes.truncated);
   if (baseline === null && counts.total !== 0) throw new Error("GitHub changes require a delivered baseline");
+  if (baseline && changes.some(({ materialisedAt }) => Date.parse(materialisedAt) <= Date.parse(baseline.deliveredAt))) {
+    throw new Error("GitHub change must be materialised after delivered baseline");
+  }
 
   const unknowns = input.unknowns.items.map(normalizeGitHubResult).sort(resultOrder);
   if (unknowns.some(({ result }) => result !== "unknown")) throw new Error("Invalid GitHub unknown result");

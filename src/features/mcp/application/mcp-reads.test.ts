@@ -84,9 +84,9 @@ function githubDigestBundle(overrides: Record<string, unknown> = {}) {
     result: "fail",
     severity: "high",
     summary: "Required pull-request reviews are not enforced.",
-    observedAt: "2026-08-05T06:00:00.000Z",
+    observedAt: "2026-08-05T09:00:00.000Z",
     freshUntil: "2026-08-07T06:00:00.000Z",
-    materialisedAt: "2026-08-05T06:01:00.000Z",
+    materialisedAt: "2026-08-05T09:01:00.000Z",
   };
   return {
     asOf: "2026-08-06T12:00:00.000Z",
@@ -102,7 +102,7 @@ function githubDigestBundle(overrides: Record<string, unknown> = {}) {
         id: "github_change:new_failure:40000000-0000-4000-8000-000000000001",
         resultId: result.id,
         kind: "new_failure",
-        occurredAt: "2026-08-05T06:00:00.000Z",
+        occurredAt: "2026-08-05T09:00:00.000Z",
       }],
       truncated: false,
     },
@@ -501,13 +501,18 @@ describe("MCP public read services", () => {
     expect(fake.states.map(({ table }) => table)).toEqual(["memberships", "memberships"]);
   });
 
-  it("accepts immutable lifecycle changes after their result freshness window has elapsed", async () => {
+  it("accepts delayed immutable lifecycle changes after their event time and freshness window have elapsed", async () => {
     const bundle = githubDigestBundle();
     const item = (bundle.changes as { items: Array<Record<string, unknown>> }).items[0]!;
     const github = githubDigestBundle({
       changes: {
         ...bundle.changes,
-        items: [{ ...item, freshUntil: bundle.asOf }],
+        items: [{
+          ...item,
+          observedAt: "2026-08-05T07:00:00.000Z",
+          occurredAt: "2026-08-05T07:00:00.000Z",
+          freshUntil: bundle.asOf,
+        }],
       },
     });
     const fake = fakeSupabase({ memberships: membership("owner") }, () => ({
@@ -516,6 +521,20 @@ describe("MCP public read services", () => {
 
     await expect(prepareDailyDigest(fake.client as never, USER, { localDate: "2026-08-06" }))
       .resolves.toMatchObject({ facts: { github: { changes: { counts: { newFailure: 1 } } } } });
+  });
+
+  it("rejects a bundle change materialised at the delivered baseline", async () => {
+    const bundle = githubDigestBundle();
+    const item = (bundle.changes as { items: Array<Record<string, unknown>> }).items[0]!;
+    const github = githubDigestBundle({
+      baseline: { deliveredAt: item.materialisedAt, localDate: "2026-08-05" },
+    });
+    const fake = fakeSupabase({ memberships: membership("owner") }, () => ({
+      data: complianceBundle("owner", { github }), error: null,
+    }));
+
+    await expect(prepareDailyDigest(fake.client as never, USER, { localDate: "2026-08-06" }))
+      .rejects.toMatchObject({ code: "INTERNAL_ERROR" });
   });
 
   it("rejects duplicate or inconsistent RPC facts before hashing", async () => {

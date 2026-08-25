@@ -275,6 +275,20 @@ describe("daily digest facts", () => {
     }
   });
 
+  it("rejects a GitHub change materialised at the delivered baseline", () => {
+    const base = {
+      workspace: { id: "00000000-0000-4000-8000-000000000001", name: "Internal ISMS" },
+      localDate: "2026-08-06", overview, attentionItems: [], monitoringFindings: [], latestLeadershipReport: null,
+    };
+    expect(() => buildDailyDigestFacts({
+      ...base,
+      github: {
+        ...github,
+        baseline: { ...github.baseline, deliveredAt: github.changes.items[0]!.materialisedAt },
+      },
+    })).toThrow(/baseline/i);
+  });
+
   it("generates exact qualified GitHub metrics, facts, unknowns, stale results, and actions", () => {
     const lines = buildGitHubDigestLines(github);
     expect(lines.headline).toBe("Verified GitHub technical fact: 1 current failure");

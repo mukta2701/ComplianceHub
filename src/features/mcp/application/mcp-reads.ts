@@ -127,6 +127,10 @@ const digestGithubSchema = z.object({
   }
   if (github.baseline === null && counts.total !== 0) ctx.addIssue({ code: "custom", message: "changes require baseline" });
   if (github.baseline && (Date.parse(github.baseline.deliveredAt) >= Date.parse(github.asOf))) ctx.addIssue({ code: "custom", message: "invalid baseline chronology" });
+  if (github.baseline) {
+    const baselineDeliveredAt = Date.parse(github.baseline.deliveredAt);
+    if (github.changes.items.some((row) => Date.parse(row.materialisedAt) <= baselineDeliveredAt)) ctx.addIssue({ code: "custom", message: "change must be materialised after baseline" });
+  }
   const asOf = Date.parse(github.asOf);
   if (github.changes.items.some((row) => Date.parse(row.materialisedAt) > asOf)) ctx.addIssue({ code: "custom", message: "invalid future change" });
   const currentRows = [...github.unknowns.items, ...github.recommendedActions.items];
