@@ -19,6 +19,9 @@ describe("private ComplianceHub plugin safety contract", () => {
     expect(skill).toMatch(/explicit(?:ly)? (?:asks? to )?(?:send|post|deliver)/i);
     expect(skill).toMatch(/Owner role[\s\S]*not sufficient/i);
     expect(skill).toMatch(/`list_github_compliance_results`[\s\S]*read-only/i);
+    expect(skill).toMatch(/schema-v2[\s\S]*official results[\s\S]*immutable/i);
+    expect(skill).toMatch(/Verified GitHub technical fact:[\s\S]*Unknown GitHub information:[\s\S]*Stale GitHub result:[\s\S]*Recommended follow-up:/i);
+    expect(skill).toMatch(/historical[\s\S]*never[\s\S]*(?:pass|passing)/i);
     expect(skill).toMatch(/ordinary chat[\s\S]*scheduled[\s\S]*not enough/i);
     expect(skill).toMatch(/`delivery_failed`[\s\S]*continue composing[\s\S]*PREPARE-ONLY/i);
     expect(manifest.interface.defaultPrompt[0]).toMatch(/without posting/i);
@@ -47,7 +50,7 @@ describe("private ComplianceHub plugin safety contract", () => {
     expect(skill).toMatch(/singular[\s\S]*<N>.*1[\s\S]*plural/i);
 
     const facts: DailyDigestFacts = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       workspace: { id: "10000000-0000-4000-8000-000000000001", name: "Internal ISMS" },
       localDate: "2026-08-07",
       overview: {
@@ -67,6 +70,27 @@ describe("private ComplianceHub plugin safety contract", () => {
       }],
       latestLeadershipReport: null,
       truncation: { attentionItems: false, monitoringFindings: false },
+      github: {
+        partition: { activeCurrentPass: 0, activeCurrentFail: 0, activeCurrentUnknown: 0, activeCurrentNotApplicable: 0, activeStale: 0, historical: 0, total: 0 },
+        baseline: null,
+        changes: { counts: { newFailure: 0, reopen: 0, resolution: 0, supersedingPass: 0, total: 0 }, items: [], truncated: false },
+        unknowns: { count: 0, items: [], truncated: false },
+        staleResults: { count: 0, items: [], truncated: false },
+        recommendedActions: { count: 0, items: [], truncated: false },
+        lines: {
+          headline: "Verified GitHub technical fact: 0 current failures",
+          metrics: [
+            "Verified GitHub technical fact: 0 official results",
+            "Verified GitHub technical fact: 0 current passes",
+            "Verified GitHub technical fact: 0 current failures",
+            "Unknown GitHub information: 0 current results",
+            "Verified GitHub technical fact: 0 current not-applicable results",
+            "Stale GitHub result: 0 active-mapping results",
+            "Verified GitHub technical fact: 0 historical-mapping results",
+          ],
+          priorities: [], actions: [],
+        },
+      },
     };
     expect(validateDigestMessageAgainstFacts({
       headline: "72% readiness",
@@ -98,6 +122,9 @@ describe("private ComplianceHub plugin safety contract", () => {
     const workflow = read(".github/workflows/ci.yml");
     const maintenanceWorkflow = read(".github/workflows/azure-maintenance.yml");
     const vercel = JSON.parse(read("vercel.json")) as { crons?: Array<{ path: string; schedule: string }> };
+    const manifest = JSON.parse(read("plugins/compliancehub-internal/.codex-plugin/plugin.json")) as { version: string };
+
+    expect(manifest.version).toBe("0.2.0");
 
     expect(appMap.apps).toEqual({
       compliancehub: { id: "asdk_app_6a82f504a814819182e544ececddefc9" },

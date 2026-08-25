@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildDailyDigestFacts,
+  buildGitHubDigestLines,
   buildSlackDigestPayload,
   dailyDigestMessageSchema,
   hashDailyDigestFacts,
@@ -19,8 +20,104 @@ const overview = {
 };
 const privateKeyExample = ["private_key=-----BEGIN", "PRIVATE", "KEY-----abc"].join(" ");
 const awsAccessKeyId = ["AK", "IAIOSFODNN7EXAMPLE"].join("");
+const github = {
+  partition: {
+    activeCurrentPass: 1,
+    activeCurrentFail: 1,
+    activeCurrentUnknown: 1,
+    activeCurrentNotApplicable: 1,
+    activeStale: 1,
+    historical: 1,
+    total: 6,
+  },
+  baseline: { deliveredAt: "2026-08-05T08:00:00.000Z", localDate: "2026-08-05" },
+  changes: {
+    counts: { newFailure: 1, reopen: 0, resolution: 1, supersedingPass: 0, total: 2 },
+    items: [
+      {
+        id: "github_change:new_failure:10000000-0000-4000-8000-000000000011",
+        kind: "new_failure" as const,
+        resultId: "github_result:10000000-0000-4000-8000-000000000011",
+        repositoryId: "10000000-0000-4000-8000-000000000021",
+        repositoryLabel: "GitHub repository 10000000",
+        checkId: "github.branch.required_reviews",
+        result: "fail" as const,
+        severity: "high" as const,
+        summary: "Required pull-request reviews are not enforced.",
+        observedAt: "2026-08-06T06:00:00.000Z",
+        freshUntil: "2026-08-07T06:00:00.000Z",
+        materialisedAt: "2026-08-06T06:01:00.000Z",
+        occurredAt: "2026-08-06T06:00:00.000Z",
+      },
+      {
+        id: "github_change:resolution:10000000-0000-4000-8000-000000000012",
+        kind: "resolution" as const,
+        resultId: "github_result:10000000-0000-4000-8000-000000000012",
+        repositoryId: "10000000-0000-4000-8000-000000000022",
+        repositoryLabel: "GitHub repository 10000000",
+        checkId: "github.secret_scanning.enabled",
+        result: "pass" as const,
+        severity: null,
+        summary: "Secret scanning is enabled.",
+        observedAt: "2026-08-06T07:00:00.000Z",
+        freshUntil: "2026-08-07T07:00:00.000Z",
+        materialisedAt: "2026-08-06T07:01:00.000Z",
+        occurredAt: "2026-08-06T07:00:00.000Z",
+      },
+    ],
+    truncated: false,
+  },
+  unknowns: {
+    count: 1,
+    items: [{
+      id: "github_result:10000000-0000-4000-8000-000000000013",
+      repositoryId: "10000000-0000-4000-8000-000000000023",
+      repositoryLabel: "GitHub repository 10000000",
+      checkId: "github.dependabot.alerts",
+      result: "unknown" as const,
+      severity: null,
+      summary: "Dependabot alert availability is unknown.",
+      observedAt: "2026-08-06T08:00:00.000Z",
+      freshUntil: "2026-08-07T08:00:00.000Z",
+      materialisedAt: "2026-08-06T08:01:00.000Z",
+    }],
+    truncated: false,
+  },
+  staleResults: {
+    count: 1,
+    items: [{
+      id: "github_result:10000000-0000-4000-8000-000000000014",
+      repositoryId: "10000000-0000-4000-8000-000000000024",
+      repositoryLabel: "GitHub repository 10000000",
+      checkId: "github.code_scanning.alerts",
+      result: "pass" as const,
+      severity: null,
+      summary: "Code scanning reported no open high-severity alerts.",
+      observedAt: "2026-08-04T08:00:00.000Z",
+      freshUntil: "2026-08-05T08:00:00.000Z",
+      materialisedAt: "2026-08-04T08:01:00.000Z",
+    }],
+    truncated: false,
+  },
+  recommendedActions: {
+    count: 1,
+    items: [{
+      id: "github_result:10000000-0000-4000-8000-000000000015",
+      repositoryId: "10000000-0000-4000-8000-000000000025",
+      repositoryLabel: "GitHub repository 10000000",
+      checkId: "github.branch.required_reviews",
+      result: "fail" as const,
+      severity: "critical" as const,
+      summary: "Required pull-request reviews are not enforced.",
+      observedAt: "2026-08-06T09:00:00.000Z",
+      freshUntil: "2026-08-07T09:00:00.000Z",
+      materialisedAt: "2026-08-06T09:01:00.000Z",
+    }],
+    truncated: false,
+  },
+};
 
-function makeFacts(reverse = false) {
+function makeFacts(reverse = false, githubFacts = github) {
   const attentionItems = [
     { id: "task:task-z", category: "overdue_task" as const, severity: "high" as const, summary: "  Review access controls  ", dueOn: "2026-08-05", source: "task" as const },
     { id: "risk:risk-a", category: "high_risk" as const, severity: "critical" as const, summary: "Treat supplier risk", source: "risk" as const },
@@ -37,6 +134,7 @@ function makeFacts(reverse = false) {
     attentionItems: reverse ? attentionItems.reverse() : attentionItems,
     monitoringFindings: reverse ? monitoringFindings.reverse() : monitoringFindings,
     latestLeadershipReport: { id: "report-1", publishedAt: "2026-08-05T16:00:00.000Z" },
+    github: githubFacts,
     limits: { attentionItems: 2, monitoringFindings: 1 },
   });
 }
@@ -45,12 +143,14 @@ describe("daily digest facts", () => {
   it("normalises, orders, and bounds closed-world facts deterministically", () => {
     const facts = makeFacts();
 
-    expect(facts.schemaVersion).toBe(1);
+    expect(facts.schemaVersion).toBe(2);
     expect(facts.attentionItems.map((item) => item.id)).toEqual(["risk:risk-a", "task:task-z"]);
     expect(facts.attentionItems[1]?.summary).toBe("Review access controls");
     expect(facts.monitoringFindings.map((item) => item.id)).toEqual(["monitoring_finding:finding-a"]);
     expect(facts.truncation).toEqual({ attentionItems: true, monitoringFindings: true });
     expect(facts.latestLeadershipReport).toEqual({ id: "report-1", publishedAt: "2026-08-05T16:00:00.000Z" });
+    expect(facts.github.partition.total).toBe(6);
+    expect(facts.github.lines.headline).toBe("Verified GitHub technical fact: 1 current failure");
   });
 
   it("preserves severity, date, category, source, and ID priority in canonical facts", () => {
@@ -108,6 +208,80 @@ describe("daily digest facts", () => {
     expect(hashDailyDigestFacts(equivalent)).toBe(hashDailyDigestFacts(facts));
     expect(hashDailyDigestFacts({ ...facts, overview: { ...facts.overview, tasksOverdue: 3 } })).not.toBe(hashDailyDigestFacts(facts));
     expect(hashDailyDigestFacts(facts)).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("hashes the exact GitHub partition, baseline, event and truncation state but ignores input ordering", () => {
+    const facts = makeFacts();
+    const reordered = makeFacts(false, {
+      ...github,
+      changes: { ...github.changes, items: [...github.changes.items].reverse() },
+    });
+    expect(hashDailyDigestFacts(reordered)).toBe(hashDailyDigestFacts(facts));
+    expect(hashDailyDigestFacts({ ...facts, github: { ...facts.github, partition: { ...facts.github.partition, activeCurrentPass: 0, activeCurrentUnknown: 2 } } }))
+      .not.toBe(hashDailyDigestFacts(facts));
+    expect(hashDailyDigestFacts({ ...facts, github: { ...facts.github, baseline: null } }))
+      .not.toBe(hashDailyDigestFacts(facts));
+    expect(hashDailyDigestFacts({ ...facts, github: { ...facts.github, changes: { ...facts.github.changes, truncated: true } } }))
+      .not.toBe(hashDailyDigestFacts(facts));
+  });
+
+  it("rejects impossible GitHub partitions, count/truncation shapes, outcome confusion, and unsafe local labels", () => {
+    const base = {
+      workspace: { id: "00000000-0000-4000-8000-000000000001", name: "Internal ISMS" },
+      localDate: "2026-08-06", overview, attentionItems: [], monitoringFindings: [], latestLeadershipReport: null,
+    };
+    expect(() => buildDailyDigestFacts({ ...base, github: { ...github, partition: { ...github.partition, total: 7 } } })).toThrow(/partition/i);
+    expect(() => buildDailyDigestFacts({ ...base, github: { ...github, unknowns: { ...github.unknowns, count: 2, truncated: false } } })).toThrow(/unknown/i);
+    expect(() => buildDailyDigestFacts({
+      ...base,
+      github: { ...github, unknowns: { ...github.unknowns, items: [{ ...github.unknowns.items[0], result: "pass" as const }] } },
+    })).toThrow(/unknown/i);
+    expect(() => buildDailyDigestFacts({
+      ...base,
+      github: { ...github, recommendedActions: { ...github.recommendedActions, items: [{ ...github.recommendedActions.items[0], repositoryLabel: "octo/private" }] } },
+    })).toThrow(/repository label/i);
+    for (const [kind, result] of [["resolution", "unknown"], ["superseding_pass", "not_applicable"]] as const) {
+      const passChange = github.changes.items[1]!;
+      expect(() => buildDailyDigestFacts({
+        ...base,
+        github: {
+          ...github,
+          changes: {
+            ...github.changes,
+            items: github.changes.items.map((item, index) => index === 1 ? {
+              ...passChange,
+              id: `github_change:${kind}:${passChange.resultId.slice("github_result:".length)}`,
+              kind,
+              result,
+              severity: null,
+            } : item),
+          },
+        },
+      })).toThrow(/change outcome/i);
+    }
+  });
+
+  it("generates exact qualified GitHub metrics, facts, unknowns, stale results, and actions", () => {
+    const lines = buildGitHubDigestLines(github);
+    expect(lines.headline).toBe("Verified GitHub technical fact: 1 current failure");
+    expect(lines.metrics).toEqual([
+      "Verified GitHub technical fact: 6 official results",
+      "Verified GitHub technical fact: 1 current pass",
+      "Verified GitHub technical fact: 1 current failure",
+      "Unknown GitHub information: 1 current result",
+      "Verified GitHub technical fact: 1 current not-applicable result",
+      "Stale GitHub result: 1 active-mapping result",
+      "Verified GitHub technical fact: 1 historical-mapping result",
+    ]);
+    expect(lines.priorities).toEqual([
+      "Verified GitHub technical fact: Resolution — GitHub repository 10000000 — github.secret_scanning.enabled — Secret scanning is enabled.",
+      "Verified GitHub technical fact: New failure — GitHub repository 10000000 — github.branch.required_reviews — Required pull-request reviews are not enforced.",
+      "Unknown GitHub information: GitHub repository 10000000 — github.dependabot.alerts — Dependabot alert availability is unknown.",
+      "Stale GitHub result: GitHub repository 10000000 — github.code_scanning.alerts — pass — Code scanning reported no open high-severity alerts.",
+    ]);
+    expect(lines.actions).toEqual([
+      "Recommended follow-up: Review verified failure — GitHub repository 10000000 — github.branch.required_reviews — Required pull-request reviews are not enforced.",
+    ]);
   });
 
   it("rejects impossible local dates", () => {
@@ -293,6 +467,37 @@ describe("daily digest message", () => {
       priorities: ["Treat supplier risk urgently"],
       actions: ["Review 3 open non-conformities"],
     }, facts).ok).toBe(false);
+  });
+
+  it("allows only exact server-owned GitHub lines and rejects count, status, decoration, and provider-text hallucinations", () => {
+    const facts = makeFacts();
+    const allowed = facts.github.lines;
+    expect(validateDigestMessageAgainstFacts({
+      headline: allowed.headline,
+      priorities: [allowed.metrics[0]!, ...allowed.priorities.slice(0, 4)],
+      actions: allowed.actions,
+    }, facts)).toEqual({ ok: true });
+
+    for (const line of [
+      "Verified GitHub technical fact: 2 current failures",
+      "Verified GitHub technical fact: 1 current pass — including the unknown result",
+      `${allowed.priorities[0]} Urgent.`,
+      "Verified GitHub technical fact: octo/private passed branch protection",
+      "Unknown GitHub information: caused by a permissions outage",
+      "Recommended follow-up: Finish by 2026-08-09",
+      "Verified GitHub technical fact: https://github.example/private",
+      "Verified GitHub technical fact: raw provider response says protection is disabled",
+      "Verified GitHub technical fact: GitHub proves ISO certification and overall compliance",
+      "Verified GitHub technical fact: GitHub proves readiness and security",
+    ]) {
+      let accepted = false;
+      try {
+        accepted = validateDigestMessageAgainstFacts({ headline: allowed.headline, priorities: [line], actions: [] }, facts).ok;
+      } catch {
+        accepted = false;
+      }
+      expect(accepted, line).toBe(false);
+    }
   });
 
   it("binds numerical claims to their exact compliance metric", () => {

@@ -59,15 +59,104 @@ const bundleMonitoringRow = z.object({
   resolvedAt: dateTime.nullable().optional(),
   hasRemediationTask: z.boolean(),
 }).strict();
+const digestGitHubResultWithoutId = {
+  repositoryId: uuid,
+  repositoryLabel: z.string().max(40), checkId: z.string().min(1).max(120).regex(/^[a-z0-9._-]+$/),
+  result: z.enum(["pass", "fail", "unknown", "not_applicable"]), severity: z.enum(DIGEST_SEVERITIES).nullable(),
+  summary: z.string().min(1).max(280), observedAt: dateTime, freshUntil: dateTime, materialisedAt: dateTime,
+};
+const digestGitHubResultShape = { id: prefixedUuid("github_result:"), ...digestGitHubResultWithoutId };
+function validateDigestGitHubResult(row: z.infer<ReturnType<typeof z.object<typeof digestGitHubResultShape>>>, ctx: z.core.$RefinementCtx) {
+  if (row.repositoryLabel !== `GitHub repository ${row.repositoryId.slice(0, 8)}`) ctx.addIssue({ code: "custom", message: "unsafe repository label" });
+  if ((row.result === "fail") !== (row.severity !== null)) ctx.addIssue({ code: "custom", message: "severity must match failure outcome" });
+  if (Date.parse(row.freshUntil) <= Date.parse(row.observedAt) || Date.parse(row.materialisedAt) < Date.parse(row.observedAt)) ctx.addIssue({ code: "custom", message: "invalid result chronology" });
+  if (safeSummary(row.summary, 280, "GitHub compliance result") !== row.summary) ctx.addIssue({ code: "custom", message: "unsafe summary" });
+}
+const digestGitHubResultRow = z.object(digestGitHubResultShape).strict().superRefine(validateDigestGitHubResult);
+const digestGitHubChangeRow = z.object({
+  ...digestGitHubResultWithoutId,
+  id: z.string().regex(/^github_change:(?:new_failure|reopen|resolution|superseding_pass):[0-9a-f-]{36}$/),
+  resultId: prefixedUuid("github_result:"),
+  kind: z.enum(["new_failure", "reopen", "resolution", "superseding_pass"]),
+  occurredAt: dateTime,
+}).strict().superRefine((row, ctx) => {
+  validateDigestGitHubResult({ ...row, id: row.resultId }, ctx);
+  if (row.id !== `github_change:${row.kind}:${row.resultId.slice("github_result:".length)}`) ctx.addIssue({ code: "custom", message: "invalid change id" });
+  const expectedResult = row.kind === "new_failure" || row.kind === "reopen" ? "fail" : "pass";
+  if (row.result !== expectedResult) ctx.addIssue({ code: "custom", message: "invalid change outcome" });
+});
+const githubPartition = z.object({
+  activeCurrentPass: z.number().int().nonnegative(), activeCurrentFail: z.number().int().nonnegative(),
+  activeCurrentUnknown: z.number().int().nonnegative(), activeCurrentNotApplicable: z.number().int().nonnegative(),
+  activeStale: z.number().int().nonnegative(), historical: z.number().int().nonnegative(), total: z.number().int().nonnegative(),
+}).strict();
+const countedGithubResults = z.object({
+  count: z.number().int().nonnegative(), items: z.array(digestGitHubResultRow).max(20), truncated: z.boolean(),
+}).strict();
+const digestGithubSchema = z.object({
+  asOf: dateTime,
+  partition: githubPartition,
+  baseline: z.object({ deliveredAt: dateTime, localDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }).strict().nullable(),
+  changes: z.object({
+    counts: z.object({
+      newFailure: z.number().int().nonnegative(), reopen: z.number().int().nonnegative(),
+      resolution: z.number().int().nonnegative(), supersedingPass: z.number().int().nonnegative(), total: z.number().int().nonnegative(),
+    }).strict(),
+    items: z.array(digestGitHubChangeRow).max(20), truncated: z.boolean(),
+  }).strict(),
+  unknowns: countedGithubResults,
+  staleResults: countedGithubResults,
+  recommendedActions: countedGithubResults,
+}).strict().superRefine((github, ctx) => {
+  const partition = github.partition;
+  if (partition.activeCurrentPass + partition.activeCurrentFail + partition.activeCurrentUnknown
+    + partition.activeCurrentNotApplicable + partition.activeStale + partition.historical !== partition.total) {
+    ctx.addIssue({ code: "custom", message: "invalid partition sum" });
+  }
+  const counts = github.changes.counts;
+  if (counts.newFailure + counts.reopen + counts.resolution + counts.supersedingPass !== counts.total) ctx.addIssue({ code: "custom", message: "invalid change count sum" });
+  const countShape = (label: string, count: number, length: number, truncated: boolean) => {
+    if ((!truncated && count !== length) || (truncated && count <= length)) ctx.addIssue({ code: "custom", message: `invalid ${label} truncation` });
+  };
+  countShape("change", counts.total, github.changes.items.length, github.changes.truncated);
+  countShape("unknown", github.unknowns.count, github.unknowns.items.length, github.unknowns.truncated);
+  countShape("stale", github.staleResults.count, github.staleResults.items.length, github.staleResults.truncated);
+  countShape("recommended", github.recommendedActions.count, github.recommendedActions.items.length, github.recommendedActions.truncated);
+  if (github.unknowns.count !== partition.activeCurrentUnknown || github.staleResults.count !== partition.activeStale || github.recommendedActions.count !== partition.activeCurrentFail) {
+    ctx.addIssue({ code: "custom", message: "section counts differ from partition" });
+  }
+  if (github.baseline === null && counts.total !== 0) ctx.addIssue({ code: "custom", message: "changes require baseline" });
+  if (github.baseline && (Date.parse(github.baseline.deliveredAt) >= Date.parse(github.asOf))) ctx.addIssue({ code: "custom", message: "invalid baseline chronology" });
+  const asOf = Date.parse(github.asOf);
+  const currentRows = [...github.changes.items, ...github.unknowns.items, ...github.recommendedActions.items];
+  if (currentRows.some((row) => Date.parse(row.freshUntil) <= asOf || Date.parse(row.materialisedAt) > asOf)) ctx.addIssue({ code: "custom", message: "invalid current result freshness" });
+  if (github.staleResults.items.some((row) => Date.parse(row.freshUntil) > asOf || Date.parse(row.materialisedAt) > asOf)) ctx.addIssue({ code: "custom", message: "invalid stale result freshness" });
+  if (github.unknowns.items.some(({ result }) => result !== "unknown")) ctx.addIssue({ code: "custom", message: "unknown section outcome" });
+  if (github.recommendedActions.items.some(({ result }) => result !== "fail")) ctx.addIssue({ code: "custom", message: "recommended section outcome" });
+  const severityRank: Record<string, number> = { low: 1, medium: 2, high: 3, critical: 4 };
+  const ordered = <T extends { id: string; observedAt: string }>(items: T[], compare: (left: T, right: T) => number) => {
+    for (let index = 1; index < items.length; index += 1) if (compare(items[index - 1]!, items[index]!) > 0) return false;
+    return true;
+  };
+  const resultCompare = (left: z.infer<typeof digestGitHubResultRow>, right: z.infer<typeof digestGitHubResultRow>) => Date.parse(right.observedAt) - Date.parse(left.observedAt) || right.id.localeCompare(left.id);
+  if (!ordered(github.unknowns.items, resultCompare) || !ordered(github.staleResults.items, resultCompare)) ctx.addIssue({ code: "custom", message: "non-deterministic result ordering" });
+  if (!ordered(github.recommendedActions.items, (left, right) => severityRank[right.severity!] - severityRank[left.severity!] || resultCompare(left, right))) ctx.addIssue({ code: "custom", message: "non-deterministic action ordering" });
+  const changeRank: Record<string, number> = { resolution: 1, superseding_pass: 2, reopen: 3, new_failure: 4 };
+  if (!ordered(github.changes.items, (left, right) => Date.parse(right.materialisedAt) - Date.parse(left.materialisedAt) || changeRank[left.kind]! - changeRank[right.kind]! || right.id.localeCompare(left.id))) ctx.addIssue({ code: "custom", message: "non-deterministic change ordering" });
+  for (const items of [github.changes.items, github.unknowns.items, github.staleResults.items, github.recommendedActions.items]) {
+    if (new Set(items.map(({ id }) => id)).size !== items.length) ctx.addIssue({ code: "custom", message: "duplicate GitHub digest id" });
+  }
+});
 const bundleSchema = z.object({
-  schemaVersion: z.literal(1),
+  schemaVersion: z.literal(2),
   workspace: z.object({ id: uuid, name: z.string(), role: z.enum(["owner", "admin", "member"]) }).strict(),
   overviewSource: z.enum(["live", "published"]),
   overview: readinessReportSchema.nullable(),
   attentionItems: z.array(bundleAttentionRow).max(51),
   monitoringFindings: z.array(bundleMonitoringRow).max(51),
   latestLeadershipReport: z.object({ id: uuid, publishedAt: dateTime }).strict().nullable(),
-  delivery: z.object({ id: uuid, status: z.enum(["reserved", "delivered", "failed", "unknown"]), deliveredAt: dateTime.nullable() }).strict().nullable(),
+  github: digestGithubSchema,
+  delivery: z.object({ id: uuid, status: z.enum(["reserved", "delivered", "failed", "unknown"]), deliveredAt: dateTime.nullable(), factHash: z.string().regex(/^[0-9a-f]{64}$/) }).strict().nullable(),
 }).strict();
 const githubResultRow = z.object({
   id: prefixedUuid("github_result:"),
@@ -136,11 +225,12 @@ async function loadComplianceBundle(
 ): Promise<ComplianceBundle> {
   let response: { data: unknown; error: unknown };
   try {
-    response = await supabase.rpc("get_mcp_compliance_bundle", {
+    response = await supabase.rpc("get_mcp_compliance_bundle_v2", {
       target_organisation_id: workspace.id,
       target_local_date: localDate,
       attention_limit: 20,
       monitoring_limit: 20,
+      github_limit: 20,
     }).abortSignal(AbortSignal.timeout(MCP_BUNDLE_REQUEST_TIMEOUT_MS));
   } catch {
     queryFailure();
@@ -340,7 +430,7 @@ export type PrepareDailyDigestResult = {
   status: "ready" | "already_delivered" | "delivery_failed" | "delivery_unknown" | "delivery_reserved";
   facts: DailyDigestFacts;
   factHash: string;
-  delivery: { id: string; deliveredAt: string | null } | null;
+  delivery: { id: string; deliveredAt: string | null; factHash: string } | null;
 };
 
 export function mapDeliveryStatus(status: "reserved" | "delivered" | "failed" | "unknown" | null): PrepareDailyDigestResult["status"] {
@@ -363,12 +453,13 @@ export async function prepareDailyDigest(supabase: SupabaseClient, verifiedUserI
     attentionItems: bundle.attentionItems,
     monitoringFindings: bundle.monitoringFindings,
     latestLeadershipReport: bundle.latestLeadershipReport,
+    github: bundle.github,
   });
   const status = mapDeliveryStatus(bundle.delivery?.status ?? null);
   return {
     status,
     facts,
     factHash: hashDailyDigestFacts(facts),
-    delivery: bundle.delivery ? { id: bundle.delivery.id, deliveredAt: bundle.delivery.deliveredAt } : null,
+    delivery: bundle.delivery ? { id: bundle.delivery.id, deliveredAt: bundle.delivery.deliveredAt, factHash: bundle.delivery.factHash } : null,
   };
 }

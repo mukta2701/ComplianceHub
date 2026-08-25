@@ -14,18 +14,26 @@ The internal MCP surface is a separate read boundary over the same tenant-scoped
 facts. Protected-resource metadata advertises the canonical `/mcp` audience;
 OAuth authorization-code and refresh grants are validated against Supabase Auth,
 and every MCP read resolves the caller's accessible organisations through RLS.
-Six read/prepare tools expose overview, attention items, findings, leadership
-reports, and digest preparation. `prepare_daily_digest` is deliberately
+Seven read/prepare tools expose overview, attention items, monitoring findings,
+immutable official GitHub results, leadership reports, and digest preparation.
+`prepare_daily_digest` is deliberately
 side-effect free. The separate Owner-only `post_daily_digest` tool is an
 external Slack write, not part of the read surface; it revalidates the fact hash, reserves one
 delivery row, encrypts the configured Slack incoming-webhook URL at rest, and
 finalises a terminal delivery state without automatic retries after an unknown
 network outcome.
 
-GitHub shadow collection is another isolated provider boundary. A private
+GitHub collection is another isolated provider boundary. A private
 read-only GitHub App installation is claimed to one organisation, selected
 repositories are collected through bounded allowlisted API calls, and only
-sanitised observations are stored. Shadow observations remain informational in
-this release: they do not alter readiness, evidence, findings, MCP answers, or
-Slack delivery. Signed webhook intake is replay-safe and queues bounded
-rechecks; scheduled reconciliation is the recovery path for terminal failures.
+sanitised shadow observations are stored. Shadow rows alone never alter
+readiness, evidence, findings, MCP answers, or digest facts. An Owner-approved,
+immutable mapping pack authorises a separate transactional materialiser, which
+persists evidence/finding lineage and an immutable official-result row together.
+The schema-v2 digest reads only the latest official result per stable repository
+and check identity; it partitions active current, active stale, and historical
+mapping results and derives bounded changes only from immutable lifecycle
+lineage since the latest prior delivered digest. The exact partition, nullable
+baseline, changes, and truncation state are included in the canonical fact hash.
+Signed webhook intake is replay-safe and queues bounded rechecks; scheduled
+reconciliation is the recovery path for terminal failures.

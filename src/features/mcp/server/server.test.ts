@@ -3,6 +3,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { McpError } from "../auth/errors";
 import { WorkspaceRequiredError } from "../application/workspace-access";
+import { buildDailyDigestFacts } from "../domain/digest";
 import { createComplianceMcpServer, MCP_SERVER_INSTRUCTIONS, type McpReadServices } from "./server";
 
 const USER_ID = "10000000-0000-4000-8000-000000000001";
@@ -16,6 +17,18 @@ const readiness = {
   evidence: { total: 3, expiring: 1, expired: 0 },
   openAudits: 1, openNonConformities: 0,
 };
+const digestFacts = buildDailyDigestFacts({
+  workspace: { id: WORKSPACE_ID, name: "Acme" }, localDate: "2026-08-07", overview: readiness,
+  attentionItems: [], monitoringFindings: [], latestLeadershipReport: null,
+  github: {
+    partition: { activeCurrentPass: 1, activeCurrentFail: 0, activeCurrentUnknown: 0, activeCurrentNotApplicable: 0, activeStale: 0, historical: 0, total: 1 },
+    baseline: null,
+    changes: { counts: { newFailure: 0, reopen: 0, resolution: 0, supersedingPass: 0, total: 0 }, items: [], truncated: false },
+    unknowns: { count: 0, items: [], truncated: false },
+    staleResults: { count: 0, items: [], truncated: false },
+    recommendedActions: { count: 0, items: [], truncated: false },
+  },
+});
 
 const servers: Array<{ close(): Promise<void> }> = [];
 const clients: Client[] = [];
@@ -51,11 +64,7 @@ function serviceStubs(): McpReadServices {
     })),
     prepareDailyDigest: vi.fn(async () => ({
       status: "ready" as const,
-      facts: {
-        schemaVersion: 1 as const, workspace: { id: WORKSPACE_ID, name: "Acme" }, localDate: "2026-08-07", overview: readiness,
-        attentionItems: [], monitoringFindings: [], latestLeadershipReport: null,
-        truncation: { attentionItems: false, monitoringFindings: false },
-      },
+      facts: digestFacts,
       factHash: "a".repeat(64), delivery: null,
     })),
     postDailyDigest: vi.fn(async () => ({
@@ -79,7 +88,7 @@ async function connected(services = serviceStubs()) {
 describe("ComplianceHub MCP server", () => {
   it("initializes with stable identity, safety-first instructions, and exactly eight tools", async () => {
     const { client } = await connected();
-    expect(client.getServerVersion()).toEqual({ name: "compliancehub-internal", version: "1.0.0" });
+    expect(client.getServerVersion()).toEqual({ name: "compliancehub-internal", version: "0.2.0" });
     expect(client.getInstructions()).toBe(MCP_SERVER_INSTRUCTIONS);
     expect(MCP_SERVER_INSTRUCTIONS.slice(0, 512)).toMatch(/Supabase is canonical[\s\S]*closed-world[\s\S]*Never invent/);
 
@@ -107,6 +116,10 @@ describe("ComplianceHub MCP server", () => {
     const github = tools.find(({ name }) => name === "list_github_compliance_results");
     expect(github?.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false, openWorldHint: false });
     expect(github?.inputSchema).toMatchObject({ additionalProperties: false, properties: expect.objectContaining({ repositoryId: expect.any(Object), result: expect.any(Object), freshness: expect.any(Object), mappingStatus: expect.any(Object), severity: expect.any(Object), limit: expect.any(Object) }) });
+    const prepare = tools.find(({ name }) => name === "prepare_daily_digest");
+    expect(prepare?.description).toMatch(/schema-v2[\s\S]*verified[\s\S]*unknown[\s\S]*stale[\s\S]*historical/i);
+    expect(JSON.stringify(prepare?.outputSchema)).toContain('"const":2');
+    expect(tools.filter(({ annotations }) => annotations?.openWorldHint)).toHaveLength(1);
   });
 
   it("calls all eight tools with authenticated user and OAuth-client context and returns stable structured content", async () => {

@@ -37,6 +37,9 @@ export const MCP_SERVER_INSTRUCTIONS = [
   "Use only the safe evidence and policy summaries supplied by the tools; never return their bodies or person-level fields.",
   "post_daily_digest is an external Slack write, is restricted to the server-authorized sending role, and always uses the server-configured channel; never request or supply a destination.",
   "Read results are bounded snapshots and may be truncated.",
+  "Prepared schema-v2 GitHub digest facts come only from immutable official results and lifecycle events, and separate current pass, current failure, unknown, not-applicable, stale, and historical-mapping results.",
+  "For GitHub content copy only exact server-owned lines returned in facts.github.lines; they begin with Verified GitHub technical fact:, Unknown GitHub information:, Stale GitHub result:, or Recommended follow-up:.",
+  "Never present unknown, stale, or historical-mapping GitHub results as passing, and never claim that a GitHub result proves certification, readiness, security, or overall compliance.",
 ].join(" ");
 
 const OAUTH_SECURITY_SCHEMES = [{ type: "oauth2", scopes: ["openid", "email", "profile"] }] as const;
@@ -92,12 +95,43 @@ const githubResult = z.object({
   mappingVersion: z.string().min(1).max(80).regex(/^[A-Za-z0-9._-]+$/), mappingStatus: z.enum(["active", "historical"]), ruleVersion: z.string().min(1).max(80).regex(/^[A-Za-z0-9._-]+$/), summary: z.string().min(1).max(280),
   evidenceId: z.string().regex(/^evidence:[0-9a-f-]{36}$/).nullable(), findingId: z.string().regex(/^monitoring_finding:[0-9a-f-]{36}$/).nullable(),
 }).strict();
+const digestGithubResult = z.object({
+  id: z.string().regex(/^github_result:[0-9a-f-]{36}$/), repositoryId: uuid,
+  repositoryLabel: z.string().regex(/^GitHub repository [0-9a-f]{8}$/), checkId: z.string().min(1).max(120).regex(/^[a-z0-9._-]+$/),
+  result: z.enum(["pass", "fail", "unknown", "not_applicable"]), severity: z.enum(DIGEST_SEVERITIES).nullable(),
+  summary: z.string().min(1).max(280), observedAt: dateTime, freshUntil: dateTime, materialisedAt: dateTime,
+}).strict();
+const digestGithubChange = digestGithubResult.omit({ id: true }).extend({
+  id: z.string().regex(/^github_change:(?:new_failure|reopen|resolution|superseding_pass):[0-9a-f-]{36}$/),
+  resultId: z.string().regex(/^github_result:[0-9a-f-]{36}$/),
+  kind: z.enum(["new_failure", "reopen", "resolution", "superseding_pass"]), occurredAt: dateTime,
+}).strict();
+const digestGithubCountedResults = z.object({ count: z.number().int().nonnegative(), items: z.array(digestGithubResult).max(20), truncated: z.boolean() }).strict();
 const digestFacts = z.object({
-  schemaVersion: z.literal(1), workspace: workspaceSummary, localDate, overview: readinessReportSchema,
+  schemaVersion: z.literal(2), workspace: workspaceSummary, localDate, overview: readinessReportSchema,
   attentionItems: z.array(attentionItem).max(20),
   monitoringFindings: z.array(monitoringFinding.omit({ resolvedAt: true, hasRemediationTask: true })).max(20),
   latestLeadershipReport: reportMetadata.nullable(),
   truncation: z.object({ attentionItems: z.boolean(), monitoringFindings: z.boolean() }).strict(),
+  github: z.object({
+    partition: z.object({
+      activeCurrentPass: z.number().int().nonnegative(), activeCurrentFail: z.number().int().nonnegative(),
+      activeCurrentUnknown: z.number().int().nonnegative(), activeCurrentNotApplicable: z.number().int().nonnegative(),
+      activeStale: z.number().int().nonnegative(), historical: z.number().int().nonnegative(), total: z.number().int().nonnegative(),
+    }).strict(),
+    baseline: z.object({ deliveredAt: dateTime, localDate }).strict().nullable(),
+    changes: z.object({
+      counts: z.object({ newFailure: z.number().int().nonnegative(), reopen: z.number().int().nonnegative(), resolution: z.number().int().nonnegative(), supersedingPass: z.number().int().nonnegative(), total: z.number().int().nonnegative() }).strict(),
+      items: z.array(digestGithubChange).max(20), truncated: z.boolean(),
+    }).strict(),
+    unknowns: digestGithubCountedResults,
+    staleResults: digestGithubCountedResults,
+    recommendedActions: digestGithubCountedResults,
+    lines: z.object({
+      headline: z.string().min(1).max(120), metrics: z.array(z.string().min(1).max(240)).length(7),
+      priorities: z.array(z.string().min(1).max(240)).max(5), actions: z.array(z.string().min(1).max(240)).max(5),
+    }).strict(),
+  }).strict(),
 }).strict();
 
 export type McpReadServices = {
@@ -160,7 +194,7 @@ export function createComplianceMcpServer(
   services: McpReadServices = defaultServices,
 ): McpServer {
   const server = new McpServer(
-    { name: "compliancehub-internal", version: "1.0.0" },
+    { name: "compliancehub-internal", version: "0.2.0" },
     { instructions: MCP_SERVER_INSTRUCTIONS },
   );
 
@@ -227,12 +261,12 @@ export function createComplianceMcpServer(
     }),
     defineTool({
       name: "prepare_daily_digest", title: "Prepare daily compliance digest",
-      description: "Read-only. Return bounded, verified digest facts and a deterministic fact hash for the supplied Europe/London calendar date. This never posts to Slack and is the default for prepare, draft, preview, review, or ambiguous requests.",
+      description: "Read-only. Return bounded schema-v2 verified digest facts and a deterministic fact hash for the supplied Europe/London calendar date, including explicit current, unknown, stale, and historical GitHub limits. This never posts to Slack and is the default for prepare, draft, preview, review, or ambiguous requests.",
       input: prepareInputSchema,
       output: success(z.object({
         status: z.enum(["ready", "already_delivered", "delivery_failed", "delivery_unknown", "delivery_reserved"]),
         facts: digestFacts, factHash: z.string().regex(/^[0-9a-f]{64}$/),
-        delivery: z.object({ id: uuid, deliveredAt: dateTime.nullable() }).strict().nullable(),
+        delivery: z.object({ id: uuid, deliveredAt: dateTime.nullable(), factHash: z.string().regex(/^[0-9a-f]{64}$/) }).strict().nullable(),
       }).strict()),
       run: async (input) => {
         const data = await services.prepareDailyDigest(context.supabase, context.userId, input);

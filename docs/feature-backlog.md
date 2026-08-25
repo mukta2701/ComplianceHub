@@ -156,10 +156,13 @@ The following previously reported items are now closed and tracked as `Done` in 
 
 ## Internal MCP + daily Slack digest (shipped)
 
-**What shipped:** an OAuth-protected Streamable HTTP MCP endpoint with six
+**What shipped:** an OAuth-protected Streamable HTTP MCP endpoint with seven
 tenant-scoped read/prepare tools plus a separate Owner-only `post_daily_digest`
-external-write tool, deterministic digest facts, and an Owner-only daily
-Slack digest workflow. Digest claims are derived from a prepared fact hash;
+external-write tool, including a bounded immutable official-GitHub read,
+schema-v2 deterministic digest facts, and an Owner-only daily Slack digest
+workflow. Digest claims are derived from a prepared fact hash that covers the
+exact GitHub partition, prior-delivery baseline, immutable lifecycle changes,
+and truncation state;
 reservation/finalisation RPCs make concurrent calls idempotent, webhook URLs are
 encrypted at rest, and delivery outcomes are terminally classified. A private
 ComplianceHub plugin and daily-brief skill keep preparation side-effect-free
@@ -171,17 +174,20 @@ webhook remain go-live checkpoints, not local defaults.
 - Configure a real Slack incoming webhook and record three redacted shadow deliveries, including failure/unknown handling.
 - Add operator-facing schedule status and a bounded retry/recovery dashboard for abandoned digest reservations.
 
-## GitHub shadow collection (foundation shipped)
+## GitHub verified collection and materialisation (pipeline shipped)
 
 **What shipped:** a private GitHub App claim/callback flow, tenant-safe
 installation and repository scope, deterministic rule evaluation, bounded
 collection orchestration, signed replay-safe webhook intake, manual recheck UI,
-and collection-health summaries. The local personal pilot accepts a `User`
+collection-health summaries, immutable mapping approval/provenance, transactional
+evidence/finding materialisation, and immutable official results consumed by the
+read-only MCP result tool and schema-v2 digest. Raw shadow observations never
+become official facts by themselves. The local personal pilot accepts a `User`
 account only on an HTTP loopback origin; hosted deployments stay
-organisation-only. Shadow observations are intentionally not readiness-affecting
-until a later mapping-approval release.
+organisation-only. Official GitHub technical results remain narrower than ISO
+certification, readiness, security, or overall-compliance claims.
 
 **Suggested improvements:**
 - Complete the hosted Supabase migration and Azure secret/registration checkpoints.
 - Run the approved Adtecher one-repository shadow pilot and commit a redacted comparison proof.
-- Add the separately planned mapping/evidence/finding lifecycle after the shadow proof passes.
+- Add the separately planned Owner-facing mapping approval and official-result UI after the shadow proof passes.

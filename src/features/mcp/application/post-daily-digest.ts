@@ -223,6 +223,10 @@ export async function postDailyDigest(
   const stateError = preparedStateError(prepared.status);
   if (stateError) throw new McpError(stateError);
   if (prepared.factHash !== input.factHash) throw new McpError("STALE_DIGEST");
+  if (prepared.status === "delivery_failed"
+    && (!prepared.delivery || prepared.delivery.factHash !== prepared.factHash)) {
+    throw new McpError("STALE_DIGEST");
+  }
 
   const digestMessage = dailyDigestMessageSchema.parse({
     headline: input.headline,

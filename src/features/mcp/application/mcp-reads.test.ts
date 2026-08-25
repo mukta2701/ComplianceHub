@@ -62,14 +62,61 @@ function membership(role: "owner" | "admin" | "member" = "owner"): Resolver {
 
 function complianceBundle(role: "owner" | "admin" | "member" = "owner", overrides: Record<string, unknown> = {}) {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     workspace: { id: ORG, name: "Acme", role },
     overviewSource: role === "member" ? "published" : "live",
     overview: readiness,
     attentionItems: [],
     monitoringFindings: [],
     latestLeadershipReport: null,
+    github: githubDigestBundle(),
     delivery: null,
+    ...overrides,
+  };
+}
+
+function githubDigestBundle(overrides: Record<string, unknown> = {}) {
+  const result = {
+    id: "github_result:40000000-0000-4000-8000-000000000001",
+    repositoryId: "50000000-0000-4000-8000-000000000001",
+    repositoryLabel: "GitHub repository 50000000",
+    checkId: "github.branch.required_reviews",
+    result: "fail",
+    severity: "high",
+    summary: "Required pull-request reviews are not enforced.",
+    observedAt: "2026-08-05T06:00:00.000Z",
+    freshUntil: "2026-08-07T06:00:00.000Z",
+    materialisedAt: "2026-08-05T06:01:00.000Z",
+  };
+  return {
+    asOf: "2026-08-06T12:00:00.000Z",
+    partition: {
+      activeCurrentPass: 1, activeCurrentFail: 1, activeCurrentUnknown: 1,
+      activeCurrentNotApplicable: 1, activeStale: 1, historical: 1, total: 6,
+    },
+    baseline: { deliveredAt: "2026-08-05T08:00:00.000Z", localDate: "2026-08-05" },
+    changes: {
+      counts: { newFailure: 1, reopen: 0, resolution: 0, supersedingPass: 0, total: 1 },
+      items: [{
+        ...result,
+        id: "github_change:new_failure:40000000-0000-4000-8000-000000000001",
+        resultId: result.id,
+        kind: "new_failure",
+        occurredAt: "2026-08-05T06:00:00.000Z",
+      }],
+      truncated: false,
+    },
+    unknowns: {
+      count: 1,
+      items: [{ ...result, id: "github_result:40000000-0000-4000-8000-000000000002", result: "unknown", severity: null, summary: "Alert availability is unknown.", observedAt: "2026-08-05T07:00:00.000Z", materialisedAt: "2026-08-05T07:01:00.000Z" }],
+      truncated: false,
+    },
+    staleResults: {
+      count: 1,
+      items: [{ ...result, id: "github_result:40000000-0000-4000-8000-000000000003", result: "pass", severity: null, summary: "Required reviews were enabled.", observedAt: "2026-08-03T06:00:00.000Z", freshUntil: "2026-08-06T12:00:00.000Z", materialisedAt: "2026-08-03T06:01:00.000Z" }],
+      truncated: false,
+    },
+    recommendedActions: { count: 1, items: [result], truncated: false },
     ...overrides,
   };
 }
@@ -305,8 +352,9 @@ describe("MCP public read services", () => {
       data: complianceBundle("owner", { overview: { ...readiness, soaTotal: 1205, soaPercent: 100 } }), error: null,
     }));
     await expect(getComplianceOverview(exact.client as never, USER, { localDate: "2026-08-06" })).resolves.toMatchObject({ source: "live", readiness: { soaTotal: 1205, soaPercent: 100 } });
-    expect(exact.rpc).toHaveBeenCalledWith("get_mcp_compliance_bundle", {
+    expect(exact.rpc).toHaveBeenCalledWith("get_mcp_compliance_bundle_v2", {
       target_organisation_id: ORG, target_local_date: "2026-08-06", attention_limit: 20, monitoring_limit: 20,
+      github_limit: 20,
     });
     expect(exact.rpcSignals).toHaveLength(1);
     expect(typeof exact.rpcSignals[0]?.addEventListener).toBe("function");
@@ -416,13 +464,16 @@ describe("MCP public read services", () => {
 
   it("prepares a deterministic fact hash and exposes Owner-only delivery state", async () => {
     const fake = fakeSupabase({ memberships: membership("owner") }, () => ({ data: complianceBundle("owner", {
-      delivery: { id: "50000000-0000-4000-8000-000000000001", status: "failed", deliveredAt: null },
+      delivery: { id: "50000000-0000-4000-8000-000000000001", status: "failed", deliveredAt: null, factHash: "b".repeat(64) },
     }), error: null }));
     const first = await prepareDailyDigest(fake.client as never, USER, { localDate: "2026-08-06" });
     const second = await prepareDailyDigest(fake.client as never, USER, { localDate: "2026-08-06" });
     expect(first.status).toBe("delivery_failed");
     expect(first.factHash).toMatch(/^[0-9a-f]{64}$/);
     expect(second.factHash).toBe(first.factHash);
+    expect(first.facts.schemaVersion).toBe(2);
+    expect(first.facts.github.partition).toEqual(githubDigestBundle().partition);
+    expect(first.delivery).toEqual({ id: "50000000-0000-4000-8000-000000000001", deliveredAt: null, factHash: "b".repeat(64) });
     expect(fake.rpc).toHaveBeenCalledTimes(2);
     expect(new Set(fake.states.map(({ table }) => table))).toEqual(new Set(["memberships"]));
   });
@@ -463,6 +514,44 @@ describe("MCP public read services", () => {
       overview: { ...readiness, evidence: { total: 1, expiring: 1, expired: 1 } },
     }), error: null }));
     await expect(prepareDailyDigest(inconsistent.client as never, USER, { localDate: "2026-08-06" })).rejects.toMatchObject({ code: "INTERNAL_ERROR" });
+
+    for (const github of [
+      githubDigestBundle({ partition: { ...githubDigestBundle().partition, total: 7 } }),
+      githubDigestBundle({ unknowns: { ...githubDigestBundle().unknowns, count: 2, truncated: false } }),
+      githubDigestBundle({ staleResults: { ...githubDigestBundle().staleResults, items: [{ ...(githubDigestBundle().staleResults as { items: object[] }).items[0], freshUntil: "2026-08-06T12:00:00.001Z" }] } }),
+      githubDigestBundle({ recommendedActions: { ...githubDigestBundle().recommendedActions, items: [{ ...(githubDigestBundle().recommendedActions as { items: object[] }).items[0], repositoryLabel: "octo/private" }] } }),
+      ...([[
+        "resolution", "unknown",
+      ], [
+        "superseding_pass", "not_applicable",
+      ]] as const).map(([kind, result]) => {
+        const bundle = githubDigestBundle();
+        const item = (bundle.changes as { items: Array<Record<string, unknown>> }).items[0]!;
+        const resultId = String(item.resultId);
+        return githubDigestBundle({
+          changes: {
+            counts: {
+              newFailure: 0, reopen: 0,
+              resolution: kind === "resolution" ? 1 : 0,
+              supersedingPass: kind === "superseding_pass" ? 1 : 0,
+              total: 1,
+            },
+            items: [{
+              ...item,
+              id: `github_change:${kind}:${resultId.slice("github_result:".length)}`,
+              kind,
+              result,
+              severity: null,
+            }],
+            truncated: false,
+          },
+        });
+      }),
+    ]) {
+      const malformed = fakeSupabase({ memberships: membership("owner") }, () => ({ data: complianceBundle("owner", { github }), error: null }));
+      await expect(prepareDailyDigest(malformed.client as never, USER, { localDate: "2026-08-06" }))
+        .rejects.toMatchObject({ code: "INTERNAL_ERROR" });
+    }
   });
 
   it("maps every persisted delivery state to a stable preparation state", () => {
@@ -478,5 +567,6 @@ describe("MCP public read services", () => {
     await prepareDailyDigest(fake.client as never, USER, { localDate: "2026-08-06" });
     expect(fake.states.map(({ table }) => table)).toEqual(["memberships", "memberships"]);
     expect(fake.rpc).toHaveBeenCalledTimes(1);
+    expect(fake.rpc).toHaveBeenCalledWith("get_mcp_compliance_bundle_v2", expect.objectContaining({ github_limit: 20 }));
   });
 });

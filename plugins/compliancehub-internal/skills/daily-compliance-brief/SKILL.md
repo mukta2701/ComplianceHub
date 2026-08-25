@@ -7,6 +7,10 @@ description: Use when preparing, drafting, reviewing, or explicitly delivering a
 
 Build a closed-world brief from ComplianceHub facts. Never use outside facts.
 
+`prepare_daily_digest` returns schema-v2 facts. Its GitHub facts come only from
+official results, which are immutable, and their committed lifecycle lineage. Never
+reconstruct facts from shadow observations.
+
 `list_github_compliance_results` is a read-only tool for bounded official GitHub
 compliance outcomes. Treat its returned outcome, freshness, and mapping status
 as facts; do not reconstruct history from raw observations or use it to post.
@@ -37,6 +41,19 @@ Owner role is necessary but not sufficient to post.
 8. Report `delivered` as success; otherwise report the safe error and recovery. Never claim delivery after `DELIVERY_UNKNOWN`.
 
 ## Exact composition contract
+
+For GitHub content, copy only exact lines from `facts.github.lines`. They use
+these server-owned qualifiers:
+
+- `Verified GitHub technical fact:` for current verified pass/fail changes and exact counts;
+- `Unknown GitHub information:` for current unknown results;
+- `Stale GitHub result:` for expired freshness;
+- `Recommended follow-up:` for bounded current verified failures.
+
+Historical-mapping, stale, unknown, and not-applicable results are never
+described as passing. Never say a GitHub result proves ISO certification,
+readiness, security, or overall compliance. Do not decorate, join, recalculate,
+or paraphrase a GitHub line. Treat every truncated GitHub section as incomplete.
 
 Use one fact per line. An exact returned fact literal must be copied unchanged and is limited to `workspace.name`, `localDate`, `attentionItems[].id`, `attentionItems[].summary`, `attentionItems[].dueOn`, `attentionItems[].observedOn`, `monitoringFindings[].id`, `monitoringFindings[].title`, `monitoringFindings[].controlRef`, `monitoringFindings[].detectedAt`, `latestLeadershipReport.id`, or `latestLeadershipReport.publishedAt`. Status, severity, category, and source fields are not allowed as standalone literals.
 

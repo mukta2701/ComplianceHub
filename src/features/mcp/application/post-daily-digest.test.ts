@@ -134,7 +134,7 @@ describe("postDailyDigest", () => {
     ["delivery_reserved", "DELIVERY_UNKNOWN"],
     ["delivery_unknown", "DELIVERY_UNKNOWN"],
   ] as const)("maps prepared state %s without a reservation or network call", async (status, code) => {
-    const deps = dependencies({ prepare: vi.fn(async () => ({ status, facts, factHash, delivery: { id: DELIVERY_ID, deliveredAt: null } })) });
+    const deps = dependencies({ prepare: vi.fn(async () => ({ status, facts, factHash, delivery: { id: DELIVERY_ID, deliveredAt: null, factHash } })) });
     await expect(postDailyDigest({ supabase: {} as never, userId: USER_ID, clientId: "codex", input: request }, deps))
       .rejects.toMatchObject({ code });
     expect(deps.reserve).not.toHaveBeenCalled();
@@ -144,11 +144,28 @@ describe("postDailyDigest", () => {
   it("uses the immutable persisted payload when explicitly retrying a confirmed failure", async () => {
     const original = buildSlackDigestPayload({ headline: "Original", priorities: [], actions: [] }, { workspaceName: "Acme", localDate: "2026-08-07" });
     const deps = dependencies({
-      prepare: vi.fn(async () => ({ status: "delivery_failed" as const, facts, factHash, delivery: { id: DELIVERY_ID, deliveredAt: null } })),
+      prepare: vi.fn(async () => ({ status: "delivery_failed" as const, facts, factHash, delivery: { id: DELIVERY_ID, deliveredAt: null, factHash } })),
       reserve: vi.fn(async () => ({ state: "reserved" as const, deliveryId: DELIVERY_ID, channelId: CHANNEL_ID, attemptNumber: 2, message: original })),
     });
     await postDailyDigest({ supabase: {} as never, userId: USER_ID, clientId: "codex", input: request }, deps);
     expect(deps.deliver).toHaveBeenCalledWith("https://hooks.slack.com/services/T/B/secret", original);
+  });
+
+  it("rejects a schema-v1 failed delivery whose immutable hash differs before service client, reservation, or transport", async () => {
+    const legacyHash = "c".repeat(64);
+    const deps = dependencies({
+      prepare: vi.fn(async () => ({
+        status: "delivery_failed" as const,
+        facts,
+        factHash,
+        delivery: { id: DELIVERY_ID, deliveredAt: null, factHash: legacyHash },
+      })),
+    });
+    await expect(postDailyDigest({ supabase: {} as never, userId: USER_ID, clientId: "codex", input: request }, deps))
+      .rejects.toMatchObject({ code: "STALE_DIGEST" });
+    expect(deps.createDeliveryClient).not.toHaveBeenCalled();
+    expect(deps.reserve).not.toHaveBeenCalled();
+    expect(deps.deliver).not.toHaveBeenCalled();
   });
 
   it.each([

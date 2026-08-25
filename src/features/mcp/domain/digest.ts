@@ -85,8 +85,70 @@ export type DigestMonitoringFinding = {
   detectedAt: string;
 };
 
+export const DIGEST_GITHUB_CHANGE_KINDS = [
+  "new_failure", "reopen", "resolution", "superseding_pass",
+] as const;
+
+export type DigestGitHubPartition = {
+  activeCurrentPass: number;
+  activeCurrentFail: number;
+  activeCurrentUnknown: number;
+  activeCurrentNotApplicable: number;
+  activeStale: number;
+  historical: number;
+  total: number;
+};
+
+export type DigestGitHubResultFact = {
+  id: string;
+  repositoryId: string;
+  repositoryLabel: string;
+  checkId: string;
+  result: "pass" | "fail" | "unknown" | "not_applicable";
+  severity: DigestSeverity | null;
+  summary: string;
+  observedAt: string;
+  freshUntil: string;
+  materialisedAt: string;
+};
+
+export type DigestGitHubChangeFact = DigestGitHubResultFact & {
+  id: string;
+  resultId: string;
+  kind: typeof DIGEST_GITHUB_CHANGE_KINDS[number];
+  occurredAt: string;
+};
+
+export type DigestGitHubFactsInput = {
+  partition: DigestGitHubPartition;
+  baseline: { deliveredAt: string; localDate: string } | null;
+  changes: {
+    counts: { newFailure: number; reopen: number; resolution: number; supersedingPass: number; total: number };
+    items: readonly DigestGitHubChangeFact[];
+    truncated: boolean;
+  };
+  unknowns: { count: number; items: readonly DigestGitHubResultFact[]; truncated: boolean };
+  staleResults: { count: number; items: readonly DigestGitHubResultFact[]; truncated: boolean };
+  recommendedActions: { count: number; items: readonly DigestGitHubResultFact[]; truncated: boolean };
+};
+
+export type DigestGitHubLines = {
+  headline: string;
+  metrics: string[];
+  priorities: string[];
+  actions: string[];
+};
+
+export type DigestGitHubFacts = Omit<DigestGitHubFactsInput, "changes" | "unknowns" | "staleResults" | "recommendedActions"> & {
+  changes: Omit<DigestGitHubFactsInput["changes"], "items"> & { items: DigestGitHubChangeFact[] };
+  unknowns: Omit<DigestGitHubFactsInput["unknowns"], "items"> & { items: DigestGitHubResultFact[] };
+  staleResults: Omit<DigestGitHubFactsInput["staleResults"], "items"> & { items: DigestGitHubResultFact[] };
+  recommendedActions: Omit<DigestGitHubFactsInput["recommendedActions"], "items"> & { items: DigestGitHubResultFact[] };
+  lines: DigestGitHubLines;
+};
+
 export type DailyDigestFacts = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   workspace: { id: string; name: string };
   localDate: string;
   overview: ReadinessReport;
@@ -94,6 +156,7 @@ export type DailyDigestFacts = {
   monitoringFindings: DigestMonitoringFinding[];
   latestLeadershipReport: { id: string; publishedAt: string } | null;
   truncation: { attentionItems: boolean; monitoringFindings: boolean };
+  github: DigestGitHubFacts;
 };
 
 type BuildDailyDigestFactsInput = {
@@ -103,6 +166,7 @@ type BuildDailyDigestFactsInput = {
   attentionItems: readonly DigestAttentionItem[];
   monitoringFindings: readonly DigestMonitoringFinding[];
   latestLeadershipReport: { id: string; publishedAt: string } | null;
+  github?: DigestGitHubFactsInput;
   limits?: { attentionItems?: number; monitoringFindings?: number };
 };
 
@@ -147,6 +211,180 @@ function boundedLimit(value: number | undefined, fallback: number): number {
   return z.number().int().min(1).max(50).parse(value ?? fallback);
 }
 
+const emptyGitHubFacts: DigestGitHubFactsInput = {
+  partition: {
+    activeCurrentPass: 0, activeCurrentFail: 0, activeCurrentUnknown: 0,
+    activeCurrentNotApplicable: 0, activeStale: 0, historical: 0, total: 0,
+  },
+  baseline: null,
+  changes: {
+    counts: { newFailure: 0, reopen: 0, resolution: 0, supersedingPass: 0, total: 0 },
+    items: [], truncated: false,
+  },
+  unknowns: { count: 0, items: [], truncated: false },
+  staleResults: { count: 0, items: [], truncated: false },
+  recommendedActions: { count: 0, items: [], truncated: false },
+};
+
+const githubOutcome = z.enum(["pass", "fail", "unknown", "not_applicable"]);
+const githubCheckId = z.string().min(1).max(120).regex(/^[a-z0-9._-]+$/);
+const nonnegativeCount = z.number().int().nonnegative();
+
+function normalizeGitHubResult(input: DigestGitHubResultFact): DigestGitHubResultFact {
+  const id = z.string().refine((value) => value.startsWith("github_result:")
+    && z.uuid().safeParse(value.slice("github_result:".length)).success, "GitHub result ID required").parse(input.id);
+  const repositoryId = z.uuid().parse(input.repositoryId);
+  const repositoryLabel = z.string().max(40).parse(input.repositoryLabel);
+  if (repositoryLabel !== `GitHub repository ${repositoryId.slice(0, 8)}`) {
+    throw new Error("Unsafe GitHub repository label");
+  }
+  const result = githubOutcome.parse(input.result);
+  const severity = input.severity === null ? null : z.enum(DIGEST_SEVERITIES).parse(input.severity);
+  if ((result === "fail") !== (severity !== null)) throw new Error("GitHub failure severity mismatch");
+  const observedAt = normaliseDateTime(input.observedAt);
+  const freshUntil = normaliseDateTime(input.freshUntil);
+  const materialisedAt = normaliseDateTime(input.materialisedAt);
+  if (Date.parse(freshUntil) <= Date.parse(observedAt) || Date.parse(materialisedAt) < Date.parse(observedAt)) {
+    throw new Error("Invalid GitHub result chronology");
+  }
+  return {
+    id, repositoryId, repositoryLabel,
+    checkId: githubCheckId.parse(input.checkId), result, severity,
+    summary: cleanFactText(input.summary, 280), observedAt, freshUntil, materialisedAt,
+  };
+}
+
+function resultOrder(left: DigestGitHubResultFact, right: DigestGitHubResultFact): number {
+  return Date.parse(right.observedAt) - Date.parse(left.observedAt)
+    || right.id.localeCompare(left.id);
+}
+
+function actionOrder(left: DigestGitHubResultFact, right: DigestGitHubResultFact): number {
+  return severityRank[right.severity!] - severityRank[left.severity!]
+    || resultOrder(left, right);
+}
+
+const changeKindRank: Record<DigestGitHubChangeFact["kind"], number> = {
+  resolution: 1, superseding_pass: 2, reopen: 3, new_failure: 4,
+};
+
+function changeOrder(left: DigestGitHubChangeFact, right: DigestGitHubChangeFact): number {
+  return Date.parse(right.materialisedAt) - Date.parse(left.materialisedAt)
+    || changeKindRank[left.kind] - changeKindRank[right.kind]
+    || right.id.localeCompare(left.id);
+}
+
+function validateCountedSection(label: string, count: number, length: number, truncated: boolean): void {
+  nonnegativeCount.parse(count);
+  if ((!truncated && count !== length) || (truncated && count <= length)) {
+    throw new Error(`Invalid GitHub ${label} count/truncation state`);
+  }
+}
+
+function counted(count: number, singular: string, plural = `${singular}s`): string {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function githubLinesFromFacts(facts: Omit<DigestGitHubFacts, "lines">): DigestGitHubLines {
+  const partition = facts.partition;
+  const headline = `Verified GitHub technical fact: ${counted(partition.activeCurrentFail, "current failure")}`;
+  const metrics = [
+    `Verified GitHub technical fact: ${counted(partition.total, "official result")}`,
+    `Verified GitHub technical fact: ${counted(partition.activeCurrentPass, "current pass")}`,
+    `Verified GitHub technical fact: ${counted(partition.activeCurrentFail, "current failure")}`,
+    `Unknown GitHub information: ${counted(partition.activeCurrentUnknown, "current result")}`,
+    `Verified GitHub technical fact: ${counted(partition.activeCurrentNotApplicable, "current not-applicable result")}`,
+    `Stale GitHub result: ${counted(partition.activeStale, "active-mapping result")}`,
+    `Verified GitHub technical fact: ${counted(partition.historical, "historical-mapping result")}`,
+  ];
+  const kindLabel: Record<DigestGitHubChangeFact["kind"], string> = {
+    new_failure: "New failure", reopen: "Reopen", resolution: "Resolution", superseding_pass: "Superseding pass",
+  };
+  const changes = facts.changes.items.map((item) =>
+    `Verified GitHub technical fact: ${kindLabel[item.kind]} — ${item.repositoryLabel} — ${item.checkId} — ${item.summary}`);
+  const unknowns = facts.unknowns.items.map((item) =>
+    `Unknown GitHub information: ${item.repositoryLabel} — ${item.checkId} — ${item.summary}`);
+  const stale = facts.staleResults.items.map((item) =>
+    `Stale GitHub result: ${item.repositoryLabel} — ${item.checkId} — ${item.result} — ${item.summary}`);
+  const actions = facts.recommendedActions.items.map((item) =>
+    `Recommended follow-up: Review verified failure — ${item.repositoryLabel} — ${item.checkId} — ${item.summary}`);
+  for (const line of [headline, ...metrics, ...changes, ...unknowns, ...stale, ...actions]) cleanFactText(line, 240);
+  return { headline, metrics, priorities: [...changes, ...unknowns, ...stale].slice(0, 5), actions: actions.slice(0, 5) };
+}
+
+function normalizeGitHubFacts(input: DigestGitHubFactsInput): DigestGitHubFacts {
+  const partition = {
+    activeCurrentPass: nonnegativeCount.parse(input.partition.activeCurrentPass),
+    activeCurrentFail: nonnegativeCount.parse(input.partition.activeCurrentFail),
+    activeCurrentUnknown: nonnegativeCount.parse(input.partition.activeCurrentUnknown),
+    activeCurrentNotApplicable: nonnegativeCount.parse(input.partition.activeCurrentNotApplicable),
+    activeStale: nonnegativeCount.parse(input.partition.activeStale),
+    historical: nonnegativeCount.parse(input.partition.historical),
+    total: nonnegativeCount.parse(input.partition.total),
+  };
+  const partitionSum = partition.activeCurrentPass + partition.activeCurrentFail
+    + partition.activeCurrentUnknown + partition.activeCurrentNotApplicable
+    + partition.activeStale + partition.historical;
+  if (partitionSum !== partition.total) throw new Error("Invalid GitHub partition sum");
+
+  const baseline = input.baseline === null ? null : {
+    deliveredAt: normaliseDateTime(input.baseline.deliveredAt),
+    localDate: localDateSchema.parse(input.baseline.localDate),
+  };
+  const changes = input.changes.items.map((item): DigestGitHubChangeFact => {
+    const kind = z.enum(DIGEST_GITHUB_CHANGE_KINDS).parse(item.kind);
+    const result = normalizeGitHubResult({ ...item, id: item.resultId });
+    const id = `github_change:${kind}:${result.id.slice("github_result:".length)}`;
+    if (item.id !== id) throw new Error("Invalid GitHub change ID");
+    const expectedResult = kind === "new_failure" || kind === "reopen" ? "fail" : "pass";
+    if (result.result !== expectedResult) {
+      throw new Error("Invalid GitHub change outcome");
+    }
+    return { ...result, id, resultId: result.id, kind, occurredAt: normaliseDateTime(item.occurredAt) };
+  }).sort(changeOrder);
+  const counts = {
+    newFailure: nonnegativeCount.parse(input.changes.counts.newFailure),
+    reopen: nonnegativeCount.parse(input.changes.counts.reopen),
+    resolution: nonnegativeCount.parse(input.changes.counts.resolution),
+    supersedingPass: nonnegativeCount.parse(input.changes.counts.supersedingPass),
+    total: nonnegativeCount.parse(input.changes.counts.total),
+  };
+  if (counts.newFailure + counts.reopen + counts.resolution + counts.supersedingPass !== counts.total) {
+    throw new Error("Invalid GitHub change count sum");
+  }
+  validateCountedSection("change", counts.total, changes.length, input.changes.truncated);
+  if (baseline === null && counts.total !== 0) throw new Error("GitHub changes require a delivered baseline");
+
+  const unknowns = input.unknowns.items.map(normalizeGitHubResult).sort(resultOrder);
+  if (unknowns.some(({ result }) => result !== "unknown")) throw new Error("Invalid GitHub unknown result");
+  validateCountedSection("unknown", input.unknowns.count, unknowns.length, input.unknowns.truncated);
+  const staleResults = input.staleResults.items.map(normalizeGitHubResult).sort(resultOrder);
+  validateCountedSection("stale", input.staleResults.count, staleResults.length, input.staleResults.truncated);
+  const recommendedActions = input.recommendedActions.items.map(normalizeGitHubResult).sort(actionOrder);
+  if (recommendedActions.some(({ result }) => result !== "fail")) throw new Error("Invalid GitHub recommended action");
+  validateCountedSection("recommended action", input.recommendedActions.count, recommendedActions.length, input.recommendedActions.truncated);
+  if (input.unknowns.count !== partition.activeCurrentUnknown
+    || input.staleResults.count !== partition.activeStale
+    || input.recommendedActions.count !== partition.activeCurrentFail) {
+    throw new Error("GitHub section counts do not match partition");
+  }
+  for (const [label, items] of [["change", changes], ["unknown", unknowns], ["stale", staleResults], ["recommended action", recommendedActions]] as const) {
+    if (new Set(items.map(({ id }) => id)).size !== items.length) throw new Error(`Duplicate GitHub ${label} ID`);
+  }
+  const normalized = {
+    partition, baseline,
+    changes: { counts, items: changes, truncated: z.boolean().parse(input.changes.truncated) },
+    unknowns: { count: input.unknowns.count, items: unknowns, truncated: z.boolean().parse(input.unknowns.truncated) },
+    staleResults: { count: input.staleResults.count, items: staleResults, truncated: z.boolean().parse(input.staleResults.truncated) },
+    recommendedActions: { count: input.recommendedActions.count, items: recommendedActions, truncated: z.boolean().parse(input.recommendedActions.truncated) },
+  };
+  return { ...normalized, lines: githubLinesFromFacts(normalized) };
+}
+
+export function buildGitHubDigestLines(input: DigestGitHubFactsInput): DigestGitHubLines {
+  return normalizeGitHubFacts(input).lines;
+}
+
 export function buildDailyDigestFacts(input: BuildDailyDigestFactsInput): DailyDigestFacts {
   const localDate = localDateSchema.parse(input.localDate);
   const attentionLimit = boundedLimit(input.limits?.attentionItems, 20);
@@ -182,7 +420,7 @@ export function buildDailyDigestFacts(input: BuildDailyDigestFactsInput): DailyD
   }
 
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     workspace: {
       id: z.string().uuid().parse(input.workspace.id),
       name: cleanFactText(input.workspace.name, 160),
@@ -199,6 +437,7 @@ export function buildDailyDigestFacts(input: BuildDailyDigestFactsInput): DailyD
       attentionItems: attentionItems.length > attentionLimit,
       monitoringFindings: monitoringFindings.length > monitoringLimit,
     },
+    github: normalizeGitHubFacts(input.github ?? emptyGitHubFacts),
   };
 }
 
@@ -235,6 +474,10 @@ function exactFactLiterals(facts: DailyDigestFacts): string[] {
     ...facts.monitoringFindings.flatMap((finding) => [finding.id, finding.title, finding.controlRef, finding.detectedAt]),
     facts.latestLeadershipReport?.id,
     facts.latestLeadershipReport?.publishedAt,
+    facts.github.lines.headline,
+    ...facts.github.lines.metrics,
+    ...facts.github.lines.priorities,
+    ...facts.github.lines.actions,
   ].filter((value): value is string => Boolean(value));
 }
 

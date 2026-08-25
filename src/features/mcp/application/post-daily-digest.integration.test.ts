@@ -6,6 +6,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { buildDailyDigestFacts, hashDailyDigestFacts } from "../domain/digest";
 import { isDestructiveIntegrationTargetAllowed } from "@/test/destructive-integration-target";
+import { prepareDailyDigest } from "./mcp-reads";
 import { postDailyDigest, type PostDailyDigestDependencies } from "./post-daily-digest";
 
 const envFile = path.join(process.cwd(), ".env.local");
@@ -84,6 +85,26 @@ beforeAll(async () => {
 // destroying the disposable Supabase stack after the integration run.
 
 describe("concurrent daily digest delivery", () => {
+  it("uses schema-v2 verified facts for the trusted scheduled prepare path without a send", async () => {
+    const prepared = await prepareDailyDigest(ownerClient, userId, {
+      workspaceId,
+      localDate: "2026-08-08",
+    });
+
+    expect(prepared).toMatchObject({
+      status: "ready",
+      facts: {
+        schemaVersion: 2,
+        github: {
+          partition: { total: 0 },
+          baseline: null,
+          changes: { counts: { total: 0 }, items: [], truncated: false },
+        },
+      },
+      delivery: null,
+    });
+  }, 30_000);
+
   it("creates exactly one reservation and one network send path", async () => {
     const facts = buildDailyDigestFacts({
       workspace: { id: workspaceId, name: `Digest concurrency ${runId}` },
@@ -102,6 +123,7 @@ describe("concurrent daily digest delivery", () => {
       monitoringFindings: [],
       latestLeadershipReport: null,
     });
+    expect(facts.schemaVersion).toBe(2);
     const factHash = hashDailyDigestFacts(facts);
     const deliver = vi.fn(async () => {
       await new Promise((resolve) => setTimeout(resolve, 100));

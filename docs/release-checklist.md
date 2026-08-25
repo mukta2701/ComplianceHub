@@ -3,7 +3,7 @@
 - [ ] Project owner has reviewed and approved every assessment question and remediation.
 - [ ] Legal, privacy, certification, and open-source disclaimers are visible and accurate.
 - [ ] Production Supabase project uses the intended region and all migrations pass.
-- [ ] Hosted Supabase personal staging project ref `ytenjiyjdcrjkgwmciqw` has a verified backup; `supabase migration list` and `supabase db push --dry-run` showed exactly the seventeen reviewed migrations through `20260825014236` in order; they were verified before any application deployment; and `HOSTED_SUPABASE_PROJECT_REF` plus `HOSTED_SUPABASE_MIGRATION_VERSION` were set only afterwards and match `NEXT_PUBLIC_SUPABASE_URL`.
+- [ ] Hosted Supabase personal staging project ref `ytenjiyjdcrjkgwmciqw` has a verified backup; `supabase migration list` and `supabase db push --dry-run` showed exactly the eighteen reviewed migrations through `20260825040825` in order; they were verified before any application deployment; and `HOSTED_SUPABASE_PROJECT_REF` plus `HOSTED_SUPABASE_MIGRATION_VERSION` were set only afterwards and match `NEXT_PUBLIC_SUPABASE_URL`.
 - [ ] Cross-tenant RLS tests, immutable-record tests, and stale-write tests pass.
 - [ ] Service-role and cron credentials are server-only, rotated, and stored in deployment secrets.
 - [ ] An Adtecher organisation owner approved the private GitHub App, one dedicated selected repository, exact read-only permissions/events, SSL verification, OAuth-during-install disabled, Redirect-on-update enabled, and the callback/setup/webhook URLs at the canonical origin.
