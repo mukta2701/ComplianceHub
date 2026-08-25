@@ -172,15 +172,18 @@ export async function drainGitHubWebhookDeliveries(
         if (!validatedCollection.success) {
           outcome = "failed";
           diagnosticCode = "invalid_response";
-        } else if (validatedCollection.data.repositoriesDeferred > 0) {
-          outcome = "failed";
-          diagnosticCode = "internal_error";
         } else {
-          const materialisation = await deps.reconcile({
-            limit: 100,
-            terminalRuns: validatedCollection.data.terminalRuns,
-          });
-          if (materialisation.needsAttention > 0) {
+          if (validatedCollection.data.terminalRuns.length > 0) {
+            const materialisation = await deps.reconcile({
+              limit: 100,
+              terminalRuns: validatedCollection.data.terminalRuns,
+            });
+            if (materialisation.needsAttention > 0) {
+              outcome = "failed";
+              diagnosticCode = "internal_error";
+            }
+          }
+          if (validatedCollection.data.repositoriesDeferred > 0) {
             outcome = "failed";
             diagnosticCode = "internal_error";
           }

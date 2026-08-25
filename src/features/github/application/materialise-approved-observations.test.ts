@@ -115,6 +115,7 @@ function dependencies(overrides: Partial<MaterialisationDependencies> = {}) {
       organisationId: ORGANISATION_ID,
     }]),
     finaliseJob: vi.fn().mockResolvedValue(true),
+    inspectJobs: vi.fn().mockResolvedValue([]),
     loadTerminalRun: vi.fn().mockResolvedValue(terminalRun()),
     loadActiveApproval: vi.fn().mockResolvedValue({
       approvalId: APPROVAL_ID,
@@ -141,6 +142,7 @@ function dependencies(overrides: Partial<MaterialisationDependencies> = {}) {
   return value as MaterialisationDependencies & {
     claimJobs: ReturnType<typeof vi.fn>;
     finaliseJob: ReturnType<typeof vi.fn>;
+    inspectJobs: ReturnType<typeof vi.fn>;
     loadTerminalRun: ReturnType<typeof vi.fn>;
     loadActiveApproval: ReturnType<typeof vi.fn>;
     loadObservations: ReturnType<typeof vi.fn>;
@@ -468,6 +470,104 @@ describe("reconcileApprovedGitHubObservations", () => {
     expect(deps.claimJobs).toHaveBeenCalledWith({ limit: 1, collectionRunIds: [RUN_ID] });
   });
 
+  it("surfaces an exact exhausted job as attention instead of false healthy", async () => {
+    const deps = dependencies({
+      claimJobs: vi.fn().mockResolvedValue([]),
+      inspectJobs: vi.fn().mockResolvedValue([{
+        collectionRunId: RUN_ID,
+        status: "exhausted",
+        leaseActive: false,
+      }]),
+    });
+
+    const result = await reconcileApprovedGitHubObservations(deps, {
+      limit: 100,
+      terminalRuns: [{
+        collectionRunId: RUN_ID,
+        organisationId: ORGANISATION_ID,
+        installationId: INSTALLATION_ID,
+        repositoryId: REPOSITORY_ID,
+        providerRepositoryId: PROVIDER_REPOSITORY_ID,
+        status: "partial",
+      }],
+    });
+
+    expect(deps.inspectJobs).toHaveBeenCalledWith({ limit: 1, collectionRunIds: [RUN_ID] });
+    expect(result).toEqual({
+      runsConsidered: 1, materialised: 0, unchanged: 0, awaitingApproval: 0, needsAttention: 1,
+    });
+  });
+
+  it("surfaces an exact active lease as attention instead of false healthy", async () => {
+    const deps = dependencies({
+      claimJobs: vi.fn().mockResolvedValue([]),
+      inspectJobs: vi.fn().mockResolvedValue([{
+        collectionRunId: RUN_ID,
+        status: "pending",
+        leaseActive: true,
+      }]),
+    });
+
+    const result = await reconcileApprovedGitHubObservations(deps, {
+      limit: 100,
+      terminalRuns: [{
+        collectionRunId: RUN_ID,
+        organisationId: ORGANISATION_ID,
+        installationId: INSTALLATION_ID,
+        repositoryId: REPOSITORY_ID,
+        providerRepositoryId: PROVIDER_REPOSITORY_ID,
+        status: "succeeded",
+      }],
+    });
+
+    expect(result.needsAttention).toBe(1);
+    expect(result.runsConsidered).toBe(1);
+  });
+
+  it("recognises an exact completed job without reclaiming or reporting attention", async () => {
+    const deps = dependencies({
+      claimJobs: vi.fn().mockResolvedValue([]),
+      inspectJobs: vi.fn().mockResolvedValue([{
+        collectionRunId: RUN_ID,
+        status: "completed",
+        leaseActive: false,
+      }]),
+    });
+
+    const result = await reconcileApprovedGitHubObservations(deps, {
+      limit: 100,
+      terminalRuns: [{
+        collectionRunId: RUN_ID,
+        organisationId: ORGANISATION_ID,
+        installationId: INSTALLATION_ID,
+        repositoryId: REPOSITORY_ID,
+        providerRepositoryId: PROVIDER_REPOSITORY_ID,
+        status: "succeeded",
+      }],
+    });
+
+    expect(result).toEqual({
+      runsConsidered: 1, materialised: 0, unchanged: 0, awaitingApproval: 0, needsAttention: 0,
+    });
+  });
+
+  it("surfaces exhausted jobs during a bounded generic recovery sweep", async () => {
+    const deps = dependencies({
+      claimJobs: vi.fn().mockResolvedValue([]),
+      inspectJobs: vi.fn().mockResolvedValue([{
+        collectionRunId: RUN_ID,
+        status: "exhausted",
+        leaseActive: false,
+      }]),
+    });
+
+    const result = await reconcileApprovedGitHubObservations(deps, { limit: 20 });
+
+    expect(deps.inspectJobs).toHaveBeenCalledWith({ limit: 20 });
+    expect(result.needsAttention).toBe(1);
+    expect(result.runsConsidered).toBe(1);
+  });
+
   it("parks a claimed job as awaiting approval without treating it as unhealthy", async () => {
     const deps = dependencies({ loadActiveApproval: vi.fn().mockResolvedValue(null) });
 
@@ -480,8 +580,15 @@ describe("reconcileApprovedGitHubObservations", () => {
     expect(deps.materialise).not.toHaveBeenCalled();
   });
 
-  it("chunks every exact collector-returned run instead of truncating after one hundred", async () => {
-    const deps = dependencies({ claimJobs: vi.fn().mockResolvedValue([]) });
+  it("inspects every exact collector-returned run beyond one hundred without false healthy", async () => {
+    const inspectJobs = vi.fn().mockImplementation(async ({ collectionRunIds }: { collectionRunIds: string[] }) => (
+      collectionRunIds.map((collectionRunId) => ({
+        collectionRunId,
+        status: "exhausted",
+        leaseActive: false,
+      }))
+    ));
+    const deps = dependencies({ claimJobs: vi.fn().mockResolvedValue([]), inspectJobs });
     const terminalRuns = Array.from({ length: 201 }, (_, index) => ({
       collectionRunId: `20000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
       organisationId: ORGANISATION_ID,
@@ -496,7 +603,10 @@ describe("reconcileApprovedGitHubObservations", () => {
     expect(deps.claimJobs).toHaveBeenCalledTimes(3);
     expect(deps.claimJobs.mock.calls.map(([scope]) => scope.limit)).toEqual([100, 100, 1]);
     expect(deps.claimJobs.mock.calls.flatMap(([scope]) => scope.collectionRunIds)).toHaveLength(201);
-    expect(result.needsAttention).toBe(0);
+    expect(inspectJobs).toHaveBeenCalledTimes(3);
+    expect(inspectJobs.mock.calls.flatMap(([scope]) => scope.collectionRunIds)).toHaveLength(201);
+    expect(result.runsConsidered).toBe(201);
+    expect(result.needsAttention).toBe(201);
   });
 });
 
@@ -545,6 +655,24 @@ describe("buildMaterialisationDependencies", () => {
       target_lease_token: LEASE_TOKEN,
       target_attempt_count: 1,
       target_outcome: "completed",
+    });
+  });
+
+  it("inspects bounded exact job states through a service-only RPC", async () => {
+    const service = { from: vi.fn(), rpc: vi.fn().mockResolvedValue({
+      data: [{ collection_run_id: RUN_ID, status: "exhausted", lease_active: false }],
+      error: null,
+    }) };
+    const deps = buildMaterialisationDependencies(service);
+
+    await expect(deps.inspectJobs({ limit: 1, collectionRunIds: [RUN_ID] })).resolves.toEqual([{
+      collectionRunId: RUN_ID,
+      status: "exhausted",
+      leaseActive: false,
+    }]);
+    expect(service.rpc).toHaveBeenCalledWith("inspect_github_materialisation_jobs_server", {
+      target_limit: 1,
+      target_collection_run_ids: [RUN_ID],
     });
   });
 

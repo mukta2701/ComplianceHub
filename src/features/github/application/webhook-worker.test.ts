@@ -99,6 +99,46 @@ describe("drainGitHubWebhookDeliveries", () => {
     expect(input.finalise).toHaveBeenNthCalledWith(2, second, "processed", null);
   });
 
+  it("materialises completed runs in a mixed deferred collection before leaving the webhook retryable", async () => {
+    const input = deps([row()]);
+    input.runCollection.mockResolvedValue({
+      installationsChecked: 1,
+      repositoriesChecked: 1,
+      observationsStored: 15,
+      repositoriesFailed: 0,
+      repositoriesDeferred: 1,
+      runsPartial: 0,
+      terminalRuns,
+    });
+
+    const result = await drainGitHubWebhookDeliveries(input, { limit: 20 });
+
+    expect(input.reconcile).toHaveBeenCalledWith({ limit: 100, terminalRuns });
+    expect(result).toEqual({ claimed: 1, processed: 0, ignored: 0, failed: 1, ownershipLost: 0 });
+    expect(input.finalise).toHaveBeenCalledWith(row(), "failed", "internal_error");
+  });
+
+  it("preserves materialisation attention for completed runs in a mixed deferred collection", async () => {
+    const input = deps([row()]);
+    input.runCollection.mockResolvedValue({
+      installationsChecked: 1,
+      repositoriesChecked: 1,
+      observationsStored: 15,
+      repositoriesFailed: 0,
+      repositoriesDeferred: 1,
+      runsPartial: 0,
+      terminalRuns,
+    });
+    input.reconcile.mockResolvedValue({
+      runsConsidered: 1, materialised: 0, unchanged: 0, awaitingApproval: 0, needsAttention: 1,
+    });
+
+    await drainGitHubWebhookDeliveries(input, { limit: 20 });
+
+    expect(input.reconcile).toHaveBeenCalledOnce();
+    expect(input.finalise).toHaveBeenCalledWith(row(), "failed", "internal_error");
+  });
+
   it("treats a false finalizer CAS as lost ownership and exposes no identifiers", async () => {
     const input = deps([row()]);
     input.finalise.mockResolvedValue(false);

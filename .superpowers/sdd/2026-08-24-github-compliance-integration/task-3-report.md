@@ -240,3 +240,97 @@ sandbox-blocked Docker/pgTAP execution described above.
 
 The review-fix implementation and this appended report are committed together;
 the final SHA is supplied in the task handoff.
+
+---
+
+## Review fix round 2 (2026-08-25)
+
+### Status and corrected design
+
+All three Important review findings are addressed without changing the Task 2
+migration or moving phase-2 work into `runGitHubCollection`.
+
+- Awaiting-approval finalisation and approval insertion now serialize with the
+  same transaction-scoped, organisation-specific advisory lock. Approval
+  insertion takes that lock in a `BEFORE INSERT` trigger before the existing
+  wake trigger can touch queue rows. Finalisation takes the lock, performs the
+  exact lease/attempt row-lock CAS, then rechecks for an active approval. If one
+  is present, the job returns to immediately available `pending`; only a
+  genuinely absent approval parks at infinity. The finaliser never locks an
+  approval row, avoiding a reverse row-lock dependency with the existing
+  approval RPC.
+- The webhook worker reconciles every non-empty exact `terminalRuns` set even
+  when the same collection reports deferred repositories. It then finalises
+  the delivery as retryable `failed/internal_error` for the deferred remainder,
+  while preserving any materialisation needs-attention result.
+- Queue state now includes durable `exhausted` dead letters with
+  `exhausted_at`. A 25th retryable finalisation becomes exhausted, and a worker
+  crash on an expired attempt-25 lease is promoted to exhausted by the next
+  bounded claim/inspection. Exhausted and completed work cannot be reclaimed.
+- The new service-only `inspect_github_materialisation_jobs_server` boundary
+  reports exact unclaimable IDs, including active leases, completed jobs, and
+  exhausted jobs. Missing exact IDs fail visibly. Generic daily recovery fairly
+  inspects bounded exhausted work, so scheduled/manual exact health and daily
+  recovery cannot report dead letters as healthy. Exact sets continue to be
+  chunked deterministically, including sets larger than 100.
+- There is deliberately no automatic attempt reset or requeue RPC. The
+  approved design has no audited operator identity/reason contract for that
+  mutation, so exhausted rows remain visible through tenant-safe RLS until a
+  separately reviewed recovery workflow exists.
+
+The unshipped successor migration remains
+`20260824212223_github_materialisation_jobs.sql`; no additional migration was
+stacked and the deployment version/count attestations remain unchanged.
+
+### RED evidence
+
+1. The focused webhook/materialiser run initially failed seven tests: two mixed
+   deferred-plus-terminal webhook cases because reconciliation was skipped, and
+   five exact/dead-letter cases because unclaimable jobs were not inspected and
+   were reported healthy.
+2. After adding the service-boundary contract test, the focused materialiser
+   run failed six tests because `inspectJobs` and the inspection RPC mapping did
+   not yet exist.
+
+These failures were observed before the minimal webhook ordering and shared
+inspection/reconciliation implementation was added.
+
+### GREEN and verification evidence
+
+- Focused materialiser/webhook/route/action suite: 5 files passed; 119 tests
+  passed.
+- Full unit suite: 212 files passed; 1,546 tests passed.
+- `npm run typecheck`: passed.
+- `npm run lint`: passed.
+- `actionlint .github/workflows/*.yml`: passed.
+- Azure deployment contract: 8 tests passed.
+- `git diff --check`: passed.
+- Privacy diff scan found no added credential, secret, raw-provider, or response
+  body patterns.
+- Task 2 migration preservation: working tree and `HEAD` SHA-256 are both
+  `e3a6e16c191cb42c3637f876c1899b130d996f9f2e23fb8cb2495cafe9c36c0d`;
+  the file has no diff.
+
+Database runtime verification was attempted with
+`SUPABASE_TELEMETRY_DISABLED=1 npx supabase status`. The CLI reached the local
+Colima endpoint, but this sandbox denied access to
+`/Users/m1ghty/.colima/default/docker.sock`; reset and pgTAP therefore could not
+execute. The strict amended `071_github_materialisation_jobs.sql` contract
+covers approval-before-finalise, concurrent approval/finaliser ordering,
+retryable backoff, the 25th retry, final-attempt lease expiry, exact exhausted
+and active-lease inspection, completed non-reclaim, fair generic exhausted
+inspection, grants, and tenant RLS.
+
+### Files changed in this round
+
+- `src/features/github/application/materialise-approved-observations.ts` and
+  tests
+- `src/features/github/application/webhook-worker.ts` and tests
+- `supabase/migrations/20260824212223_github_materialisation_jobs.sql`
+- `supabase/tests/database/071_github_materialisation_jobs.sql`
+- `docs/deployment.md`
+- this report
+
+No external service was called or mutated, and nothing was pushed, merged, or
+deployed. The sandbox-blocked pgTAP execution is the only outstanding runtime
+verification concern. The final commit SHA is supplied in the task handoff.

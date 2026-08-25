@@ -137,6 +137,7 @@ type MaterialisationJobOutcome = "completed" | "awaiting_approval" | "retryable"
 
 export type MaterialisationDependencies = {
   claimJobs(scope: { limit: number; collectionRunIds?: string[] }): Promise<unknown[]>;
+  inspectJobs(scope: { limit: number; collectionRunIds?: string[] }): Promise<unknown[]>;
   finaliseJob(job: Pick<ClaimedMaterialisationJob, "jobId" | "leaseToken" | "attemptCount"> & { outcome: MaterialisationJobOutcome }): Promise<boolean>;
   loadTerminalRun(target: { organisationId: string; collectionRunId: string }): Promise<unknown | null>;
   loadActiveApproval(organisationId: string): Promise<unknown | null>;
@@ -233,6 +234,28 @@ const rawClaimedJobSchema = z.object({
   collection_run_id: uuidSchema,
   organisation_id: uuidSchema,
 }).strict();
+const inspectedJobSchema = z.object({
+  collectionRunId: uuidSchema,
+  status: z.enum(["pending", "awaiting_approval", "retryable", "completed", "exhausted"]),
+  leaseActive: z.boolean(),
+}).strict();
+const rawInspectedJobSchema = z.object({
+  collection_run_id: uuidSchema,
+  status: z.enum(["pending", "awaiting_approval", "retryable", "completed", "exhausted"]),
+  lease_active: z.boolean(),
+}).strict();
+const jobScopeSchema = z.object({
+  limit: z.number().int().min(1).max(100),
+  collectionRunIds: z.array(uuidSchema).min(1).max(100).optional(),
+}).strict();
+
+function parseJobScope(value: unknown): z.infer<typeof jobScopeSchema> {
+  const parsed = jobScopeSchema.safeParse(value);
+  if (!parsed.success || (parsed.data.collectionRunIds && new Set(parsed.data.collectionRunIds).size !== parsed.data.collectionRunIds.length)) {
+    throw persistenceFailure();
+  }
+  return parsed.data;
+}
 
 function persistenceFailure(): Error {
   return new Error("GitHub compliance materialisation persistence failed");
@@ -259,18 +282,12 @@ export function buildMaterialisationDependencies(serviceInput: unknown): Materia
   const service = serviceInput as SupabaseServiceClient;
   return {
     async claimJobs(scope) {
-      const parsed = z.object({
-        limit: z.number().int().min(1).max(100),
-        collectionRunIds: z.array(uuidSchema).min(1).max(100).optional(),
-      }).strict().safeParse(scope);
-      if (!parsed.success || (parsed.data.collectionRunIds && new Set(parsed.data.collectionRunIds).size !== parsed.data.collectionRunIds.length)) {
-        throw persistenceFailure();
-      }
+      const parsed = parseJobScope(scope);
       const { data, error } = await service.rpc("claim_github_materialisation_jobs_server", {
-        target_limit: parsed.data.limit,
-        target_collection_run_ids: parsed.data.collectionRunIds ?? null,
+        target_limit: parsed.limit,
+        target_collection_run_ids: parsed.collectionRunIds ?? null,
       });
-      const rows = z.array(rawClaimedJobSchema).max(parsed.data.limit).safeParse(data);
+      const rows = z.array(rawClaimedJobSchema).max(parsed.limit).safeParse(data);
       if (error || !rows.success) throw persistenceFailure();
       return rows.data.map((row) => ({
         jobId: row.job_id,
@@ -278,6 +295,20 @@ export function buildMaterialisationDependencies(serviceInput: unknown): Materia
         attemptCount: row.attempt_count,
         collectionRunId: row.collection_run_id,
         organisationId: row.organisation_id,
+      }));
+    },
+    async inspectJobs(scope) {
+      const parsed = parseJobScope(scope);
+      const { data, error } = await service.rpc("inspect_github_materialisation_jobs_server", {
+        target_limit: parsed.limit,
+        target_collection_run_ids: parsed.collectionRunIds ?? null,
+      });
+      const rows = z.array(rawInspectedJobSchema).max(parsed.limit).safeParse(data);
+      if (error || !rows.success) throw persistenceFailure();
+      return rows.data.map((row) => ({
+        collectionRunId: row.collection_run_id,
+        status: row.status,
+        leaseActive: row.lease_active,
       }));
     },
     async finaliseJob(job) {
@@ -539,23 +570,24 @@ export async function reconcileApprovedGitHubObservations(
     : [{ limit: parsedScope.data.limit }];
 
   for (const claimScope of claimScopes) {
-    let values: unknown[];
+    let values: unknown[] = [];
     try {
       values = await deps.claimJobs(claimScope);
     } catch {
       empty.needsAttention += 1;
-      continue;
     }
     if (!Array.isArray(values) || values.length > claimScope.limit) {
       empty.needsAttention += 1;
-      continue;
+      values = [];
     }
+    const claimedRunIds = new Set<string>();
     for (const value of values) {
       const job = claimedJobSchema.safeParse(value);
       if (!job.success) {
         empty.needsAttention += 1;
         continue;
       }
+      claimedRunIds.add(job.data.collectionRunId);
       empty.runsConsidered += 1;
       const outcome = await materialiseApprovedGitHubObservations(deps, {
         organisationId: job.data.organisationId,
@@ -581,6 +613,43 @@ export async function reconcileApprovedGitHubObservations(
       else if (outcome.status === "unchanged") empty.unchanged += 1;
       else if (outcome.status === "awaiting_approval") empty.awaitingApproval += 1;
       else empty.needsAttention += 1;
+    }
+
+    const exactRunIds = "collectionRunIds" in claimScope ? claimScope.collectionRunIds : undefined;
+    const unclaimedRunIds = exactRunIds?.filter((collectionRunId) => !claimedRunIds.has(collectionRunId));
+    const inspectionScope = unclaimedRunIds
+      ? unclaimedRunIds.length > 0 ? { limit: unclaimedRunIds.length, collectionRunIds: unclaimedRunIds } : null
+      : { limit: claimScope.limit };
+    if (inspectionScope) {
+      try {
+        const inspectionValues = await deps.inspectJobs(inspectionScope);
+        const inspections = z.array(inspectedJobSchema).max(inspectionScope.limit).safeParse(inspectionValues);
+        if (!inspections.success) {
+          empty.needsAttention += 1;
+          continue;
+        }
+        const inspectedRunIds = new Set<string>();
+        for (const inspection of inspections.data) {
+          if (
+            inspectedRunIds.has(inspection.collectionRunId)
+            || (unclaimedRunIds && !unclaimedRunIds.includes(inspection.collectionRunId))
+          ) {
+            empty.needsAttention += 1;
+            continue;
+          }
+          inspectedRunIds.add(inspection.collectionRunId);
+          empty.runsConsidered += 1;
+          if (inspection.status !== "completed") empty.needsAttention += 1;
+        }
+        if (unclaimedRunIds) {
+          const missingCount = unclaimedRunIds.filter((collectionRunId) => !inspectedRunIds.has(collectionRunId)).length;
+          empty.runsConsidered += missingCount;
+          empty.needsAttention += missingCount;
+        }
+      } catch {
+        empty.needsAttention += 1;
+        if (unclaimedRunIds) empty.runsConsidered += unclaimedRunIds.length;
+      }
     }
   }
   return empty;
