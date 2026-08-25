@@ -32,6 +32,7 @@ select no_plan();
 select has_table('public','github_materialisation_jobs','terminal collection work has a durable queue');
 select has_column('public','github_materialisation_jobs','lease_token','claims use compare-and-set lease tokens');
 select has_column('public','github_materialisation_jobs','available_at','retry scheduling is durable');
+select has_column('public','github_materialisation_jobs','lease_attempt_incremented','leases remember whether they consumed a real attempt');
 select has_column('public','github_materialisation_jobs','exhausted_at','dead-letter attention has a durable timestamp');
 select has_fk('public','github_materialisation_jobs','github_materialisation_jobs_run_ancestry_fk');
 select ok(
@@ -109,7 +110,7 @@ select is((select count(distinct organisation_id) from public.claim_github_mater
 ])),2::bigint,'fair claiming gives old work from each tenant a turn before a tenant second job');
 reset role;
 
-update public.github_materialisation_jobs set lease_token=null,lease_expires_at=null,attempt_count=0,available_at=now()-interval '1 hour';
+update public.github_materialisation_jobs set lease_token=null,lease_expires_at=null,lease_attempt_incremented=null,attempt_count=0,available_at=now()-interval '1 hour';
 set role service_role;
 select is((select count(*) from public.claim_github_materialisation_jobs_server(1,array['72000000-0000-4000-8000-000000000301'::uuid])),1::bigint,'an exact run claim acquires its durable job');
 select is((select count(*) from public.claim_github_materialisation_jobs_server(1,array['72000000-0000-4000-8000-000000000301'::uuid])),0::bigint,'a simultaneous or repeated caller cannot acquire an active lease');
@@ -136,18 +137,65 @@ select ok(public.finalize_github_materialisation_job_server(
 select ok((select lease_token is null and available_at='infinity'::timestamptz from public.github_materialisation_jobs where collection_run_id='72000000-0000-4000-8000-000000000302'),'awaiting approval is parked without a hot lease or recovery timestamp');
 reset role;
 
+-- Build three real retryable failures, then prove repeated exact duplicate
+-- reconciliation while approval is absent cannot erase that history.
+set role service_role;
+select is((select attempt_count from public.claim_github_materialisation_jobs_server(1,array['72000000-0000-4000-8000-000000000303'::uuid])),1,'the first real materialisation attempt is counted');
+select ok(public.finalize_github_materialisation_job_server(
+  (select id from public.github_materialisation_jobs where collection_run_id='72000000-0000-4000-8000-000000000303'),
+  (select lease_token from public.github_materialisation_jobs where collection_run_id='72000000-0000-4000-8000-000000000303'),1,'retryable'
+),'the first real failure is retryable');
+reset role;
+update public.github_materialisation_jobs set available_at=now()-interval '1 minute' where collection_run_id='72000000-0000-4000-8000-000000000303';
+set role service_role;
+select is((select attempt_count from public.claim_github_materialisation_jobs_server(1,array['72000000-0000-4000-8000-000000000303'::uuid])),2,'the second real materialisation attempt is counted');
+select ok(public.finalize_github_materialisation_job_server(
+  (select id from public.github_materialisation_jobs where collection_run_id='72000000-0000-4000-8000-000000000303'),
+  (select lease_token from public.github_materialisation_jobs where collection_run_id='72000000-0000-4000-8000-000000000303'),2,'retryable'
+),'the second real failure is retryable');
+reset role;
+update public.github_materialisation_jobs set available_at=now()-interval '1 minute' where collection_run_id='72000000-0000-4000-8000-000000000303';
+set role service_role;
+select is((select attempt_count from public.claim_github_materialisation_jobs_server(1,array['72000000-0000-4000-8000-000000000303'::uuid])),3,'the third real materialisation attempt is counted');
+select ok(public.finalize_github_materialisation_job_server(
+  (select id from public.github_materialisation_jobs where collection_run_id='72000000-0000-4000-8000-000000000303'),
+  (select lease_token from public.github_materialisation_jobs where collection_run_id='72000000-0000-4000-8000-000000000303'),3,'retryable'
+),'the third real failure is retryable');
+reset role;
+update public.github_materialisation_jobs set available_at=now()-interval '1 minute' where collection_run_id='72000000-0000-4000-8000-000000000303';
+set role service_role;
+select is((select attempt_count from public.claim_github_materialisation_jobs_server(1,array['72000000-0000-4000-8000-000000000303'::uuid])),4,'a retryable claim reserves a possible fourth attempt');
+select ok(public.finalize_github_materialisation_job_server(
+  (select id from public.github_materialisation_jobs where collection_run_id='72000000-0000-4000-8000-000000000303'),
+  (select lease_token from public.github_materialisation_jobs where collection_run_id='72000000-0000-4000-8000-000000000303'),4,'awaiting_approval'
+),'discovering no approval removes only the reserved attempt');
+select is((select attempt_count from public.github_materialisation_jobs where collection_run_id='72000000-0000-4000-8000-000000000303'),3,'the first no-approval observation preserves three real failures');
+select is((select attempt_count from public.claim_github_materialisation_jobs_server(1,array['72000000-0000-4000-8000-000000000303'::uuid])),3,'an exact awaiting duplicate claims without reserving another attempt');
+select ok(public.finalize_github_materialisation_job_server(
+  (select id from public.github_materialisation_jobs where collection_run_id='72000000-0000-4000-8000-000000000303'),
+  (select lease_token from public.github_materialisation_jobs where collection_run_id='72000000-0000-4000-8000-000000000303'),3,'awaiting_approval'
+),'the first repeated awaiting finalisation succeeds');
+select is((select attempt_count from public.github_materialisation_jobs where collection_run_id='72000000-0000-4000-8000-000000000303'),3,'the first repeated awaiting finalisation is counter-neutral');
+select is((select attempt_count from public.claim_github_materialisation_jobs_server(1,array['72000000-0000-4000-8000-000000000303'::uuid])),3,'a second exact awaiting duplicate remains counter-neutral when claimed');
+select ok(public.finalize_github_materialisation_job_server(
+  (select id from public.github_materialisation_jobs where collection_run_id='72000000-0000-4000-8000-000000000303'),
+  (select lease_token from public.github_materialisation_jobs where collection_run_id='72000000-0000-4000-8000-000000000303'),3,'awaiting_approval'
+),'the second repeated awaiting finalisation succeeds');
+select is((select attempt_count from public.github_materialisation_jobs where collection_run_id='72000000-0000-4000-8000-000000000303'),3,'repeated exact awaiting finalisation never erases real failures');
+reset role;
+
 insert into public.github_mapping_approvals(organisation_id,mapping_pack_id,approved_by)
 select '72000000-0000-4000-8000-000000000001',id,'72000000-0000-4000-8000-000000000001'
 from public.github_mapping_packs where version='github-iso-27001-v1';
 select is((select status from public.github_materialisation_jobs where collection_run_id='72000000-0000-4000-8000-000000000302'),'pending','a new active approval wakes parked work for retry');
 
 set role service_role;
-select is((select count(*) from public.claim_github_materialisation_jobs_server(1,array['72000000-0000-4000-8000-000000000303'::uuid])),1::bigint,'retryable work is first acquired with a bounded lease');
+select is((select attempt_count from public.claim_github_materialisation_jobs_server(1,array['72000000-0000-4000-8000-000000000303'::uuid])),4,'approval wake lets the next real retry increment from three to four');
 select ok(public.finalize_github_materialisation_job_server(
   (select id from public.github_materialisation_jobs where collection_run_id='72000000-0000-4000-8000-000000000303'),
-  (select lease_token from public.github_materialisation_jobs where collection_run_id='72000000-0000-4000-8000-000000000303'),1,'retryable'
+  (select lease_token from public.github_materialisation_jobs where collection_run_id='72000000-0000-4000-8000-000000000303'),4,'retryable'
 ),'a retryable outcome safely releases the lease');
-select ok((select status='retryable' and available_at>now() and lease_token is null from public.github_materialisation_jobs where collection_run_id='72000000-0000-4000-8000-000000000303'),'retryable failures retain durable backoff before the attempt ceiling');
+select ok((select status='retryable' and attempt_count=4 and available_at>now() and lease_token is null from public.github_materialisation_jobs where collection_run_id='72000000-0000-4000-8000-000000000303'),'the post-approval real retry preserves all historical failures and durable backoff');
 reset role;
 
 -- If approval commits after the application observed no approval but before
@@ -201,7 +249,7 @@ select ok((select status='pending' and available_at<=now() from public.github_ma
 select extensions.dblink_disconnect('github_job_approval');
 select extensions.dblink_disconnect('github_job_finalise');
 
-update public.github_materialisation_jobs set status='retryable',attempt_count=24,available_at=now()-interval '1 minute',lease_token=null,lease_expires_at=null where collection_run_id='72000000-0000-4000-8000-000000000303';
+update public.github_materialisation_jobs set status='retryable',attempt_count=24,available_at=now()-interval '1 minute',lease_token=null,lease_expires_at=null,lease_attempt_incremented=null where collection_run_id='72000000-0000-4000-8000-000000000303';
 set role service_role;
 select is((select attempt_count from public.claim_github_materialisation_jobs_server(1,array['72000000-0000-4000-8000-000000000303'::uuid])),25,'the final retry is claimed at attempt twenty-five');
 select ok(public.finalize_github_materialisation_job_server(
@@ -221,7 +269,7 @@ reset role;
 
 -- A worker crash on the final leased attempt is dead-lettered when its lease
 -- expires; it cannot disappear merely because no finaliser ran.
-update public.github_materialisation_jobs set status='retryable',attempt_count=24,available_at=now()-interval '1 minute',lease_token=null,lease_expires_at=null,exhausted_at=null where collection_run_id='72000000-0000-4000-8000-000000000304';
+update public.github_materialisation_jobs set status='retryable',attempt_count=24,available_at=now()-interval '1 minute',lease_token=null,lease_expires_at=null,lease_attempt_incremented=null,exhausted_at=null where collection_run_id='72000000-0000-4000-8000-000000000304';
 set role service_role;
 select is((select attempt_count from public.claim_github_materialisation_jobs_server(1,array['72000000-0000-4000-8000-000000000304'::uuid])),25,'the crash fixture reaches its final leased attempt');
 reset role;
@@ -234,7 +282,7 @@ reset role;
 
 -- An active exact lease is inspectable rather than silently treated healthy;
 -- completed jobs remain visible but non-reclaimable.
-update public.github_materialisation_jobs set status='pending',attempt_count=0,available_at=now(),lease_token=null,lease_expires_at=null where collection_run_id='72000000-0000-4000-8000-000000000306';
+update public.github_materialisation_jobs set status='pending',attempt_count=0,available_at=now(),lease_token=null,lease_expires_at=null,lease_attempt_incremented=null where collection_run_id='72000000-0000-4000-8000-000000000306';
 set role service_role;
 select is((select count(*) from public.claim_github_materialisation_jobs_server(1,array['72000000-0000-4000-8000-000000000306'::uuid])),1::bigint,'an exact in-progress job can be leased');
 select results_eq(

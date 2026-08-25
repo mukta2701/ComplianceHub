@@ -334,3 +334,69 @@ inspection, grants, and tenant RLS.
 No external service was called or mutated, and nothing was pushed, merged, or
 deployed. The sandbox-blocked pgTAP execution is the only outstanding runtime
 verification concern. The final commit SHA is supplied in the task handoff.
+
+---
+
+## Review fix round 3 (2026-08-25)
+
+### Counter-neutral approval waiting
+
+The exact awaiting-approval retry regression is fixed without changing the
+Task 2 migration or stacking a new migration.
+
+`github_materialisation_jobs` now stores a nullable
+`lease_attempt_incremented` flag as part of the lease invariant. A
+pending/retryable claim reserves one attempt and records `true`; an
+awaiting-approval exact claim preserves the historical counter and records
+`false`. Finalisation uses that durable lease fact rather than inferring from a
+status that an approval wake may have changed:
+
+- `awaiting_approval` releases one reserved attempt only when that lease
+  actually reserved it;
+- repeated awaiting exact claims and finalisations are counter-neutral at both
+  zero and non-zero historical counts;
+- a completed/retryable real outcome from a counter-neutral lease is counted at
+  finalisation;
+- retry exhaustion, expired-lease recovery, lease-token/attempt CAS, approval
+  wake-up, exact inspection, RLS, and service-only RPC grants are unchanged.
+
+The application service adapter accepts attempt zero only for the database
+claim/finalise contract; the unguessable lease token and exact counter CAS still
+guard ownership.
+
+### RED evidence
+
+After adding the adapter regression, the focused materialiser run failed one of
+50 tests. `claimJobs` rejected the valid awaiting lease row with
+`attempt_count = 0` as a persistence failure. The amended pgTAP lifecycle was
+also written before the migration change: it builds three real retryable
+failures, observes no approval, exact-claims/finalises the awaiting job twice,
+requires the counter to remain three, then inserts approval and requires the
+next real retry to become attempt four.
+
+### GREEN and verification evidence
+
+- Focused materialiser: 50 tests passed.
+- Focused materialiser/webhook/scheduled/daily/manual suite: 5 files passed;
+  120 tests passed.
+- Full unit suite: 212 files passed; 1,547 tests passed.
+- `npm run typecheck`: passed.
+- `npm run lint`: passed.
+- `actionlint .github/workflows/*.yml`: passed.
+- `git diff --check`: passed.
+- Privacy diff scan found no added credential, secret, raw-provider, or response
+  body patterns.
+- Task 2 migration preservation: working tree and `HEAD` SHA-256 remain
+  `e3a6e16c191cb42c3637f876c1899b130d996f9f2e23fb8cb2495cafe9c36c0d`.
+
+Database execution was attempted with
+`SUPABASE_TELEMETRY_DISABLED=1 npx supabase test db
+supabase/tests/database/071_github_materialisation_jobs.sql`; the local database
+was unreachable. `npx supabase status` confirmed the sandbox still denies
+access to `/Users/m1ghty/.colima/default/docker.sock`. The lifecycle assertions
+remain strict and were not weakened.
+
+Files changed in this round are the materialiser service adapter and its unit
+test, the existing unshipped
+`20260824212223_github_materialisation_jobs.sql` migration, pgTAP 071, and this
+report. The final verification and commit SHA are recorded in the handoff.

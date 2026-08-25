@@ -223,14 +223,14 @@ const scopeSchema = z.object({
 const claimedJobSchema = z.object({
   jobId: uuidSchema,
   leaseToken: uuidSchema,
-  attemptCount: z.number().int().min(1).max(25),
+  attemptCount: z.number().int().min(0).max(25),
   collectionRunId: uuidSchema,
   organisationId: uuidSchema,
 }).strict();
 const rawClaimedJobSchema = z.object({
   job_id: uuidSchema,
   lease_token: uuidSchema,
-  attempt_count: z.number().int().min(1).max(25),
+  attempt_count: z.number().int().min(0).max(25),
   collection_run_id: uuidSchema,
   organisation_id: uuidSchema,
 }).strict();

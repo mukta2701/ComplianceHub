@@ -658,6 +658,35 @@ describe("buildMaterialisationDependencies", () => {
     });
   });
 
+  it("preserves a zero real-attempt counter for an awaiting-approval lease", async () => {
+    const service = { from: vi.fn(), rpc: vi.fn()
+      .mockResolvedValueOnce({ data: [{
+        job_id: "80000000-0000-4000-8000-000000000001",
+        lease_token: LEASE_TOKEN,
+        attempt_count: 0,
+        collection_run_id: RUN_ID,
+        organisation_id: ORGANISATION_ID,
+      }], error: null })
+      .mockResolvedValueOnce({ data: true, error: null }) };
+    const deps = buildMaterialisationDependencies(service);
+
+    await expect(deps.claimJobs({ limit: 1, collectionRunIds: [RUN_ID] })).resolves.toEqual([
+      expect.objectContaining({ attemptCount: 0 }),
+    ]);
+    await expect(deps.finaliseJob({
+      jobId: "80000000-0000-4000-8000-000000000001",
+      leaseToken: LEASE_TOKEN,
+      attemptCount: 0,
+      outcome: "awaiting_approval",
+    })).resolves.toBe(true);
+    expect(service.rpc).toHaveBeenNthCalledWith(2, "finalize_github_materialisation_job_server", {
+      target_job_id: "80000000-0000-4000-8000-000000000001",
+      target_lease_token: LEASE_TOKEN,
+      target_attempt_count: 0,
+      target_outcome: "awaiting_approval",
+    });
+  });
+
   it("inspects bounded exact job states through a service-only RPC", async () => {
     const service = { from: vi.fn(), rpc: vi.fn().mockResolvedValue({
       data: [{ collection_run_id: RUN_ID, status: "exhausted", lease_active: false }],

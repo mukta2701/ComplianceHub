@@ -15,6 +15,7 @@ create table public.github_materialisation_jobs (
   available_at timestamptz not null default pg_catalog.now(),
   lease_token uuid,
   lease_expires_at timestamptz,
+  lease_attempt_incremented boolean,
   completed_at timestamptz,
   exhausted_at timestamptz,
   created_at timestamptz not null default pg_catalog.now(),
@@ -26,8 +27,8 @@ create table public.github_materialisation_jobs (
     references public.github_collection_runs(id, organisation_id, installation_id, repository_id, provider_repository_id)
     on delete cascade,
   constraint github_materialisation_jobs_lease_check check (
-    (lease_token is null and lease_expires_at is null)
-    or (lease_token is not null and lease_expires_at is not null)
+    (lease_token is null and lease_expires_at is null and lease_attempt_incremented is null)
+    or (lease_token is not null and lease_expires_at is not null and lease_attempt_incremented is not null)
   ),
   constraint github_materialisation_jobs_completion_check check (
     (status = 'completed' and completed_at is not null and exhausted_at is null and lease_token is null)
@@ -183,6 +184,7 @@ begin
   set status = 'exhausted',
       lease_token = null,
       lease_expires_at = null,
+      lease_attempt_incremented = null,
       exhausted_at = pg_catalog.now(),
       updated_at = pg_catalog.now()
   from candidates
@@ -219,8 +221,9 @@ begin
     update public.github_materialisation_jobs job
     set lease_token = extensions.gen_random_uuid(),
         lease_expires_at = pg_catalog.now() + interval '5 minutes',
+        lease_attempt_incremented = job.status <> 'awaiting_approval',
         attempt_count = case
-          when job.status = 'awaiting_approval' then pg_catalog.greatest(job.attempt_count, 1)
+          when job.status = 'awaiting_approval' then job.attempt_count
           else job.attempt_count + 1
         end,
         updated_at = pg_catalog.now()
@@ -255,9 +258,10 @@ declare
   target_organisation_id uuid;
   job_row public.github_materialisation_jobs;
   active_approval_exists boolean := false;
+  effective_attempt_count integer;
 begin
   if target_job_id is null or target_lease_token is null
-     or target_attempt_count is null or target_attempt_count < 1
+     or target_attempt_count is null or target_attempt_count < 0
      or target_outcome not in ('completed', 'awaiting_approval', 'retryable') then
     return false;
   end if;
@@ -281,6 +285,11 @@ begin
   for update;
   if not found then return false; end if;
 
+  effective_attempt_count := pg_catalog.least(
+    job_row.attempt_count + case when job_row.lease_attempt_incremented then 0 else 1 end,
+    25
+  );
+
   if target_outcome = 'awaiting_approval' then
     select exists (
       select 1
@@ -293,38 +302,48 @@ begin
 
     update public.github_materialisation_jobs job
     set status = case when active_approval_exists then 'pending' else 'awaiting_approval' end,
-        attempt_count = pg_catalog.greatest(job.attempt_count - 1, 0),
+        attempt_count = case
+          when job_row.lease_attempt_incremented then pg_catalog.greatest(job.attempt_count - 1, 0)
+          else job.attempt_count
+        end,
         available_at = case when active_approval_exists then pg_catalog.now() else 'infinity'::timestamptz end,
         lease_token = null,
         lease_expires_at = null,
+        lease_attempt_incremented = null,
         updated_at = pg_catalog.now()
     where job.id = job_row.id;
-  elsif target_outcome = 'retryable' and job_row.attempt_count >= 25 then
+  elsif target_outcome = 'retryable' and effective_attempt_count >= 25 then
     update public.github_materialisation_jobs job
     set status = 'exhausted',
+        attempt_count = effective_attempt_count,
         lease_token = null,
         lease_expires_at = null,
+        lease_attempt_incremented = null,
         exhausted_at = pg_catalog.now(),
         updated_at = pg_catalog.now()
     where job.id = job_row.id;
   elsif target_outcome = 'retryable' then
     update public.github_materialisation_jobs job
     set status = 'retryable',
+        attempt_count = effective_attempt_count,
         available_at = pg_catalog.now() + pg_catalog.make_interval(
           secs => pg_catalog.least(
             3600::double precision,
-            pg_catalog.power(2::double precision, pg_catalog.least(job.attempt_count, 12)::double precision)
+            pg_catalog.power(2::double precision, pg_catalog.least(effective_attempt_count, 12)::double precision)
           )
         ),
         lease_token = null,
         lease_expires_at = null,
+        lease_attempt_incremented = null,
         updated_at = pg_catalog.now()
     where job.id = job_row.id;
   else
     update public.github_materialisation_jobs job
     set status = 'completed',
+        attempt_count = effective_attempt_count,
         lease_token = null,
         lease_expires_at = null,
+        lease_attempt_incremented = null,
         completed_at = pg_catalog.now(),
         updated_at = pg_catalog.now()
     where job.id = job_row.id;
@@ -383,6 +402,7 @@ begin
   set status = 'exhausted',
       lease_token = null,
       lease_expires_at = null,
+      lease_attempt_incremented = null,
       exhausted_at = pg_catalog.now(),
       updated_at = pg_catalog.now()
   from candidates
