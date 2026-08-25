@@ -95,6 +95,7 @@ describe("Settings Connections page", () => {
     expect(screen.queryByText("#old-alerts")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "GitHub App shadow collection" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Install GitHub App" })).toHaveAttribute("href", "/api/github/setup");
+    expect(screen.getByRole("checkbox", { name: /Select Adtecher\/compliancehub/ })).toBeDisabled();
 
     const expectedColumns: Record<string, string> = {
       integration_connections: "id,provider,label,config,connection_mode,enabled,created_at,revoked_at",
@@ -143,14 +144,26 @@ describe("Settings Connections page", () => {
     });
   });
 
-  it("short-circuits Members before every GitHub query and action dependency", async () => {
+  it("gives Members only the safe GitHub read view with repository scope disabled", async () => {
     hoisted.role = "member";
 
     render(await IntegrationsPage({ searchParams: Promise.resolve({ github: "connected" }) }));
 
-    expect(hoisted.selectCalls).toEqual([]);
-    expect(screen.queryByRole("heading", { name: "GitHub App shadow collection" })).not.toBeInTheDocument();
-    expect(screen.getByText("Connections are managed by workspace Owners and Admins.")).toBeInTheDocument();
+    expect(hoisted.selectCalls.map((call) => call.table)).toEqual([
+      "github_installations",
+      "github_repository_shadow_summaries",
+    ]);
+    expect(screen.getByRole("heading", { name: "GitHub App shadow collection" })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: /Select Adtecher\/compliancehub/ })).toBeDisabled();
+    expect(screen.queryByRole("article", { name: "Slack connection" })).not.toBeInTheDocument();
+    expect(screen.queryByText("GitHub App connected.")).not.toBeInTheDocument();
+  });
+
+  it("allows only Owners to change repository scope", async () => {
+    hoisted.role = "owner";
+    render(await IntegrationsPage({ searchParams: Promise.resolve({}) }));
+
+    expect(screen.getByRole("checkbox", { name: /Select Adtecher\/compliancehub/ })).toBeEnabled();
   });
 
   it("shows only the whitelisted GitHub connection success state", async () => {

@@ -88,6 +88,19 @@ export default async function IntegrationsPage({
   const canManageConnections = hasCapability(membership.role, "manage_connections");
 
   if (!canManageConnections) {
+    const [installationResult, repositorySummaryResult] = await Promise.all([
+      supabase.from("github_installations")
+        .select("id,account_login,status,repository_selection,permissions_ok")
+        .eq("organisation_id", organisation.id)
+        .order("updated_at", { ascending: false }),
+      supabase.from("github_repository_shadow_summaries")
+        .select("repository_id,installation_id,full_name,html_url,visibility,default_branch,archived,selected,available,latest_run_id,latest_status,latest_failed_count,last_completed_collection_at")
+        .eq("organisation_id", organisation.id)
+        .order("full_name", { ascending: true }),
+    ]);
+    if (installationResult.error || repositorySummaryResult.error) {
+      throw new Error("Could not load GitHub connection status");
+    }
     return <>
       <PageIntro
         eyebrow="SETTINGS · CONNECTIONS"
@@ -97,6 +110,13 @@ export default async function IntegrationsPage({
       <Card style={{ padding: "18px" }} role="note">
         <p style={{ margin: 0 }}>Connections are managed by workspace Owners and Admins.</p>
       </Card>
+      <GitHubInstallationPanel
+        installations={(installationResult.data ?? []) as GitHubInstallationSummary[]}
+        repositories={(repositorySummaryResult.data ?? []) as GitHubRepositoryShadowSummary[]}
+        nowIso={new Date().toISOString()}
+        canManageInstallation={false}
+        canManageRepositoryScope={false}
+      />
     </>;
   }
 
@@ -170,6 +190,8 @@ export default async function IntegrationsPage({
       installations={(installationResult.data ?? []) as GitHubInstallationSummary[]}
       repositories={(repositorySummaryResult.data ?? []) as GitHubRepositoryShadowSummary[]}
       nowIso={new Date().toISOString()}
+      canManageInstallation={canManageConnections}
+      canManageRepositoryScope={membership.role === "owner"}
     />
     {showDeveloperTools && <DeveloperConnectionTools />}
   </>;

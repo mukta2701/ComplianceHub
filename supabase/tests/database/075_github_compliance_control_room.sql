@@ -90,6 +90,24 @@ select ok(
     ~* 'perform[[:space:]]+1[[:space:]]+from public[.]memberships membership[[:space:]]+where[[:space:][:print:]]+membership[.]role = ''owner''[[:space:]]+for update',
   'the second Owner revalidation takes a lock that blocks role demotion'
 );
+select ok(
+  pg_catalog.to_regclass('public.github_materialisation_jobs_exhausted_attention_idx') is not null,
+  'the exhausted-attention query has a dedicated partial index'
+);
+select ok(
+  pg_catalog.pg_get_indexdef('public.github_materialisation_jobs_exhausted_attention_idx'::pg_catalog.regclass)
+    ~ '[(]organisation_id, exhausted_at, id[)] WHERE [(][(]status = ''exhausted''::text[)] AND [(]exhausted_at IS NOT NULL[)][)]',
+  'the exhausted-attention index matches tenant, order, tie-breaker, and predicate'
+);
+select ok(
+  pg_catalog.to_regclass('public.github_repositories_control_room_selected_idx') is not null,
+  'the selected-repository page has a dedicated partial index'
+);
+select ok(
+  pg_catalog.pg_get_indexdef('public.github_repositories_control_room_selected_idx'::pg_catalog.regclass)
+    ~ '[(]organisation_id, full_name COLLATE "C", id[)] WHERE selected',
+  'the selected-repository index matches tenant, C ordering, tie-breaker, and predicate'
+);
 
 select has_function(
   'public', 'get_github_compliance_control_room_v1',
@@ -307,6 +325,10 @@ select is(
   '2',
   'a Member receives the same member-scoped read contract'
 );
+select throws_ok(
+  $$ select public.set_github_repository_selected('75000000-0000-4000-8000-000000000301',false) $$,
+  '42501','repository selection requires a workspace Owner','a Member cannot change collection scope'
+);
 
 select set_config('request.jwt.claims','{"sub":"75000000-0000-4000-8000-000000000005","role":"authenticated"}',false);
 select is(
@@ -314,11 +336,19 @@ select is(
   null::jsonb,
   'an outsider receives zero control-room data'
 );
+select throws_ok(
+  $$ select public.set_github_repository_selected('75000000-0000-4000-8000-000000000301',false) $$,
+  '42501','repository selection requires a workspace Owner','an outsider cannot change collection scope'
+);
 select set_config('request.jwt.claims','{"sub":"75000000-0000-4000-8000-000000000004","role":"authenticated"}',false);
 select is(
   public.get_github_compliance_control_room_v1('75000000-0000-4000-8000-000000000101',0,20),
   null::jsonb,
   'a different-workspace Owner receives zero cross-tenant data'
+);
+select throws_ok(
+  $$ select public.set_github_repository_selected('75000000-0000-4000-8000-000000000301',false) $$,
+  '42501','repository selection requires a workspace Owner','a different-workspace Owner cannot change collection scope'
 );
 select is(
   public.get_github_compliance_control_room_v1('75000000-0000-4000-8000-000000000102',0,20) #>> '{repositories,0,name}',
@@ -346,29 +376,37 @@ select throws_ok(
 );
 select throws_ok(
   $$ select public.retry_github_materialisation_job_server('75000000-0000-4000-8000-000000000101','75000000-0000-4000-8000-000000000001',(select id from public.github_materialisation_jobs where collection_run_id='75000000-0000-4000-8000-000000000401'),'unsafe <reason>') $$,
-  '22023','materialisation retry reason is invalid','retry rejects unsafe reason characters'
+  '22023','materialisation retry reason is invalid','retry rejects arbitrary free text'
 );
 select throws_ok(
-  $$ select public.retry_github_materialisation_job_server('75000000-0000-4000-8000-000000000101','75000000-0000-4000-8000-000000000002',(select id from public.github_materialisation_jobs where collection_run_id='75000000-0000-4000-8000-000000000401'),'Owner reviewed retry') $$,
+  $$ select public.retry_github_materialisation_job_server('75000000-0000-4000-8000-000000000101','75000000-0000-4000-8000-000000000001',(select id from public.github_materialisation_jobs where collection_run_id='75000000-0000-4000-8000-000000000401'),'https://' || 'example.test/retry?' || 'to' || 'ken=' || 'synthetic-value') $$,
+  '22023','materialisation retry reason is invalid','retry rejects URL and token-shaped content'
+);
+select throws_ok(
+  $$ select public.retry_github_materialisation_job_server('75000000-0000-4000-8000-000000000101','75000000-0000-4000-8000-000000000001',(select id from public.github_materialisation_jobs where collection_run_id='75000000-0000-4000-8000-000000000401'),'owner' || pg_catalog.chr(64) || 'example.test') $$,
+  '22023','materialisation retry reason is invalid','retry rejects email-shaped content'
+);
+select throws_ok(
+  $$ select public.retry_github_materialisation_job_server('75000000-0000-4000-8000-000000000101','75000000-0000-4000-8000-000000000002',(select id from public.github_materialisation_jobs where collection_run_id='75000000-0000-4000-8000-000000000401'),'owner_reviewed') $$,
   '42501','materialisation retry requires a current workspace Owner','an Admin cannot nominate a retry'
 );
 select throws_ok(
-  $$ select public.retry_github_materialisation_job_server('75000000-0000-4000-8000-000000000101','75000000-0000-4000-8000-000000000003',(select id from public.github_materialisation_jobs where collection_run_id='75000000-0000-4000-8000-000000000401'),'Owner reviewed retry') $$,
+  $$ select public.retry_github_materialisation_job_server('75000000-0000-4000-8000-000000000101','75000000-0000-4000-8000-000000000003',(select id from public.github_materialisation_jobs where collection_run_id='75000000-0000-4000-8000-000000000401'),'owner_reviewed') $$,
   '42501','materialisation retry requires a current workspace Owner','a Member cannot nominate a retry'
 );
 select throws_ok(
-  $$ select public.retry_github_materialisation_job_server('75000000-0000-4000-8000-000000000101','75000000-0000-4000-8000-000000000005',(select id from public.github_materialisation_jobs where collection_run_id='75000000-0000-4000-8000-000000000401'),'Owner reviewed retry') $$,
+  $$ select public.retry_github_materialisation_job_server('75000000-0000-4000-8000-000000000101','75000000-0000-4000-8000-000000000005',(select id from public.github_materialisation_jobs where collection_run_id='75000000-0000-4000-8000-000000000401'),'owner_reviewed') $$,
   '42501','materialisation retry requires a current workspace Owner','an outsider cannot nominate a retry'
 );
 select throws_ok(
-  $$ select public.retry_github_materialisation_job_server('75000000-0000-4000-8000-000000000101','75000000-0000-4000-8000-000000000004',(select id from public.github_materialisation_jobs where collection_run_id='75000000-0000-4000-8000-000000000401'),'Owner reviewed retry') $$,
+  $$ select public.retry_github_materialisation_job_server('75000000-0000-4000-8000-000000000101','75000000-0000-4000-8000-000000000004',(select id from public.github_materialisation_jobs where collection_run_id='75000000-0000-4000-8000-000000000401'),'owner_reviewed') $$,
   '42501','materialisation retry requires a current workspace Owner','a cross-workspace Owner cannot nominate a retry'
 );
 select ok(
   not public.retry_github_materialisation_job_server(
     '75000000-0000-4000-8000-000000000101','75000000-0000-4000-8000-000000000001',
     (select id from public.github_materialisation_jobs where collection_run_id='75000000-0000-4000-8000-000000000403'),
-    'Owner reviewed retry'
+    'owner_reviewed'
   ),
   'an exact organisation guard rejects a sibling-workspace job ID'
 );
@@ -383,7 +421,7 @@ select extensions.dblink_send_query('control_retry_a',$remote$
     select public.retry_github_materialisation_job_server(
       '75000000-0000-4000-8000-000000000101','75000000-0000-4000-8000-000000000001',
       (select id from public.github_materialisation_jobs where collection_run_id='75000000-0000-4000-8000-000000000401'),
-      'Owner reviewed a safe retry'
+      'owner_reviewed'
     ) as result
   )
   select retried.result
@@ -398,7 +436,7 @@ select extensions.dblink_send_query('control_retry_b',$remote$
   select public.retry_github_materialisation_job_server(
     '75000000-0000-4000-8000-000000000101','75000000-0000-4000-8000-000000000001',
     (select id from public.github_materialisation_jobs where collection_run_id='75000000-0000-4000-8000-000000000401'),
-    'Owner reviewed a safe retry'
+    'owner_reviewed'
   )
 $remote$);
 select pg_catalog.pg_sleep(0.1);
@@ -424,11 +462,11 @@ select is(
   'concurrent retry writes exactly one immutable audit event'
 );
 select is(
-  (select metadata->>'reason' from public.audit_events
+  (select metadata->>'reason_code' from public.audit_events
    where organisation_id='75000000-0000-4000-8000-000000000101'
      and action='github.materialisation_retry' order by id desc limit 1),
-  'Owner reviewed a safe retry',
-  'the retry audit retains the bounded Owner reason'
+  'owner_reviewed',
+  'the retry audit retains only the closed safe reason code'
 );
 select is(
   (select (metadata->>'previous_attempt_count')::integer from public.audit_events
@@ -467,7 +505,7 @@ select extensions.dblink_send_query('control_role_retry',$remote$
     select public.retry_github_materialisation_job_server(
       '75000000-0000-4000-8000-000000000101','75000000-0000-4000-8000-000000000001',
       (select id from public.github_materialisation_jobs where collection_run_id='75000000-0000-4000-8000-000000000402'),
-      'Owner reviewed a role-locked retry'
+      'owner_reviewed'
     ) as result
   )
   select retried.result
@@ -531,6 +569,68 @@ select throws_ok(
   '42501','repository selection requires a workspace Owner','an Admin cannot restore repository scope'
 );
 reset role;
+
+update public.memberships
+set role='owner'
+where organisation_id='75000000-0000-4000-8000-000000000101'
+  and user_id='75000000-0000-4000-8000-000000000002';
+select extensions.dblink_connect('control_selection_owner','host=127.0.0.1 port=5432 dbname='||current_database()||' user=postgres password=postgres connect_timeout=5');
+select extensions.dblink_connect('control_selection_demote','host=127.0.0.1 port=5432 dbname='||current_database()||' user=postgres password=postgres connect_timeout=5');
+select extensions.dblink_exec('control_selection_owner','set role authenticated');
+select extensions.dblink_exec(
+  'control_selection_owner',
+  $remote$set "request.jwt.claims" = '{"sub":"75000000-0000-4000-8000-000000000001","role":"authenticated"}'$remote$
+);
+select extensions.dblink_send_query('control_selection_owner',$remote$
+  with changed as (
+    select public.set_github_repository_selected(
+      '75000000-0000-4000-8000-000000000302', true
+    ) as result
+  )
+  select changed.result
+  from changed
+  cross join lateral (
+    select pg_catalog.pg_sleep(0.5 + case when changed.result then 0 else 0 end)
+  ) hold(waited)
+  where hold.waited is null
+$remote$);
+select pg_catalog.pg_sleep(0.1);
+select extensions.dblink_send_query('control_selection_demote',$remote$
+  update public.memberships
+  set role='admin'
+  where organisation_id='75000000-0000-4000-8000-000000000101'
+    and user_id='75000000-0000-4000-8000-000000000001'
+  returning role::text
+$remote$);
+select pg_catalog.pg_sleep(0.1);
+select is(
+  extensions.dblink_is_busy('control_selection_demote'),
+  1,
+  'Owner demotion waits while repository selection holds the exact membership row'
+);
+select ok(
+  result,
+  'the current Owner changes repository scope while the role lock is held'
+) from extensions.dblink_get_result('control_selection_owner') as selection(result boolean);
+select is(
+  changed_role,
+  'admin',
+  'role demotion completes only after repository selection commits'
+) from extensions.dblink_get_result('control_selection_demote') as demotion(changed_role text);
+select extensions.dblink_disconnect('control_selection_owner');
+select extensions.dblink_disconnect('control_selection_demote');
+select ok(
+  (select selected from public.github_repositories where id='75000000-0000-4000-8000-000000000302'),
+  'the selected state committed before Owner demotion'
+);
+update public.memberships
+set role='owner'
+where organisation_id='75000000-0000-4000-8000-000000000101'
+  and user_id='75000000-0000-4000-8000-000000000001';
+update public.memberships
+set role='admin'
+where organisation_id='75000000-0000-4000-8000-000000000101'
+  and user_id='75000000-0000-4000-8000-000000000002';
 
 select * from finish();
 

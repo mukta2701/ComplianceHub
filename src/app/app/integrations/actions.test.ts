@@ -836,6 +836,24 @@ describe("GitHub shadow collection actions", () => {
     expect(rpc).not.toHaveBeenCalled();
   });
 
+  it("rejects Admins before repository selection reaches Supabase", async () => {
+    const from = vi.fn();
+    const rpc = vi.fn();
+    hoisted.ctx = {
+      supabase: { from, rpc }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "admin" },
+    };
+    const form = new FormData();
+    form.set("repositoryId", REPOSITORY_ID);
+    form.set("selected", "true");
+
+    await expect(setGitHubRepositorySelectedAction(form)).resolves.toEqual({
+      ok: false,
+      message: "Could not update repository scope. Please try again.",
+    });
+    expect(from).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["not-a-uuid", "true"],
     [REPOSITORY_ID, "yes"],
@@ -843,7 +861,7 @@ describe("GitHub shadow collection actions", () => {
   ])("rejects invalid repository selection input before the checked RPC", async (repositoryId, selected) => {
     const rpc = vi.fn();
     hoisted.ctx = {
-      supabase: { rpc }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "admin" },
+      supabase: { rpc }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
     };
     const form = new FormData();
     form.set("repositoryId", repositoryId);
@@ -864,7 +882,7 @@ describe("GitHub shadow collection actions", () => {
     const select = vi.fn().mockReturnValue({ eq: repositoryFilter });
     const from = vi.fn().mockReturnValue({ select });
     hoisted.ctx = {
-      supabase: { from, rpc }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "admin" },
+      supabase: { from, rpc }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
     };
     const form = new FormData();
     form.set("repositoryId", REPOSITORY_ID);
@@ -881,7 +899,7 @@ describe("GitHub shadow collection actions", () => {
     expect(rpc).not.toHaveBeenCalled();
   });
 
-  it("uses the authenticated operator RPC with exact derived arguments and requires true", async () => {
+  it("uses the authenticated Owner RPC with exact derived arguments and requires true", async () => {
     const rpc = vi.fn().mockResolvedValue({ data: true, error: null });
     const maybeSingle = vi.fn().mockResolvedValue({ data: { id: REPOSITORY_ID }, error: null });
     const organisationFilter = vi.fn().mockReturnValue({ maybeSingle });

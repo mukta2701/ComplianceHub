@@ -126,7 +126,7 @@ jobs:
               ;;
             final)
               runtime_reservation_mode="strict"
-              expected_migration_version="20260825073650"
+              expected_migration_version="20260825082411"
               rollback_capability_required="true"
               ;;
             *) exit 1 ;;

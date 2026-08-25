@@ -115,10 +115,14 @@ export function GitHubInstallationPanel({
   installations,
   repositories,
   nowIso,
+  canManageInstallation,
+  canManageRepositoryScope,
 }: {
   installations: GitHubInstallationSummary[];
   repositories: GitHubRepositoryShadowSummary[];
   nowIso: string;
+  canManageInstallation: boolean;
+  canManageRepositoryScope: boolean;
 }) {
   const router = useRouter();
   const serverSelections = selectionSnapshot(repositories);
@@ -134,7 +138,7 @@ export function GitHubInstallationPanel({
   const [message, setMessage] = useState("");
 
   async function changeRepository(repository: GitHubRepositoryShadowSummary, selected: boolean) {
-    if (!repository.available || pendingRepositories.has(repository.repository_id)) return;
+    if (!canManageRepositoryScope || !repository.available || pendingRepositories.has(repository.repository_id)) return;
     const attemptServerSelected = selectionState.serverSelections[repository.repository_id];
     const previousSelected = selectionState.overrides[repository.repository_id] ?? repository.selected;
     setMessage("");
@@ -204,7 +208,9 @@ export function GitHubInstallationPanel({
         <h2 id="github-shadow-title">GitHub App shadow collection</h2>
         <p>Choose repositories for read-only checks. Shadow results do not change readiness, evidence, or findings.</p>
       </div>
-      <a className="button primary" href="/api/github/setup">Install GitHub App</a>
+      {canManageInstallation
+        ? <a className="button primary" href="/api/github/setup">Install GitHub App</a>
+        : <span className="field-hint">Installation changes are managed by workspace Owners and Admins.</span>}
     </header>
 
     {installations.length === 0 ? <div className="github-shadow-empty">
@@ -214,7 +220,7 @@ export function GitHubInstallationPanel({
       {installations.map((installation) => {
         const health = installationHealth(installation);
         const installationRepositories = repositories.filter((repository) => repository.installation_id === installation.id);
-        const canRecheck = installation.status === "active" && installation.permissions_ok;
+        const canRecheck = canManageInstallation && installation.status === "active" && installation.permissions_ok;
         const isRechecking = recheckingInstallations.has(installation.id);
         return <article className="github-installation" aria-label={`${installation.account_login} GitHub installation`} key={installation.id}>
           <div className="github-installation-head">
@@ -233,6 +239,7 @@ export function GitHubInstallationPanel({
             >{isRechecking ? "Rechecking…" : `Recheck ${installation.account_login}`}</button>
           </div>
 
+          {!canManageRepositoryScope && <p className="field-hint">Only workspace Owners can change repository scope.</p>}
           {installationRepositories.length === 0 ? <p className="github-repositories-empty">
             No repositories are available for this installation.
           </p> : <div className="github-repository-list">
@@ -247,7 +254,7 @@ export function GitHubInstallationPanel({
                     <input
                       type="checkbox"
                       checked={selectionState.overrides[repository.repository_id] ?? repository.selected}
-                      disabled={!repository.available || pending}
+                      disabled={!canManageRepositoryScope || !repository.available || pending}
                       onChange={(event) => void changeRepository(repository, event.target.checked)}
                     />
                     <span>Select {repository.full_name} for shadow collection</span>

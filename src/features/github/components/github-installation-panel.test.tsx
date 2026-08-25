@@ -68,6 +68,25 @@ describe("GitHubInstallationPanel", () => {
     hoisted.selectRepository.mockResolvedValue({ ok: true, message: "Repository scope updated." });
   });
 
+  it("renders repository scope as read-only when the viewer is not an Owner", async () => {
+    const user = userEvent.setup();
+    render(<GitHubInstallationPanel
+      installations={[installation]}
+      repositories={[repository()]}
+      nowIso="2026-08-17T20:00:00Z"
+      canManageInstallation={false}
+      canManageRepositoryScope={false}
+    />);
+
+    const checkbox = screen.getByRole("checkbox", {
+      name: "Select Adtecher/compliancehub for shadow collection",
+    });
+    expect(checkbox).toBeDisabled();
+    expect(screen.getByText("Only workspace Owners can change repository scope.")).toBeVisible();
+    await user.click(checkbox);
+    expect(hoisted.selectRepository).not.toHaveBeenCalled();
+  });
+
   it("keeps installation, collection, and freshness health independent", () => {
     render(<GitHubInstallationPanel
       installations={[installation]}
@@ -89,6 +108,8 @@ describe("GitHubInstallationPanel", () => {
         }),
       ]}
       nowIso="2026-08-17T20:00:00Z"
+      canManageInstallation={true}
+      canManageRepositoryScope={true}
     />);
 
     const installationCard = screen.getByRole("article", { name: "Adtecher GitHub installation" });
@@ -129,6 +150,8 @@ describe("GitHubInstallationPanel", () => {
         }),
       ]}
       nowIso="2026-08-17T20:00:00Z"
+      canManageInstallation={true}
+      canManageRepositoryScope={true}
     />);
 
     expect(within(screen.getByRole("article", { name: "Adtecher/boundary repository" })).getByText("Stale")).toBeVisible();
@@ -146,6 +169,8 @@ describe("GitHubInstallationPanel", () => {
       ]}
       repositories={[]}
       nowIso="2026-08-17T20:00:00Z"
+      canManageInstallation={true}
+      canManageRepositoryScope={true}
     />);
 
     expect(within(screen.getByRole("article", { name: "Suspended-Co GitHub installation" })).getByText("Suspended")).toBeVisible();
@@ -169,6 +194,8 @@ describe("GitHubInstallationPanel", () => {
         }),
       ]}
       nowIso="2026-08-17T20:00:00Z"
+      canManageInstallation={true}
+      canManageRepositoryScope={true}
     />);
 
     const first = screen.getByRole("checkbox", { name: "Select Adtecher/compliancehub for shadow collection" });
@@ -201,6 +228,8 @@ describe("GitHubInstallationPanel", () => {
       installations={[installation]}
       repositories={[repository({ selected: false })]}
       nowIso="2026-08-17T20:00:00Z"
+      canManageInstallation={true}
+      canManageRepositoryScope={true}
     />);
 
     const checkbox = screen.getByRole("checkbox", { name: "Select Adtecher/compliancehub for shadow collection" });
@@ -221,6 +250,8 @@ describe("GitHubInstallationPanel", () => {
       installations={[installation]}
       repositories={[repository({ selected: false })]}
       nowIso="2026-08-17T20:00:00Z"
+      canManageInstallation={true}
+      canManageRepositoryScope={true}
     />);
     const checkbox = screen.getByRole("checkbox", { name: "Select Adtecher/compliancehub for shadow collection" });
 
@@ -232,6 +263,8 @@ describe("GitHubInstallationPanel", () => {
       installations={[installation]}
       repositories={[repository({ selected: true })]}
       nowIso="2026-08-17T20:00:00Z"
+      canManageInstallation={true}
+      canManageRepositoryScope={true}
     />);
     expect(checkbox).toBeChecked();
 
@@ -239,6 +272,8 @@ describe("GitHubInstallationPanel", () => {
       installations={[installation]}
       repositories={[repository({ selected: false })]}
       nowIso="2026-08-17T20:00:00Z"
+      canManageInstallation={true}
+      canManageRepositoryScope={true}
     />);
     expect(checkbox).not.toBeChecked();
   });
@@ -253,6 +288,8 @@ describe("GitHubInstallationPanel", () => {
       installations={[installation]}
       repositories={[repository({ selected: false })]}
       nowIso="2026-08-17T20:00:00Z"
+      canManageInstallation={true}
+      canManageRepositoryScope={true}
     />);
     const checkbox = screen.getByRole("checkbox", { name: "Select Adtecher/compliancehub for shadow collection" });
 
@@ -268,6 +305,8 @@ describe("GitHubInstallationPanel", () => {
       installations={[installation]}
       repositories={[repository({ selected: true })]}
       nowIso="2026-08-17T20:00:00Z"
+      canManageInstallation={true}
+      canManageRepositoryScope={true}
     />);
     expect(checkbox).not.toBeChecked();
 
@@ -279,6 +318,8 @@ describe("GitHubInstallationPanel", () => {
       installations={[installation]}
       repositories={[repository({ selected: false })]}
       nowIso="2026-08-17T20:00:00Z"
+      canManageInstallation={true}
+      canManageRepositoryScope={true}
     />);
     expect(checkbox).not.toBeChecked();
   });
@@ -288,6 +329,8 @@ describe("GitHubInstallationPanel", () => {
       installations={[installation]}
       repositories={[repository({ available: false, selected: true })]}
       nowIso="2026-08-17T20:00:00Z"
+      canManageInstallation={true}
+      canManageRepositoryScope={true}
     />);
 
     expect(screen.getByRole("checkbox", { name: "Select Adtecher/compliancehub for shadow collection" })).toBeDisabled();
@@ -302,6 +345,8 @@ describe("GitHubInstallationPanel", () => {
       installations={[installation]}
       repositories={[repository()]}
       nowIso="2026-08-17T20:00:00Z"
+      canManageInstallation={true}
+      canManageRepositoryScope={true}
     />);
 
     await user.click(screen.getByRole("button", { name: "Recheck Adtecher" }));
@@ -334,6 +379,8 @@ describe("GitHubInstallationPanel", () => {
       installations={[installation, secondInstallation]}
       repositories={[]}
       nowIso="2026-08-17T20:00:00Z"
+      canManageInstallation={true}
+      canManageRepositoryScope={true}
     />);
 
     await user.click(screen.getByRole("button", { name: "Recheck Adtecher" }));

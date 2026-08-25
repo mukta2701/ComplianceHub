@@ -1,10 +1,13 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 
 import {
   CONTROL_ROOM_REQUEST_TIMEOUT_MS,
+  GITHUB_MATERIALISATION_RETRY_REASON_CODES,
   loadGitHubComplianceControlRoom,
   parseGitHubComplianceControlRoom,
   parseSafeGitHubRepositorySource,
+  retryGitHubMaterialisationJob,
 } from "./github-compliance-control-room";
 
 const ORG = "a1000000-0000-4000-8000-000000000001";
@@ -16,6 +19,10 @@ const PACK = "91000000-0000-4000-8000-000000000001";
 const EVIDENCE = "a1000000-0000-4000-8000-000000000501";
 const FINDING = "a1000000-0000-4000-8000-000000000601";
 const CHECKSUM = "b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f";
+const HARDENING_MIGRATION = readFileSync(
+  `${process.cwd()}/supabase/migrations/20260825082411_harden_github_control_room_ownership_privacy_indexes.sql`,
+  "utf8",
+);
 
 function validPayload() {
   return {
@@ -121,6 +128,72 @@ describe("safe GitHub repository source", () => {
 });
 
 describe("GitHub compliance control-room contract", () => {
+  it("pins the two control-room indexes to the exact bounded query shapes", () => {
+    expect(HARDENING_MIGRATION).toContain(
+      "on public.github_materialisation_jobs(organisation_id, exhausted_at, id)\nwhere status = 'exhausted' and exhausted_at is not null;",
+    );
+    expect(HARDENING_MIGRATION).toContain(
+      'on public.github_repositories(organisation_id, full_name collate "C", id)\nwhere selected;',
+    );
+  });
+
+  it("locks the exact authenticated Owner membership through repository mutation", () => {
+    expect(HARDENING_MIGRATION).toMatch(/actor_id := \(select auth\.uid\(\)\)/);
+    expect(HARDENING_MIGRATION).toMatch(/select membership\.role[\s\S]*?membership\.organisation_id = target_organisation_id[\s\S]*?membership\.user_id = actor_id\s+for update;/);
+    expect(HARDENING_MIGRATION).toMatch(/if not found or actor_role <> 'owner'/);
+    expect(HARDENING_MIGRATION).not.toContain("is_organisation_owner(target_organisation_id)");
+  });
+
+  it("persists only a closed retry reason code and never a raw retry note", () => {
+    for (const reasonCode of GITHUB_MATERIALISATION_RETRY_REASON_CODES) {
+      expect(HARDENING_MIGRATION).toContain(`'${reasonCode}'`);
+    }
+    expect(HARDENING_MIGRATION).toContain("'reason_code', target_reason");
+    expect(HARDENING_MIGRATION).not.toContain("'reason', target_reason");
+  });
+
+  it.each(GITHUB_MATERIALISATION_RETRY_REASON_CODES)("retries only with stable safe reason code %s", async (reasonCode) => {
+    const rpc = vi.fn().mockResolvedValue({ data: true, error: null });
+    const createServiceClient = vi.fn(() => ({ rpc }));
+
+    await expect(retryGitHubMaterialisationJob(createServiceClient as never, {
+      organisationId: ORG,
+      actorId: "a1000000-0000-4000-8000-000000000002",
+      jobId: JOB,
+      reasonCode,
+    })).resolves.toBe(true);
+
+    expect(createServiceClient).toHaveBeenCalledOnce();
+    expect(rpc).toHaveBeenCalledWith("retry_github_materialisation_job_server", {
+      target_organisation_id: ORG,
+      target_actor_id: "a1000000-0000-4000-8000-000000000002",
+      target_job_id: JOB,
+      target_reason: reasonCode,
+    });
+  });
+
+  it.each([
+    "Owner reviewed this after checking https://example.test/private",
+    ["mukta", "@", "example.test"].join(""),
+    ["to", "ken=", "synthetic-private-value"].join(""),
+    "please retry this free text",
+    "configuration corrected",
+    "owner_reviewed ",
+  ])("rejects non-code retry reason %s before creating a service client", async (reasonCode) => {
+    const rpc = vi.fn();
+    const createServiceClient = vi.fn(() => ({ rpc }));
+
+    await expect(retryGitHubMaterialisationJob(createServiceClient as never, {
+      organisationId: ORG,
+      actorId: "a1000000-0000-4000-8000-000000000002",
+      jobId: JOB,
+      reasonCode,
+    })).rejects.toThrow("Could not retry GitHub materialisation job");
+
+    expect(createServiceClient).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
   it("parses a bounded snapshot and canonicalises the trusted repository URL", () => {
     const parsed = parseGitHubComplianceControlRoom(validPayload(), {
       organisationId: ORG,
@@ -135,6 +208,33 @@ describe("GitHub compliance control-room contract", () => {
       findingId: FINDING,
     });
     expect(parsed.exhaustedAttention).toEqual(validPayload().exhaustedAttention);
+  });
+
+  it("keeps active approval identity separate from immutable historical result provenance", () => {
+    const payload = validPayload();
+    payload.approval = {
+      ...payload.approval,
+      mappingPackId: "a1000000-0000-4000-8000-000000000701",
+      version: "github-iso-27001-v2",
+      checksum: "c4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f",
+      approvedAt: "2026-08-25T06:30:00.000Z",
+    };
+
+    const parsed = parseGitHubComplianceControlRoom(payload, {
+      organisationId: ORG,
+      offset: 0,
+      limit: 10,
+    });
+
+    expect(parsed.approval).toMatchObject({
+      mappingPackId: "a1000000-0000-4000-8000-000000000701",
+      version: "github-iso-27001-v2",
+    });
+    expect(parsed.repositories[0]?.officialResults[0]).toMatchObject({
+      mappingPackId: PACK,
+      mappingVersion: "github-iso-27001-v1",
+      mappingChecksum: CHECKSUM,
+    });
   });
 
   it("represents an approval-blocked job with no invented availability time", () => {

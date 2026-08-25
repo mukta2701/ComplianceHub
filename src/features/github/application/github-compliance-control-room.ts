@@ -13,6 +13,19 @@ const safeVersion = z.string().min(1).max(120).regex(/^[A-Za-z0-9._-]+$/);
 const severity = z.enum(["low", "medium", "high", "critical"]);
 const outcome = z.enum(["pass", "fail", "unknown", "not_applicable"]);
 
+export const GITHUB_MATERIALISATION_RETRY_REASON_CODES = [
+  "configuration_corrected",
+  "provider_recovered",
+  "owner_reviewed",
+] as const;
+const githubMaterialisationRetryReasonCodeSchema = z.enum(GITHUB_MATERIALISATION_RETRY_REASON_CODES);
+const retryInputSchema = z.object({
+  organisationId: uuid,
+  actorId: uuid,
+  jobId: uuid,
+  reasonCode: githubMaterialisationRetryReasonCodeSchema,
+}).strict();
+
 const inputSchema = z.object({
   organisationId: uuid,
   offset: z.number().int().min(0).max(10_000),
@@ -132,13 +145,41 @@ const controlRoomSchema = z.object({
 
 export type GitHubComplianceControlRoom = z.infer<typeof controlRoomSchema>;
 export type GitHubComplianceControlRoomInput = z.infer<typeof inputSchema>;
+export type GitHubMaterialisationRetryReasonCode = z.infer<typeof githubMaterialisationRetryReasonCodeSchema>;
 export type SafeGitHubRepositorySource = { name: string; url: string };
 
 export const CONTROL_ROOM_REQUEST_TIMEOUT_MS = 7_000;
 const LOAD_ERROR = "Could not load GitHub compliance control room";
+const RETRY_ERROR = "Could not retry GitHub materialisation job";
 
 function fail(): never {
   throw new Error(LOAD_ERROR);
+}
+
+function retryFail(): never {
+  throw new Error(RETRY_ERROR);
+}
+
+export async function retryGitHubMaterialisationJob(
+  createServiceClient: () => Pick<SupabaseClient, "rpc">,
+  input: unknown,
+): Promise<boolean> {
+  const parsed = retryInputSchema.safeParse(input);
+  if (!parsed.success) retryFail();
+
+  try {
+    const service = createServiceClient();
+    const { data, error } = await service.rpc("retry_github_materialisation_job_server", {
+      target_organisation_id: parsed.data.organisationId,
+      target_actor_id: parsed.data.actorId,
+      target_job_id: parsed.data.jobId,
+      target_reason: parsed.data.reasonCode,
+    });
+    if (error || typeof data !== "boolean") retryFail();
+    return data;
+  } catch {
+    retryFail();
+  }
 }
 
 export function parseSafeGitHubRepositorySource(

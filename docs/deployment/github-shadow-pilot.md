@@ -13,11 +13,11 @@ or Slack output.
       intended owner account and repository. Record only the repository name,
       installation ID, and reviewed permission/event set; never record keys.
 - [ ] Verify the hosted Supabase backup and the complete pending migration set
-      through `20260825073650` before setting the protected schema attestation.
+      through `20260825082411` before setting the protected schema attestation.
 - [ ] Complete the documented staged Slack compatibility rollout: manually
       deploy `bridge` with migration `20260825040825`, verify the non-secret
       `v1`/`bridge` capability and exact release SHA, apply additive migrations
-      `20260825053718` and `20260825073650`, then manually deploy
+      `20260825053718`, `20260825073650`, and `20260825082411`, then manually deploy
       `final`/`strict`. Never use bridge
       for an automatic deployment. The first final must follow that exact
       bridge revision. In steady-state operation, subsequent manual final and
