@@ -285,7 +285,7 @@ begin
   for update;
   if not found then return false; end if;
 
-  effective_attempt_count := pg_catalog.least(
+  effective_attempt_count := least(
     job_row.attempt_count + case when job_row.lease_attempt_incremented then 0 else 1 end,
     25
   );
@@ -303,7 +303,7 @@ begin
     update public.github_materialisation_jobs job
     set status = case when active_approval_exists then 'pending' else 'awaiting_approval' end,
         attempt_count = case
-          when job_row.lease_attempt_incremented then pg_catalog.greatest(job.attempt_count - 1, 0)
+          when job_row.lease_attempt_incremented then greatest(job.attempt_count - 1, 0)
           else job.attempt_count
         end,
         available_at = case when active_approval_exists then pg_catalog.now() else 'infinity'::timestamptz end,
@@ -327,9 +327,9 @@ begin
     set status = 'retryable',
         attempt_count = effective_attempt_count,
         available_at = pg_catalog.now() + pg_catalog.make_interval(
-          secs => pg_catalog.least(
+          secs => least(
             3600::double precision,
-            pg_catalog.power(2::double precision, pg_catalog.least(effective_attempt_count, 12)::double precision)
+            pg_catalog.power(2::double precision, least(effective_attempt_count, 12)::double precision)
           )
         ),
         lease_token = null,

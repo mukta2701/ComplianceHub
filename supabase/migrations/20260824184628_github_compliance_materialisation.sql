@@ -3,14 +3,6 @@
 -- remains independent; this migration does not write readiness, SoA,
 -- assessment, risk, or leadership-report state.
 
-alter type public.monitor_finding_status
-  add value if not exists 'in_progress' after 'acknowledged';
-alter type public.monitor_finding_status
-  add value if not exists 'exception_requested' after 'in_progress';
-alter type public.monitor_finding_status
-  add value if not exists 'risk_accepted' after 'exception_requested';
-alter type public.task_source add value if not exists 'github';
-
 create or replace function public.github_iso_reference_array_is_valid(references_value text[])
 returns boolean
 language sql

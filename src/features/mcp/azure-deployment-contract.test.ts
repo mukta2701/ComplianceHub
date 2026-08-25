@@ -236,9 +236,9 @@ describe("Azure staging deployment contract", () => {
     expect(workflow).toMatch(/test "\$REGISTERED_GITHUB_APP_SITE_URL" = "\$CANONICAL_SITE_URL"/);
     expect(workflow).toMatch(/properties\.configuration\.ingress\.fqdn[\s\S]*test "\$CANONICAL_SITE_URL" = "https:\/\/\$container_app_fqdn"/);
     expect(deployment).toMatch(/backup[\s\S]*supabase migration list[\s\S]*HOSTED_SUPABASE_MIGRATION_VERSION/i);
-    expect(deployment).toMatch(/twenty-two pending additive\s+migrations[\s\S]*20260817010000[\s\S]*20260817020000[\s\S]*20260817030000[\s\S]*20260817192458[\s\S]*20260818030000[\s\S]*20260818040000[\s\S]*20260818050000[\s\S]*20260818060000[\s\S]*20260818070000[\s\S]*20260818100000[\s\S]*20260818110000[\s\S]*20260818120000[\s\S]*20260818130000[\s\S]*20260818140000[\s\S]*20260824184628[\s\S]*20260824212223[\s\S]*20260825014236[\s\S]*20260825040825[\s\S]*20260825053718[\s\S]*20260825073650[\s\S]*20260825082411[\s\S]*20260825094343/);
+    expect(deployment).toMatch(/twenty-three pending additive\s+migrations[\s\S]*20260817010000[\s\S]*20260817020000[\s\S]*20260817030000[\s\S]*20260817192458[\s\S]*20260818030000[\s\S]*20260818040000[\s\S]*20260818050000[\s\S]*20260818060000[\s\S]*20260818070000[\s\S]*20260818100000[\s\S]*20260818110000[\s\S]*20260818120000[\s\S]*20260818130000[\s\S]*20260818140000[\s\S]*20260824184627[\s\S]*20260824184628[\s\S]*20260824212223[\s\S]*20260825014236[\s\S]*20260825040825[\s\S]*20260825053718[\s\S]*20260825073650[\s\S]*20260825082411[\s\S]*20260825094343/);
     expect(deployment).toMatch(/REGISTERED_GITHUB_APP_SITE_URL[\s\S]*NEXT_PUBLIC_SITE_URL/);
-    expect(releaseChecklist).toMatch(/hosted Supabase[\s\S]*migrations 1–18 were verified before the manual bridge[\s\S]*migrations 19–22 were verified before final/i);
+    expect(releaseChecklist).toMatch(/hosted Supabase[\s\S]*migrations 1–19 were verified before the manual bridge[\s\S]*migrations 20–23 were verified before final/i);
     expect(releaseChecklist).toMatch(/GitHub App[\s\S]*canonical.*origin/i);
   });
 

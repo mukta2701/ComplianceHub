@@ -3,7 +3,7 @@
 - [ ] Project owner has reviewed and approved every assessment question and remediation.
 - [ ] Legal, privacy, certification, and open-source disclaimers are visible and accurate.
 - [ ] Production Supabase project uses the intended region and all migrations pass.
-- [ ] Hosted Supabase personal staging project ref `ytenjiyjdcrjkgwmciqw` has a verified backup; `supabase migration list` and `supabase db push --dry-run` showed exactly the twenty-two reviewed migrations through `20260825094343` in order; migrations 1–18 were verified before the manual bridge, additive migrations 19–22 were verified before final, and the phase-specific `HOSTED_SUPABASE_MIGRATION_VERSION` always matched `NEXT_PUBLIC_SUPABASE_URL`.
+- [ ] Hosted Supabase personal staging project ref `ytenjiyjdcrjkgwmciqw` has a verified backup; `supabase migration list` and `supabase db push --dry-run` showed exactly the twenty-three reviewed migrations through `20260825094343` in order; migrations 1–19 were verified before the manual bridge, additive migrations 20–23 were verified before final, and the phase-specific `HOSTED_SUPABASE_MIGRATION_VERSION` always matched `NEXT_PUBLIC_SUPABASE_URL`.
 - [ ] Cross-tenant RLS tests, immutable-record tests, and stale-write tests pass.
 - [ ] Service-role and cron credentials are server-only, rotated, and stored in deployment secrets.
 - [ ] Mukta has verified one Mukta-owned, server-approved private Slack destination; its canonical webhook SHA-256 is stored only in `SLACK_ALLOWED_WEBHOOK_SHA256`, the A/B secret references are coherent, and blank/malformed/mismatched/legacy configurations fail without a Slack write.

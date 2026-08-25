@@ -283,7 +283,7 @@ begin
       'offset', target_offset,
       'limit', target_limit,
       'total', repository_total.total,
-      'truncated', target_offset + pg_catalog.least(target_limit, pg_catalog.greatest(repository_total.total - target_offset, 0)) < repository_total.total
+      'truncated', target_offset + least(target_limit, greatest(repository_total.total - target_offset, 0)) < repository_total.total
     ),
     'repositories', coalesce((
       select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
