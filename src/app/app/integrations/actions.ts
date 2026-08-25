@@ -94,10 +94,10 @@ async function requireConnectionManager() {
   return context;
 }
 
-async function requireGitHubRepositoryScopeOwner() {
+async function requireGitHubOwner() {
   const context = await requireAppContext();
   if (context.membership.role !== "owner") {
-    throw new Error("Only a workspace Owner can change GitHub repository scope");
+    throw new Error("Only a workspace Owner can manage the GitHub App");
   }
   return context;
 }
@@ -175,7 +175,7 @@ const installationRecheckFailure = {
 
 export async function setGitHubRepositorySelectedAction(formData: FormData): Promise<GitHubMutationResult> {
   try {
-    const { supabase, organisation } = await requireGitHubRepositoryScopeOwner();
+    const { supabase, organisation } = await requireGitHubOwner();
     const parsed = githubRepositorySelectionSchema.parse(Object.fromEntries(formData));
     const { data: repository, error: repositoryError } = await supabase.from("github_repositories")
       .select("id")
@@ -197,7 +197,7 @@ export async function setGitHubRepositorySelectedAction(formData: FormData): Pro
 
 export async function recheckGitHubInstallationAction(formData: FormData): Promise<GitHubMutationResult> {
   try {
-    const { supabase, user, organisation } = await requireConnectionManager();
+    const { supabase, user, organisation } = await requireGitHubOwner();
     const parsed = githubInstallationRecheckSchema.parse(Object.fromEntries(formData));
     const { data: installation, error } = await supabase.from("github_installations")
       .select("id,status,permissions_ok")

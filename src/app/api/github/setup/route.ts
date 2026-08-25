@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 
 import { buildGitHubAuthorizeUrl, createOAuthFlow } from "@/features/github/application/github-user-oauth";
-import { hasCapability } from "@/features/organisations/domain/access";
 import { requireAppContext } from "@/lib/app-context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { siteUrl } from "@/lib/site-url";
@@ -64,7 +63,7 @@ export async function GET(request: Request): Promise<NextResponse> {
   } catch {
     return redirectTo(canonicalSiteUrl("/sign-in"));
   }
-  if (!hasCapability(context.membership.role, "manage_connections")) return errorRedirect("not_authorized");
+  if (context.membership.role !== "owner") return errorRedirect("not_authorized");
 
   try {
     await enforceRateLimit(`github-setup:${context.user.id}:${sourceClass(request)}`, { limit: 10, windowMs: 10 * 60_000 });

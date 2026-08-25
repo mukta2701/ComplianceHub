@@ -930,10 +930,10 @@ describe("GitHub shadow collection actions", () => {
     });
   });
 
-  it("rejects Members before installation lookup or service collection", async () => {
+  it.each(["admin", "member"] as const)("rejects %ss before installation lookup or service collection", async (role) => {
     const from = vi.fn();
     hoisted.ctx = {
-      supabase: { from }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "member" },
+      supabase: { from }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role },
     };
     const form = new FormData();
     form.set("installationId", INSTALLATION_ID);
@@ -950,7 +950,7 @@ describe("GitHub shadow collection actions", () => {
   it("rejects client-supplied organisation and request keys rather than trusting them", async () => {
     const from = vi.fn();
     hoisted.ctx = {
-      supabase: { from }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "admin" },
+      supabase: { from }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
     };
     const form = new FormData();
     form.set("installationId", INSTALLATION_ID);

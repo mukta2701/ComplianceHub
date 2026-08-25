@@ -210,7 +210,7 @@ export function GitHubInstallationPanel({
       </div>
       {canManageInstallation
         ? <a className="button primary" href="/api/github/setup">Install GitHub App</a>
-        : <span className="field-hint">Installation changes are managed by workspace Owners and Admins.</span>}
+        : <span className="field-hint">Only workspace Owners can install or recheck the GitHub App.</span>}
     </header>
 
     {installations.length === 0 ? <div className="github-shadow-empty">

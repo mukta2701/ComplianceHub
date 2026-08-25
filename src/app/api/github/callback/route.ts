@@ -12,7 +12,6 @@ import {
   parseOAuthFlowCookie,
 } from "@/features/github/application/github-user-oauth";
 import { claimInstallation } from "@/features/github/application/installation-claim";
-import { hasCapability } from "@/features/organisations/domain/access";
 import { requireAppContext } from "@/lib/app-context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { siteUrl } from "@/lib/site-url";
@@ -125,7 +124,7 @@ export async function GET(request: Request): Promise<NextResponse> {
   if (
     context.user.id !== flow.actorId
     || context.organisation.id !== flow.organisationId
-    || !hasCapability(context.membership.role, "manage_connections")
+    || context.membership.role !== "owner"
   ) return errorRedirect("not_authorized");
 
   try {

@@ -43,8 +43,8 @@ describe("GET /api/github/setup", () => {
   });
   afterEach(() => vi.unstubAllEnvs());
 
-  it("rejects non-operators without writing state", async () => {
-    hoisted.context.membership.role = "member";
+  it.each(["admin", "member"] as const)("rejects %s before writing OAuth state", async (role) => {
+    hoisted.context.membership.role = role;
     const response = await GET(new Request("https://hostile.example/api/github/setup"));
     expect(response.status).toBe(303);
     expect(response.headers.get("location")).toBe("https://compliance.example/app/integrations?github=not_authorized");

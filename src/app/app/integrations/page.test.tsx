@@ -5,6 +5,8 @@ const hoisted = vi.hoisted(() => ({
   selectCalls: [] as Array<{ table: string; columns: string }>,
   filterCalls: [] as Array<{ table: string; column: string; value: string }>,
   errors: {} as Record<string, { message: string } | undefined>,
+  controlRoomLoads: [] as unknown[],
+  mappingReviewLoads: [] as unknown[],
   role: "admin" as "owner" | "admin" | "member",
   rows: {
     integration_connections: [{
@@ -64,6 +66,41 @@ vi.mock("@/lib/app-context", () => ({
     user: { id: "user-1", email: "admin@example.test" },
   }),
 }));
+vi.mock("@/features/github/application/github-compliance-control-room", () => ({
+  GITHUB_MATERIALISATION_RETRY_REASON_CODES: ["configuration_corrected", "provider_recovered", "owner_reviewed"],
+  retryGitHubMaterialisationJob: vi.fn(),
+  loadGitHubComplianceControlRoom: (...args: unknown[]) => {
+    hoisted.controlRoomLoads.push(args);
+    return Promise.resolve({
+      schemaVersion: 1,
+      workspaceId: "org-1",
+      asOf: "2026-08-25T12:00:00.000Z",
+      approval: null,
+      pagination: { offset: 0, limit: 20, total: 0, truncated: false },
+      repositories: [],
+      exhaustedAttention: { total: 0, truncated: false, items: [] },
+    });
+  },
+}));
+vi.mock("@/features/github/application/github-mapping-review", () => ({
+  loadGitHubMappingReview: (...args: unknown[]) => {
+    hoisted.mappingReviewLoads.push(args);
+    return Promise.resolve({
+      pack: {
+        id: "91000000-0000-4000-8000-000000000001",
+        version: "github-iso-27001-v1",
+        title: "Standard GitHub to ISO/IEC 27001:2022 mapping pack",
+        checksum: "b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f",
+        publishedAt: "2026-08-24T12:00:00.000Z",
+      },
+      entries: [],
+      approvalHistory: [],
+      limitations: [
+        "These repository checks cover selected technical signals only; they do not certify ISO/IEC 27001 compliance.",
+      ],
+    });
+  },
+}));
 vi.mock("next/navigation", () => ({ usePathname: () => "/app/integrations", useRouter: () => ({ refresh: vi.fn() }) }));
 
 import IntegrationsPage from "./page";
@@ -73,6 +110,8 @@ describe("Settings Connections page", () => {
     hoisted.selectCalls = [];
     hoisted.filterCalls = [];
     hoisted.errors = {};
+    hoisted.controlRoomLoads = [];
+    hoisted.mappingReviewLoads = [];
     hoisted.role = "admin";
   });
 
@@ -94,7 +133,8 @@ describe("Settings Connections page", () => {
     expect(screen.queryByText("Old Jira")).not.toBeInTheDocument();
     expect(screen.queryByText("#old-alerts")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "GitHub App shadow collection" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Install GitHub App" })).toHaveAttribute("href", "/api/github/setup");
+    expect(screen.getByRole("heading", { name: "From repository facts to reviewed records" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Install GitHub App" })).not.toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: /Select Adtecher\/compliancehub/ })).toBeDisabled();
 
     const expectedColumns: Record<string, string> = {
@@ -157,6 +197,10 @@ describe("Settings Connections page", () => {
     expect(screen.getByRole("checkbox", { name: /Select Adtecher\/compliancehub/ })).toBeDisabled();
     expect(screen.queryByRole("article", { name: "Slack connection" })).not.toBeInTheDocument();
     expect(screen.queryByText("GitHub App connected.")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "From repository facts to reviewed records" })).toBeInTheDocument();
+    expect(screen.getByText("Only workspace Owners can approve mappings or recover processing.")).toBeVisible();
+    expect(hoisted.controlRoomLoads).toHaveLength(1);
+    expect(hoisted.mappingReviewLoads).toHaveLength(1);
   });
 
   it("allows only Owners to change repository scope", async () => {
@@ -164,6 +208,15 @@ describe("Settings Connections page", () => {
     render(await IntegrationsPage({ searchParams: Promise.resolve({}) }));
 
     expect(screen.getByRole("checkbox", { name: /Select Adtecher\/compliancehub/ })).toBeEnabled();
+    expect(screen.getByRole("group", { name: "Owner mapping approval" })).toBeVisible();
+  });
+
+  it("loads the requested bounded repository result page", async () => {
+    await IntegrationsPage({ searchParams: Promise.resolve({ githubPage: "3" }) });
+    expect(hoisted.controlRoomLoads[0]).toEqual([
+      expect.anything(),
+      { organisationId: "org-1", offset: 40, limit: 20 },
+    ]);
   });
 
   it("shows only the whitelisted GitHub connection success state", async () => {

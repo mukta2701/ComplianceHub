@@ -83,6 +83,7 @@ describe("GitHubInstallationPanel", () => {
     });
     expect(checkbox).toBeDisabled();
     expect(screen.getByText("Only workspace Owners can change repository scope.")).toBeVisible();
+    expect(screen.getByText("Only workspace Owners can install or recheck the GitHub App.")).toBeVisible();
     await user.click(checkbox);
     expect(hoisted.selectRepository).not.toHaveBeenCalled();
   });
