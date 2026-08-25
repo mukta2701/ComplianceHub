@@ -2,10 +2,8 @@
 -- channel that the user-scoped application boundary already approved. The
 -- application still rechecks the server-only webhook allow-policy immediately
 -- before transport; this database boundary closes a selected-channel race.
-
-revoke all on function public.reserve_daily_digest_delivery_server(uuid,uuid,date,text,jsonb)
-  from public, anon, authenticated, service_role;
-drop function public.reserve_daily_digest_delivery_server(uuid,uuid,date,text,jsonb);
+-- Keep the legacy overload temporarily for the explicit staged bridge. Both
+-- overloads remain service-only; a later reviewed migration retires the bridge.
 
 create function public.reserve_daily_digest_delivery_server(
   target_organisation_id uuid,
@@ -133,8 +131,14 @@ begin
 end;
 $$;
 
+alter function public.reserve_daily_digest_delivery_server(uuid,uuid,date,text,jsonb)
+  owner to postgres;
 alter function public.reserve_daily_digest_delivery_server(uuid,uuid,uuid,date,text,jsonb)
   owner to postgres;
+revoke all on function public.reserve_daily_digest_delivery_server(uuid,uuid,date,text,jsonb)
+  from public, anon, authenticated, service_role;
+grant execute on function public.reserve_daily_digest_delivery_server(uuid,uuid,date,text,jsonb)
+  to service_role;
 revoke all on function public.reserve_daily_digest_delivery_server(uuid,uuid,uuid,date,text,jsonb)
   from public, anon, authenticated, service_role;
 grant execute on function public.reserve_daily_digest_delivery_server(uuid,uuid,uuid,date,text,jsonb)

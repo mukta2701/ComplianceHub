@@ -13,6 +13,7 @@ import {
   approveSlackDestination,
   approveStoredSlackDestination,
 } from "./slack-destination-policy";
+import { dailyDigestReservationMode } from "./runtime-capabilities";
 import { McpError, type McpErrorCode } from "../auth/errors";
 import {
   buildSlackDigestPayload,
@@ -110,14 +111,27 @@ const reservationSchema = z.discriminatedUnion("state", [
 ]);
 
 export async function reserveDelivery(supabase: SupabaseClient, input: ReserveInput): Promise<DigestReservation> {
-  const { data, error } = await supabase.rpc("reserve_daily_digest_delivery_server", {
+  const expectedChannelArguments = {
     target_actor_id: input.actorUserId,
     target_expected_channel_id: input.expectedChannelId,
     target_organisation_id: input.workspaceId,
     target_digest_on: input.localDate,
     target_fact_hash: input.factHash,
     target_message: input.message,
-  });
+  };
+  let { data, error } = await supabase.rpc(
+    "reserve_daily_digest_delivery_server",
+    expectedChannelArguments,
+  );
+  if (error?.code === "PGRST202" && dailyDigestReservationMode() === "bridge") {
+    ({ data, error } = await supabase.rpc("reserve_daily_digest_delivery_server", {
+      target_actor_id: input.actorUserId,
+      target_organisation_id: input.workspaceId,
+      target_digest_on: input.localDate,
+      target_fact_hash: input.factHash,
+      target_message: input.message,
+    }));
+  }
   if (error) throw new McpError(error.code === "42501" ? "FORBIDDEN" : "INTERNAL_ERROR");
   const parsed = reservationSchema.safeParse(data);
   if (!parsed.success) throw new McpError("INTERNAL_ERROR");

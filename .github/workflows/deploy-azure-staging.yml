@@ -8,6 +8,14 @@ on:
         required: true
         type: boolean
         default: true
+      rollout_phase:
+        description: Staged Slack destination rollout phase
+        required: true
+        type: choice
+        options:
+          - bridge
+          - final
+        default: final
   workflow_run:
     workflows: [CI]
     types: [completed]
@@ -27,6 +35,7 @@ env:
   AZURE_CONTAINER_APP: ${{ vars.AZURE_CONTAINER_APP }}
   AZURE_CONTAINER_ENVIRONMENT: ${{ vars.AZURE_CONTAINER_ENVIRONMENT }}
   DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+  ROLLOUT_PHASE: ${{ github.event_name == 'workflow_dispatch' && inputs.rollout_phase || 'final' }}
 
 jobs:
   publish:
@@ -109,6 +118,19 @@ jobs:
         id: rollout
         run: |
           set -euo pipefail
+          case "$ROLLOUT_PHASE" in
+            bridge)
+              runtime_reservation_mode="bridge"
+              expected_migration_version="20260825040825"
+              rollback_capability_required="false"
+              ;;
+            final)
+              runtime_reservation_mode="strict"
+              expected_migration_version="20260825053718"
+              rollback_capability_required="true"
+              ;;
+            *) exit 1 ;;
+          esac
           previous_revision="$(az containerapp show \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --name "$AZURE_CONTAINER_APP" \
@@ -121,27 +143,66 @@ jobs:
             --revision "$previous_revision" \
             --query 'properties.template.containers[0].env' \
             --output json)"
+          previous_image="$(az containerapp revision show \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_CONTAINER_APP" \
+            --revision "$previous_revision" \
+            --query 'properties.template.containers[0].image' \
+            --output tsv)"
+          test -n "$previous_image"
+          previous_revision_fqdn="$(az containerapp revision show \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_CONTAINER_APP" \
+            --revision "$previous_revision" \
+            --query 'properties.fqdn' \
+            --output tsv)"
+          test -n "$previous_revision_fqdn"
+          previous_ref_fingerprint="$(jq -c '[.[] | select(.secretRef != null) | [.name, .secretRef]] | sort' <<< "$current_environment" | sha256sum | cut -d ' ' -f 1)"
           current_service_ref="$(jq -r '.[] | select(.name == "SUPABASE_SERVICE_ROLE_KEY") | .secretRef // empty' <<< "$current_environment")"
           current_encryption_ref="$(jq -r '.[] | select(.name == "APP_ENCRYPTION_KEY") | .secretRef // empty' <<< "$current_environment")"
           current_cron_ref="$(jq -r '.[] | select(.name == "CRON_SECRET") | .secretRef // empty' <<< "$current_environment")"
           current_slack_allowed_ref="$(jq -r '.[] | select(.name == "SLACK_ALLOWED_WEBHOOK_SHA256") | .secretRef // empty' <<< "$current_environment")"
-          if [ -z "$current_service_ref" ] && [ -z "$current_encryption_ref" ] && [ -z "$current_cron_ref" ] && [ -z "$current_slack_allowed_ref" ]; then
-            current_slot=""
-            secret_slot="a"
-          elif [ "$current_service_ref" = "supabase-service-role-a" ] \
-            && [ "$current_encryption_ref" = "app-encryption-a" ] \
-            && [ "$current_cron_ref" = "cron-secret-a" ] \
-            && { [ -z "$current_slack_allowed_ref" ] || [ "$current_slack_allowed_ref" = "slack-allowed-webhook-a" ]; }; then
-            current_slot="a"
-            secret_slot="b"
-          elif [ "$current_service_ref" = "supabase-service-role-b" ] \
-            && [ "$current_encryption_ref" = "app-encryption-b" ] \
-            && [ "$current_cron_ref" = "cron-secret-b" ] \
-            && { [ -z "$current_slack_allowed_ref" ] || [ "$current_slack_allowed_ref" = "slack-allowed-webhook-b" ]; }; then
-            current_slot="b"
-            secret_slot="a"
+          current_reservation_mode="$(jq -r '.[] | select(.name == "DAILY_DIGEST_RESERVATION_MODE") | .value // empty' <<< "$current_environment")"
+          current_release_sha="$(jq -r '.[] | select(.name == "COMPLIANCEHUB_RELEASE_SHA") | .value // empty' <<< "$current_environment")"
+          if [ "$ROLLOUT_PHASE" = "bridge" ]; then
+            # BRIDGE_REF_POLICY_BEGIN
+            if [ -z "$current_service_ref" ] && [ -z "$current_encryption_ref" ] && [ -z "$current_cron_ref" ] && [ -z "$current_slack_allowed_ref" ]; then
+              current_slot=""
+              secret_slot="a"
+            elif [ "$current_service_ref" = "supabase-service-role-a" ] \
+              && [ "$current_encryption_ref" = "app-encryption-a" ] \
+              && [ "$current_cron_ref" = "cron-secret-a" ] \
+              && { [ -z "$current_slack_allowed_ref" ] || [ "$current_slack_allowed_ref" = "slack-allowed-webhook-a" ]; }; then
+              current_slot="a"
+              secret_slot="b"
+            elif [ "$current_service_ref" = "supabase-service-role-b" ] \
+              && [ "$current_encryption_ref" = "app-encryption-b" ] \
+              && [ "$current_cron_ref" = "cron-secret-b" ] \
+              && { [ -z "$current_slack_allowed_ref" ] || [ "$current_slack_allowed_ref" = "slack-allowed-webhook-b" ]; }; then
+              current_slot="b"
+              secret_slot="a"
+            else
+              exit 1
+            fi
+            # BRIDGE_REF_POLICY_END
           else
-            exit 1
+            # FINAL_REF_POLICY_BEGIN
+            if [ "$current_service_ref" = "supabase-service-role-a" ] \
+              && [ "$current_encryption_ref" = "app-encryption-a" ] \
+              && [ "$current_cron_ref" = "cron-secret-a" ] \
+              && [ "$current_slack_allowed_ref" = "slack-allowed-webhook-a" ]; then
+              current_slot="a"
+              secret_slot="b"
+            elif [ "$current_service_ref" = "supabase-service-role-b" ] \
+              && [ "$current_encryption_ref" = "app-encryption-b" ] \
+              && [ "$current_cron_ref" = "cron-secret-b" ] \
+              && [ "$current_slack_allowed_ref" = "slack-allowed-webhook-b" ]; then
+              current_slot="b"
+              secret_slot="a"
+            else
+              exit 1
+            fi
+            # FINAL_REF_POLICY_END
           fi
           github_ref_count="$(jq '[.[] | select(.name | startswith("GITHUB_"))] | length' <<< "$current_environment")"
           github_ref_names="$(jq -r '[.[] | select(.name | startswith("GITHUB_")) | .name] | sort | join(",")' <<< "$current_environment")"
@@ -179,8 +240,51 @@ jobs:
           else
             exit 1
           fi
+          verify_previous_capability="false"
+          if [ "$ROLLOUT_PHASE" = "final" ]; then
+            test "$current_reservation_mode" = "bridge"
+            [[ "$current_release_sha" =~ ^[0-9a-f]{40}$ ]]
+            verify_previous_capability="true"
+          elif [ -n "$current_reservation_mode" ] || [ -n "$current_release_sha" ]; then
+            test "$current_reservation_mode" = "bridge"
+            [[ "$current_release_sha" =~ ^[0-9a-f]{40}$ ]]
+            rollback_capability_required="true"
+            verify_previous_capability="true"
+          fi
+          if [ "$verify_previous_capability" = "true" ]; then
+            previous_health="$(curl --fail-with-body --retry 5 --retry-all-errors --retry-delay 5 --retry-max-time 120 --connect-timeout 10 --max-time 120 "https://$previous_revision_fqdn/api/health/live")"
+            jq --exit-status \
+              --arg releaseSha "$current_release_sha" \
+              '.status == "ok"
+                and .slackDestinationPolicy == "v1"
+                and .dailyDigestReservationMode == "bridge"
+                and .releaseSha == $releaseSha
+                and (keys | sort) == (["dailyDigestReservationMode","releaseSha","slackDestinationPolicy","status"] | sort)' \
+              <<< "$previous_health" >/dev/null
+            confirmed_revision="$(az containerapp show \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --name "$AZURE_CONTAINER_APP" \
+              --query properties.latestReadyRevisionName \
+              --output tsv)"
+            test "$confirmed_revision" = "$previous_revision"
+            confirmed_image="$(az containerapp revision show \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --name "$AZURE_CONTAINER_APP" \
+              --revision "$previous_revision" \
+              --query 'properties.template.containers[0].image' \
+              --output tsv)"
+            test "$confirmed_image" = "$previous_image"
+          fi
           {
             echo "previous-revision=$previous_revision"
+            echo "previous-image=$previous_image"
+            echo "previous-revision-fqdn=$previous_revision_fqdn"
+            echo "previous-ref-fingerprint=$previous_ref_fingerprint"
+            echo "previous-release-sha=$current_release_sha"
+            echo "previous-reservation-mode=$current_reservation_mode"
+            echo "rollback-capability-required=$rollback_capability_required"
+            echo "runtime-reservation-mode=$runtime_reservation_mode"
+            echo "expected-migration-version=$expected_migration_version"
             echo "service-role-ref=supabase-service-role-$secret_slot"
             echo "encryption-ref=app-encryption-$secret_slot"
             echo "cron-ref=cron-secret-$secret_slot"
@@ -242,7 +346,7 @@ jobs:
           done
           [[ "$HOSTED_SUPABASE_PROJECT_REF" =~ ^[a-z0-9]{20}$ ]]
           test "$SUPABASE_URL" = "https://$HOSTED_SUPABASE_PROJECT_REF.supabase.co"
-          test "$HOSTED_SUPABASE_MIGRATION_VERSION" = "20260825053718"
+          test "$HOSTED_SUPABASE_MIGRATION_VERSION" = "${{ steps.rollout.outputs.expected-migration-version }}"
           test "$REGISTERED_GITHUB_APP_SITE_URL" = "$CANONICAL_SITE_URL"
           container_app_fqdn="$(az containerapp show \
             --resource-group "$AZURE_RESOURCE_GROUP" \
@@ -273,6 +377,29 @@ jobs:
           pkcs8_footer="$(printf '%s' '\n-----END ' "$private_key_label" '-----')"
           [[ "$GITHUB_APP_PRIVATE_KEY" == "$pkcs8_header"* ]]
           [[ "$GITHUB_APP_PRIVATE_KEY" == *"$pkcs8_footer" ]]
+          # PRE_MUTATION_REVALIDATION_BEGIN
+          unchanged_revision="$(az containerapp show \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_CONTAINER_APP" \
+            --query properties.latestReadyRevisionName \
+            --output tsv)"
+          test "$unchanged_revision" = "${{ steps.rollout.outputs.previous-revision }}"
+          unchanged_image="$(az containerapp revision show \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_CONTAINER_APP" \
+            --revision "${{ steps.rollout.outputs.previous-revision }}" \
+            --query 'properties.template.containers[0].image' \
+            --output tsv)"
+          test "$unchanged_image" = "${{ steps.rollout.outputs.previous-image }}"
+          unchanged_environment="$(az containerapp revision show \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_CONTAINER_APP" \
+            --revision "${{ steps.rollout.outputs.previous-revision }}" \
+            --query 'properties.template.containers[0].env' \
+            --output json)"
+          unchanged_ref_fingerprint="$(jq -c '[.[] | select(.secretRef != null) | [.name, .secretRef]] | sort' <<< "$unchanged_environment" | sha256sum | cut -d ' ' -f 1)"
+          test "$unchanged_ref_fingerprint" = "${{ steps.rollout.outputs.previous-ref-fingerprint }}"
+          # PRE_MUTATION_REVALIDATION_END
           az containerapp secret set \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --name "$AZURE_CONTAINER_APP" \
@@ -294,10 +421,12 @@ jobs:
           echo "mutation-started=true" >> "$GITHUB_OUTPUT"
 
       - name: Create rollout revision from the previous healthy revision
+        id: revision
         env:
           IMAGE_REFERENCE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.publish.outputs.image-digest }}
         run: |
           set -euo pipefail
+          runtime_reservation_mode="${{ steps.rollout.outputs.runtime-reservation-mode }}"
           new_revision="$(az containerapp revision copy \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --name "$AZURE_CONTAINER_APP" \
@@ -317,6 +446,8 @@ jobs:
               "SUPABASE_OAUTH_ISSUER=${{ vars.SUPABASE_OAUTH_ISSUER }}" \
               "SUPABASE_OAUTH_JWKS_URL=${{ vars.SUPABASE_OAUTH_JWKS_URL }}" \
               "MCP_JWT_ALGORITHMS=${{ vars.MCP_JWT_ALGORITHMS }}" \
+              "DAILY_DIGEST_RESERVATION_MODE=$runtime_reservation_mode" \
+              "COMPLIANCEHUB_RELEASE_SHA=$DEPLOY_SHA" \
               "SUPABASE_SERVICE_ROLE_KEY=secretref:${{ steps.rollout.outputs.service-role-ref }}" \
               "APP_ENCRYPTION_KEY=secretref:${{ steps.rollout.outputs.encryption-ref }}" \
               "CRON_SECRET=secretref:${{ steps.rollout.outputs.cron-ref }}" \
@@ -355,6 +486,14 @@ jobs:
             --query properties.latestReadyRevisionName \
             --output tsv)"
           test "$latest_ready_revision" = "$new_revision"
+          new_revision_fqdn="$(az containerapp revision show \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_CONTAINER_APP" \
+            --revision "$new_revision" \
+            --query 'properties.fqdn' \
+            --output tsv)"
+          test -n "$new_revision_fqdn"
+          echo "new-revision-fqdn=$new_revision_fqdn" >> "$GITHUB_OUTPUT"
 
       - name: Verify deployed health and OAuth/MCP contract
         env:
@@ -363,8 +502,32 @@ jobs:
         run: |
           set -euo pipefail
           origin="$CANONICAL_SITE_URL"
-          curl --fail-with-body --retry 5 --retry-all-errors --retry-delay 5 --retry-max-time 120 --connect-timeout 10 --max-time 120 "$origin/api/health/live"
-          curl --fail-with-body --retry 5 --retry-all-errors --retry-delay 5 --retry-max-time 120 --connect-timeout 10 --max-time 120 "$origin/api/health"
+          revision_origin="https://${{ steps.revision.outputs.new-revision-fqdn }}"
+          runtime_reservation_mode="${{ steps.rollout.outputs.runtime-reservation-mode }}"
+          live_health="$(curl --fail-with-body --retry 5 --retry-all-errors --retry-delay 5 --retry-max-time 120 --connect-timeout 10 --max-time 120 "$revision_origin/api/health/live")"
+          jq --exit-status \
+            --arg policy "v1" \
+            --arg reservationMode "$runtime_reservation_mode" \
+            --arg releaseSha "$DEPLOY_SHA" \
+            '.status == "ok"
+              and .slackDestinationPolicy == $policy
+              and .dailyDigestReservationMode == $reservationMode
+              and .releaseSha == $releaseSha
+              and (keys | sort) == (["dailyDigestReservationMode","releaseSha","slackDestinationPolicy","status"] | sort)' \
+            <<< "$live_health" >/dev/null
+          ready_health="$(curl --fail-with-body --retry 5 --retry-all-errors --retry-delay 5 --retry-max-time 120 --connect-timeout 10 --max-time 120 "$revision_origin/api/health")"
+          jq --exit-status \
+            --arg policy "v1" \
+            --arg reservationMode "$runtime_reservation_mode" \
+            --arg releaseSha "$DEPLOY_SHA" \
+            '.status == "ok"
+              and .db == "ok"
+              and (.ms | type) == "number"
+              and .slackDestinationPolicy == $policy
+              and .dailyDigestReservationMode == $reservationMode
+              and .releaseSha == $releaseSha
+              and (keys | sort) == (["dailyDigestReservationMode","db","ms","releaseSha","slackDestinationPolicy","status"] | sort)' \
+            <<< "$ready_health" >/dev/null
           curl --fail-with-body --retry 5 --retry-all-errors --retry-delay 5 --retry-max-time 120 --connect-timeout 10 --max-time 120 \
             "$origin/.well-known/oauth-protected-resource" | jq --exit-status \
             --arg resource "$origin/mcp" \
@@ -392,6 +555,7 @@ jobs:
           CANONICAL_SITE_URL: ${{ vars.NEXT_PUBLIC_SITE_URL }}
         run: |
           set -euo pipefail
+          rollback_capability_required="${{ steps.rollout.outputs.rollback-capability-required }}"
           rollback_revision="$(az containerapp revision copy \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --name "$AZURE_CONTAINER_APP" \
@@ -417,11 +581,44 @@ jobs:
           done
           test "$health_state" = "Healthy"
           test "$running_state" = "Running"
+          rollback_image="$(az containerapp revision show \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_CONTAINER_APP" \
+            --revision "$rollback_revision" \
+            --query 'properties.template.containers[0].image' \
+            --output tsv)"
+          test "$rollback_image" = "${{ steps.rollout.outputs.previous-image }}"
+          rollback_revision_fqdn="$(az containerapp revision show \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_CONTAINER_APP" \
+            --revision "$rollback_revision" \
+            --query 'properties.fqdn' \
+            --output tsv)"
+          test -n "$rollback_revision_fqdn"
+          rollback_environment="$(az containerapp revision show \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_CONTAINER_APP" \
+            --revision "$rollback_revision" \
+            --query 'properties.template.containers[0].env' \
+            --output json)"
+          rollback_ref_fingerprint="$(jq -c '[.[] | select(.secretRef != null) | [.name, .secretRef]] | sort' <<< "$rollback_environment" | sha256sum | cut -d ' ' -f 1)"
+          test "$rollback_ref_fingerprint" = "${{ steps.rollout.outputs.previous-ref-fingerprint }}"
           latest_ready_revision="$(az containerapp show \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --name "$AZURE_CONTAINER_APP" \
             --query properties.latestReadyRevisionName \
             --output tsv)"
           test "$latest_ready_revision" = "$rollback_revision"
-          curl --fail-with-body --retry 5 --retry-all-errors --retry-delay 5 --retry-max-time 120 --connect-timeout 10 --max-time 120 "$CANONICAL_SITE_URL/api/health/live"
-          curl --fail-with-body --retry 5 --retry-all-errors --retry-delay 5 --retry-max-time 120 --connect-timeout 10 --max-time 120 "$CANONICAL_SITE_URL/api/health"
+          rollback_live_health="$(curl --fail-with-body --retry 5 --retry-all-errors --retry-delay 5 --retry-max-time 120 --connect-timeout 10 --max-time 120 "https://$rollback_revision_fqdn/api/health/live")"
+          if [ "$rollback_capability_required" = "true" ]; then
+            jq --exit-status \
+              --arg releaseSha "${{ steps.rollout.outputs.previous-release-sha }}" \
+              '.status == "ok"
+                and .slackDestinationPolicy == "v1"
+                and .dailyDigestReservationMode == "bridge"
+                and .releaseSha == $releaseSha' \
+              <<< "$rollback_live_health" >/dev/null
+          else
+            test "$ROLLOUT_PHASE" = "bridge"
+          fi
+          curl --fail-with-body --retry 5 --retry-all-errors --retry-delay 5 --retry-max-time 120 --connect-timeout 10 --max-time 120 "$CANONICAL_SITE_URL/api/health" >/dev/null

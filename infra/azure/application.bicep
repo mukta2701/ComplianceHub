@@ -14,6 +14,12 @@ param mcpResourceUrl string
 param supabaseOauthIssuer string
 param supabaseOauthJwksUrl string
 param mcpJwtAlgorithms string = 'RS256,ES256'
+@allowed([
+  'bridge'
+  'strict'
+])
+param dailyDigestReservationMode string = 'strict'
+param complianceHubReleaseSha string = 'unknown'
 
 param supabaseRefName string
 param encryptionRefName string
@@ -68,6 +74,8 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
             { name: 'SUPABASE_OAUTH_ISSUER', value: supabaseOauthIssuer }
             { name: 'SUPABASE_OAUTH_JWKS_URL', value: supabaseOauthJwksUrl }
             { name: 'MCP_JWT_ALGORITHMS', value: mcpJwtAlgorithms }
+            { name: 'DAILY_DIGEST_RESERVATION_MODE', value: dailyDigestReservationMode }
+            { name: 'COMPLIANCEHUB_RELEASE_SHA', value: complianceHubReleaseSha }
             { name: 'SUPABASE_SERVICE_ROLE_KEY', secretRef: supabaseRefName }
             { name: 'APP_ENCRYPTION_KEY', secretRef: encryptionRefName }
             { name: 'CRON_SECRET', secretRef: cronRefName }

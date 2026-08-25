@@ -52,8 +52,11 @@ configuration or delivery-ledger mutation.
    reservation RPC to require the prevalidated expected channel ID under the
    existing organisation/date advisory lock. A selected, failed-delivery,
    disabled, revoked, switched, or cross-organisation mismatch must return a
-   safe no-channel state before delivery/attempt/audit mutation. Remove/revoke
-   the old signature and keep service-role-only execution.
+   safe no-channel state before delivery/attempt/audit mutation. **Superseded
+   rollout ruling:** do not drop the old five-argument overload in this
+   migration. Keep both overloads service-role-only for a manual bridge, default
+   the application to strict, and retire the old overload only in a later
+   reviewed migration after hosted final acceptance.
 
 ## Release/config/docs
 
@@ -66,6 +69,12 @@ configuration or delivery-ledger mutation.
   architecture/backlog, and plugin/skill wording. Active guidance must refer only
   to a Mukta-owned server-approved private destination. Remove or explicitly mark
   AdTecher/Ankit/KT-SME Slack acceptance as invalid historical evidence.
+- Use an explicit manual `bridge` then manual `final` rollout. Bridge alone may
+  attest migration `20260825040825`, tolerate absent bootstrap/Slack refs, and
+  fall back once on exact PostgREST `PGRST202`. Final and every automatic run are
+  strict, require migration `20260825053718`, a policy-capable bridge revision,
+  and exact same-slot references. Health exposes only policy version, mode, and
+  release SHA so the workflow can correlate the exact rollback revision.
 
 ## Tests first
 
@@ -78,7 +87,7 @@ Record RED before production edits. Add:
 - daily ordering and every early failure with zero limiter/service/reserve/audit/
   fetch, expected-channel race, final recheck, exact retry/duplicate invariants;
 - monitoring pre-decrypt rejection, valid delivery, final recheck, and isolation;
-- a new pgTAP suite proving old signature unavailable, service-only grants,
+- a new pgTAP suite proving both overloads exist with service-only grants,
   expected-channel success, wrong/cross-org/disabled/revoked/switched zero
   delivery/attempt/audit mutation, and retry binding;
 - local integration with injected transport only; build sentinel/static/health

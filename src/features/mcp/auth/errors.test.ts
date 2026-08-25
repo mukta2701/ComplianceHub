@@ -22,6 +22,22 @@ describe("MCP errors", () => {
       .toHaveProperty("_meta", { "mcp/www_authenticate": [challenge] });
   });
 
+  it("describes a confirmed digest rejection without attributing it to Slack or exposing configuration detail", () => {
+    const error = new McpError("SLACK_REJECTED");
+
+    expect(error.toStructuredContent()).toEqual({
+      ok: false,
+      error: {
+        code: "SLACK_REJECTED",
+        message: "The Slack digest delivery was rejected.",
+        recovery: "Check that the server-approved Slack destination is configured and active, then explicitly retry a confirmed failure.",
+      },
+    });
+    const publicText = `${error.message} ${error.recovery}`;
+    expect(publicText).not.toMatch(/Slack (?:said|returned|responded|refused)/i);
+    expect(publicText).not.toMatch(/webhook|workspace|channel name|digest value|sha-?256|environment variable/i);
+  });
+
   it.each(MCP_ERROR_CODES.filter((code) => code !== "AUTH_REQUIRED" && code !== "INVALID_TOKEN"))(
     "does not attach an authentication challenge to business error %s", (code) => {
       expect(mcpErrorResult(new McpError(code), "https://compliance.example/mcp")).not.toHaveProperty("_meta");

@@ -312,6 +312,41 @@ describe("postDailyDigest", () => {
     }));
   });
 
+  it("finalizes a legacy bridge reservation whose returned channel differs from the held approved channel without fetch", async () => {
+    vi.stubEnv("DAILY_DIGEST_RESERVATION_MODE", "bridge");
+    const legacyChannelId = "30000000-0000-4000-8000-000000000099";
+    const rpc = vi.fn()
+      .mockResolvedValueOnce({ data: null, error: { code: "PGRST202" } })
+      .mockResolvedValueOnce({
+        data: {
+          state: "reserved" as const,
+          deliveryId: DELIVERY_ID,
+          channelId: legacyChannelId,
+          attemptNumber: 1,
+          message: payload,
+        },
+        error: null,
+      });
+    const bridgeClient = { rpc } as unknown as import("@supabase/supabase-js").SupabaseClient;
+    const deps = dependencies({
+      createDeliveryClient: vi.fn(() => bridgeClient),
+      reserve: reserveDelivery,
+    });
+
+    await expect(postDailyDigest({ supabase: {} as never, userId: USER_ID, clientId: "codex", input: request }, deps))
+      .rejects.toMatchObject({ code: "NO_DIGEST_CHANNEL" });
+
+    expect(deps.isChannelActive).not.toHaveBeenCalled();
+    expect(deps.deliver).not.toHaveBeenCalled();
+    expect(rpc).toHaveBeenCalledTimes(2);
+    expect(deps.finalize).toHaveBeenCalledWith(bridgeClient, expect.objectContaining({
+      deliveryId: DELIVERY_ID,
+      attemptNumber: 1,
+      outcome: "failed",
+      errorCode: "NO_DIGEST_CHANNEL",
+    }));
+  });
+
   it("fails a final allow-policy recheck as confirmed SLACK_REJECTED without network", async () => {
     const deps = dependencies({
       isChannelActive: vi.fn(async () => {
@@ -388,6 +423,87 @@ describe("daily digest reservation error mapping", () => {
     message: payload,
     expectedChannelId: CHANNEL_ID,
   };
+
+  const reserved = {
+    state: "reserved",
+    deliveryId: DELIVERY_ID,
+    channelId: CHANNEL_ID,
+    attemptNumber: 1,
+    message: payload,
+  };
+
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("uses the expected-channel overload once when it is available", async () => {
+    const rpc = vi.fn(async () => ({ data: reserved, error: null }));
+    const supabase = { rpc } as unknown as import("@supabase/supabase-js").SupabaseClient;
+
+    await expect(reserveDelivery(supabase, input)).resolves.toEqual(reserved);
+
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc).toHaveBeenCalledWith("reserve_daily_digest_delivery_server", {
+      target_actor_id: USER_ID,
+      target_expected_channel_id: CHANNEL_ID,
+      target_organisation_id: WORKSPACE_ID,
+      target_digest_on: "2026-08-07",
+      target_fact_hash: factHash,
+      target_message: payload,
+    });
+  });
+
+  it("falls back exactly once to the legacy overload only for exact PGRST202 in bridge mode", async () => {
+    vi.stubEnv("DAILY_DIGEST_RESERVATION_MODE", "bridge");
+    const rpc = vi.fn()
+      .mockResolvedValueOnce({ data: null, error: { code: "PGRST202", message: "schema cache has no six-argument overload" } })
+      .mockResolvedValueOnce({ data: reserved, error: null });
+    const supabase = { rpc } as unknown as import("@supabase/supabase-js").SupabaseClient;
+
+    await expect(reserveDelivery(supabase, input)).resolves.toEqual(reserved);
+
+    expect(rpc).toHaveBeenCalledTimes(2);
+    expect(rpc.mock.calls[0]?.[1]).toHaveProperty("target_expected_channel_id", CHANNEL_ID);
+    expect(rpc.mock.calls[1]).toEqual(["reserve_daily_digest_delivery_server", {
+      target_actor_id: USER_ID,
+      target_organisation_id: WORKSPACE_ID,
+      target_digest_on: "2026-08-07",
+      target_fact_hash: factHash,
+      target_message: payload,
+    }]);
+  });
+
+  it("fails closed on PGRST202 in strict mode without calling the legacy overload", async () => {
+    vi.stubEnv("DAILY_DIGEST_RESERVATION_MODE", "strict");
+    const rpc = vi.fn(async () => ({ data: null, error: { code: "PGRST202" } }));
+    const supabase = { rpc } as unknown as import("@supabase/supabase-js").SupabaseClient;
+
+    await expect(reserveDelivery(supabase, input)).rejects.toMatchObject({ code: "INTERNAL_ERROR" });
+    expect(rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    [{ code: "42883", message: "undefined function" }, "INTERNAL_ERROR"],
+    [{ code: "42501", message: "permission denied" }, "FORBIDDEN"],
+    [{ code: "57014", message: "timeout" }, "INTERNAL_ERROR"],
+    [{ code: "XX000", message: "PGRST202 appears only in text" }, "INTERNAL_ERROR"],
+    [{ message: "network unavailable" }, "INTERNAL_ERROR"],
+  ] as const)("does not use the legacy overload for non-PGRST202 reservation error %#", async (error, code) => {
+    vi.stubEnv("DAILY_DIGEST_RESERVATION_MODE", "bridge");
+    const rpc = vi.fn(async () => ({ data: null, error }));
+    const supabase = { rpc } as unknown as import("@supabase/supabase-js").SupabaseClient;
+
+    await expect(reserveDelivery(supabase, input)).rejects.toMatchObject({ code });
+    expect(rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not fall back when the expected-channel call rejects at the transport boundary", async () => {
+    vi.stubEnv("DAILY_DIGEST_RESERVATION_MODE", "bridge");
+    const transportError = new TypeError("network unavailable");
+    const rpc = vi.fn(async () => { throw transportError; });
+    const supabase = { rpc } as unknown as import("@supabase/supabase-js").SupabaseClient;
+
+    await expect(reserveDelivery(supabase, input)).rejects.toBe(transportError);
+    expect(rpc).toHaveBeenCalledTimes(1);
+  });
 
   it("maps an Owner revocation SQLSTATE to FORBIDDEN before any network call", async () => {
     const supabase = {

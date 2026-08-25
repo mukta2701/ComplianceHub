@@ -14,6 +14,11 @@ or Slack output.
       installation ID, and reviewed permission/event set; never record keys.
 - [ ] Verify the hosted Supabase backup and the complete pending migration set
       through `20260825053718` before setting the protected schema attestation.
+- [ ] Complete the documented staged Slack compatibility rollout: manually
+      deploy `bridge` with migration `20260825040825`, verify the non-secret
+      `v1`/`bridge` capability and exact release SHA, apply additive migration
+      `20260825053718`, then manually deploy `final`/`strict`. Never use bridge
+      for an automatic deployment.
 - [ ] Confirm all eight server-only `AZURE_GITHUB_*` values are present in the
       protected environment, with the private key in escaped-newline PKCS#8
       form. Do not copy values into this document or build inputs.

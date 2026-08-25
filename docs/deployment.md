@@ -77,19 +77,38 @@ migrations, in this order:
 18. `20260825040825_mcp_github_digest_v2.sql`
 19. `20260825053718_restrict_slack_delivery_destination.sql`
 
-Stop if the project ref, ordering, or pending set differs. After the backup is
-verified, apply that reviewed set once with `supabase db push`, rerun
-`supabase migration list`, and verify the GitHub tables, security-invoker summary
-view, and service-only claim/finalise/inspection RPC signatures. Confirm that a
-materialisation job at its 25-attempt ceiling becomes visible as `exhausted`
-instead of being reclaimed or reported healthy. Only then set the protected environment
-variables `HOSTED_SUPABASE_PROJECT_REF=ytenjiyjdcrjkgwmciqw` and
-`HOSTED_SUPABASE_MIGRATION_VERSION=20260825053718`. The deploy preflight binds
-both attestations to the exact `NEXT_PUBLIC_SUPABASE_URL`; changing the target
-project invalidates the gate. These attestations are not substitutes for the
-list, dry run, backup, or direct verification. The migrations remain compatible
-with the previous application revision; rolling the Container App back does not
-roll the database back.
+Stop if the project ref, ordering, or pending set differs. The Slack reservation
+upgrade uses one explicit two-stage deployment; do not apply migration 19 before
+the bridge revision is healthy:
+
+1. Apply and verify migrations 1–18 through
+   `20260825040825_mcp_github_digest_v2.sql`. Set the protected migration
+   attestation temporarily to `20260825040825` and manually dispatch **Deploy
+   Azure staging** with `rollout_phase=bridge`. This deploys the policy-capable
+   image with `DAILY_DIGEST_RESERVATION_MODE=bridge`; it tries the six-argument
+   reservation first and may use the service-only legacy overload only when
+   PostgREST returns exact `PGRST202`.
+2. Verify the bridge health response reports policy `v1`, reservation mode
+   `bridge`, and the exact release SHA. Then apply only additive migration 19,
+   rerun the migration list and database checks, and set
+   `HOSTED_SUPABASE_MIGRATION_VERSION=20260825053718`.
+3. Manually dispatch `rollout_phase=final`. Final requires the exact healthy
+   policy-capable bridge revision, coherent same-slot Slack/core references,
+   and migration `20260825053718`; it deploys
+   `DAILY_DIGEST_RESERVATION_MODE=strict`. Every automatic `workflow_run`
+   deployment is final/strict and cannot create or reuse a bridge.
+
+After migration 19, verify the GitHub tables, security-invoker summary view, and
+both service-only reservation overloads plus the claim/finalise/inspection RPC
+signatures. The five-argument overload is temporary rollout compatibility and
+must remain denied to PUBLIC, anon, and authenticated until a later reviewed
+retirement migration removes it. Confirm that a materialisation job at its
+25-attempt ceiling becomes visible as `exhausted` instead of being reclaimed or
+reported healthy. The deploy preflight binds the project and phase-specific
+migration attestations to the exact `NEXT_PUBLIC_SUPABASE_URL`; changing the
+target project invalidates the gate. These attestations are not substitutes for
+the list, dry run, backup, or direct verification. Rolling the Container App
+back never rolls the database back.
 
 ## 2. Azure Container Apps staging **(you — external authorization checkpoint)**
 
@@ -126,20 +145,21 @@ an Azure Container Registry. Render, AWS, and Vercel hosting are not used.
    public repository's package inherits public visibility, so Container Apps
    needs no long-lived registry credential. The workflow deploys the immutable
    image digest, not a mutable tag.
-8. The first rollout may initialise slot `a` only when all four core secret
-   references are absent. Later rollouts write credentials to the opposite slot
-   only after proving the legacy references are coherent and the prior GitHub
-   reference set is either absent (the one-time upgrade) or all eight values in
-   the same slot. The Slack allow-digest reference may likewise be absent only
-   for this one-time upgrade; once present it must match the core slot. Partial
-   or mixed state fails closed. It creates a new revision
-   even on a rerun, waits for that exact
-   revision to be Healthy/Running and `latestReadyRevisionName`, then validates
-   that the canonical origin exactly matches the Container App ingress FQDN
-   before checking liveness, readiness, OAuth resource metadata, and the bounded
-   unauthenticated MCP challenge. On failure or cancellation it copies the
-   previous healthy revision and applies the same exact-revision proof before
-   bounded rollback smoke.
+8. Only a manual `bridge` rollout may initialise slot `a` when all four core
+   references are absent, or accept a coherent core a/b slot whose Slack
+   allow-digest reference is absent or in that same slot. A `final` or automatic
+   rollout accepts only a coherent a/b core plus the exact same-slot Slack
+   reference; there is no general blank-reference exception. Immediately before
+   the first secret mutation, the workflow re-reads and compares the captured
+   `latestReadyRevisionName`, immutable image, and complete secret-reference
+   fingerprint. Final also proves that the exact rollback revision is the
+   policy-capable bridge image by matching its non-secret health marker, mode,
+   and release SHA. It then creates one new revision, binds the inactive secret
+   slot exactly once, waits for that exact revision to be Healthy/Running and
+   `latestReadyRevisionName`, and validates the marker/release identity before
+   OAuth/MCP smoke. On failure or cancellation it copies only the captured
+   previous revision, verifies the copied image and references are identical,
+   and for a final rollback proves the restored `v1`/`bridge`/release identity.
 9. Do not merge or deploy this release until the hosted migration checkpoint and
    GitHub organisation-owner registration checkpoint below are complete. The
    current environment has no GitHub App values, `main` auto-deploys after CI,

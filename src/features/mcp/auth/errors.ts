@@ -15,7 +15,7 @@ const safeErrors: Record<McpErrorCode, { message: string; recovery: string; stat
   STALE_DIGEST: { message: "Compliance facts changed after this digest was prepared.", recovery: "Prepare a new digest before posting.", status: 409 },
   NO_DIGEST_CHANNEL: { message: "No daily digest channel is configured.", recovery: "Ask a workspace Owner to configure one Slack digest channel.", status: 409 },
   ALREADY_POSTED: { message: "Today’s digest has already been posted.", recovery: "No action is needed for this date.", status: 409 },
-  SLACK_REJECTED: { message: "Slack rejected the digest delivery.", recovery: "Check the configured Slack channel, then explicitly retry a confirmed failure.", status: 502 },
+  SLACK_REJECTED: { message: "The Slack digest delivery was rejected.", recovery: "Check that the server-approved Slack destination is configured and active, then explicitly retry a confirmed failure.", status: 502 },
   DELIVERY_UNKNOWN: { message: "Slack delivery could not be confirmed.", recovery: "Review Slack and the audit trail before taking further action.", status: 502 },
   RATE_LIMITED: { message: "Too many requests were made.", recovery: "Wait briefly, then try again.", status: 429 },
   INTERNAL_ERROR: { message: "ComplianceHub could not complete the request.", recovery: "Try again later or contact the internal support team.", status: 500 },

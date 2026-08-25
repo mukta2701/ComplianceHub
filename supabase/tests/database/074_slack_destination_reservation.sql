@@ -1,10 +1,26 @@
 begin;
-select plan(31);
+select plan(35);
 
-select hasnt_function(
+select has_function(
   'public', 'reserve_daily_digest_delivery_server',
   array['uuid','uuid','date','text','jsonb'],
-  'the reservation signature without an expected channel is removed'
+  'the staged bridge retains the legacy reservation signature temporarily'
+);
+select ok(
+  not has_function_privilege('authenticated','public.reserve_daily_digest_delivery_server(uuid,uuid,date,text,jsonb)','EXECUTE'),
+  'authenticated cannot call the legacy bridge overload'
+);
+select ok(
+  not has_function_privilege('anon','public.reserve_daily_digest_delivery_server(uuid,uuid,date,text,jsonb)','EXECUTE'),
+  'anonymous callers cannot call the legacy bridge overload'
+);
+select ok(
+  not has_function_privilege('public','public.reserve_daily_digest_delivery_server(uuid,uuid,date,text,jsonb)','EXECUTE'),
+  'PUBLIC cannot call the legacy bridge overload'
+);
+select ok(
+  has_function_privilege('service_role','public.reserve_daily_digest_delivery_server(uuid,uuid,date,text,jsonb)','EXECUTE'),
+  'only the service boundary can call the legacy bridge overload'
 );
 select has_function(
   'public', 'reserve_daily_digest_delivery_server',

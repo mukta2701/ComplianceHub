@@ -19,6 +19,7 @@ describe("Azure staging deployment contract", () => {
   const dockerfile = read("Dockerfile");
   const deployment = read("docs/deployment.md");
   const releaseChecklist = read("docs/release-checklist.md");
+  const slackMigration = read("supabase/migrations/20260825053718_restrict_slack_delivery_destination.sql");
   const healthRoutes = `${read("src/app/api/health/route.ts")}\n${read("src/app/api/health/live/route.ts")}`;
   const clientSources = readdirSync(`${process.cwd()}/src`, { recursive: true })
     .filter((entry) => typeof entry === "string" && /\.[cm]?[jt]sx?$/.test(entry))
@@ -44,14 +45,96 @@ describe("Azure staging deployment contract", () => {
   });
 
   it("retains the previous credential slot and creates a fresh revision on rerun", () => {
-    expect(workflow).toMatch(/-z "\$current_service_ref"[\s\S]*-z "\$current_encryption_ref"[\s\S]*-z "\$current_cron_ref"[\s\S]*-z "\$current_slack_allowed_ref"[\s\S]*secret_slot="a"/);
-    expect(workflow).toMatch(/current_service_ref[\s\S]*supabase-service-role-a[\s\S]*current_slack_allowed_ref[\s\S]*slack-allowed-webhook-a[\s\S]*secret_slot="b"/);
+    expect(workflow).toContain("# BRIDGE_REF_POLICY_BEGIN");
+    expect(workflow).toContain("# FINAL_REF_POLICY_BEGIN");
     expect(workflow).toMatch(/secret_slot="a"/);
     expect(workflow).toContain("run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}");
     expect(bicep).toContain("param supabaseRefName string");
     expect(bicep).toContain("secretRef: supabaseRefName");
     expect(bicep).not.toMatch(/param supabaseServiceRoleKey|string\s+supabaseServiceRoleKey/);
     expect(bicep).not.toMatch(/configuration:\s*\{[\s\S]*?secrets:\s*\[/);
+  });
+
+  it("allows bridge only by explicit manual dispatch and forces every automatic rollout to final strict mode", () => {
+    expect(workflow).toMatch(/workflow_dispatch:[\s\S]*rollout_phase:[\s\S]*type: choice[\s\S]*options:[\s\S]*- bridge[\s\S]*- final[\s\S]*default: final/);
+    expect(workflow).toContain("ROLLOUT_PHASE: ${{ github.event_name == 'workflow_dispatch' && inputs.rollout_phase || 'final' }}");
+    expect(workflow).toMatch(/case "\$ROLLOUT_PHASE" in[\s\S]*bridge\)[\s\S]*runtime_reservation_mode="bridge"[\s\S]*final\)[\s\S]*runtime_reservation_mode="strict"/);
+    expect(workflow).not.toMatch(/workflow_run[\s\S]{0,300}bridge/);
+  });
+
+  it("keeps both reservation overloads service-only during the staged bridge", () => {
+    expect(slackMigration).not.toMatch(/drop function public\.reserve_daily_digest_delivery_server\(uuid,uuid,date,text,jsonb\)/i);
+    for (const signature of [
+      "reserve_daily_digest_delivery_server(uuid,uuid,date,text,jsonb)",
+      "reserve_daily_digest_delivery_server(uuid,uuid,uuid,date,text,jsonb)",
+    ]) {
+      expect(slackMigration).toContain(`revoke all on function public.${signature}`);
+      expect(slackMigration).toContain(`grant execute on function public.${signature}`);
+    }
+  });
+
+  it.each([
+    ["bridge", "bridge", "20260825040825"],
+    ["final", "strict", "20260825053718"],
+  ] as const)("maps %s rollout to %s runtime and exact %s schema", (phase, runtimeMode, migration) => {
+    const phaseBlock = workflow.match(new RegExp(`${phase}\\)([\\s\\S]*?);;`))?.[1] ?? "";
+    expect(phaseBlock).toContain(`runtime_reservation_mode="${runtimeMode}"`);
+    expect(phaseBlock).toContain(`expected_migration_version="${migration}"`);
+    expect(workflow).toContain('test "$HOSTED_SUPABASE_MIGRATION_VERSION" = "${{ steps.rollout.outputs.expected-migration-version }}"');
+  });
+
+  it("accepts a missing Slack reference only during bridge and requires exact same-slot references for final", () => {
+    const bridgeRefs = workflow.slice(
+      workflow.indexOf("# BRIDGE_REF_POLICY_BEGIN"),
+      workflow.indexOf("# BRIDGE_REF_POLICY_END"),
+    );
+    const finalRefs = workflow.slice(
+      workflow.indexOf("# FINAL_REF_POLICY_BEGIN"),
+      workflow.indexOf("# FINAL_REF_POLICY_END"),
+    );
+
+    expect(bridgeRefs).toMatch(/-z "\$current_service_ref"[\s\S]*-z "\$current_encryption_ref"[\s\S]*-z "\$current_cron_ref"[\s\S]*-z "\$current_slack_allowed_ref"/);
+    expect(bridgeRefs).toMatch(/supabase-service-role-a[\s\S]*app-encryption-a[\s\S]*cron-secret-a[\s\S]*-z "\$current_slack_allowed_ref"[\s\S]*slack-allowed-webhook-a/);
+    expect(finalRefs).toMatch(/supabase-service-role-a[\s\S]*app-encryption-a[\s\S]*cron-secret-a[\s\S]*slack-allowed-webhook-a/);
+    expect(finalRefs).toMatch(/supabase-service-role-b[\s\S]*app-encryption-b[\s\S]*cron-secret-b[\s\S]*slack-allowed-webhook-b/);
+    expect(finalRefs).not.toContain('-z "$current_slack_allowed_ref"');
+  });
+
+  it("proves final follows an exact policy-capable bridge revision and revalidates it immediately before mutation", () => {
+    expect(workflow).toMatch(/ROLLOUT_PHASE.*final[\s\S]*current_reservation_mode[\s\S]*test "\$current_reservation_mode" = "bridge"/);
+    expect(workflow).toMatch(/current_release_sha[\s\S]*previous_health[\s\S]*slackDestinationPolicy[\s\S]*dailyDigestReservationMode[\s\S]*releaseSha/);
+    expect(workflow).toMatch(/previous_revision_fqdn[\s\S]*https:\/\/\$previous_revision_fqdn\/api\/health\/live/);
+    const revalidation = workflow.slice(
+      workflow.indexOf("# PRE_MUTATION_REVALIDATION_BEGIN"),
+      workflow.indexOf("az containerapp secret set"),
+    );
+    expect(revalidation).toContain("latestReadyRevisionName");
+    expect(revalidation).toContain("previous-revision");
+    expect(revalidation).toContain("previous-image");
+    expect(revalidation).toContain("previous-ref-fingerprint");
+    expect(revalidation).toContain("# PRE_MUTATION_REVALIDATION_END");
+  });
+
+  it("stages and binds each sensitive value exactly once while exposing only nonsecret rollout capability", () => {
+    expect(workflow.split("az containerapp secret set")).toHaveLength(2);
+    expect(workflow.split('"DAILY_DIGEST_RESERVATION_MODE=$runtime_reservation_mode"')).toHaveLength(2);
+    expect(workflow.split('"COMPLIANCEHUB_RELEASE_SHA=$DEPLOY_SHA"')).toHaveLength(2);
+    expect(bicep).toContain("param dailyDigestReservationMode string = 'strict'");
+    expect(bicep).toContain("param complianceHubReleaseSha string = 'unknown'");
+    expect(bicep).toContain("{ name: 'DAILY_DIGEST_RESERVATION_MODE', value: dailyDigestReservationMode }");
+    expect(bicep).toContain("{ name: 'COMPLIANCEHUB_RELEASE_SHA', value: complianceHubReleaseSha }");
+    expect(clientSources).not.toContain("DAILY_DIGEST_RESERVATION_MODE");
+    expect(clientSources).not.toContain("COMPLIANCEHUB_RELEASE_SHA");
+  });
+
+  it("verifies the deployed capability and pins rollback semantics to the captured revision", () => {
+    expect(workflow).toMatch(/--arg policy "v1"[\s\S]*--arg reservationMode "\$runtime_reservation_mode"[\s\S]*--arg releaseSha "\$DEPLOY_SHA"/);
+    expect(workflow).toMatch(/slackDestinationPolicy == \$policy[\s\S]*dailyDigestReservationMode == \$reservationMode[\s\S]*releaseSha == \$releaseSha/);
+    expect(workflow).toContain("rollback-capability-required");
+    expect(workflow).toMatch(/new_revision_fqdn[\s\S]*revision_origin="https:\/\/\$\{\{ steps\.revision\.outputs\.new-revision-fqdn \}\}"/);
+    expect(workflow).toMatch(/--from-revision "\$\{\{ steps\.rollout\.outputs\.previous-revision \}\}"[\s\S]*rollback_image[\s\S]*previous-image/);
+    expect(workflow).toMatch(/rollback_revision_fqdn[\s\S]*https:\/\/\$rollback_revision_fqdn\/api\/health\/live/);
+    expect(workflow).toMatch(/rollback_capability_required[\s\S]*dailyDigestReservationMode == "bridge"/);
   });
 
   it("keeps the one allowed Slack destination digest server-only and rotates it with the complete inactive slot", () => {
@@ -141,8 +224,16 @@ describe("Azure staging deployment contract", () => {
     expect(deployment).toMatch(/backup[\s\S]*supabase migration list[\s\S]*HOSTED_SUPABASE_MIGRATION_VERSION/i);
     expect(deployment).toMatch(/nineteen pending additive\s+migrations[\s\S]*20260817010000[\s\S]*20260817020000[\s\S]*20260817030000[\s\S]*20260817192458[\s\S]*20260818030000[\s\S]*20260818040000[\s\S]*20260818050000[\s\S]*20260818060000[\s\S]*20260818070000[\s\S]*20260818100000[\s\S]*20260818110000[\s\S]*20260818120000[\s\S]*20260818130000[\s\S]*20260818140000[\s\S]*20260824184628[\s\S]*20260824212223[\s\S]*20260825014236[\s\S]*20260825040825[\s\S]*20260825053718/);
     expect(deployment).toMatch(/REGISTERED_GITHUB_APP_SITE_URL[\s\S]*NEXT_PUBLIC_SITE_URL/);
-    expect(releaseChecklist).toMatch(/hosted Supabase[\s\S]*before.*application deployment/i);
+    expect(releaseChecklist).toMatch(/hosted Supabase[\s\S]*migrations 1–18 were verified before the manual bridge[\s\S]*migration 19 was verified before final/i);
     expect(releaseChecklist).toMatch(/GitHub App[\s\S]*canonical.*origin/i);
+  });
+
+  it("documents strict-by-default application mode and the explicit two-stage bridge procedure", () => {
+    const envExample = read(".env.example");
+    expect(envExample).toMatch(/DAILY_DIGEST_RESERVATION_MODE=strict/);
+    expect(envExample).toMatch(/bridge[\s\S]*temporary[\s\S]*manual/i);
+    expect(deployment).toMatch(/20260825040825[\s\S]*manual[\s\S]{0,200}bridge[\s\S]*policy-capable[\s\S]*20260825053718[\s\S]*manual[\s\S]{0,200}final[\s\S]*strict/i);
+    expect(releaseChecklist).toMatch(/bridge[\s\S]*final[\s\S]*strict/i);
   });
 
   it("proves the exact rollout and rollback revisions are ready before canonical smoke tests", () => {
@@ -158,7 +249,7 @@ describe("Azure staging deployment contract", () => {
     expect(workflow).toContain("/.well-known/oauth-protected-resource");
     expect(workflow).toContain('test "$mcp_status" = "401"');
     expect(workflow).toMatch(/mcp_status=.*curl[\s\S]{0,500}--connect-timeout 10[\s\S]{0,500}--max-time 120/);
-    expect(workflow.match(/curl[^\n]*--retry 5[^\n]*--retry-max-time 120/g)).toHaveLength(5);
+    expect(workflow.match(/curl[^\n]*--retry 5[^\n]*--retry-max-time 120/g)).toHaveLength(6);
     expect(workflow).toMatch(/www-authenticate: Bearer resource_metadata/);
     expect(workflow).toMatch(/if: \(failure\(\) \|\| cancelled\(\)\) && steps\.rollout\.outputs\.previous-revision != ''/);
     expect(workflow).toMatch(/containerapp revision copy[\s\S]*--from-revision/);
