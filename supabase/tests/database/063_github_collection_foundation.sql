@@ -142,7 +142,7 @@ select ok(not has_table_privilege('service_role', 'public.github_webhook_deliver
 select hasnt_column('public', 'github_oauth_states', 'state', 'OAuth state is never stored in plaintext');
 select hasnt_column('public', 'github_oauth_states', 'pkce_verifier', 'the PKCE verifier remains only in the integrity-protected flow cookie');
 
-select has_function('public', 'set_github_repository_selected', array['uuid', 'boolean'], 'operator repository selection RPC exists');
+select has_function('public', 'set_github_repository_selected', array['uuid', 'boolean'], 'Owner repository selection RPC exists');
 select has_function(
   'public', 'claim_github_installation_server',
   array['uuid', 'uuid', 'bigint', 'bigint', 'text', 'text', 'text', 'jsonb', 'boolean', 'jsonb'],
@@ -154,7 +154,7 @@ select has_function(
 );
 select has_function('public', 'claim_github_webhook_deliveries_server', array['integer'], 'bounded webhook recovery claim RPC exists');
 select has_function('public', 'finalize_github_webhook_delivery_server', array['uuid', 'integer', 'text', 'text'], 'webhook attempt CAS finalizer exists');
-select ok(has_function_privilege('authenticated', 'public.set_github_repository_selected(uuid,boolean)', 'EXECUTE'), 'authenticated may invoke the operator-checked selection RPC');
+select ok(has_function_privilege('authenticated', 'public.set_github_repository_selected(uuid,boolean)', 'EXECUTE'), 'authenticated may invoke the Owner-checked selection RPC');
 select ok(not has_function_privilege('anon', 'public.set_github_repository_selected(uuid,boolean)', 'EXECUTE'), 'anonymous callers cannot invoke repository selection');
 select ok(not has_function_privilege('service_role', 'public.set_github_repository_selected(uuid,boolean)', 'EXECUTE'), 'service boundary cannot impersonate an operator through repository selection');
 select ok(has_function_privilege('service_role', 'public.claim_github_installation_server(uuid,uuid,bigint,bigint,text,text,text,jsonb,boolean,jsonb)', 'EXECUTE'), 'only the service boundary may claim a verified installation transactionally');
@@ -681,9 +681,15 @@ select throws_ok(
   $$ delete from public.github_repositories where id = '8b000000-0000-4000-8000-000000000201' $$,
   '42501', null, 'an Admin cannot directly delete a repository'
 );
+select throws_ok(
+  $$ select public.set_github_repository_selected('8b000000-0000-4000-8000-000000000201', false) $$,
+  '42501', 'repository selection requires a workspace Owner', 'an Admin cannot deselect a repository through the Owner-only RPC'
+);
+
+select set_config('request.jwt.claims', '{"sub":"8b000000-0000-4000-8000-000000000001","role":"authenticated"}', true);
 select lives_ok(
   $$ select public.set_github_repository_selected('8b000000-0000-4000-8000-000000000201', false) $$,
-  'an Admin may deselect a repository through the checked RPC'
+  'the Owner may deselect the repository again through the checked RPC'
 );
 
 select set_config('request.jwt.claims', '{"sub":"8b000000-0000-4000-8000-000000000003","role":"authenticated"}', true);
@@ -702,7 +708,7 @@ select throws_ok(
 );
 select throws_ok(
   $$ select public.set_github_repository_selected('8b000000-0000-4000-8000-000000000201', true) $$,
-  '42501', 'repository selection requires a workspace operator', 'a Member cannot select a repository through the RPC'
+  '42501', 'repository selection requires a workspace Owner', 'a Member cannot select a repository through the RPC'
 );
 
 select set_config('request.jwt.claims', '{"sub":"8b000000-0000-4000-8000-000000000004","role":"authenticated"}', true);
@@ -725,7 +731,7 @@ select throws_ok(
 );
 select throws_ok(
   $$ select public.set_github_repository_selected('8b000000-0000-4000-8000-000000000201', true) $$,
-  '42501', 'repository selection requires a workspace operator', 'a cross-tenant Owner cannot select a repository through the RPC'
+  '42501', 'repository selection requires a workspace Owner', 'a cross-tenant Owner cannot select a repository through the RPC'
 );
 
 reset role;
@@ -778,7 +784,7 @@ select cmp_ok(
 select cmp_ok(
   (select count(*) from public.audit_events where organisation_id = current_setting('app.github_org')::uuid and entity_type = 'github_repositories' and action = 'update'),
   '>=', 2::bigint,
-  'operator repository-selection changes are audited'
+  'Owner repository-selection changes are audited'
 );
 select is(
   (
@@ -790,8 +796,8 @@ select is(
     order by id desc
     limit 1
   ),
-  '8b000000-0000-4000-8000-000000000002'::uuid,
-  'repository selection audit retains the Admin operator actor'
+  '8b000000-0000-4000-8000-000000000001'::uuid,
+  'repository selection audit retains the Owner actor'
 );
 select is(
   (select count(*) from public.audit_events where organisation_id = current_setting('app.github_org')::uuid and entity_type = 'github_observations'),
