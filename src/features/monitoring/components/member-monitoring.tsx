@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Card, PageIntro, Pill } from "@/components/ui";
 import { StatusLabel, type StatusTone } from "@/components/status-label";
 import type { MemberMonitoringData } from "@/features/monitoring/application/load-member-monitoring";
@@ -24,9 +25,11 @@ function providerLabel(provider: string): string {
 export function MemberMonitoring({
   data,
   selectedFinding = null,
+  githubCompliance,
 }: {
   data: MemberMonitoringData;
   selectedFinding?: string | null;
+  githubCompliance?: ReactNode;
 }) {
   const highOrCritical = data.findings.filter(
     (finding) => finding.severity === "high" || finding.severity === "critical",
@@ -46,6 +49,8 @@ export function MemberMonitoring({
         <p>{highOrCritical} high or critical · {data.connectedSystems.length} system{data.connectedSystems.length === 1 ? "" : "s"} monitored</p>
       </div>
     </Card>
+
+    {githubCompliance}
 
     <Card style={{ marginBottom: "16px" }}>
       <div className="card-head"><div><h3>Connected systems</h3><p>Systems included in your workspace monitoring</p></div></div>

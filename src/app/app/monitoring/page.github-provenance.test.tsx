@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const OFFICIAL = "40000000-0000-4000-8000-000000000001";
 const LEGACY = "40000000-0000-4000-8000-000000000002";
-const hoisted = vi.hoisted(() => ({ loadOfficial: vi.fn() }));
+const hoisted = vi.hoisted(() => ({ loadOfficial: vi.fn(), loadControlRoom: vi.fn(), loadMappingReview: vi.fn() }));
 
 const findings = [{
   id: OFFICIAL, control_ref: "A.8.25", subject_id: "provider-subject-must-stay-hidden", severity: "high",
@@ -33,6 +33,15 @@ vi.mock("@/features/github/application/github-record-provenance", async (importO
   const actual = await importOriginal<typeof import("@/features/github/application/github-record-provenance")>();
   return { ...actual, loadOfficialGitHubFindingProvenance: hoisted.loadOfficial };
 });
+vi.mock("@/features/github/application/github-compliance-control-room", () => ({
+  loadGitHubComplianceControlRoom: hoisted.loadControlRoom,
+}));
+vi.mock("@/features/github/application/github-mapping-review", () => ({
+  loadGitHubMappingReview: hoisted.loadMappingReview,
+}));
+vi.mock("@/features/github/components/github-compliance-control-room", () => ({
+  GitHubComplianceControlRoomPanel: () => <section aria-label="GitHub compliance control room" />,
+}));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 
 import MonitoringPage from "./page";
@@ -51,6 +60,8 @@ describe("MonitoringPage official GitHub findings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     hoisted.loadOfficial.mockResolvedValue([provenance]);
+    hoisted.loadControlRoom.mockResolvedValue({ repositories: [], pagination: { offset: 0, limit: 20, total: 0, truncated: false } });
+    hoisted.loadMappingReview.mockResolvedValue({ pack: {}, entries: [], approvalHistory: [], limitations: [] });
   });
 
   it("selects exact official finding, renders safe Owner lifecycle, and preserves legacy controls", async () => {

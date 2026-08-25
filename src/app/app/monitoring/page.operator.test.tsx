@@ -1,8 +1,10 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const hoisted = vi.hoisted(() => ({
   loadOfficial: vi.fn().mockResolvedValue([]),
+  controlRoomLoads: [] as unknown[][],
+  mappingReviewLoads: [] as unknown[][],
   rows: {
     monitoring_findings: [{
       id: "41000000-0000-4000-8000-000000000001", control_ref: "A.8.32",
@@ -34,6 +36,8 @@ const hoisted = vi.hoisted(() => ({
       id: "42000000-0000-4000-8000-000000000001", provider: "github", label: "Production GitHub",
       created_at: "2026-01-01T00:00:00Z",
     }],
+    github_installations: [],
+    github_repository_shadow_summaries: [],
     alert_channels: [],
   } as Record<string, unknown[]>,
 }));
@@ -42,6 +46,25 @@ vi.mock("@/features/github/application/github-record-provenance", async (importO
   const actual = await importOriginal<typeof import("@/features/github/application/github-record-provenance")>();
   return { ...actual, loadOfficialGitHubFindingProvenance: hoisted.loadOfficial };
 });
+vi.mock("@/features/github/application/github-compliance-control-room", () => ({
+  loadGitHubComplianceControlRoom: (...args: unknown[]) => {
+    hoisted.controlRoomLoads.push(args);
+    return Promise.resolve({
+      schemaVersion: 1, workspaceId: "org-1", asOf: "2026-08-25T12:00:00.000Z", approval: null,
+      pagination: { offset: 0, limit: 20, total: 0, truncated: false }, repositories: [],
+      exhaustedAttention: { total: 0, truncated: false, items: [] },
+    });
+  },
+}));
+vi.mock("@/features/github/application/github-mapping-review", () => ({
+  loadGitHubMappingReview: (...args: unknown[]) => {
+    hoisted.mappingReviewLoads.push(args);
+    return Promise.resolve({ pack: {}, entries: [], approvalHistory: [], limitations: [] });
+  },
+}));
+vi.mock("@/features/github/components/github-compliance-control-room", () => ({
+  GitHubComplianceControlRoomPanel: ({ role }: { role: string }) => <section aria-label="GitHub compliance control room">Read-only GitHub compliance · {role}</section>,
+}));
 
 function query(rows: unknown[]) {
   const chain: Record<string, unknown> = {};
@@ -66,6 +89,11 @@ vi.mock("@/features/monitoring/application/monitor-registry", () => ({
 import MonitoringPage from "./page";
 
 describe("operator monitoring page", () => {
+  beforeEach(() => {
+    hoisted.controlRoomLoads = [];
+    hoisted.mappingReviewLoads = [];
+  });
+
   it("shows monitoring operations but hides owner-only finding controls for Admin", async () => {
     render(await MonitoringPage());
 
@@ -78,9 +106,17 @@ describe("operator monitoring page", () => {
     }
     expect(screen.queryByRole("heading", { name: "Alert channels" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Manage connections and alerts" })).toHaveAttribute("href", "/app/integrations");
+    expect(screen.getByRole("region", { name: "GitHub compliance control room" })).toHaveTextContent("Read-only GitHub compliance · admin");
+    expect(hoisted.controlRoomLoads).toEqual([[expect.anything(), { organisationId: "org-1", offset: 0, limit: 20 }]]);
+    expect(hoisted.mappingReviewLoads).toEqual([[expect.anything(), "org-1"]]);
     for (const visible of ["Remediation underway", "Exception requested", "Risk accepted"]) {
       expect(screen.getByText(visible)).toBeInTheDocument();
     }
     expect(screen.queryByText("Resolved finding must stay hidden")).not.toBeInTheDocument();
+  });
+
+  it("keeps GitHub repository pagination in Monitoring", async () => {
+    await MonitoringPage({ searchParams: Promise.resolve({ githubPage: "3" }) });
+    expect(hoisted.controlRoomLoads).toEqual([[expect.anything(), { organisationId: "org-1", offset: 40, limit: 20 }]]);
   });
 });

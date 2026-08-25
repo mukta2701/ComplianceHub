@@ -416,10 +416,10 @@ export function GitHubComplianceControlRoomPanel({
       </div>}
       {(hasPreviousPage || hasNextPage) && <nav className="github-control-room-pagination" aria-label="Repository result pages">
         {hasPreviousPage
-          ? <a className="button secondary" href={`/app/integrations?githubPage=${currentPage - 1}`}>Previous repositories</a>
+          ? <a className="button secondary" href={`/app/monitoring?githubPage=${currentPage - 1}`}>Previous repositories</a>
           : <span />}
         <span>Page {currentPage}</span>
-        {hasNextPage && <a className="button secondary" href={`/app/integrations?githubPage=${currentPage + 1}`}>Next repositories</a>}
+        {hasNextPage && <a className="button secondary" href={`/app/monitoring?githubPage=${currentPage + 1}`}>Next repositories</a>}
       </nav>}
     </section>
     <p className="github-control-room-status" role="status" aria-live="polite">{message}</p>

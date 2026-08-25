@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Card, PageIntro } from "@/components/ui";
 import { SubTabs } from "@/components/sub-tabs";
 import { hasCapability } from "@/features/organisations/domain/access";
@@ -8,9 +9,6 @@ import {
   type GitHubInstallationSummary,
   type GitHubRepositoryShadowSummary,
 } from "@/features/github/components/github-installation-panel";
-import { GitHubComplianceControlRoomPanel } from "@/features/github/components/github-compliance-control-room";
-import { loadGitHubComplianceControlRoom } from "@/features/github/application/github-compliance-control-room";
-import { loadGitHubMappingReview } from "@/features/github/application/github-mapping-review";
 import {
   addConnectionAction,
   addEvidenceSourceAction,
@@ -85,17 +83,13 @@ function DeveloperConnectionTools() {
 export default async function IntegrationsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ github?: string | string[]; githubPage?: string | string[] }>;
+  searchParams: Promise<{ github?: string | string[] }>;
 }) {
   const { supabase, membership, organisation } = await requireAppContext();
   const canManageConnections = hasCapability(membership.role, "manage_connections");
   const params = await searchParams;
-  const requestedPage = Array.isArray(params.githubPage) ? params.githubPage[0] : params.githubPage;
-  const parsedPage = requestedPage && /^[1-9][0-9]{0,2}$/.test(requestedPage) ? Number(requestedPage) : 1;
-  const repositoryOffset = Math.min((parsedPage - 1) * 20, 10_000);
-
   if (!canManageConnections) {
-    const [installationResult, repositorySummaryResult, controlRoom, mappingReview] = await Promise.all([
+    const [installationResult, repositorySummaryResult] = await Promise.all([
       supabase.from("github_installations")
         .select("id,account_login,status,repository_selection,permissions_ok")
         .eq("organisation_id", organisation.id)
@@ -104,8 +98,6 @@ export default async function IntegrationsPage({
         .select("repository_id,installation_id,full_name,html_url,visibility,default_branch,archived,selected,available,latest_run_id,latest_status,latest_failed_count,last_completed_collection_at")
         .eq("organisation_id", organisation.id)
         .order("full_name", { ascending: true }),
-      loadGitHubComplianceControlRoom(supabase, { organisationId: organisation.id, offset: repositoryOffset, limit: 20 }),
-      loadGitHubMappingReview(supabase, organisation.id),
     ]);
     if (installationResult.error || repositorySummaryResult.error) {
       throw new Error("Could not load GitHub connection status");
@@ -126,23 +118,14 @@ export default async function IntegrationsPage({
         canManageInstallation={false}
         canManageRepositoryScope={false}
       />
-      <GitHubComplianceControlRoomPanel
-        room={controlRoom}
-        review={mappingReview}
-        role={membership.role}
-        unhealthyRepositoryIds={controlRoom.repositories
-          .filter((repository) => {
-            const shadow = (repositorySummaryResult.data ?? []).find((candidate) => candidate.repository_id === repository.id);
-            const installation = (installationResult.data ?? []).find((candidate) => candidate.id === shadow?.installation_id);
-            return !repository.available || !installation || installation.status !== "active" || installation.permissions_ok !== true;
-          })
-          .map((repository) => repository.id)}
-      />
+      <Card style={{ padding: "16px", marginTop: "16px" }}>
+        <p style={{ margin: 0 }}><Link href="/app/monitoring">Review GitHub compliance in Monitoring</Link></p>
+      </Card>
     </>;
   }
 
   const { github } = params;
-  const [connectionsResult, alertChannelsResult, installationResult, repositorySummaryResult, deliveryResult, controlRoom, mappingReview] = await Promise.all([
+  const [connectionsResult, alertChannelsResult, installationResult, repositorySummaryResult, deliveryResult] = await Promise.all([
     supabase.from("integration_connections")
       .select("id,provider,label,config,connection_mode,enabled,created_at,revoked_at")
       .eq("organisation_id", organisation.id)
@@ -167,8 +150,6 @@ export default async function IntegrationsPage({
         .order("digest_on", { ascending: false })
         .limit(10)
       : Promise.resolve({ data: [] as DailyDigestDeliverySummary[], error: null }),
-    loadGitHubComplianceControlRoom(supabase, { organisationId: organisation.id, offset: repositoryOffset, limit: 20 }),
-    loadGitHubMappingReview(supabase, organisation.id),
   ]);
 
   if (
@@ -216,18 +197,9 @@ export default async function IntegrationsPage({
       canManageInstallation={membership.role === "owner"}
       canManageRepositoryScope={membership.role === "owner"}
     />
-    <GitHubComplianceControlRoomPanel
-      room={controlRoom}
-      review={mappingReview}
-      role={membership.role}
-      unhealthyRepositoryIds={controlRoom.repositories
-        .filter((repository) => {
-          const shadow = (repositorySummaryResult.data ?? []).find((candidate) => candidate.repository_id === repository.id);
-          const installation = (installationResult.data ?? []).find((candidate) => candidate.id === shadow?.installation_id);
-          return !repository.available || !installation || installation.status !== "active" || installation.permissions_ok !== true;
-        })
-        .map((repository) => repository.id)}
-    />
+    <Card style={{ padding: "16px", marginTop: "16px" }}>
+      <p style={{ margin: 0 }}><Link href="/app/monitoring">Review GitHub compliance in Monitoring</Link></p>
+    </Card>
     {showDeveloperTools && <DeveloperConnectionTools />}
   </>;
 }

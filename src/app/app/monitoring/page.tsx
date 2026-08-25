@@ -23,6 +23,16 @@ import {
   parseOfficialRecordSelection,
 } from "@/features/github/application/github-record-provenance";
 import { OfficialGitHubFindingCard } from "@/features/github/components/github-record-provenance";
+import {
+  loadGitHubComplianceControlRoom,
+  type GitHubComplianceControlRoom,
+} from "@/features/github/application/github-compliance-control-room";
+import { loadGitHubMappingReview, type GitHubMappingReview } from "@/features/github/application/github-mapping-review";
+import { GitHubComplianceControlRoomPanel } from "@/features/github/components/github-compliance-control-room";
+import type {
+  GitHubInstallationSummary,
+  GitHubRepositoryShadowSummary,
+} from "@/features/github/components/github-installation-panel";
 
 const SEVERITY_TONE: Record<CheckSeverity, StatusTone> = { critical: "risk", high: "risk", medium: "attention", low: "neutral" };
 const SEVERITY_PILL: Record<CheckSeverity, string> = { critical: "red", high: "red", medium: "amber", low: "blue" };
@@ -62,24 +72,94 @@ function providerLabel(provider: string): string {
   return provider.length > 0 ? provider[0].toUpperCase() + provider.slice(1) : "System";
 }
 
+function unhealthyGitHubRepositoryIds(
+  room: GitHubComplianceControlRoom,
+  installations: GitHubInstallationSummary[],
+  repositories: GitHubRepositoryShadowSummary[],
+): string[] {
+  return room.repositories
+    .filter((repository) => {
+      const shadow = repositories.find((candidate) => candidate.repository_id === repository.id);
+      const installation = installations.find((candidate) => candidate.id === shadow?.installation_id);
+      return !repository.available || !installation || installation.status !== "active" || installation.permissions_ok !== true;
+    })
+    .map((repository) => repository.id);
+}
+
+function GitHubComplianceSection({
+  room,
+  review,
+  role,
+  unhealthyRepositoryIds,
+}: {
+  room: GitHubComplianceControlRoom;
+  review: GitHubMappingReview;
+  role: "owner" | "admin" | "member";
+  unhealthyRepositoryIds: string[];
+}) {
+  return <section aria-labelledby="github-compliance-section-title">
+    <Card style={{ marginBottom: "16px", padding: "16px" }}>
+      <div className="card-head"><div>
+        <h2 id="github-compliance-section-title">GitHub compliance</h2>
+        <p>Read-only repository signals for review. They do not certify compliance or change readiness.</p>
+      </div></div>
+    </Card>
+    <GitHubComplianceControlRoomPanel
+      room={room}
+      review={review}
+      role={role}
+      unhealthyRepositoryIds={unhealthyRepositoryIds}
+    />
+  </section>;
+}
+
 export default async function MonitoringPage({
   searchParams,
 }: {
-  searchParams: Promise<{ finding?: string | string[] }>;
+  searchParams: Promise<{ finding?: string | string[]; githubPage?: string | string[] }>;
 } = { searchParams: Promise.resolve({}) }) {
   const { supabase, organisation, membership } = await requireAppContext();
   const params = await searchParams;
   const requestedFinding = parseOfficialRecordSelection(params.finding);
+  const requestedPage = Array.isArray(params.githubPage) ? params.githubPage[0] : params.githubPage;
+  const parsedPage = requestedPage && /^[1-9][0-9]{0,2}$/.test(requestedPage) ? Number(requestedPage) : 1;
+  const repositoryOffset = Math.min((parsedPage - 1) * 20, 10_000);
   if (membership.role === "member") {
-    const data = await loadMemberMonitoring(supabase, organisation.id);
+    const [data, installationResult, repositorySummaryResult, controlRoom, mappingReview] = await Promise.all([
+      loadMemberMonitoring(supabase, organisation.id),
+      supabase.from("github_installations")
+        .select("id,account_login,status,repository_selection,permissions_ok")
+        .eq("organisation_id", organisation.id)
+        .order("updated_at", { ascending: false }),
+      supabase.from("github_repository_shadow_summaries")
+        .select("repository_id,installation_id,full_name,html_url,visibility,default_branch,archived,selected,available,latest_run_id,latest_status,latest_failed_count,last_completed_collection_at")
+        .eq("organisation_id", organisation.id)
+        .order("full_name", { ascending: true }),
+      loadGitHubComplianceControlRoom(supabase, { organisationId: organisation.id, offset: repositoryOffset, limit: 20 }),
+      loadGitHubMappingReview(supabase, organisation.id),
+    ]);
+    if (installationResult.error || repositorySummaryResult.error) throw new Error("Could not load monitoring");
     const selectedFinding = requestedFinding && data.officialGitHubFindings.some((record) => record.findingId === requestedFinding)
       ? requestedFinding
       : null;
-    return <MemberMonitoring data={data} selectedFinding={selectedFinding} />;
+    return <MemberMonitoring
+      data={data}
+      selectedFinding={selectedFinding}
+      githubCompliance={<GitHubComplianceSection
+        room={controlRoom}
+        review={mappingReview}
+        role={membership.role}
+        unhealthyRepositoryIds={unhealthyGitHubRepositoryIds(
+          controlRoom,
+          (installationResult.data ?? []) as GitHubInstallationSummary[],
+          (repositorySummaryResult.data ?? []) as GitHubRepositoryShadowSummary[],
+        )}
+      />}
+    />;
   }
 
   const canManageMonitoringFindings = hasCapability(membership.role, "manage_monitoring_findings");
-  const [findingResult, sourceResult] = await Promise.all([
+  const [findingResult, sourceResult, installationResult, repositorySummaryResult, controlRoom, mappingReview] = await Promise.all([
     supabase.from("monitoring_findings")
       .select("id,control_ref,subject_id,severity,title,detail,status,task_id,detected_at,finding_origin")
       .eq("organisation_id", organisation.id)
@@ -94,8 +174,18 @@ export default async function MonitoringPage({
       .is("revoked_at", null)
       .order("created_at", { ascending: false })
       .limit(100),
+    supabase.from("github_installations")
+      .select("id,account_login,status,repository_selection,permissions_ok")
+      .eq("organisation_id", organisation.id)
+      .order("updated_at", { ascending: false }),
+    supabase.from("github_repository_shadow_summaries")
+      .select("repository_id,installation_id,full_name,html_url,visibility,default_branch,archived,selected,available,latest_run_id,latest_status,latest_failed_count,last_completed_collection_at")
+      .eq("organisation_id", organisation.id)
+      .order("full_name", { ascending: true }),
+    loadGitHubComplianceControlRoom(supabase, { organisationId: organisation.id, offset: repositoryOffset, limit: 20 }),
+    loadGitHubMappingReview(supabase, organisation.id),
   ]);
-  if (findingResult.error || sourceResult.error) throw new Error("Could not load monitoring");
+  if (findingResult.error || sourceResult.error || installationResult.error || repositorySummaryResult.error) throw new Error("Could not load monitoring");
 
   // Keep the rendered set active-only even if a non-PostgREST test adapter or
   // stale cache ever returns a row outside the requested status filter.
@@ -138,6 +228,17 @@ export default async function MonitoringPage({
         <Link className="button secondary" href="/app/integrations">Manage connections and alerts</Link>
       </span>
     </Card>
+
+    <GitHubComplianceSection
+      room={controlRoom}
+      review={mappingReview}
+      role={membership.role}
+      unhealthyRepositoryIds={unhealthyGitHubRepositoryIds(
+        controlRoom,
+        (installationResult.data ?? []) as GitHubInstallationSummary[],
+        (repositorySummaryResult.data ?? []) as GitHubRepositoryShadowSummary[],
+      )}
+    />
 
     <Card style={{ marginBottom: "16px" }}>
       <div className="card-head"><div><h3>Connected systems</h3><p>Enabled systems included in monitoring</p></div></div>

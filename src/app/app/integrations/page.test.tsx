@@ -133,7 +133,7 @@ describe("Settings Connections page", () => {
     expect(screen.queryByText("Old Jira")).not.toBeInTheDocument();
     expect(screen.queryByText("#old-alerts")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "GitHub App shadow collection" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "From repository facts to reviewed records" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "From repository facts to reviewed records" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Install GitHub App" })).not.toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: /Select Adtecher\/compliancehub/ })).toBeDisabled();
 
@@ -147,6 +147,8 @@ describe("Settings Connections page", () => {
     for (const call of hoisted.selectCalls) {
       expect(call.columns).toBe(expectedColumns[call.table]);
     }
+    expect(hoisted.controlRoomLoads).toHaveLength(0);
+    expect(hoisted.mappingReviewLoads).toHaveLength(0);
   });
 
   it("scopes every connection dataset to the active workspace", async () => {
@@ -197,10 +199,10 @@ describe("Settings Connections page", () => {
     expect(screen.getByRole("checkbox", { name: /Select Adtecher\/compliancehub/ })).toBeDisabled();
     expect(screen.queryByRole("article", { name: "Slack connection" })).not.toBeInTheDocument();
     expect(screen.queryByText("GitHub App connected.")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "From repository facts to reviewed records" })).toBeInTheDocument();
-    expect(screen.getByText("Only workspace Owners can approve mappings or recover processing.")).toBeVisible();
-    expect(hoisted.controlRoomLoads).toHaveLength(1);
-    expect(hoisted.mappingReviewLoads).toHaveLength(1);
+    expect(screen.queryByRole("heading", { name: "From repository facts to reviewed records" })).not.toBeInTheDocument();
+    expect(hoisted.controlRoomLoads).toHaveLength(0);
+    expect(hoisted.mappingReviewLoads).toHaveLength(0);
+    expect(screen.getByRole("link", { name: "Review GitHub compliance in Monitoring" })).toHaveAttribute("href", "/app/monitoring");
   });
 
   it("allows only Owners to change repository scope", async () => {
@@ -208,15 +210,8 @@ describe("Settings Connections page", () => {
     render(await IntegrationsPage({ searchParams: Promise.resolve({}) }));
 
     expect(screen.getByRole("checkbox", { name: /Select Adtecher\/compliancehub/ })).toBeEnabled();
-    expect(screen.getByRole("group", { name: "Owner mapping approval" })).toBeVisible();
-  });
-
-  it("loads the requested bounded repository result page", async () => {
-    await IntegrationsPage({ searchParams: Promise.resolve({ githubPage: "3" }) });
-    expect(hoisted.controlRoomLoads[0]).toEqual([
-      expect.anything(),
-      { organisationId: "org-1", offset: 40, limit: 20 },
-    ]);
+    expect(screen.queryByRole("group", { name: "Owner mapping approval" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Review GitHub compliance in Monitoring" })).toHaveAttribute("href", "/app/monitoring");
   });
 
   it("shows only the whitelisted GitHub connection success state", async () => {

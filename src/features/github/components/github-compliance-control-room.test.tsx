@@ -258,8 +258,8 @@ describe("GitHubComplianceControlRoomPanel", () => {
     expect(screen.getByRole("heading", { name: "Processing recovery queue" })).toBeVisible();
     expect(screen.getByText("Showing 1 of 25 exhausted jobs.")).toBeVisible();
     expect(screen.getByText(/More exhausted jobs will appear after queued recoveries are processed/)).toBeVisible();
-    expect(screen.getByRole("link", { name: "Previous repositories" })).toHaveAttribute("href", "/app/integrations?githubPage=1");
-    expect(screen.getByRole("link", { name: "Next repositories" })).toHaveAttribute("href", "/app/integrations?githubPage=3");
+    expect(screen.getByRole("link", { name: "Previous repositories" })).toHaveAttribute("href", "/app/monitoring?githubPage=1");
+    expect(screen.getByRole("link", { name: "Next repositories" })).toHaveAttribute("href", "/app/monitoring?githubPage=3");
     await user.click(screen.getByRole("button", { name: "Retry queued exhausted job" }));
     await waitFor(() => expect(hoisted.retry).toHaveBeenCalledOnce());
     expect(Object.fromEntries(hoisted.retry.mock.calls[0][0] as FormData)).toEqual({
