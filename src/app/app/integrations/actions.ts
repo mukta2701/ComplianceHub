@@ -175,7 +175,7 @@ const installationRecheckFailure = {
 
 export async function setGitHubRepositorySelectedAction(formData: FormData): Promise<GitHubMutationResult> {
   try {
-    const { supabase, organisation } = await requireGitHubOwner();
+    const { supabase, user, organisation } = await requireGitHubOwner();
     const parsed = githubRepositorySelectionSchema.parse(Object.fromEntries(formData));
     const { data: repository, error: repositoryError } = await supabase.from("github_repositories")
       .select("id")
@@ -183,6 +183,10 @@ export async function setGitHubRepositorySelectedAction(formData: FormData): Pro
       .eq("organisation_id", organisation.id)
       .maybeSingle();
     if (repositoryError || !repository) return repositorySelectionFailure;
+    await enforceRateLimit(`github-repository-scope:${organisation.id}:${user.id}`, {
+      limit: 10,
+      windowMs: 60_000,
+    });
     const { data, error } = await supabase.rpc("set_github_repository_selected", {
       target_repository_id: parsed.repositoryId,
       target_selected: parsed.selected,

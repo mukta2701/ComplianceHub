@@ -81,6 +81,7 @@ function connectionForm() {
 describe("integration connection access", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    hoisted.enforceRateLimit.mockResolvedValue(undefined);
     vi.stubEnv("SLACK_ALLOWED_WEBHOOK_SHA256", APPROVED_SLACK_WEBHOOK_SHA256);
     hoisted.encryptSecret.mockImplementation(() => "v1:iv:tag:data");
     hoisted.decryptSecret.mockReturnValue(APPROVED_SLACK_WEBHOOK);
@@ -797,6 +798,7 @@ describe("GitHub shadow collection actions", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    hoisted.enforceRateLimit.mockResolvedValue(undefined);
     process.env.GITHUB_APP_ID = "123456";
     process.env.GITHUB_APP_PRIVATE_KEY = "private-key";
     process.env.GITHUB_APPROVED_SECURITY_WORKFLOW_IDS = "101,202";
@@ -921,6 +923,12 @@ describe("GitHub shadow collection actions", () => {
       target_repository_id: REPOSITORY_ID,
       target_selected: false,
     });
+    expect(hoisted.enforceRateLimit).toHaveBeenCalledWith(
+      `github-repository-scope:${ORGANISATION_ID}:${USER_ID}`,
+      { limit: 10, windowMs: 60_000 },
+    );
+    expect(maybeSingle.mock.invocationCallOrder[0]).toBeLessThan(hoisted.enforceRateLimit.mock.invocationCallOrder[0]);
+    expect(hoisted.enforceRateLimit.mock.invocationCallOrder[0]).toBeLessThan(rpc.mock.invocationCallOrder[0]);
     expect(hoisted.revalidatePath).toHaveBeenCalledWith("/app/integrations");
 
     rpc.mockResolvedValueOnce({ data: false, error: null });
@@ -928,6 +936,30 @@ describe("GitHub shadow collection actions", () => {
       ok: false,
       message: "Could not update repository scope. Please try again.",
     });
+  });
+
+  it("maps a repository-scope rate-limit failure to the stable error before the RPC", async () => {
+    const rpc = vi.fn();
+    const maybeSingle = vi.fn().mockResolvedValue({ data: { id: REPOSITORY_ID }, error: null });
+    const query: Record<string, ReturnType<typeof vi.fn>> = {};
+    query.select = vi.fn(() => query);
+    query.eq = vi.fn(() => query);
+    query.maybeSingle = maybeSingle;
+    hoisted.enforceRateLimit.mockRejectedValue(new Error("private limiter detail"));
+    hoisted.ctx = {
+      supabase: { from: vi.fn(() => query), rpc }, user: { id: USER_ID },
+      organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
+    };
+    const form = new FormData();
+    form.set("repositoryId", REPOSITORY_ID);
+    form.set("selected", "true");
+
+    await expect(setGitHubRepositorySelectedAction(form)).resolves.toEqual({
+      ok: false,
+      message: "Could not update repository scope. Please try again.",
+    });
+    expect(rpc).not.toHaveBeenCalled();
+    expect(hoisted.createServiceClient).not.toHaveBeenCalled();
   });
 
   it.each(["admin", "member"] as const)("rejects %ss before installation lookup or service collection", async (role) => {
@@ -1076,8 +1108,9 @@ describe("GitHub shadow collection actions", () => {
     lookup.select = vi.fn(() => lookup);
     lookup.eq = vi.fn(() => lookup);
     lookup.maybeSingle = vi.fn().mockResolvedValue({ data, error: null });
+    const from = vi.fn(() => lookup);
     hoisted.ctx = {
-      supabase: { from: vi.fn(() => lookup) }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "admin" },
+      supabase: { from }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
     };
     const form = new FormData();
     form.set("installationId", INSTALLATION_ID);
@@ -1086,9 +1119,11 @@ describe("GitHub shadow collection actions", () => {
       ok: false,
       message: "Could not recheck this GitHub installation. Please try again.",
     });
+    expect(from).toHaveBeenCalledWith("github_installations");
     expect(hoisted.enforceRateLimit).not.toHaveBeenCalled();
     expect(hoisted.createServiceClient).not.toHaveBeenCalled();
     expect(hoisted.runGitHubCollection).not.toHaveBeenCalled();
+    expect(hoisted.reconcileApprovedGitHubObservations).not.toHaveBeenCalled();
   });
 
   it("redacts provider and persistence failures from manual action results", async () => {
