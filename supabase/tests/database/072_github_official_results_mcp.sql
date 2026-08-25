@@ -1,0 +1,33 @@
+begin;
+select plan(28);
+
+select has_table('public','github_official_compliance_results','immutable official GitHub result table exists');
+select has_column('public','github_official_compliance_results','approval_id','result retains exact approval ancestry');
+select has_column('public','github_official_compliance_results','mapping_checksum','result retains exact mapping checksum');
+select has_column('public','github_official_compliance_results','materialised_at','result records official materialisation time');
+select col_is_pk('public','github_official_compliance_results','id','result has a stable local primary key');
+select col_is_unique('public','github_official_compliance_results',array['observation_id'],'one official result exists per observation');
+select has_function('public','get_mcp_github_compliance_results_v1',array['uuid','uuid','public.github_observation_result','text','text','public.monitor_severity','integer'],'versioned result read RPC exists');
+select is((select prosecdef from pg_proc where oid='public.get_mcp_github_compliance_results_v1(uuid,uuid,public.github_observation_result,text,text,public.monitor_severity,integer)'::regprocedure),false,'read RPC is security invoker');
+select is((select provolatile::text from pg_proc where oid='public.get_mcp_github_compliance_results_v1(uuid,uuid,public.github_observation_result,text,text,public.monitor_severity,integer)'::regprocedure),'s','read RPC is stable');
+select ok((select proconfig @> array['search_path=""'] from pg_proc where oid='public.get_mcp_github_compliance_results_v1(uuid,uuid,public.github_observation_result,text,text,public.monitor_severity,integer)'::regprocedure),'read RPC pins empty search path');
+select ok(has_function_privilege('authenticated','public.get_mcp_github_compliance_results_v1(uuid,uuid,public.github_observation_result,text,text,public.monitor_severity,integer)','execute'),'authenticated members may invoke the caller-scoped read');
+select ok(not has_function_privilege('anon','public.get_mcp_github_compliance_results_v1(uuid,uuid,public.github_observation_result,text,text,public.monitor_severity,integer)','execute'),'anonymous callers cannot invoke the read');
+select ok(not has_function_privilege('service_role','public.get_mcp_github_compliance_results_v1(uuid,uuid,public.github_observation_result,text,text,public.monitor_severity,integer)','execute'),'service role has no MCP read bypass');
+select policies_are('public','github_official_compliance_results',array['github_official_compliance_results_member_read'],'only member read RLS is present');
+select has_trigger('public','github_official_compliance_results','github_official_results_immutable','immutable result trigger is installed');
+select has_function('public','reject_github_official_result_change',array[]::text[],'immutable result trigger function exists');
+select ok(not has_table_privilege('authenticated','public.github_official_compliance_results','INSERT,UPDATE,DELETE'),'authenticated callers cannot directly mutate official results');
+select ok(not has_table_privilege('service_role','public.github_official_compliance_results','INSERT,UPDATE,DELETE'),'service callers cannot bypass materialisation');
+select ok(not has_function_privilege('service_role','public.materialise_github_observations_task2_server(uuid,uuid,text,text,jsonb)','EXECUTE'),'service role cannot bypass official-result persistence through renamed Task 2 materialiser');
+select ok(not has_function_privilege('authenticated','public.materialise_github_observations_task2_server(uuid,uuid,text,text,jsonb)','EXECUTE'),'authenticated callers cannot invoke renamed Task 2 materialiser');
+select is((select pg_get_functiondef('public.materialise_github_observations_server(uuid,uuid,text,text,jsonb)'::regprocedure)) ~ 'github_official_compliance_results',true,'materialiser persists official results in its transaction');
+select is((select pg_get_functiondef('public.materialise_github_observations_server(uuid,uuid,text,text,jsonb)'::regprocedure)) ~ 'official result ledger is incomplete or conflicts',true,'materialiser rejects partial or conflicting official-result replays atomically');
+select is((select pg_get_functiondef('public.get_mcp_github_compliance_results_v1(uuid,uuid,public.github_observation_result,text,text,public.monitor_severity,integer)'::regprocedure)) ~ 'row_number\(\) over',true,'read selects latest identity before applying filters');
+select is((select pg_get_functiondef('public.get_mcp_github_compliance_results_v1(uuid,uuid,public.github_observation_result,text,text,public.monitor_severity,integer)'::regprocedure)) ~ 'fresh_until > as_of',true,'freshness equality is stale');
+select is((select pg_get_functiondef('public.get_mcp_github_compliance_results_v1(uuid,uuid,public.github_observation_result,text,text,public.monitor_severity,integer)'::regprocedure)) ~ 'target_limit \+ 1',true,'read uses limit plus one');
+select is((select pg_get_functiondef('public.get_mcp_github_compliance_results_v1(uuid,uuid,public.github_observation_result,text,text,public.monitor_severity,integer)'::regprocedure)) !~ '''(providerRepositoryId|sourceUrl|explanation|remediation|accountLogin)''',true,'read JSON excludes prohibited provider and raw-data keys');
+select is((select count(*)::int from supabase_migrations.schema_migrations where version='20260825014236'),1,'successor migration is applied');
+
+select * from finish();
+rollback;

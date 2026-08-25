@@ -18,6 +18,7 @@ describe("private ComplianceHub plugin safety contract", () => {
     expect(skill).toMatch(/draft[\s\S]*review[\s\S]*do not post/i);
     expect(skill).toMatch(/explicit(?:ly)? (?:asks? to )?(?:send|post|deliver)/i);
     expect(skill).toMatch(/Owner role[\s\S]*not sufficient/i);
+    expect(skill).toMatch(/`list_github_compliance_results`[\s\S]*read-only/i);
     expect(skill).toMatch(/ordinary chat[\s\S]*scheduled[\s\S]*not enough/i);
     expect(skill).toMatch(/`delivery_failed`[\s\S]*continue composing[\s\S]*PREPARE-ONLY/i);
     expect(manifest.interface.defaultPrompt[0]).toMatch(/without posting/i);

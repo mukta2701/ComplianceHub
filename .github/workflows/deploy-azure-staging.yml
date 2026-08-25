@@ -236,7 +236,7 @@ jobs:
           done
           [[ "$HOSTED_SUPABASE_PROJECT_REF" =~ ^[a-z0-9]{20}$ ]]
           test "$SUPABASE_URL" = "https://$HOSTED_SUPABASE_PROJECT_REF.supabase.co"
-          test "$HOSTED_SUPABASE_MIGRATION_VERSION" = "20260824212223"
+          test "$HOSTED_SUPABASE_MIGRATION_VERSION" = "20260825014236"
           test "$REGISTERED_GITHUB_APP_SITE_URL" = "$CANONICAL_SITE_URL"
           container_app_fqdn="$(az containerapp show \
             --resource-group "$AZURE_RESOURCE_GROUP" \

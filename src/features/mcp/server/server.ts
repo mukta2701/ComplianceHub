@@ -9,6 +9,7 @@ import {
   getComplianceOverview,
   getLatestLeadershipReport,
   listAttentionItems,
+  listGitHubComplianceResults,
   listMonitoringFindings,
   prepareDailyDigest,
 } from "../application/mcp-reads";
@@ -65,6 +66,11 @@ const monitoringInputSchema = z.object({
   severity: z.enum(DIGEST_SEVERITIES).optional(), limit: z.number().int().min(1).max(50).default(20).optional(),
 }).strict();
 const prepareInputSchema = z.object({ workspaceId: uuid.optional(), localDate }).strict();
+const githubResultsInputSchema = z.object({
+  workspaceId: uuid.optional(), repositoryId: uuid.optional(), result: z.enum(["pass", "fail", "unknown", "not_applicable"]).optional(),
+  freshness: z.enum(["current", "stale"]).optional(), mappingStatus: z.enum(["active", "historical"]).optional(),
+  severity: z.enum(DIGEST_SEVERITIES).optional(), limit: z.number().int().min(1).max(50).default(20).optional(),
+}).strict();
 
 const attentionItem = z.object({
   id: z.string().min(1).max(200),
@@ -78,6 +84,14 @@ const monitoringFinding = z.object({
   controlRef: z.string().min(1).max(80).optional(), detectedAt: dateTime,
   resolvedAt: dateTime.nullable(), hasRemediationTask: z.boolean(),
 }).strict();
+const githubResult = z.object({
+  id: z.string().regex(/^github_result:[0-9a-f-]{36}$/), repositoryId: uuid,
+  repositoryLabel: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,62}\/[a-z0-9][a-z0-9._-]{0,62}$/), checkId: z.string().min(1).max(120),
+  result: z.enum(["pass", "fail", "unknown", "not_applicable"]), severity: z.enum(DIGEST_SEVERITIES).nullable(),
+  observedAt: dateTime, freshUntil: dateTime, materialisedAt: dateTime, freshness: z.enum(["current", "stale"]),
+  mappingVersion: z.string().min(1).max(80), mappingStatus: z.enum(["active", "historical"]), ruleVersion: z.string().min(1).max(80), summary: z.string().min(1).max(280),
+  evidenceId: z.string().regex(/^evidence:[0-9a-f-]{36}$/).nullable(), findingId: z.string().regex(/^monitoring_finding:[0-9a-f-]{36}$/).nullable(),
+}).strict();
 const digestFacts = z.object({
   schemaVersion: z.literal(1), workspace: workspaceSummary, localDate, overview: readinessReportSchema,
   attentionItems: z.array(attentionItem).max(20),
@@ -90,6 +104,7 @@ export type McpReadServices = {
   listWorkspaces: typeof listWorkspaces;
   getComplianceOverview: typeof getComplianceOverview;
   listAttentionItems: typeof listAttentionItems;
+  listGitHubComplianceResults: typeof listGitHubComplianceResults;
   listMonitoringFindings: typeof listMonitoringFindings;
   getLatestLeadershipReport: typeof getLatestLeadershipReport;
   prepareDailyDigest: typeof prepareDailyDigest;
@@ -98,7 +113,7 @@ export type McpReadServices = {
 
 const defaultServices: McpReadServices = {
   listWorkspaces, getComplianceOverview, listAttentionItems,
-  listMonitoringFindings, getLatestLeadershipReport, prepareDailyDigest,
+  listMonitoringFindings, listGitHubComplianceResults, getLatestLeadershipReport, prepareDailyDigest,
   postDailyDigest,
 };
 
@@ -188,6 +203,16 @@ export function createComplianceMcpServer(
       run: async (input) => {
         const data = await services.listMonitoringFindings(context.supabase, context.userId, input);
         return successResult(data, `Found ${data.findings.length} monitoring finding${data.findings.length === 1 ? "" : "s"} for ${data.workspace.name}.`);
+      },
+    }),
+    defineTool({
+      name: "list_github_compliance_results", title: "List approved GitHub compliance results",
+      description: "List bounded, caller-scoped official GitHub compliance results with explicit outcome, freshness, and mapping status. This read never exposes provider data or performs writes.",
+      input: githubResultsInputSchema,
+      output: success(z.object({ schemaVersion: z.literal(1), workspace: workspaceSummary, asOf: dateTime, results: z.array(githubResult).max(50), truncated: z.boolean() }).strict()),
+      run: async (input) => {
+        const data = await services.listGitHubComplianceResults(context.supabase, context.userId, input);
+        return successResult(data, `Found ${data.results.length} approved GitHub compliance result${data.results.length === 1 ? "" : "s"} for ${data.workspace.name}.`);
       },
     }),
     defineTool({

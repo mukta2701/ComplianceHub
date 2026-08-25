@@ -68,6 +68,39 @@ const bundleSchema = z.object({
   latestLeadershipReport: z.object({ id: uuid, publishedAt: dateTime }).strict().nullable(),
   delivery: z.object({ id: uuid, status: z.enum(["reserved", "delivered", "failed", "unknown"]), deliveredAt: dateTime.nullable() }).strict().nullable(),
 }).strict();
+const githubResultRow = z.object({
+  id: z.string().regex(/^github_result:[0-9a-f-]{36}$/),
+  repositoryId: uuid,
+  repositoryLabel: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,62}\/[a-z0-9][a-z0-9._-]{0,62}$/),
+  checkId: z.string().min(1).max(120).regex(/^[a-z0-9._-]+$/),
+  result: z.enum(["pass", "fail", "unknown", "not_applicable"]),
+  severity: z.enum(DIGEST_SEVERITIES).nullable(),
+  observedAt: dateTime,
+  freshUntil: dateTime,
+  materialisedAt: dateTime,
+  freshness: z.enum(["current", "stale"]),
+  mappingVersion: z.string().min(1).max(80),
+  mappingStatus: z.enum(["active", "historical"]),
+  ruleVersion: z.string().min(1).max(80),
+  summary: z.string().min(1).max(280),
+  evidenceId: z.string().regex(/^evidence:[0-9a-f-]{36}$/).nullable(),
+  findingId: z.string().regex(/^monitoring_finding:[0-9a-f-]{36}$/).nullable(),
+}).strict().superRefine((row, ctx) => {
+  if ((row.result === "fail") !== (row.severity !== null)) ctx.addIssue({ code: "custom", message: "severity must match failure outcome" });
+  if (new Date(row.freshUntil) <= new Date(row.observedAt) || new Date(row.materialisedAt) < new Date(row.observedAt)) ctx.addIssue({ code: "custom", message: "invalid result chronology" });
+  if (safeSummary(row.summary, 280, "GitHub compliance result") !== row.summary) ctx.addIssue({ code: "custom", message: "unsafe summary" });
+});
+const githubResultsSchema = z.object({
+  schemaVersion: z.literal(1), workspace: z.object({ id: uuid, name: z.string() }).strict(),
+  asOf: dateTime, results: z.array(githubResultRow).max(51), truncated: z.boolean(),
+}).strict().superRefine((value, ctx) => {
+  const ids = new Set<string>();
+  for (const row of value.results) {
+    if (ids.has(row.id)) ctx.addIssue({ code: "custom", message: "duplicate result id" });
+    ids.add(row.id);
+    if ((row.freshness === "current") !== (new Date(row.freshUntil) > new Date(value.asOf))) ctx.addIssue({ code: "custom", message: "invalid freshness" });
+  }
+});
 
 type ComplianceBundle = z.infer<typeof bundleSchema>;
 
@@ -252,6 +285,38 @@ async function monitoringForWorkspace(supabase: SupabaseClient, workspace: Acces
 export async function listMonitoringFindings(supabase: SupabaseClient, verifiedUserId: string, input: { workspaceId?: string; status?: string; severity?: string; limit?: number }) {
   const workspace = await resolveWorkspace(supabase, verifiedUserId, input.workspaceId);
   return monitoringForWorkspace(supabase, workspace, input);
+}
+
+export async function listGitHubComplianceResults(
+  supabase: SupabaseClient,
+  verifiedUserId: string,
+  input: { workspaceId?: string; repositoryId?: string; result?: string; freshness?: string; mappingStatus?: string; severity?: string; limit?: number },
+) {
+  const workspace = await resolveWorkspace(supabase, verifiedUserId, input.workspaceId);
+  const parsed = z.object({
+    repositoryId: uuid.optional(), result: z.enum(["pass", "fail", "unknown", "not_applicable"]).optional(),
+    freshness: z.enum(["current", "stale"]).optional(), mappingStatus: z.enum(["active", "historical"]).optional(),
+    severity: z.enum(DIGEST_SEVERITIES).optional(), limit: z.number().int().min(1).max(50).default(20),
+  }).safeParse(input);
+  if (!parsed.success) throw new McpError("VALIDATION_ERROR");
+  let response: { data: unknown; error: unknown };
+  try {
+    response = await supabase.rpc("get_mcp_github_compliance_results_v1", {
+      target_organisation_id: workspace.id, target_repository_id: parsed.data.repositoryId ?? null,
+      target_result: parsed.data.result ?? null, target_freshness: parsed.data.freshness ?? null,
+      target_mapping_status: parsed.data.mappingStatus ?? null, target_severity: parsed.data.severity ?? null,
+      target_limit: parsed.data.limit,
+    }).abortSignal(AbortSignal.timeout(MCP_BUNDLE_REQUEST_TIMEOUT_MS));
+  } catch { queryFailure(); }
+  if (response.error || !response.data) queryFailure();
+  const result = githubResultsSchema.safeParse(response.data);
+  if (!result.success || result.data.workspace.id !== workspace.id) queryFailure();
+  return {
+    ...result.data,
+    workspace: { id: result.data.workspace.id, name: safeSummary(result.data.workspace.name, 160, "Workspace") },
+    results: result.data.results.slice(0, parsed.data.limit).map((row) => ({ ...row, summary: safeSummary(row.summary, 280, "GitHub compliance result") })),
+    truncated: result.data.truncated || result.data.results.length > parsed.data.limit,
+  };
 }
 
 export async function getLatestLeadershipReport(supabase: SupabaseClient, verifiedUserId: string, input: { workspaceId?: string }) {

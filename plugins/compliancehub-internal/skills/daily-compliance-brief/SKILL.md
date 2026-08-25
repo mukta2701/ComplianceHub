@@ -7,6 +7,10 @@ description: Use when preparing, drafting, reviewing, or explicitly delivering a
 
 Build a closed-world brief from ComplianceHub facts. Never use outside facts.
 
+`list_github_compliance_results` is a read-only tool for bounded official GitHub
+compliance outcomes. Treat its returned outcome, freshness, and mapping status
+as facts; do not reconstruct history from raw observations or use it to post.
+
 ## Decide delivery intent first
 
 Decide delivery intent before calling any tool:

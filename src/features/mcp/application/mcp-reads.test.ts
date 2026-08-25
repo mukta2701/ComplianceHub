@@ -4,6 +4,7 @@ import {
   getLatestLeadershipReport,
   dateInLondon,
   listAttentionItems,
+  listGitHubComplianceResults,
   listMonitoringFindings,
   mapDeliveryStatus,
   MCP_BUNDLE_REQUEST_TIMEOUT_MS,
@@ -73,7 +74,60 @@ function complianceBundle(role: "owner" | "admin" | "member" = "owner", override
   };
 }
 
+function githubResults(overrides: Record<string, unknown> = {}) {
+  return {
+    schemaVersion: 1,
+    workspace: { id: ORG, name: "Acme" },
+    asOf: "2026-08-25T01:42:36.000Z",
+    results: [{
+      id: "github_result:40000000-0000-4000-8000-000000000001",
+      repositoryId: "50000000-0000-4000-8000-000000000001",
+      repositoryLabel: "acme/portal",
+      checkId: "branch_protection",
+      result: "fail",
+      severity: "high",
+      observedAt: "2026-08-25T01:00:00.000Z",
+      freshUntil: "2026-08-26T01:00:00.000Z",
+      materialisedAt: "2026-08-25T01:01:00.000Z",
+      freshness: "current",
+      mappingVersion: "github-iso-2026.08",
+      mappingStatus: "active",
+      ruleVersion: "2026-08-17",
+      summary: "Branch protection is not enabled.",
+      evidenceId: null,
+      findingId: "monitoring_finding:60000000-0000-4000-8000-000000000001",
+    }],
+    truncated: false,
+    ...overrides,
+  };
+}
+
 describe("MCP public read services", () => {
+  it("loads only the caller-scoped official-result RPC with exact bounded filters and fails closed on unsafe rows", async () => {
+    const exact = fakeSupabase({ memberships: membership("member") }, () => ({ data: githubResults(), error: null }));
+    await expect(listGitHubComplianceResults(exact.client as never, USER, {
+      workspaceId: ORG, repositoryId: "50000000-0000-4000-8000-000000000001", result: "fail",
+      freshness: "current", mappingStatus: "active", severity: "high", limit: 7,
+    })).resolves.toMatchObject({
+      schemaVersion: 1, workspace: { id: ORG, name: "Acme" },
+      results: [{ id: "github_result:40000000-0000-4000-8000-000000000001", repositoryLabel: "acme/portal" }],
+    });
+    expect(exact.rpc).toHaveBeenCalledWith("get_mcp_github_compliance_results_v1", {
+      target_organisation_id: ORG,
+      target_repository_id: "50000000-0000-4000-8000-000000000001",
+      target_result: "fail", target_freshness: "current", target_mapping_status: "active",
+      target_severity: "high", target_limit: 7,
+    });
+    expect(exact.states.map(({ table }) => table)).toEqual(["memberships"]);
+    expect(exact.rpcSignals).toHaveLength(1);
+
+    const unsafe = fakeSupabase({ memberships: membership() }, () => ({
+      data: githubResults({ results: [{ ...githubResults().results[0] as object, repositoryLabel: "acme/portal?token=secret" }] }), error: null,
+    }));
+    await expect(listGitHubComplianceResults(unsafe.client as never, USER, {})).rejects.toMatchObject({ code: "INTERNAL_ERROR" });
+    await expect(listGitHubComplianceResults(exact.client as never, USER, { result: "broken" }))
+      .rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+  });
   it("derives London dates correctly across midnight and DST seasons", () => {
     expect(dateInLondon(new Date("2026-01-15T00:30:00Z"))).toBe("2026-01-15");
     expect(dateInLondon(new Date("2026-07-15T23:30:00Z"))).toBe("2026-07-16");

@@ -36,6 +36,11 @@ function serviceStubs(): McpReadServices {
       workspace: { id: WORKSPACE_ID, name: "Acme" }, truncated: false,
       items: [{ id: `task:${REPORT_ID}`, source: "task" as const, category: "overdue_task" as const, severity: "high" as const, summary: "Overdue task", dueOn: "2026-08-05" }],
     })),
+    listGitHubComplianceResults: vi.fn(async () => ({
+      schemaVersion: 1 as const, workspace: { id: WORKSPACE_ID, name: "Acme" },
+      asOf: "2026-08-25T01:42:36.000Z", truncated: false,
+      results: [{ id: `github_result:${REPORT_ID}`, repositoryId: REPORT_ID, repositoryLabel: "acme/portal", checkId: "branch_protection", result: "fail" as const, severity: "high" as const, observedAt: "2026-08-25T01:00:00.000Z", freshUntil: "2026-08-26T01:00:00.000Z", materialisedAt: "2026-08-25T01:01:00.000Z", freshness: "current" as const, mappingVersion: "github-iso-2026.08", mappingStatus: "active" as const, ruleVersion: "2026-08-17", summary: "Branch protection is not enabled.", evidenceId: null, findingId: null }],
+    })),
     listMonitoringFindings: vi.fn(async () => ({
       workspace: { id: WORKSPACE_ID, name: "Acme" }, truncated: false,
       findings: [{ id: `monitoring_finding:${REPORT_ID}`, severity: "critical" as const, status: "open" as const, title: "Branch protection disabled", controlRef: "A.8.1", detectedAt: "2026-08-06T10:00:00.000Z", resolvedAt: null, hasRemediationTask: false }],
@@ -72,7 +77,7 @@ async function connected(services = serviceStubs()) {
 }
 
 describe("ComplianceHub MCP server", () => {
-  it("initializes with stable identity, safety-first instructions, and exactly seven tools", async () => {
+  it("initializes with stable identity, safety-first instructions, and exactly eight tools", async () => {
     const { client } = await connected();
     expect(client.getServerVersion()).toEqual({ name: "compliancehub-internal", version: "1.0.0" });
     expect(client.getInstructions()).toBe(MCP_SERVER_INSTRUCTIONS);
@@ -81,7 +86,7 @@ describe("ComplianceHub MCP server", () => {
     const { tools } = await client.listTools();
     expect(tools.map(({ name }) => name)).toEqual([
       "list_workspaces", "get_compliance_overview", "list_attention_items",
-      "list_monitoring_findings", "get_latest_leadership_report", "prepare_daily_digest",
+      "list_monitoring_findings", "list_github_compliance_results", "get_latest_leadership_report", "prepare_daily_digest",
       "post_daily_digest",
     ]);
     for (const tool of tools) {
@@ -99,6 +104,9 @@ describe("ComplianceHub MCP server", () => {
     const post = tools.find(({ name }) => name === "post_daily_digest");
     expect(post?.description).toMatch(/external Slack write[\s\S]*authorization to send[\s\S]*configured channel[\s\S]*prepare/i);
     expect(post?.inputSchema.required).toEqual(expect.arrayContaining(["localDate", "factHash", "headline", "priorities", "actions"]));
+    const github = tools.find(({ name }) => name === "list_github_compliance_results");
+    expect(github?.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false, openWorldHint: false });
+    expect(github?.inputSchema).toMatchObject({ additionalProperties: false, properties: expect.objectContaining({ repositoryId: expect.any(Object), result: expect.any(Object), freshness: expect.any(Object), mappingStatus: expect.any(Object), severity: expect.any(Object), limit: expect.any(Object) }) });
   });
 
   it("calls all seven tools with authenticated user and OAuth-client context and returns stable structured content", async () => {
@@ -109,6 +117,7 @@ describe("ComplianceHub MCP server", () => {
       ["list_attention_items", { workspaceId: WORKSPACE_ID, categories: ["overdue_task"], severity: "high", limit: 5 }],
       ["list_monitoring_findings", { workspaceId: WORKSPACE_ID, status: "open", severity: "critical", limit: 5 }],
       ["list_monitoring_findings", { workspaceId: WORKSPACE_ID, status: "risk_accepted", limit: 5 }],
+      ["list_github_compliance_results", { workspaceId: WORKSPACE_ID, result: "fail", freshness: "current", limit: 5 }],
       ["get_latest_leadership_report", { workspaceId: WORKSPACE_ID }],
       ["prepare_daily_digest", { workspaceId: WORKSPACE_ID, localDate: "2026-08-07" }],
       ["post_daily_digest", { workspaceId: WORKSPACE_ID, localDate: "2026-08-07", factHash: "a".repeat(64), headline: "Compliance needs attention", priorities: [], actions: [] }],
@@ -122,6 +131,7 @@ describe("ComplianceHub MCP server", () => {
     expect(services.listWorkspaces).toHaveBeenCalledWith(expect.anything(), USER_ID);
     expect(services.getComplianceOverview).toHaveBeenCalledWith(expect.anything(), USER_ID, { workspaceId: WORKSPACE_ID });
     expect(services.listAttentionItems).toHaveBeenCalledWith(expect.anything(), USER_ID, { workspaceId: WORKSPACE_ID, categories: ["overdue_task"], severity: "high", limit: 5 });
+    expect(services.listGitHubComplianceResults).toHaveBeenCalledWith(expect.anything(), USER_ID, { workspaceId: WORKSPACE_ID, result: "fail", freshness: "current", limit: 5 });
     expect(services.prepareDailyDigest).toHaveBeenCalledWith(expect.anything(), USER_ID, { workspaceId: WORKSPACE_ID, localDate: "2026-08-07" });
     expect(services.postDailyDigest).toHaveBeenCalledWith(expect.objectContaining({ userId: USER_ID, clientId: "codex-test" }));
   });
