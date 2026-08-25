@@ -8,6 +8,9 @@ const migration = readFileSync(
 const migrationDirectory = `${process.cwd()}/supabase/migrations`;
 const enumMigrationName = "20260824184627_github_compliance_enum_values.sql";
 const enumMigrationPath = `${migrationDirectory}/${enumMigrationName}`;
+const finalizeFunctionRepairMigration = readdirSync(migrationDirectory)
+  .filter((name) => /^\d{14}_github_finalize_job_function_portability\.sql$/.test(name))
+  .sort();
 const notYetAppliedMigrations = readdirSync(migrationDirectory)
   .filter((name) => name.endsWith(".sql") && name >= enumMigrationName)
   .sort();
@@ -22,6 +25,16 @@ function tableDefinition(name: string): string {
 }
 
 describe("GitHub compliance materialisation migration", () => {
+  it("repairs already-installed finalisation functions with a successor migration", () => {
+    expect(finalizeFunctionRepairMigration).toHaveLength(1);
+
+    const repair = readFileSync(`${migrationDirectory}/${finalizeFunctionRepairMigration[0]}`, "utf8");
+    expect(repair).toMatch(/create or replace function public\.finalize_github_materialisation_job_server\s*\(/);
+    expect(repair).toMatch(/effective_attempt_count\s*:=\s*least\s*\(/);
+    expect(repair).toMatch(/then greatest\s*\(job\.attempt_count - 1, 0\)/);
+    expect(repair).not.toMatch(/\bpg_catalog\.(?:coalesce|greatest|least)\s*\(/i);
+  });
+
   it("commits GitHub enum values before the materialisation migration uses them", () => {
     expect(existsSync(enumMigrationPath)).toBe(true);
 

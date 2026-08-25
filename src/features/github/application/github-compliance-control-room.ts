@@ -87,8 +87,8 @@ const officialResultSchema = z.object({
   if (result.outcome === "fail" && (result.findingId === null || result.evidenceId !== null)) {
     ctx.addIssue({ code: "custom", message: "failure reference shape is invalid" });
   }
-  if (result.outcome === "pass" && result.evidenceId === null) {
-    ctx.addIssue({ code: "custom", message: "pass result requires evidence" });
+  if (result.outcome === "pass" && result.findingId !== null) {
+    ctx.addIssue({ code: "custom", message: "passing result cannot reference a finding" });
   }
   if ((result.outcome === "unknown" || result.outcome === "not_applicable")
     && (result.evidenceId !== null || result.findingId !== null)) {
@@ -255,7 +255,8 @@ export function parseGitHubComplianceControlRoom(
       if (job.exhaustedAt !== null && Date.parse(job.exhaustedAt) > asOf) fail();
     }
     if (hasDuplicates(repository.officialResults.map((result) => result.checkId))) fail();
-    if (repository.officialResults.some((result) => Date.parse(result.materialisedAt) > asOf)) fail();
+    if (repository.officialResults.some((result) => Date.parse(result.materialisedAt) > asOf
+      || (result.outcome === "pass" && result.evidenceId === null && Date.parse(result.freshUntil) > asOf))) fail();
     return { ...repository, ...source };
   });
 

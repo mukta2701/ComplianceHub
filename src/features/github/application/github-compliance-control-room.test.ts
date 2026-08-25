@@ -210,6 +210,43 @@ describe("GitHub compliance control-room contract", () => {
     expect(parsed.exhaustedAttention).toEqual(validPayload().exhaustedAttention);
   });
 
+  it("accepts a stale pass without evidence while rejecting that shape for current results", () => {
+    const payload = validPayload();
+    const staleResult = payload.repositories[0].officialResults[0] as Record<string, unknown>;
+    Object.assign(staleResult, {
+      outcome: "pass",
+      severity: null,
+      summary: "A passing repository visibility observation is historical.",
+      freshUntil: "2026-08-25T07:00:00.000Z",
+      evidenceId: null,
+      findingId: null,
+    });
+
+    expect(parseGitHubComplianceControlRoom(payload, {
+      organisationId: ORG,
+      offset: 0,
+      limit: 10,
+    }).repositories[0]?.officialResults[0]).toMatchObject({
+      outcome: "pass",
+      evidenceId: null,
+    });
+
+    staleResult.findingId = FINDING;
+    expect(() => parseGitHubComplianceControlRoom(payload, {
+      organisationId: ORG,
+      offset: 0,
+      limit: 10,
+    })).toThrow("Could not load GitHub compliance control room");
+
+    staleResult.findingId = null;
+    staleResult.freshUntil = "2026-08-26T07:00:00.000Z";
+    expect(() => parseGitHubComplianceControlRoom(payload, {
+      organisationId: ORG,
+      offset: 0,
+      limit: 10,
+    })).toThrow("Could not load GitHub compliance control room");
+  });
+
   it("keeps active approval identity separate from immutable historical result provenance", () => {
     const payload = validPayload();
     payload.approval = {

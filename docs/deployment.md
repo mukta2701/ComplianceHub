@@ -54,7 +54,7 @@ The personal staging project for this rollout is project ref
 `ytenjiyjdcrjkgwmciqw`. Confirm that exact ref in both the Supabase dashboard and
 CLI before linking or applying anything, then take and verify a recoverable
 backup. From the last deployed schema, both `supabase migration list` and
-`supabase db push --dry-run` must show exactly these twenty-three pending additive
+`supabase db push --dry-run` must show exactly these twenty-four pending additive
 migrations, in this order:
 
 1. `20260817010000_github_collection_foundation.sql`
@@ -80,9 +80,10 @@ migrations, in this order:
 21. `20260825073650_github_compliance_control_room.sql`
 22. `20260825082411_harden_github_control_room_ownership_privacy_indexes.sql`
 23. `20260825094343_owner_only_github_installation_claim.sql`
+24. `20260825124025_github_finalize_job_function_portability.sql`
 
 Stop if the project ref, ordering, or pending set differs. The Slack reservation
-upgrade uses one explicit two-stage deployment; do not apply migrations 20–23
+upgrade uses one explicit two-stage deployment; do not apply migrations 20–24
 before the bridge revision is healthy:
 
 1. Apply and verify migrations 1–19 through
@@ -95,12 +96,12 @@ before the bridge revision is healthy:
 2. Verify the bridge health response reports policy `v1`, reservation mode
    `bridge`, and the exact release SHA. Then apply only additive migration 20
    (`20260825053718`), migration 21 (`20260825073650`), migration 22
-   (`20260825082411`), and migration 23 (`20260825094343`), rerun the migration
+   (`20260825082411`), migration 23 (`20260825094343`), and migration 24 (`20260825124025`), rerun the migration
    list and database checks, and set
-   `HOSTED_SUPABASE_MIGRATION_VERSION=20260825094343`.
+   `HOSTED_SUPABASE_MIGRATION_VERSION=20260825124025`.
 3. Manually dispatch `rollout_phase=final`. The first final requires the exact
    healthy policy-capable bridge revision, coherent same-slot Slack/core
-   references, and migration `20260825094343`; it deploys
+   references, and migration `20260825124025`; it deploys
    `DAILY_DIGEST_RESERVATION_MODE=strict`. In steady-state operation, subsequent
    manual final and automatic `workflow_run` deployments remain strict and may
    follow an exact policy-capable predecessor whose captured mode is either
@@ -108,7 +109,7 @@ before the bridge revision is healthy:
    SHA, or non-final schema still fails before mutation, so the initial manual
    bridge remains mandatory.
 
-After migration 23, verify the GitHub tables, security-invoker summary and
+After migration 24, verify the GitHub tables, security-invoker summary and
 control-room reads, the Owner-authorised service retry boundary, and both
 service-only reservation overloads plus the claim/finalise/inspection RPC
 signatures. The five-argument overload is temporary rollout compatibility and
@@ -194,8 +195,8 @@ GitHub environment variables:
 | `SUPABASE_OAUTH_ISSUER` | `https://<project-ref>.supabase.co/auth/v1` |
 | `SUPABASE_OAUTH_JWKS_URL` | `<issuer>/.well-known/jwks.json` |
 | `MCP_JWT_ALGORITHMS` | `RS256,ES256` |
-| `HOSTED_SUPABASE_PROJECT_REF` | `ytenjiyjdcrjkgwmciqw`, only after the exact hosted project, backup, and twenty-three-migration checkpoint above pass |
-| `HOSTED_SUPABASE_MIGRATION_VERSION` | `20260825094343`, only after the twenty-three-migration checkpoint above passes |
+| `HOSTED_SUPABASE_PROJECT_REF` | `ytenjiyjdcrjkgwmciqw`, only after the exact hosted project, backup, and twenty-four-migration checkpoint above pass |
+| `HOSTED_SUPABASE_MIGRATION_VERSION` | `20260825124025`, only after the twenty-four-migration checkpoint above passes |
 | `REGISTERED_GITHUB_APP_SITE_URL` | Exact canonical origin registered in GitHub; must equal `NEXT_PUBLIC_SITE_URL` |
 
 GitHub environment secrets:
