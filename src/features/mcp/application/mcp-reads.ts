@@ -102,7 +102,13 @@ const githubResultsSchema = z.object({
     if (ids.has(row.id)) ctx.addIssue({ code: "custom", message: "duplicate result id" });
     ids.add(row.id);
     if ((row.freshness === "current") !== (new Date(row.freshUntil) > new Date(value.asOf)) || new Date(row.materialisedAt) > new Date(value.asOf)) ctx.addIssue({ code: "custom", message: "invalid freshness" });
-    if (previous && (previous.observedAt < row.observedAt || (previous.observedAt === row.observedAt && previous.id < row.id))) ctx.addIssue({ code: "custom", message: "non-deterministic result ordering" });
+    const observedAtEpoch = Date.parse(row.observedAt);
+    if (previous) {
+      const previousObservedAtEpoch = Date.parse(previous.observedAt);
+      if (previousObservedAtEpoch < observedAtEpoch || (previousObservedAtEpoch === observedAtEpoch && previous.id < row.id)) {
+        ctx.addIssue({ code: "custom", message: "non-deterministic result ordering" });
+      }
+    }
     previous = row;
   }
 });

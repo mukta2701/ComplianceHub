@@ -114,7 +114,7 @@ The inherited `072_github_official_results_mcp.sql` was 34 lines with a 30-asser
 - Replaced `072` with a deterministic, transaction-rollback fixture suite: 349 lines and exactly 78 uniquely named assertions.
 - The suite exercises the real service wrapper and authenticated security-invoker RPC across all four outcomes; stale, failed, and rate-limited runs; exact replay; immutable evidence/finding lineage after later results; partial/conflicting ledger rollback; active-to-historical approval change; latest-before-repository/result filters; equality freshness; equal-time ID order; limit-plus-one truncation; safe local labels; prohibited-key absence; and Owner/Admin/Member/outsider/anonymous/cross-tenant role boundaries.
 - Direct behavior covers immutable update/delete rejection, authenticated and service direct-insert denial, composite ancestry/evidence FK rejection, wrapper/inner execute grants, and lifecycle transaction rollback.
-- A committed two-session dblink fixture is intentionally not mixed into this rollback-only suite. Concurrency is proved structurally by the unique observation key, `ON CONFLICT` arbitration, the inner transaction advisory lock, and exact inserted/matching/ledger-count validation. A real two-session run remains part of the Docker-enabled runtime evidence gap.
+- `072` retains structural assertions for the unique observation key, `ON CONFLICT` arbitration, and exact inserted/matching/ledger-count validation, but those assertions are prerequisites rather than a concurrency proof. The committed-fixture dblink race in `070_github_compliance_materialisation.sql` invokes the successor wrapper from two real sessions, observes the second session waiting, and now asserts exactly one official result for observation `412` as well as one evidence-provenance row.
 
 ### Static GREEN
 
@@ -124,8 +124,34 @@ The mechanical plan check found `plan=78 assertions=78`; duplicate assertion-nam
 
 `SUPABASE_TELEMETRY_DISABLED=1 DO_NOT_TRACK=1 SUPABASE_HOME=.superpowers/supabase-task5a-home npx --no-install supabase test db supabase/tests/database/072_github_official_results_mcp.sql` reached `Connecting to local database...` and then failed before executing the suite with `LegacyDbConnectError: failed to connect to postgres: effect/sql/SqlError: PgClient: Failed to connect`.
 
-Database runtime GREEN and live two-session concurrency are not claimed. Run the focused `072` suite in a Docker-enabled environment before deployment.
+Database runtime GREEN is not claimed. The two-session wrapper race is present as executable pgTAP coverage in `070`, but the Docker connection failure prevented executing it locally. Run focused `070` and `072` in a Docker-enabled environment before deployment.
 
 ### Commit hook handling
 
 The repository privacy hook accepted the staged SQL fixture and report without a finding. The first commit attempt then failed only because GnuPG could not create its keybox lock under `/Users/m1ghty/.gnupg`; the same staged content was committed with `commit.gpgsign=false`. No privacy hook was bypassed.
+
+## Fix round 4 — independent-review closure
+
+### RED
+
+A focused parser test added mixed-offset result pages before the implementation change. `npm test -- --run src/features/mcp/application/mcp-reads.test.ts` ran 22 tests with one expected failure: the parser rejected the correctly ordered `2026-08-25T00:00:00Z` then `2026-08-25T01:30:00+02:00` page because it compared ISO strings instead of instants. The same test covers the reversed rejection and the Europe/London DST fallback equality (`00:30Z` equals `01:30+01:00`) with result-ID descent as the tie-breaker.
+
+### Changes
+
+- The application parser now compares `observedAt` as parsed epoch instants and applies descending ID order only when the epochs are equal.
+- `070` deletes successor official-result rows before observations in both committed-fixture cleanup transactions. Its existing dblink race still calls the post-migration public wrapper from two sessions and now asserts exactly one official result for observation `412`, alongside the existing wait, provenance exact-once, and single-skip assertions.
+- `072` no longer disables triggers or fabricates a one-entry published pack. It creates a deterministic `github-iso-27001-v2` draft, copies all 15 v1 mappings under deterministic entry UUIDs, invokes the real postgres-only sealer with the canonical checksum, then invokes the service-only approval RPC before proving active-to-historical behavior.
+- Failed and rate-limited collection fixtures now contain FAIL observations and use finding decisions. Their old no-op calls remain `lives_ok`, with before/after equality across official results, evidence, evidence provenance, monitoring findings, finding provenance, and finding transitions.
+- `072` explicitly points to `070` for the real two-session proof; its retained source-definition assertions are documented only as structural prerequisites.
+
+### GREEN and runtime evidence
+
+- Focused parser: 1 file / 22 tests passed.
+- Full unit suite: 212 files / 1,551 tests passed in 32.97 seconds.
+- `npm run typecheck`, full `npm run lint`, focused ESLint, and `git diff --check` passed.
+- Mechanical pgTAP audit: `plan(78)`, 78 assertion calls, 78 labels, zero duplicate labels; `072` is 375 lines.
+- The telemetry-disabled focused database command targeted `070` and `072` together. It reached `Connecting to local database...` then exited before pgTAP execution with `LegacyDbConnectError: ... PgClient: Failed to connect`. Database runtime GREEN is therefore not claimed; the executable two-session proof remains pending execution in a Docker-enabled environment.
+
+### Commit privacy hook
+
+The requested commit's privacy hook ran twice and reported `Findings: 0` and `Blocking: 0` both times. Commit creation then failed only because GnuPG could not create its keybox lock under `/Users/m1ghty/.gnupg`; the identical staged content was committed with `commit.gpgsign=false`. The privacy hook was not bypassed.

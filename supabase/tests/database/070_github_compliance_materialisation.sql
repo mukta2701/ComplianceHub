@@ -7,6 +7,7 @@ create extension if not exists dblink with schema extensions;
 
 begin;
 set local session_replication_role = replica;
+delete from public.github_official_compliance_results where organisation_id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
 delete from public.task_tickets where organisation_id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
 delete from public.integration_connections where organisation_id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
 delete from public.evidence_links where organisation_id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
@@ -1019,6 +1020,7 @@ select extensions.dblink_exec('github_materialise_a','commit');
 insert into github_materialisation_concurrency_results
 select summary from extensions.dblink_get_result('github_materialise_b') as result(summary jsonb);
 select is((select count(*) from public.github_evidence_provenance where observation_id='71000000-0000-4000-8000-000000000412'),1::bigint,'concurrent calls materialise one provenance row exactly once');
+select is((select count(*) from public.github_official_compliance_results where observation_id='71000000-0000-4000-8000-000000000412'),1::bigint,'concurrent wrapper calls persist one official result exactly once');
 select is((select sum((summary->>'skipped')::int) from github_materialisation_concurrency_results),1::bigint,'one concurrent caller reports the committed duplicate as skipped');
 select extensions.dblink_disconnect('github_materialise_a');
 select extensions.dblink_disconnect('github_materialise_b');
@@ -1027,6 +1029,7 @@ select * from finish();
 
 begin;
 set local session_replication_role = replica;
+delete from public.github_official_compliance_results where organisation_id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
 delete from public.task_tickets where organisation_id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
 delete from public.integration_connections where organisation_id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
 delete from public.evidence_links where organisation_id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');

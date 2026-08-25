@@ -172,6 +172,66 @@ describe("MCP public read services", () => {
       await expect(listGitHubComplianceResults(invalid.client as never, USER, { limit: 2 })).rejects.toMatchObject({ code: "INTERNAL_ERROR" });
     }
   });
+
+  it("orders result instants across offsets and applies ID descent to equal DST instants", async () => {
+    const base = githubResults();
+    const row = base.results[0] as Record<string, unknown>;
+    const laterZulu = {
+      ...row,
+      id: "github_result:60000000-0000-4000-8000-000000000001",
+      repositoryId: "60000000-0000-4000-8000-000000000001",
+      repositoryLabel: "GitHub repository 60000000",
+      observedAt: "2026-08-25T00:00:00.000Z",
+    };
+    const earlierPlusTwo = {
+      ...row,
+      id: "github_result:50000000-0000-4000-8000-000000000001",
+      observedAt: "2026-08-25T01:30:00.000+02:00",
+    };
+    const mixedOffsetValid = fakeSupabase({ memberships: membership() }, () => ({
+      data: githubResults({ results: [laterZulu, earlierPlusTwo] }), error: null,
+    }));
+    await expect(listGitHubComplianceResults(mixedOffsetValid.client as never, USER, { limit: 2 }))
+      .resolves.toMatchObject({ results: [{ id: laterZulu.id }, { id: earlierPlusTwo.id }] });
+
+    const mixedOffsetInvalid = fakeSupabase({ memberships: membership() }, () => ({
+      data: githubResults({ results: [earlierPlusTwo, laterZulu] }), error: null,
+    }));
+    await expect(listGitHubComplianceResults(mixedOffsetInvalid.client as never, USER, { limit: 2 }))
+      .rejects.toMatchObject({ code: "INTERNAL_ERROR" });
+
+    const equalDstHighId = {
+      ...row,
+      id: "github_result:60000000-0000-4000-8000-000000000001",
+      repositoryId: "60000000-0000-4000-8000-000000000001",
+      repositoryLabel: "GitHub repository 60000000",
+      observedAt: "2026-10-25T00:30:00.000Z",
+      freshUntil: "2026-10-26T00:30:00.000Z",
+      materialisedAt: "2026-10-25T00:31:00.000Z",
+    };
+    const equalDstLowId = {
+      ...row,
+      id: "github_result:50000000-0000-4000-8000-000000000001",
+      observedAt: "2026-10-25T01:30:00.000+01:00",
+      freshUntil: "2026-10-26T01:30:00.000+01:00",
+      materialisedAt: "2026-10-25T01:31:00.000+01:00",
+    };
+    const dstPage = (results: Record<string, unknown>[]) => githubResults({
+      asOf: "2026-10-25T02:00:00.000Z", results,
+    });
+    const equalDstValid = fakeSupabase({ memberships: membership() }, () => ({
+      data: dstPage([equalDstHighId, equalDstLowId]), error: null,
+    }));
+    await expect(listGitHubComplianceResults(equalDstValid.client as never, USER, { limit: 2 }))
+      .resolves.toMatchObject({ results: [{ id: equalDstHighId.id }, { id: equalDstLowId.id }] });
+
+    const equalDstInvalid = fakeSupabase({ memberships: membership() }, () => ({
+      data: dstPage([equalDstLowId, equalDstHighId]), error: null,
+    }));
+    await expect(listGitHubComplianceResults(equalDstInvalid.client as never, USER, { limit: 2 }))
+      .rejects.toMatchObject({ code: "INTERNAL_ERROR" });
+  });
+
   it("derives London dates correctly across midnight and DST seasons", () => {
     expect(dateInLondon(new Date("2026-01-15T00:30:00Z"))).toBe("2026-01-15");
     expect(dateInLondon(new Date("2026-07-15T23:30:00Z"))).toBe("2026-07-16");
