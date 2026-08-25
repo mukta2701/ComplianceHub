@@ -19,6 +19,7 @@ delete from public.monitoring_findings where organisation_id in ('71000000-0000-
 delete from public.tasks where organisation_id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
 delete from public.github_mapping_approvals where organisation_id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
 delete from public.audit_events where organisation_id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
+delete from public.github_materialisation_jobs where organisation_id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
 delete from public.github_observations where organisation_id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
 delete from public.github_collection_runs where organisation_id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
 delete from public.github_repositories where organisation_id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
@@ -1041,6 +1042,7 @@ delete from public.monitoring_findings where organisation_id in ('71000000-0000-
 delete from public.tasks where organisation_id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
 delete from public.github_mapping_approvals where organisation_id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
 delete from public.audit_events where organisation_id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
+delete from public.github_materialisation_jobs where organisation_id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
 delete from public.github_observations where organisation_id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
 delete from public.github_collection_runs where organisation_id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
 delete from public.github_repositories where organisation_id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');

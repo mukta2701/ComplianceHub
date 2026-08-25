@@ -155,3 +155,11 @@ A focused parser test added mixed-offset result pages before the implementation 
 ### Commit privacy hook
 
 The requested commit's privacy hook ran twice and reported `Findings: 0` and `Blocking: 0` both times. Commit creation then failed only because GnuPG could not create its keybox lock under `/Users/m1ghty/.gnupg`; the identical staged content was committed with `commit.gpgsign=false`. The privacy hook was not bypassed.
+
+## Fix round 5 — materialisation-job fixture cleanup
+
+Review of the post-migration fixture graph confirmed that `github_materialisation_jobs` has a restricting composite foreign key to `github_collection_runs`. Both committed-fixture cleanup transactions in `070_github_compliance_materialisation.sql` now delete jobs for the two fixture organisations before deleting observations and collection runs, while preserving official-result deletion before observations. This is cleanup-only and does not change the `no_plan()` assertion matrix; no TypeScript was touched, so no unit rerun was required.
+
+Static ordering verification found two cleanup blocks and, in each, `official results < materialisation jobs < observations < collection runs`; both required delete statements occur exactly twice and `git diff --check` passed. The telemetry-disabled focused `070` + `072` database attempt again reached `Connecting to local database...` and failed before pgTAP execution with `LegacyDbConnectError: ... PgClient: Failed to connect`; database runtime GREEN is not claimed.
+
+The initial commit attempt emitted no privacy finding or blocker and failed only when GnuPG could not create its keybox lock under `/Users/m1ghty/.gnupg`. The identical staged SQL/report content was therefore committed with `commit.gpgsign=false`; no hook was bypassed.
