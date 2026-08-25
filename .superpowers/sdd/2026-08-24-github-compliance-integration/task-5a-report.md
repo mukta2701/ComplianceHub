@@ -79,3 +79,22 @@ Before the corrective implementation, the focused MCP application/server tests f
 ### Remaining database evidence
 
 The Docker-blocked runtime pgTAP gap remains. The 072 plan now exactly matches its 28 assertions and includes a behavioral RPC empty-workspace assertion, but the Docker denial prevents executing fixture/role/concurrency coverage locally. The suite must still be expanded and run in a Docker-enabled environment for the full outcome/concurrency/RLS matrix.
+
+## Fix round 2
+
+### RED
+
+`npm test -- --run src/features/mcp/application/mcp-reads.test.ts` ran 21 tests with one expected failure. The new valid shape—exactly `limit` visible results and `truncated: true`—was rejected by the prior parser because it incorrectly expected a visible `limit + 1` row. The same contract introduces two equal-time result IDs in correct descending order.
+
+### Changes and GREEN
+
+- Parser accepts at most `limit` visible rows, permits `truncated: true` only when exactly `limit` rows are returned, and continues to reject impossible pages. Equal timestamps now require IDs descending, matching SQL `observed_at DESC, id DESC`.
+- Finding references are now derived from immutable `github_finding_transitions` keyed by the exact observation, rather than mutable `github_finding_provenance.latest_observation_id`. This preserves an old failure's immutable finding reference across later materialisation/replay. Evidence remains exact-observation provenance; pass resolution has the transition finding, while pass-without-resolution, unknown, and not-applicable remain null.
+
+GREEN: `npm test -- --run src/features/mcp/application/mcp-reads.test.ts src/features/mcp/server/server.test.ts src/app/mcp/route.test.ts` passed 3 files / 36 tests. `npm run typecheck`, focused ESLint, actionlint, and `git diff --check` passed.
+
+### Remaining evidence
+
+The Docker denial still prevents executing `072`; the requested full independent pgTAP role/outcome/concurrency fixture matrix remains a required Docker-enabled follow-up.
+
+The full unit suite was subsequently completed through the returned terminal session: `npm test -- --reporter=dot --silent` passed 212 files / 1,550 tests in 33.90 seconds.

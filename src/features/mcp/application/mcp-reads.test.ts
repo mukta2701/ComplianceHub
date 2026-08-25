@@ -149,6 +149,29 @@ describe("MCP public read services", () => {
     await expect(listGitHubComplianceResults(badInput.client as never, USER, { workspaceId: ORG, limit: 3, extra: "rejected" } as never)).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
     expect(badInput.states).toEqual([]);
   });
+
+  it("accepts the hidden limit-plus-one truncation shape and requires descending IDs for equal observed times", async () => {
+    const base = githubResults();
+    const first = base.results[0] as Record<string, unknown>;
+    const second = {
+      ...first,
+      id: "github_result:50000000-0000-4000-8000-000000000001",
+      repositoryId: "60000000-0000-4000-8000-000000000001",
+      repositoryLabel: "GitHub repository 60000000",
+      checkId: "secret_scanning",
+    };
+    const valid = fakeSupabase({ memberships: membership() }, () => ({ data: githubResults({ results: [second, first], truncated: true }), error: null }));
+    await expect(listGitHubComplianceResults(valid.client as never, USER, { limit: 2 })).resolves.toMatchObject({ truncated: true, results: [{ id: second.id }, { id: first.id }] });
+
+    for (const data of [
+      githubResults({ results: [first], truncated: true }),
+      githubResults({ results: [first, second, { ...second, id: "github_result:70000000-0000-4000-8000-000000000001", repositoryId: "70000000-0000-4000-8000-000000000001", repositoryLabel: "GitHub repository 70000000", checkId: "dependabot" }], truncated: true }),
+      githubResults({ results: [first, second], truncated: false }),
+    ]) {
+      const invalid = fakeSupabase({ memberships: membership() }, () => ({ data, error: null }));
+      await expect(listGitHubComplianceResults(invalid.client as never, USER, { limit: 2 })).rejects.toMatchObject({ code: "INTERNAL_ERROR" });
+    }
+  });
   it("derives London dates correctly across midnight and DST seasons", () => {
     expect(dateInLondon(new Date("2026-01-15T00:30:00Z"))).toBe("2026-01-15");
     expect(dateInLondon(new Date("2026-07-15T23:30:00Z"))).toBe("2026-07-16");

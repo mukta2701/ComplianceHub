@@ -78,14 +78,20 @@ begin
     approval.id, pack.id, pack.version, pack.checksum, observation.check_id, observation.rule_version, observation.result,
     case when observation.result = 'fail' then entry.failure_severity else null end,
     entry.treatments #>> array[observation.result::text, 'summary'], observation.observed_at, observation.fresh_until,
-    evidence_provenance.evidence_id, finding_provenance.finding_id
+    evidence_provenance.evidence_id, finding_transition.finding_id
   from pg_catalog.jsonb_array_elements(target_decisions) decision_values(decision)
   join public.github_observations observation on observation.id = (decision_values.decision ->> 'observation_id')::uuid and observation.organisation_id = target_organisation_id and observation.collection_run_id = target_collection_run_id
   join public.github_mapping_approvals approval on approval.organisation_id = target_organisation_id and approval.revoked_at is null
   join public.github_mapping_packs pack on pack.id = approval.mapping_pack_id and pack.version = target_mapping_version and pack.checksum = target_mapping_checksum and pack.published_at is not null
   join public.github_mapping_entries entry on entry.mapping_pack_id = pack.id and entry.check_id = observation.check_id and entry.rule_version = observation.rule_version
   left join public.github_evidence_provenance evidence_provenance on evidence_provenance.observation_id = observation.id
-  left join public.github_finding_provenance finding_provenance on finding_provenance.organisation_id = observation.organisation_id and finding_provenance.latest_observation_id = observation.id
+  left join lateral (
+    select transition.finding_id
+    from public.github_finding_transitions transition
+    where transition.organisation_id = observation.organisation_id and transition.observation_id = observation.id
+    order by transition.occurred_at desc, transition.id desc
+    limit 1
+  ) finding_transition on true
   where exists (select 1 from public.github_collection_runs run where run.id = target_collection_run_id and run.organisation_id = target_organisation_id and run.status in ('succeeded','partial'))
   on conflict (observation_id) do nothing;
   get diagnostics inserted_count = row_count;
@@ -103,7 +109,13 @@ begin
   join public.github_mapping_packs pack on pack.id = result.mapping_pack_id
   join public.github_mapping_entries entry on entry.mapping_pack_id = pack.id and entry.check_id = observation.check_id and entry.rule_version = observation.rule_version
   left join public.github_evidence_provenance evidence_provenance on evidence_provenance.observation_id = observation.id
-  left join public.github_finding_provenance finding_provenance on finding_provenance.organisation_id = observation.organisation_id and finding_provenance.latest_observation_id = observation.id
+  left join lateral (
+    select transition.finding_id
+    from public.github_finding_transitions transition
+    where transition.organisation_id = observation.organisation_id and transition.observation_id = observation.id
+    order by transition.occurred_at desc, transition.id desc
+    limit 1
+  ) finding_transition on true
   where observation.organisation_id = target_organisation_id and observation.collection_run_id = target_collection_run_id
     and result.organisation_id = target_organisation_id and result.collection_run_id = target_collection_run_id
     and result.installation_id = observation.installation_id and result.repository_id = observation.repository_id and result.provider_repository_id = observation.provider_repository_id
@@ -113,7 +125,7 @@ begin
     and result.catalogue_summary = entry.treatments #>> array[observation.result::text, 'summary']
     and result.observed_at = observation.observed_at and result.fresh_until = observation.fresh_until
     and result.evidence_id is not distinct from evidence_provenance.evidence_id
-    and result.finding_id is not distinct from finding_provenance.finding_id;
+    and result.finding_id is not distinct from finding_transition.finding_id;
   if expected_count = 0 or expected_count <> distinct_count or inserted_count not in (0, expected_count) or matching_count <> expected_count or ledger_count <> expected_count then
     raise exception 'official result ledger is incomplete or conflicts' using errcode = 'P0001';
   end if;

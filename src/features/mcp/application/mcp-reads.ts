@@ -102,7 +102,7 @@ const githubResultsSchema = z.object({
     if (ids.has(row.id)) ctx.addIssue({ code: "custom", message: "duplicate result id" });
     ids.add(row.id);
     if ((row.freshness === "current") !== (new Date(row.freshUntil) > new Date(value.asOf)) || new Date(row.materialisedAt) > new Date(value.asOf)) ctx.addIssue({ code: "custom", message: "invalid freshness" });
-    if (previous && (previous.observedAt < row.observedAt || (previous.observedAt === row.observedAt && previous.id > row.id))) ctx.addIssue({ code: "custom", message: "non-deterministic result ordering" });
+    if (previous && (previous.observedAt < row.observedAt || (previous.observedAt === row.observedAt && previous.id < row.id))) ctx.addIssue({ code: "custom", message: "non-deterministic result ordering" });
     previous = row;
   }
 });
@@ -315,7 +315,7 @@ export async function listGitHubComplianceResults(
   } catch { queryFailure(); }
   if (response.error || !response.data) queryFailure();
   const result = githubResultsSchema.safeParse(response.data);
-  if (!result.success || result.data.workspace.id !== workspace.id || result.data.results.length > parsed.data.limit + 1 || result.data.truncated !== (result.data.results.length > parsed.data.limit)) queryFailure();
+  if (!result.success || result.data.workspace.id !== workspace.id || result.data.results.length > parsed.data.limit || (result.data.truncated && result.data.results.length !== parsed.data.limit)) queryFailure();
   return {
     ...result.data,
     workspace: { id: result.data.workspace.id, name: safeSummary(result.data.workspace.name, 160, "Workspace") },
