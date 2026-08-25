@@ -122,6 +122,14 @@ describe("concurrent daily digest delivery", () => {
       attentionItems: [],
       monitoringFindings: [],
       latestLeadershipReport: null,
+      github: {
+        partition: { activeCurrentPass: 0, activeCurrentFail: 0, activeCurrentUnknown: 0, activeCurrentNotApplicable: 0, activeStale: 0, historical: 0, total: 0 },
+        baseline: null,
+        changes: { counts: { newFailure: 0, reopen: 0, resolution: 0, supersedingPass: 0, total: 0 }, items: [], truncated: false },
+        unknowns: { count: 0, items: [], truncated: false },
+        staleResults: { count: 0, items: [], truncated: false },
+        recommendedActions: { count: 0, items: [], truncated: false },
+      },
     });
     expect(facts.schemaVersion).toBe(2);
     const factHash = hashDailyDigestFacts(facts);

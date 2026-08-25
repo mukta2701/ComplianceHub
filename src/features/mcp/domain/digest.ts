@@ -166,7 +166,7 @@ type BuildDailyDigestFactsInput = {
   attentionItems: readonly DigestAttentionItem[];
   monitoringFindings: readonly DigestMonitoringFinding[];
   latestLeadershipReport: { id: string; publishedAt: string } | null;
-  github?: DigestGitHubFactsInput;
+  github: DigestGitHubFactsInput;
   limits?: { attentionItems?: number; monitoringFindings?: number };
 };
 
@@ -210,21 +210,6 @@ function normaliseDateTime(value: string): string {
 function boundedLimit(value: number | undefined, fallback: number): number {
   return z.number().int().min(1).max(50).parse(value ?? fallback);
 }
-
-const emptyGitHubFacts: DigestGitHubFactsInput = {
-  partition: {
-    activeCurrentPass: 0, activeCurrentFail: 0, activeCurrentUnknown: 0,
-    activeCurrentNotApplicable: 0, activeStale: 0, historical: 0, total: 0,
-  },
-  baseline: null,
-  changes: {
-    counts: { newFailure: 0, reopen: 0, resolution: 0, supersedingPass: 0, total: 0 },
-    items: [], truncated: false,
-  },
-  unknowns: { count: 0, items: [], truncated: false },
-  staleResults: { count: 0, items: [], truncated: false },
-  recommendedActions: { count: 0, items: [], truncated: false },
-};
 
 const githubOutcome = z.enum(["pass", "fail", "unknown", "not_applicable"]);
 const githubCheckId = z.string().min(1).max(120).regex(/^[a-z0-9._-]+$/);
@@ -386,6 +371,7 @@ export function buildGitHubDigestLines(input: DigestGitHubFactsInput): DigestGit
 }
 
 export function buildDailyDigestFacts(input: BuildDailyDigestFactsInput): DailyDigestFacts {
+  if (!input.github) throw new Error("Verified GitHub digest facts are required");
   const localDate = localDateSchema.parse(input.localDate);
   const attentionLimit = boundedLimit(input.limits?.attentionItems, 20);
   const monitoringLimit = boundedLimit(input.limits?.monitoringFindings, 20);
@@ -437,7 +423,7 @@ export function buildDailyDigestFacts(input: BuildDailyDigestFactsInput): DailyD
       attentionItems: attentionItems.length > attentionLimit,
       monitoringFindings: monitoringFindings.length > monitoringLimit,
     },
-    github: normalizeGitHubFacts(input.github ?? emptyGitHubFacts),
+    github: normalizeGitHubFacts(input.github),
   };
 }
 

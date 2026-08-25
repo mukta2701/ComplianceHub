@@ -128,7 +128,8 @@ const digestGithubSchema = z.object({
   if (github.baseline === null && counts.total !== 0) ctx.addIssue({ code: "custom", message: "changes require baseline" });
   if (github.baseline && (Date.parse(github.baseline.deliveredAt) >= Date.parse(github.asOf))) ctx.addIssue({ code: "custom", message: "invalid baseline chronology" });
   const asOf = Date.parse(github.asOf);
-  const currentRows = [...github.changes.items, ...github.unknowns.items, ...github.recommendedActions.items];
+  if (github.changes.items.some((row) => Date.parse(row.materialisedAt) > asOf)) ctx.addIssue({ code: "custom", message: "invalid future change" });
+  const currentRows = [...github.unknowns.items, ...github.recommendedActions.items];
   if (currentRows.some((row) => Date.parse(row.freshUntil) <= asOf || Date.parse(row.materialisedAt) > asOf)) ctx.addIssue({ code: "custom", message: "invalid current result freshness" });
   if (github.staleResults.items.some((row) => Date.parse(row.freshUntil) > asOf || Date.parse(row.materialisedAt) > asOf)) ctx.addIssue({ code: "custom", message: "invalid stale result freshness" });
   if (github.unknowns.items.some(({ result }) => result !== "unknown")) ctx.addIssue({ code: "custom", message: "unknown section outcome" });

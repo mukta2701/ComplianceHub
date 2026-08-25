@@ -140,6 +140,20 @@ function makeFacts(reverse = false, githubFacts = github) {
 }
 
 describe("daily digest facts", () => {
+  it("requires verified GitHub facts instead of synthesising an authoritative all-clear section", () => {
+    const withoutGitHub = {
+      workspace: { id: "00000000-0000-4000-8000-000000000001", name: "Internal ISMS" },
+      localDate: "2026-08-06",
+      overview,
+      attentionItems: [],
+      monitoringFindings: [],
+      latestLeadershipReport: null,
+    };
+
+    // @ts-expect-error Schema v2 callers must provide the verified GitHub projection.
+    expect(() => buildDailyDigestFacts(withoutGitHub)).toThrow(/github/i);
+  });
+
   it("normalises, orders, and bounds closed-world facts deterministically", () => {
     const facts = makeFacts();
 
@@ -164,7 +178,7 @@ describe("daily digest facts", () => {
       monitoringFindings: [
         { id: "monitoring_finding:a", severity: "critical", status: "open", title: "A", detectedAt: "2026-08-01T00:00:00Z" },
         { id: "monitoring_finding:z", severity: "critical", status: "open", title: "Z", detectedAt: "2026-08-02T00:00:00Z" },
-      ], latestLeadershipReport: null,
+      ], latestLeadershipReport: null, github,
     });
     expect(facts.attentionItems.map(({ id }) => id)).toEqual(["audit_finding:a", "evidence:c", "risk:b"]);
     expect(facts.monitoringFindings.map(({ id }) => id)).toEqual(["monitoring_finding:z", "monitoring_finding:a"]);
@@ -179,7 +193,7 @@ describe("daily digest facts", () => {
         { id: "task:same-day", category: "overdue_task", severity: "high", summary: "Same day task", source: "task", dueOn: "2026-07-01" },
         { id: "policy:same-day", category: "policy_review", severity: "high", summary: "Same day policy", source: "policy", dueOn: "2026-07-01" },
       ],
-      monitoringFindings: [], latestLeadershipReport: null,
+      monitoringFindings: [], latestLeadershipReport: null, github,
       limits: { attentionItems: 1 },
     });
     expect(facts.attentionItems.map(({ id }) => id)).toEqual(["task:same-day"]);
@@ -189,7 +203,7 @@ describe("daily digest facts", () => {
   it("treats a BST timestamp and due date on the same London day as a priority-date tie", () => {
     const input = {
       workspace: { id: "00000000-0000-4000-8000-000000000001", name: "Internal ISMS" },
-      localDate: "2026-07-02", overview, monitoringFindings: [], latestLeadershipReport: null,
+      localDate: "2026-07-02", overview, monitoringFindings: [], latestLeadershipReport: null, github,
       attentionItems: [
         { id: "audit_finding:observed", category: "unresolved_finding" as const, severity: "high" as const, summary: "Observed", source: "audit_finding" as const, observedOn: "2026-06-30T23:30:00Z" },
         { id: "task:due", category: "overdue_task" as const, severity: "high" as const, summary: "Due", source: "task" as const, dueOn: "2026-07-01" },
@@ -292,6 +306,7 @@ describe("daily digest facts", () => {
       attentionItems: [],
       monitoringFindings: [],
       latestLeadershipReport: null,
+      github,
     })).toThrow(/localDate/i);
   });
 
@@ -299,14 +314,14 @@ describe("daily digest facts", () => {
     expect(() => buildDailyDigestFacts({
       workspace: { id: "00000000-0000-4000-8000-000000000001", name: "Internal ISMS" }, localDate: "2026-08-06", overview,
       attentionItems: [{ id: "risk-id", category: "high_risk", severity: "high", summary: "Risk", source: "risk" }],
-      monitoringFindings: [], latestLeadershipReport: null,
+      monitoringFindings: [], latestLeadershipReport: null, github,
     })).toThrow(/source-prefixed/i);
   });
 
   it("rejects duplicate attention and monitoring IDs before hashing", () => {
     const base = {
       workspace: { id: "00000000-0000-4000-8000-000000000001", name: "Internal ISMS" },
-      localDate: "2026-08-06", overview, latestLeadershipReport: null,
+      localDate: "2026-08-06", overview, latestLeadershipReport: null, github,
     };
     expect(() => buildDailyDigestFacts({
       ...base,
@@ -327,7 +342,7 @@ describe("daily digest facts", () => {
   });
 
   it("rejects internally inconsistent overview counts", () => {
-    const base = { workspace: { id: "00000000-0000-4000-8000-000000000001", name: "Internal ISMS" }, localDate: "2026-08-06", attentionItems: [], monitoringFindings: [], latestLeadershipReport: null };
+    const base = { workspace: { id: "00000000-0000-4000-8000-000000000001", name: "Internal ISMS" }, localDate: "2026-08-06", attentionItems: [], monitoringFindings: [], latestLeadershipReport: null, github };
     expect(() => buildDailyDigestFacts({ ...base, overview: { ...overview, tasksOpen: 1, tasksOverdue: 2 } })).toThrow();
     expect(() => buildDailyDigestFacts({ ...base, overview: { ...overview, evidence: { total: 1, expiring: 1, expired: 1 } } })).toThrow();
   });
@@ -414,7 +429,7 @@ describe("daily digest message", () => {
         evidence: { total: 1, expiring: 1, expired: 0 },
         openAudits: 1, openNonConformities: 1,
       },
-      attentionItems: [], monitoringFindings: [], latestLeadershipReport: null,
+      attentionItems: [], monitoringFindings: [], latestLeadershipReport: null, github,
     });
 
     expect(validateDigestMessageAgainstFacts({
@@ -544,6 +559,7 @@ describe("daily digest message", () => {
         detectedAt: "2026-08-06T06:00:00.000Z",
       }],
       latestLeadershipReport: null,
+      github,
     });
 
     expect(validateDigestMessageAgainstFacts({
@@ -574,6 +590,7 @@ describe("daily digest message", () => {
         detectedAt: "2026-08-06T06:00:00Z",
       }],
       latestLeadershipReport: { id: "report-1", publishedAt: "2026-08-05T16:00:00Z" },
+      github,
     });
 
     expect(validateDigestMessageAgainstFacts({

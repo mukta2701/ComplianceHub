@@ -501,6 +501,23 @@ describe("MCP public read services", () => {
     expect(fake.states.map(({ table }) => table)).toEqual(["memberships", "memberships"]);
   });
 
+  it("accepts immutable lifecycle changes after their result freshness window has elapsed", async () => {
+    const bundle = githubDigestBundle();
+    const item = (bundle.changes as { items: Array<Record<string, unknown>> }).items[0]!;
+    const github = githubDigestBundle({
+      changes: {
+        ...bundle.changes,
+        items: [{ ...item, freshUntil: bundle.asOf }],
+      },
+    });
+    const fake = fakeSupabase({ memberships: membership("owner") }, () => ({
+      data: complianceBundle("owner", { github }), error: null,
+    }));
+
+    await expect(prepareDailyDigest(fake.client as never, USER, { localDate: "2026-08-06" }))
+      .resolves.toMatchObject({ facts: { github: { changes: { counts: { newFailure: 1 } } } } });
+  });
+
   it("rejects duplicate or inconsistent RPC facts before hashing", async () => {
     const duplicate = fakeSupabase({ memberships: membership("owner") }, () => ({ data: complianceBundle("owner", {
       attentionItems: [

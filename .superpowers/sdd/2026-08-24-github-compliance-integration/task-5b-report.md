@@ -12,7 +12,10 @@ message was sent.
 - Added the separate stable, security-invoker, empty-search-path,
   authenticated-only `get_mcp_compliance_bundle_v2` RPC. Its single SQL
   statement evaluates the unchanged v1 bundle and the official GitHub
-  projection under one statement snapshot.
+  projection under one statement snapshot. A narrow stable security-definer
+  helper with an empty search path and explicit `auth.uid()` membership check
+  exposes only the prior delivered local date/time needed by every member role;
+  current delivery identity/status/hash remains Owner-only.
 - The v2 projection selects the latest immutable official result per stable
   provider-repository/check identity before classification. It exposes a
   disjoint exact partition, nullable latest-prior-delivered baseline, bounded
@@ -22,10 +25,12 @@ message was sent.
   active after reapproval of the exact same pack/version/checksum; only an
   exact mapping identity change is historical. Lifecycle events retain their
   original approval lineage.
-- Changes are derived only from current active official results plus exact
-  committed finding-transition/evidence-provenance rows. New failure/reopen
-  require `fail`; resolution/superseding pass require `pass`. Shadow rows are
-  never read by the v2 function.
+- Latest-state partition/list facts and lifecycle deltas are separate. Changes
+  derive from every bounded active-mapping official ledger event after the
+  baseline plus exact committed finding-transition/evidence-provenance rows;
+  later results for the same repo/check cannot erase earlier events. New
+  failure/reopen require `fail`; resolution/superseding pass require `pass`.
+  Shadow rows are never read by the v2 function.
 - Upgraded strict application facts and canonical hashes to schema v2. The
   exact GitHub partition, baseline, change facts/counts, section counts, and
   truncation state are hashed after deterministic normalization.
@@ -76,9 +81,20 @@ Focused GREEN:
 - The full Vitest command exited 0. Its verbose output exercised the complete
   suite; no test count is inferred from truncated terminal output.
 
+Independent-review RED/GREEN:
+
+- The focused domain/reads run first failed exactly two new regressions while
+  70 tests passed: omitted GitHub input still produced an authoritative zero
+  section, and an immutable lifecycle event was rejected after its result
+  freshness elapsed. After implementation the same two files passed 72 tests.
+- The seven-file digest/MCP/deployment focus passed 147 tests. Full Vitest,
+  typecheck, lint, actionlint, and diff checks exited 0.
+- Database runtime remained unavailable: focused `073` stopped before any
+  assertion with `LegacyDbConnectError: PgClient: Failed to connect`.
+
 ## Direct database contract
 
-`073_mcp_github_digest_v2.sql` has an exact `plan(43)` and 43 uniquely labelled
+`073_mcp_github_digest_v2.sql` has an exact `plan(60)` and 60 uniquely labelled
 assertions. Its transaction-local fixture uses the real standard pack, copies
 and seals a reachable changed pack, and covers:
 
@@ -87,14 +103,18 @@ and seals a reachable changed pack, and covers:
   immutable transition reasons, and evidence supersession lineage;
 - exact partition and sum, equality-as-stale, same-pack reapproval versus a
   changed pack, and deterministic ordering;
+- separate latest state and all-official event delta derivation, including new
+  fail→unchanged fail, fail→pass, and fail→pass→fail sequences with their exact
+  retained new-failure/resolution/reopen events and latest states;
 - new failure, reopen, resolution, and superseding-pass counts/items;
-- prior-delivered baseline and explicit no-baseline behavior;
+- a narrowly elevated membership-scoped prior-delivery date/time helper,
+  identical safe baseline/deltas for Owner/Admin/Member, Owner-only current
+  delivery metadata, outsider denial, and explicit no-baseline behavior;
 - full counts retained under change/unknown page truncation;
 - raw newer shadow observations and replay-equivalent repeat reads as no-ops;
 - safe local repository labels, approved catalogue summaries, and prohibited
   provider/actor/destination/raw-content key absence;
-- Owner stored fact hash, Admin/Member delivery redaction, outsider/cross-tenant
-  denial, and v1 schema-one rolling compatibility.
+- Owner stored fact hash and v1 schema-one rolling compatibility.
 
 ## Runtime evidence gaps
 
@@ -117,13 +137,21 @@ These strict gates remain mandatory before deployment and were not weakened:
 
 ## Self-review
 
-- `get_mcp_compliance_bundle` v1 and all committed migrations are unchanged.
-- The v2 function is one stable invoker statement, uses existing RLS, has only
-  the authenticated execute grant, and returns null for an outsider target.
+- `get_mcp_compliance_bundle` v1 and every migration preceding the unpublished
+  Task 5B migration are unchanged; this review fix corrects that pending
+  migration before any runtime/release-complete claim.
+- The v2 function is one stable invoker statement and returns null for an
+  outsider target. Its sole elevated dependency returns only prior delivered
+  local date/time, is stable with an empty search path, rechecks authenticated
+  organisation membership internally, and denies anon/service-role execution.
 - Official ranking occurs before freshness/mapping classification. Same-pack
   reapproval is active; changed pack identity is historical. Equality is stale.
 - Counts are computed before page limits and the six partition buckets sum to
   total. No-baseline state produces no invented changes.
+- Latest-state collapse is used only by partition/lists. Deltas use all
+  official events with the exact active mapping identity and exact immutable
+  transition/provenance ancestry; unchanged repeats and later state changes do
+  not erase earlier events.
 - Change ordering matches in SQL/parser/domain exactly: materialisation instant
   descending, then resolution/superseding-pass/reopen/new-failure rank, then
   change ID descending. `occurredAt` uses a strict offset datetime parser and is
@@ -136,6 +164,9 @@ These strict gates remain mandatory before deployment and were not weakened:
 - Existing reserve/finalise RPCs, delivery one-winner semantics, ambiguous
   outcome handling, destination validation, and Slack transport were not
   changed. No test uses a real Slack or GitHub transport.
+- `BuildDailyDigestFactsInput.github` is required. The domain fails closed at
+  runtime as well as compile time instead of synthesising a verified all-zero
+  GitHub section when the projection is absent.
 
 ## Commit privacy hook
 

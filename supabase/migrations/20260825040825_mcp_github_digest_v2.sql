@@ -1,6 +1,41 @@
 -- The v1 bundle is deliberately left untouched for rolling deploys.  This
 -- successor evaluates the legacy bundle and the verified GitHub projection in
 -- one statement, so all facts share the statement snapshot.
+create function public.get_mcp_prior_delivered_digest_baseline(
+  target_organisation_id uuid,
+  target_local_date date
+)
+returns table(local_date date, delivered_at timestamptz)
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select delivery.digest_on as local_date, delivery.delivered_at
+  from public.daily_digest_deliveries as delivery
+  where target_organisation_id is not null
+    and target_local_date is not null
+    and delivery.organisation_id = target_organisation_id
+    and delivery.digest_on < target_local_date
+    and delivery.status = 'delivered'
+    and delivery.delivered_at is not null
+    and delivery.delivered_at < pg_catalog.now()
+    and exists (
+      select 1
+      from public.memberships as membership
+      where membership.organisation_id = target_organisation_id
+        and membership.user_id = (select auth.uid())
+    )
+  order by delivery.digest_on desc, delivery.delivered_at desc, delivery.id desc
+  limit 1;
+$$;
+
+alter function public.get_mcp_prior_delivered_digest_baseline(uuid,date) owner to postgres;
+revoke all on function public.get_mcp_prior_delivered_digest_baseline(uuid,date)
+from public, anon, authenticated, service_role;
+grant execute on function public.get_mcp_prior_delivered_digest_baseline(uuid,date)
+to authenticated;
+
 create function public.get_mcp_compliance_bundle_v2(
   target_organisation_id uuid,
   target_local_date date,
@@ -82,6 +117,40 @@ classified as materialized (
   where result.result_rank = 1
     and result.materialised_at <= parameters.as_of
 ),
+baseline as materialized (
+  select prior.local_date, prior.delivered_at
+  from public.get_mcp_prior_delivered_digest_baseline(
+    target_organisation_id, target_local_date
+  ) as prior
+  cross join parameters
+  where prior.delivered_at < parameters.as_of
+),
+official_event_ledger as materialized (
+  select result.*,
+         pg_catalog.jsonb_build_object(
+           'id', 'github_result:' || result.id::text,
+           'repositoryId', result.repository_id,
+           'repositoryLabel', 'GitHub repository ' || pg_catalog.left(result.repository_id::text, 8),
+           'checkId', result.check_id,
+           'result', result.outcome,
+           'severity', result.failure_severity,
+           'summary', result.catalogue_summary,
+           'observedAt', result.observed_at,
+           'freshUntil', result.fresh_until,
+           'materialisedAt', result.materialised_at
+         ) as result_json
+  from public.github_official_compliance_results as result
+  join active_approval as active
+    on active.mapping_pack_id = result.mapping_pack_id
+   and active.mapping_version = result.mapping_version
+   and active.mapping_checksum = result.mapping_checksum
+  cross join caller
+  cross join parameters
+  cross join baseline
+  where result.organisation_id = target_organisation_id
+    and result.materialised_at > baseline.delivered_at
+    and result.materialised_at <= parameters.as_of
+),
 partition_counts as (
   select count(*) filter (where mapping_status = 'active' and freshness = 'current' and outcome = 'pass')::integer as active_current_pass,
          count(*) filter (where mapping_status = 'active' and freshness = 'current' and outcome = 'fail')::integer as active_current_fail,
@@ -91,19 +160,6 @@ partition_counts as (
          count(*) filter (where mapping_status = 'historical')::integer as historical,
          count(*)::integer as total
   from classified
-),
-baseline as materialized (
-  select delivery.digest_on as local_date, delivery.delivered_at
-  from public.daily_digest_deliveries as delivery
-  cross join caller
-  cross join parameters
-  where delivery.organisation_id = target_organisation_id
-    and delivery.digest_on < target_local_date
-    and delivery.status = 'delivered'
-    and delivery.delivered_at is not null
-    and delivery.delivered_at < parameters.as_of
-  order by delivery.digest_on desc, delivery.delivered_at desc, delivery.id desc
-  limit 1
 ),
 transition_change_candidates as materialized (
   select result.id as result_id,
@@ -116,18 +172,14 @@ transition_change_candidates as materialized (
          result.materialised_at,
          result.result_json,
          transition.id as lineage_id
-  from classified as result
+  from official_event_ledger as result
   join public.github_finding_transitions as transition
     on transition.organisation_id = result.organisation_id
    and transition.observation_id = result.observation_id
    and transition.approval_id = result.approval_id
    and transition.mapping_pack_id = result.mapping_pack_id
    and transition.mapping_version = result.mapping_version
-  cross join baseline
-  where result.mapping_status = 'active'
-    and result.freshness = 'current'
-    and result.materialised_at > baseline.delivered_at
-    and transition.reason in (
+  where transition.reason in (
       'failed_observation_created', 'failed_observation_reopened', 'fresh_pass_resolved'
     )
     and (
@@ -142,18 +194,14 @@ evidence_change_candidates as materialized (
          result.materialised_at,
          result.result_json,
          provenance.id as lineage_id
-  from classified as result
+  from official_event_ledger as result
   join public.github_evidence_provenance as provenance
     on provenance.organisation_id = result.organisation_id
    and provenance.observation_id = result.observation_id
    and provenance.approval_id = result.approval_id
    and provenance.mapping_pack_id = result.mapping_pack_id
    and provenance.supersedes_evidence_id is not null
-  cross join baseline
-  where result.mapping_status = 'active'
-    and result.freshness = 'current'
-    and result.outcome = 'pass'
-    and result.materialised_at > baseline.delivered_at
+  where result.outcome = 'pass'
 ),
 change_candidates as materialized (
   select * from transition_change_candidates

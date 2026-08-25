@@ -3,7 +3,7 @@
 -- row is transaction-local and rolled back.
 begin;
 
-select plan(43);
+select plan(60);
 
 select has_function('public','get_mcp_compliance_bundle',array['uuid','date','integer','integer'],'digest v2: rolling-compatible v1 bundle remains present');
 select function_returns('public','get_mcp_compliance_bundle',array['uuid','date','integer','integer'],'jsonb','digest v2: v1 return type is unchanged');
@@ -27,6 +27,16 @@ select ok(pg_catalog.pg_get_functiondef('public.get_mcp_compliance_bundle_v2(uui
 select ok(pg_catalog.pg_get_functiondef('public.get_mcp_compliance_bundle_v2(uuid,date,integer,integer,integer)'::regprocedure) ~ 'fresh_until > .*as_of','digest v2: only strict greater-than freshness is current');
 select ok(pg_catalog.pg_get_functiondef('public.get_mcp_compliance_bundle_v2(uuid,date,integer,integer,integer)'::regprocedure) ~ 'failed_observation_created' and pg_catalog.pg_get_functiondef('public.get_mcp_compliance_bundle_v2(uuid,date,integer,integer,integer)'::regprocedure) ~ 'failed_observation_reopened' and pg_catalog.pg_get_functiondef('public.get_mcp_compliance_bundle_v2(uuid,date,integer,integer,integer)'::regprocedure) ~ 'fresh_pass_resolved','digest v2: change kinds derive from immutable lifecycle reasons');
 select ok(pg_catalog.pg_get_functiondef('public.get_mcp_compliance_bundle_v2(uuid,date,integer,integer,integer)'::regprocedure) ~ 'supersedes_evidence_id','digest v2: superseding pass derives from immutable evidence lineage');
+select ok(pg_catalog.pg_get_functiondef('public.get_mcp_compliance_bundle_v2(uuid,date,integer,integer,integer)'::regprocedure) ~ 'official_event_ledger','digest v2: change deltas use the all-official event ledger independently of latest-state collapse');
+
+select has_function('public','get_mcp_prior_delivered_digest_baseline',array['uuid','date'],'digest v2: narrow prior-delivery baseline helper exists');
+select is((select prosecdef from pg_catalog.pg_proc where oid='public.get_mcp_prior_delivered_digest_baseline(uuid,date)'::regprocedure),true,'digest v2: prior-delivery baseline helper is the narrow trusted boundary');
+select is((select provolatile::text from pg_catalog.pg_proc where oid='public.get_mcp_prior_delivered_digest_baseline(uuid,date)'::regprocedure),'s','digest v2: prior-delivery baseline helper is stable');
+select ok((select proconfig @> array['search_path=""'] from pg_catalog.pg_proc where oid='public.get_mcp_prior_delivered_digest_baseline(uuid,date)'::regprocedure),'digest v2: prior-delivery baseline helper pins an empty search path');
+select ok(has_function_privilege('authenticated','public.get_mcp_prior_delivered_digest_baseline(uuid,date)','EXECUTE'),'digest v2: authenticated callers may request only their membership-scoped safe baseline');
+select ok(not has_function_privilege('anon','public.get_mcp_prior_delivered_digest_baseline(uuid,date)','EXECUTE'),'digest v2: anonymous callers cannot execute the baseline helper');
+select ok(not has_function_privilege('service_role','public.get_mcp_prior_delivered_digest_baseline(uuid,date)','EXECUTE'),'digest v2: service role has no baseline helper bypass');
+select ok(pg_catalog.pg_get_functiondef('public.get_mcp_prior_delivered_digest_baseline(uuid,date)'::regprocedure) ~ 'memberships' and pg_catalog.pg_get_functiondef('public.get_mcp_prior_delivered_digest_baseline(uuid,date)'::regprocedure) ~ 'auth.uid\(\)','digest v2: baseline helper enforces authenticated organisation membership internally');
 
 insert into auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data) values
  ('76000000-0000-4000-8000-000000000011','00000000-0000-0000-0000-000000000000','authenticated','authenticated','digest-v2-owner@example.test','',now(),'{}','{}'),
@@ -144,9 +154,13 @@ begin
 end;
 $$;
 
-select pg_temp.seed_digest_official('76000000-0000-4000-8000-000000000401','76000000-0000-4000-8000-000000000501','76000000-0000-4000-8000-000000000601','digest.new_failure','fail',now()-interval '9 hours',now()+interval '1 day',now()-interval '8 hours','76000000-0000-4000-8000-000000000304');
-select pg_temp.seed_digest_official('76000000-0000-4000-8000-000000000402','76000000-0000-4000-8000-000000000502','76000000-0000-4000-8000-000000000602','digest.reopen','fail',now()-interval '8 hours',now()+interval '1 day',now()-interval '7 hours','76000000-0000-4000-8000-000000000304');
-select pg_temp.seed_digest_official('76000000-0000-4000-8000-000000000403','76000000-0000-4000-8000-000000000503','76000000-0000-4000-8000-000000000603','digest.resolution','pass',now()-interval '7 hours',now()+interval '1 day',now()-interval '6 hours','76000000-0000-4000-8000-000000000304');
+select pg_temp.seed_digest_official('76000000-0000-4000-8000-000000000401','76000000-0000-4000-8000-000000000501','76000000-0000-4000-8000-000000000601','digest.repeat_failure','fail',now()-interval '15 hours',now()+interval '1 day',now()-interval '14 hours','76000000-0000-4000-8000-000000000304');
+select pg_temp.seed_digest_official('76000000-0000-4000-8000-000000000411','76000000-0000-4000-8000-000000000512','76000000-0000-4000-8000-000000000615','digest.repeat_failure','fail',now()-interval '13 hours',now()+interval '1 day',now()-interval '12 hours','76000000-0000-4000-8000-000000000304');
+select pg_temp.seed_digest_official('76000000-0000-4000-8000-000000000402','76000000-0000-4000-8000-000000000502','76000000-0000-4000-8000-000000000602','digest.fail_pass','fail',now()-interval '11 hours',now()+interval '1 day',now()-interval '10 hours','76000000-0000-4000-8000-000000000304');
+select pg_temp.seed_digest_official('76000000-0000-4000-8000-000000000403','76000000-0000-4000-8000-000000000503','76000000-0000-4000-8000-000000000603','digest.fail_pass','pass',now()-interval '9 hours',now()+interval '1 day',now()-interval '8 hours','76000000-0000-4000-8000-000000000304');
+select pg_temp.seed_digest_official('76000000-0000-4000-8000-000000000412','76000000-0000-4000-8000-000000000513','76000000-0000-4000-8000-000000000612','digest.fail_pass_fail','fail',now()-interval '7 hours',now()+interval '1 day',now()-interval '6 hours','76000000-0000-4000-8000-000000000304');
+select pg_temp.seed_digest_official('76000000-0000-4000-8000-000000000413','76000000-0000-4000-8000-000000000514','76000000-0000-4000-8000-000000000613','digest.fail_pass_fail','pass',now()-interval '5 hours',now()+interval '1 day',now()-interval '4 hours','76000000-0000-4000-8000-000000000304');
+select pg_temp.seed_digest_official('76000000-0000-4000-8000-000000000414','76000000-0000-4000-8000-000000000515','76000000-0000-4000-8000-000000000614','digest.fail_pass_fail','fail',now()-interval '3 hours',now()+interval '1 day',now()-interval '2 hours','76000000-0000-4000-8000-000000000304');
 select pg_temp.seed_digest_official('76000000-0000-4000-8000-000000000404','76000000-0000-4000-8000-000000000504','76000000-0000-4000-8000-000000000604','digest.superseding_pass','pass',now()-interval '6 hours',now()+interval '1 day',now()-interval '5 hours','76000000-0000-4000-8000-000000000304');
 select pg_temp.seed_digest_official('76000000-0000-4000-8000-000000000405','76000000-0000-4000-8000-000000000505','76000000-0000-4000-8000-000000000605','digest.unknown_a','unknown',now()-interval '5 hours',now()+interval '1 day',now()-interval '4 hours','76000000-0000-4000-8000-000000000304');
 select pg_temp.seed_digest_official('76000000-0000-4000-8000-000000000406','76000000-0000-4000-8000-000000000506','76000000-0000-4000-8000-000000000606','digest.unknown_b','unknown',now()-interval '4 hours',now()+interval '1 day',now()-interval '3 hours','76000000-0000-4000-8000-000000000304');
@@ -160,9 +174,9 @@ insert into public.monitoring_findings(
  id,organisation_id,check_id,control_ref,subject_type,subject_id,severity,title,status,detected_at,
  finding_origin,provider_repository_id,mapping_version
 ) values
- ('76000000-0000-4000-8000-000000000701','76000000-0000-4000-8000-000000000001','digest.new_failure','A.8.32','github_repository','digest-new-failure','high','Approved new failure','open',now()-interval '9 hours','github',76303,'github-iso-27001-v1'),
- ('76000000-0000-4000-8000-000000000702','76000000-0000-4000-8000-000000000001','digest.reopen','A.8.32','github_repository','digest-reopen','high','Approved reopen','open',now()-interval '8 hours','github',76303,'github-iso-27001-v1'),
- ('76000000-0000-4000-8000-000000000703','76000000-0000-4000-8000-000000000001','digest.resolution','A.8.32','github_repository','digest-resolution','high','Approved resolution','resolved',now()-interval '2 days','github',76303,'github-iso-27001-v1');
+ ('76000000-0000-4000-8000-000000000701','76000000-0000-4000-8000-000000000001','digest.repeat_failure','A.8.32','github_repository','digest-repeat-failure','high','Approved repeated failure','open',now()-interval '15 hours','github',76303,'github-iso-27001-v1'),
+ ('76000000-0000-4000-8000-000000000702','76000000-0000-4000-8000-000000000001','digest.fail_pass','A.8.32','github_repository','digest-fail-pass','high','Approved fail then pass','resolved',now()-interval '11 hours','github',76303,'github-iso-27001-v1'),
+ ('76000000-0000-4000-8000-000000000703','76000000-0000-4000-8000-000000000001','digest.fail_pass_fail','A.8.32','github_repository','digest-fail-pass-fail','high','Approved fail pass fail','open',now()-interval '7 hours','github',76303,'github-iso-27001-v1');
 set session_replication_role = origin;
 insert into public.github_finding_transitions(
  id,organisation_id,finding_id,from_status,to_status,reason,observation_id,approval_id,mapping_pack_id,mapping_version,occurred_at
@@ -171,9 +185,12 @@ select transition.id,'76000000-0000-4000-8000-000000000001',transition.finding_i
        transition.from_status::public.monitor_finding_status,transition.to_status::public.monitor_finding_status,
        transition.reason,transition.observation_id,'76000000-0000-4000-8000-000000000304',pack.id,pack.version,transition.occurred_at
 from (values
- ('76000000-0000-4000-8000-000000000711'::uuid,'76000000-0000-4000-8000-000000000701'::uuid,null::text,'open','failed_observation_created','76000000-0000-4000-8000-000000000601'::uuid,now()-interval '8 hours'),
- ('76000000-0000-4000-8000-000000000712'::uuid,'76000000-0000-4000-8000-000000000702'::uuid,'resolved','open','failed_observation_reopened','76000000-0000-4000-8000-000000000602'::uuid,now()-interval '7 hours'),
- ('76000000-0000-4000-8000-000000000713'::uuid,'76000000-0000-4000-8000-000000000703'::uuid,'open','resolved','fresh_pass_resolved','76000000-0000-4000-8000-000000000603'::uuid,now()-interval '6 hours')
+ ('76000000-0000-4000-8000-000000000711'::uuid,'76000000-0000-4000-8000-000000000701'::uuid,null::text,'open','failed_observation_created','76000000-0000-4000-8000-000000000601'::uuid,now()-interval '14 hours'),
+ ('76000000-0000-4000-8000-000000000712'::uuid,'76000000-0000-4000-8000-000000000702'::uuid,null::text,'open','failed_observation_created','76000000-0000-4000-8000-000000000602'::uuid,now()-interval '10 hours'),
+ ('76000000-0000-4000-8000-000000000713'::uuid,'76000000-0000-4000-8000-000000000702'::uuid,'open','resolved','fresh_pass_resolved','76000000-0000-4000-8000-000000000603'::uuid,now()-interval '8 hours'),
+ ('76000000-0000-4000-8000-000000000714'::uuid,'76000000-0000-4000-8000-000000000703'::uuid,null::text,'open','failed_observation_created','76000000-0000-4000-8000-000000000612'::uuid,now()-interval '6 hours'),
+ ('76000000-0000-4000-8000-000000000715'::uuid,'76000000-0000-4000-8000-000000000703'::uuid,'open','resolved','fresh_pass_resolved','76000000-0000-4000-8000-000000000613'::uuid,now()-interval '4 hours'),
+ ('76000000-0000-4000-8000-000000000716'::uuid,'76000000-0000-4000-8000-000000000703'::uuid,'resolved','open','failed_observation_reopened','76000000-0000-4000-8000-000000000614'::uuid,now()-interval '2 hours')
 ) as transition(id,finding_id,from_status,to_status,reason,observation_id,occurred_at)
 cross join public.github_mapping_packs as pack
 where pack.version='github-iso-27001-v1';
@@ -202,22 +219,25 @@ select set_config('app.digest_v2_owner',public.get_mcp_compliance_bundle_v2('760
 select is((current_setting('app.digest_v2_owner')::jsonb->>'schemaVersion')::integer,2,'digest v2 fixture: Owner receives schema version two');
 select is(current_setting('app.digest_v2_owner')::jsonb#>'{github,partition}','{"activeCurrentPass":2,"activeCurrentFail":2,"activeCurrentUnknown":3,"activeCurrentNotApplicable":1,"activeStale":1,"historical":1,"total":10}'::jsonb,'digest v2 fixture: latest official identities form the exact active-current, stale, and historical partition');
 select ok((select sum(value::integer) from pg_catalog.jsonb_each_text((current_setting('app.digest_v2_owner')::jsonb#>'{github,partition}') - 'total'))=(current_setting('app.digest_v2_owner')::jsonb#>>'{github,partition,total}')::integer,'digest v2 fixture: disjoint partition sums exactly to total');
-select is(current_setting('app.digest_v2_owner')::jsonb#>'{github,changes,counts}','{"newFailure":1,"reopen":1,"resolution":1,"supersedingPass":1,"total":4}'::jsonb,'digest v2 fixture: immutable transitions and evidence lineage produce all four exact change counts');
+select is(current_setting('app.digest_v2_owner')::jsonb#>'{github,changes,counts}','{"newFailure":3,"reopen":1,"resolution":2,"supersedingPass":1,"total":7}'::jsonb,'digest v2 fixture: immutable transitions and evidence lineage preserve every exact lifecycle event count');
 select is((select pg_catalog.jsonb_agg(item.value->>'kind' order by item.ordinal)
            from pg_catalog.jsonb_array_elements(current_setting('app.digest_v2_owner')::jsonb#>'{github,changes,items}')
                 with ordinality as item(value,ordinal)),
-          '["superseding_pass","resolution","reopen","new_failure"]'::jsonb,
+          '["reopen","resolution","superseding_pass","new_failure","resolution","new_failure","new_failure"]'::jsonb,
           'digest v2 fixture: change items retain deterministic materialisation order');
+select ok(current_setting('app.digest_v2_owner')::jsonb#>'{github,changes,items}' @> '[{"kind":"new_failure","resultId":"github_result:76000000-0000-4000-8000-000000000401","checkId":"digest.repeat_failure","result":"fail"}]'::jsonb and current_setting('app.digest_v2_owner')::jsonb#>'{github,recommendedActions,items}' @> '[{"id":"github_result:76000000-0000-4000-8000-000000000411","checkId":"digest.repeat_failure","result":"fail"}]'::jsonb,'digest v2 fixture: new fail then repeated unchanged fail retains the original new-failure event and latest fail state');
+select ok(current_setting('app.digest_v2_owner')::jsonb#>'{github,changes,items}' @> '[{"kind":"new_failure","resultId":"github_result:76000000-0000-4000-8000-000000000402","checkId":"digest.fail_pass","result":"fail"},{"kind":"resolution","resultId":"github_result:76000000-0000-4000-8000-000000000403","checkId":"digest.fail_pass","result":"pass"}]'::jsonb and not (current_setting('app.digest_v2_owner')::jsonb#>'{github,recommendedActions,items}' @> '[{"checkId":"digest.fail_pass"}]'::jsonb),'digest v2 fixture: fail then pass retains new-failure and resolution events while latest state is pass');
+select ok(current_setting('app.digest_v2_owner')::jsonb#>'{github,changes,items}' @> '[{"kind":"new_failure","resultId":"github_result:76000000-0000-4000-8000-000000000412","checkId":"digest.fail_pass_fail","result":"fail"},{"kind":"resolution","resultId":"github_result:76000000-0000-4000-8000-000000000413","checkId":"digest.fail_pass_fail","result":"pass"},{"kind":"reopen","resultId":"github_result:76000000-0000-4000-8000-000000000414","checkId":"digest.fail_pass_fail","result":"fail"}]'::jsonb and current_setting('app.digest_v2_owner')::jsonb#>'{github,recommendedActions,items}' @> '[{"id":"github_result:76000000-0000-4000-8000-000000000414","checkId":"digest.fail_pass_fail","result":"fail"}]'::jsonb,'digest v2 fixture: fail then pass then fail retains new-failure, resolution, and reopen events while latest state is fail');
 select ok(current_setting('app.digest_v2_owner')::jsonb#>>'{github,staleResults,items,0,checkId}'='digest.stale' and (current_setting('app.digest_v2_owner')::jsonb#>>'{github,staleResults,count}')::integer=1,'digest v2 fixture: fresh-until equality is classified stale with its full count');
 select ok(current_setting('app.digest_v2_owner')::jsonb#>'{github,unknowns,items}' @> '[{"checkId":"digest.reapproved_same_pack"}]'::jsonb and not (current_setting('app.digest_v2_owner')::jsonb#>'{github,unknowns,items}' @> '[{"checkId":"digest.changed_pack"}]'::jsonb),'digest v2 fixture: same-pack reapproval remains active while an exact mapping-identity change is historical');
 select is(current_setting('app.digest_v2_owner')::jsonb#>>'{github,baseline,localDate}','2026-08-06','digest v2 fixture: baseline selects latest prior delivered local date');
 select is(current_setting('app.digest_v2_owner')::jsonb#>>'{github,baseline,deliveredAt}','2026-08-06T08:00:00+00:00','digest v2 fixture: baseline exposes exact delivery time');
 select ok((public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,1)#>>'{github,unknowns,count}')::integer=3 and (public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,1)#>>'{github,unknowns,truncated}')::boolean and pg_catalog.jsonb_array_length(public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,1)#>'{github,unknowns,items}')=1,'digest v2 fixture: unknown full count survives deterministic page truncation');
-select ok((public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,1)#>>'{github,changes,counts,total}')::integer=4 and (public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,1)#>>'{github,changes,truncated}')::boolean and pg_catalog.jsonb_array_length(public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,1)#>'{github,changes,items}')=1,'digest v2 fixture: change full count survives deterministic page truncation');
+select ok((public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,1)#>>'{github,changes,counts,total}')::integer=7 and (public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,1)#>>'{github,changes,truncated}')::boolean and pg_catalog.jsonb_array_length(public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,1)#>'{github,changes,items}')=1,'digest v2 fixture: change full count survives deterministic page truncation');
 select is(current_setting('app.digest_v2_owner')::jsonb#>>'{delivery,factHash}',repeat('b',64),'digest v2 fixture: Owner receives immutable current delivery hash');
 select ok(current_setting('app.digest_v2_owner') !~ '"(providerRepositoryId|providerInstallationId|sourceUrl|explanation|remediation|accountLogin|ownerLogin|fullName|htmlUrl|actorId|memberId|webhook|config)"[[:space:]]*:','digest v2 fixture: bundle excludes provider, actor, destination, and raw-content keys');
 select is(current_setting('app.digest_v2_owner')::jsonb#>>'{github,recommendedActions,items,0,repositoryLabel}','GitHub repository 76000000','digest v2 fixture: repository labels derive only from the local repository UUID');
-select is(current_setting('app.digest_v2_owner')::jsonb#>>'{github,recommendedActions,items,0,summary}','Approved catalogue summary for digest.reopen','digest v2 fixture: recommended facts expose only approved catalogue wording');
+select is(current_setting('app.digest_v2_owner')::jsonb#>>'{github,recommendedActions,items,0,summary}','Approved catalogue summary for digest.fail_pass_fail','digest v2 fixture: recommended facts expose only approved catalogue wording');
 select is((public.get_mcp_compliance_bundle('76000000-0000-4000-8000-000000000001','2026-08-07',20,20)->>'schemaVersion')::integer,1,'digest v2 fixture: rolling-compatible v1 still returns schema one');
 
 reset role;
@@ -244,11 +264,18 @@ select set_config('request.jwt.claims','{"sub":"76000000-0000-4000-8000-00000000
 select is(public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,20)->'github',current_setting('app.digest_v2_owner')::jsonb->'github','digest v2 fixture: newer raw shadow content and provider ordering cannot change official facts');
 select is(public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,20)->'github',public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,20)->'github','digest v2 fixture: repeat reads and replay-equivalent state remain byte-for-byte deterministic');
 select set_config('request.jwt.claims','{"sub":"76000000-0000-4000-8000-000000000012","role":"authenticated"}',true);
-select is(public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,20)->'delivery','null'::jsonb,'digest v2 fixture: Admin delivery metadata remains redacted');
+select set_config('app.digest_v2_admin',public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,20)::text,true);
+select is(current_setting('app.digest_v2_admin')::jsonb#>'{github,baseline}',current_setting('app.digest_v2_owner')::jsonb#>'{github,baseline}','digest v2 fixture: Admin receives the same safe prior-delivery baseline as Owner');
+select is(current_setting('app.digest_v2_admin')::jsonb#>'{github,changes}',current_setting('app.digest_v2_owner')::jsonb#>'{github,changes}','digest v2 fixture: Admin receives the same verified deltas as Owner');
+select is(current_setting('app.digest_v2_admin')::jsonb->'delivery','null'::jsonb,'digest v2 fixture: Admin delivery metadata remains redacted');
 select set_config('request.jwt.claims','{"sub":"76000000-0000-4000-8000-000000000013","role":"authenticated"}',true);
-select is(public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,20)->'delivery','null'::jsonb,'digest v2 fixture: Member delivery metadata remains redacted');
+select set_config('app.digest_v2_member',public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,20)::text,true);
+select is(current_setting('app.digest_v2_member')::jsonb#>'{github,baseline}',current_setting('app.digest_v2_owner')::jsonb#>'{github,baseline}','digest v2 fixture: Member receives the same safe prior-delivery baseline as Owner');
+select is(current_setting('app.digest_v2_member')::jsonb#>'{github,changes}',current_setting('app.digest_v2_owner')::jsonb#>'{github,changes}','digest v2 fixture: Member receives the same verified deltas as Owner');
+select is(current_setting('app.digest_v2_member')::jsonb->'delivery','null'::jsonb,'digest v2 fixture: Member delivery metadata remains redacted');
 select set_config('request.jwt.claims','{"sub":"76000000-0000-4000-8000-000000000014","role":"authenticated"}',true);
 select is(public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,20),null::jsonb,'digest v2 fixture: outsider receives no cross-tenant bundle');
+select is((select count(*) from public.get_mcp_prior_delivered_digest_baseline('76000000-0000-4000-8000-000000000001','2026-08-07')),0::bigint,'digest v2 fixture: outsider cannot read even the narrow cross-tenant baseline');
 select ok(public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000002','2026-08-07',20,20,20)#>'{github,baseline}'='null'::jsonb and (public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000002','2026-08-07',20,20,20)#>>'{github,changes,counts,total}')::integer=0,'digest v2 fixture: workspace without a prior delivery has an explicit null baseline and no invented changes');
 reset role;
 
