@@ -26,6 +26,7 @@ import {
 
 const uuid = z.uuid();
 const dateTime = z.string().datetime({ offset: true });
+const prefixedUuid = (prefix: string) => z.string().refine((value) => value.startsWith(prefix) && uuid.safeParse(value.slice(prefix.length)).success, `${prefix} UUID required`);
 const riskConfigRow = z.object({ low_max: z.number().int(), moderate_max: z.number().int(), high_max: z.number().int(), appetite_threshold: z.number().int().nullable() });
 const snapshotRow = z.object({ id: uuid, payload: readinessReportSchema, published_at: dateTime });
 const monitoringStatus = z.enum(MONITORING_FINDING_STATUSES);
@@ -69,9 +70,9 @@ const bundleSchema = z.object({
   delivery: z.object({ id: uuid, status: z.enum(["reserved", "delivered", "failed", "unknown"]), deliveredAt: dateTime.nullable() }).strict().nullable(),
 }).strict();
 const githubResultRow = z.object({
-  id: z.string().regex(/^github_result:[0-9a-f-]{36}$/),
+  id: prefixedUuid("github_result:"),
   repositoryId: uuid,
-  repositoryLabel: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,62}\/[a-z0-9][a-z0-9._-]{0,62}$/),
+  repositoryLabel: z.string().max(40),
   checkId: z.string().min(1).max(120).regex(/^[a-z0-9._-]+$/),
   result: z.enum(["pass", "fail", "unknown", "not_applicable"]),
   severity: z.enum(DIGEST_SEVERITIES).nullable(),
@@ -79,26 +80,30 @@ const githubResultRow = z.object({
   freshUntil: dateTime,
   materialisedAt: dateTime,
   freshness: z.enum(["current", "stale"]),
-  mappingVersion: z.string().min(1).max(80),
+  mappingVersion: z.string().min(1).max(80).regex(/^[A-Za-z0-9._-]+$/),
   mappingStatus: z.enum(["active", "historical"]),
-  ruleVersion: z.string().min(1).max(80),
+  ruleVersion: z.string().min(1).max(80).regex(/^[A-Za-z0-9._-]+$/),
   summary: z.string().min(1).max(280),
-  evidenceId: z.string().regex(/^evidence:[0-9a-f-]{36}$/).nullable(),
-  findingId: z.string().regex(/^monitoring_finding:[0-9a-f-]{36}$/).nullable(),
+  evidenceId: prefixedUuid("evidence:").nullable(),
+  findingId: prefixedUuid("monitoring_finding:").nullable(),
 }).strict().superRefine((row, ctx) => {
   if ((row.result === "fail") !== (row.severity !== null)) ctx.addIssue({ code: "custom", message: "severity must match failure outcome" });
   if (new Date(row.freshUntil) <= new Date(row.observedAt) || new Date(row.materialisedAt) < new Date(row.observedAt)) ctx.addIssue({ code: "custom", message: "invalid result chronology" });
   if (safeSummary(row.summary, 280, "GitHub compliance result") !== row.summary) ctx.addIssue({ code: "custom", message: "unsafe summary" });
+  if (row.repositoryLabel !== "" && row.repositoryLabel !== `GitHub repository ${row.repositoryId.slice(0, 8)}`) ctx.addIssue({ code: "custom", message: "unsafe repository label" });
 });
 const githubResultsSchema = z.object({
   schemaVersion: z.literal(1), workspace: z.object({ id: uuid, name: z.string() }).strict(),
   asOf: dateTime, results: z.array(githubResultRow).max(51), truncated: z.boolean(),
 }).strict().superRefine((value, ctx) => {
   const ids = new Set<string>();
+  let previous: z.infer<typeof githubResultRow> | null = null;
   for (const row of value.results) {
     if (ids.has(row.id)) ctx.addIssue({ code: "custom", message: "duplicate result id" });
     ids.add(row.id);
-    if ((row.freshness === "current") !== (new Date(row.freshUntil) > new Date(value.asOf))) ctx.addIssue({ code: "custom", message: "invalid freshness" });
+    if ((row.freshness === "current") !== (new Date(row.freshUntil) > new Date(value.asOf)) || new Date(row.materialisedAt) > new Date(value.asOf)) ctx.addIssue({ code: "custom", message: "invalid freshness" });
+    if (previous && (previous.observedAt < row.observedAt || (previous.observedAt === row.observedAt && previous.id > row.id))) ctx.addIssue({ code: "custom", message: "non-deterministic result ordering" });
+    previous = row;
   }
 });
 
@@ -292,13 +297,13 @@ export async function listGitHubComplianceResults(
   verifiedUserId: string,
   input: { workspaceId?: string; repositoryId?: string; result?: string; freshness?: string; mappingStatus?: string; severity?: string; limit?: number },
 ) {
-  const workspace = await resolveWorkspace(supabase, verifiedUserId, input.workspaceId);
   const parsed = z.object({
-    repositoryId: uuid.optional(), result: z.enum(["pass", "fail", "unknown", "not_applicable"]).optional(),
+    workspaceId: uuid.optional(), repositoryId: uuid.optional(), result: z.enum(["pass", "fail", "unknown", "not_applicable"]).optional(),
     freshness: z.enum(["current", "stale"]).optional(), mappingStatus: z.enum(["active", "historical"]).optional(),
     severity: z.enum(DIGEST_SEVERITIES).optional(), limit: z.number().int().min(1).max(50).default(20),
-  }).safeParse(input);
+  }).strict().safeParse(input);
   if (!parsed.success) throw new McpError("VALIDATION_ERROR");
+  const workspace = await resolveWorkspace(supabase, verifiedUserId, parsed.data.workspaceId);
   let response: { data: unknown; error: unknown };
   try {
     response = await supabase.rpc("get_mcp_github_compliance_results_v1", {
@@ -310,12 +315,12 @@ export async function listGitHubComplianceResults(
   } catch { queryFailure(); }
   if (response.error || !response.data) queryFailure();
   const result = githubResultsSchema.safeParse(response.data);
-  if (!result.success || result.data.workspace.id !== workspace.id) queryFailure();
+  if (!result.success || result.data.workspace.id !== workspace.id || result.data.results.length > parsed.data.limit + 1 || result.data.truncated !== (result.data.results.length > parsed.data.limit)) queryFailure();
   return {
     ...result.data,
     workspace: { id: result.data.workspace.id, name: safeSummary(result.data.workspace.name, 160, "Workspace") },
-    results: result.data.results.slice(0, parsed.data.limit).map((row) => ({ ...row, summary: safeSummary(row.summary, 280, "GitHub compliance result") })),
-    truncated: result.data.truncated || result.data.results.length > parsed.data.limit,
+    results: result.data.results.slice(0, parsed.data.limit).map((row) => ({ ...row, repositoryLabel: `GitHub repository ${row.repositoryId.slice(0, 8)}`, summary: safeSummary(row.summary, 280, "GitHub compliance result") })),
+    truncated: result.data.truncated,
   };
 }
 

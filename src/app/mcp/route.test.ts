@@ -65,6 +65,7 @@ describe("POST /mcp", () => {
     for (const tool of payload.result.tools) {
       expect(tool.securitySchemes).toEqual([{ type: "oauth2", scopes: ["openid", "email", "profile"] }]);
       expect(tool._meta.securitySchemes).toEqual(tool.securitySchemes);
+      if (tool.name !== "post_daily_digest") expect(tool.annotations).toMatchObject({ readOnlyHint: true, idempotentHint: true });
     }
   });
 

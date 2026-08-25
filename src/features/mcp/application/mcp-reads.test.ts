@@ -82,7 +82,7 @@ function githubResults(overrides: Record<string, unknown> = {}) {
     results: [{
       id: "github_result:40000000-0000-4000-8000-000000000001",
       repositoryId: "50000000-0000-4000-8000-000000000001",
-      repositoryLabel: "acme/portal",
+      repositoryLabel: "GitHub repository 50000000",
       checkId: "branch_protection",
       result: "fail",
       severity: "high",
@@ -110,7 +110,7 @@ describe("MCP public read services", () => {
       freshness: "current", mappingStatus: "active", severity: "high", limit: 7,
     })).resolves.toMatchObject({
       schemaVersion: 1, workspace: { id: ORG, name: "Acme" },
-      results: [{ id: "github_result:40000000-0000-4000-8000-000000000001", repositoryLabel: "acme/portal" }],
+      results: [{ id: "github_result:40000000-0000-4000-8000-000000000001", repositoryLabel: "GitHub repository 50000000" }],
     });
     expect(exact.rpc).toHaveBeenCalledWith("get_mcp_github_compliance_results_v1", {
       target_organisation_id: ORG,
@@ -127,6 +127,27 @@ describe("MCP public read services", () => {
     await expect(listGitHubComplianceResults(unsafe.client as never, USER, {})).rejects.toMatchObject({ code: "INTERNAL_ERROR" });
     await expect(listGitHubComplianceResults(exact.client as never, USER, { result: "broken" }))
       .rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+  });
+
+  it("uses only deterministic local repository labels and rejects unordered, impossible, duplicate, or inconsistent result pages", async () => {
+    const base = githubResults();
+    const row = base.results[0] as Record<string, unknown>;
+    const fallback = fakeSupabase({ memberships: membership() }, () => ({ data: githubResults({ results: [{ ...row, repositoryLabel: "" }] }), error: null }));
+    await expect(listGitHubComplianceResults(fallback.client as never, USER, {})).resolves.toMatchObject({ results: [{ repositoryLabel: "GitHub repository 50000000" }] });
+
+    for (const malformed of [
+      githubResults({ results: [{ ...row, repositoryLabel: "octo/private" }] }),
+      githubResults({ asOf: "2026-08-25T00:30:00.000Z" }),
+      githubResults({ results: [{ ...row, materialisedAt: "2026-08-25T00:30:00.000Z" }] }),
+      githubResults({ results: [row, row] }),
+      githubResults({ truncated: false, results: Array.from({ length: 21 }, () => row) }),
+    ]) {
+      const fake = fakeSupabase({ memberships: membership() }, () => ({ data: malformed, error: null }));
+      await expect(listGitHubComplianceResults(fake.client as never, USER, {})).rejects.toMatchObject({ code: "INTERNAL_ERROR" });
+    }
+    const badInput = fakeSupabase({ memberships: membership() });
+    await expect(listGitHubComplianceResults(badInput.client as never, USER, { workspaceId: ORG, limit: 3, extra: "rejected" } as never)).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+    expect(badInput.states).toEqual([]);
   });
   it("derives London dates correctly across midnight and DST seasons", () => {
     expect(dateInLondon(new Date("2026-01-15T00:30:00Z"))).toBe("2026-01-15");

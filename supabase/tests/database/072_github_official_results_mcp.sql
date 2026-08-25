@@ -28,6 +28,7 @@ select is((select pg_get_functiondef('public.get_mcp_github_compliance_results_v
 select is((select pg_get_functiondef('public.get_mcp_github_compliance_results_v1(uuid,uuid,public.github_observation_result,text,text,public.monitor_severity,integer)'::regprocedure)) ~ 'target_limit \+ 1',true,'read uses limit plus one');
 select is((select pg_get_functiondef('public.get_mcp_github_compliance_results_v1(uuid,uuid,public.github_observation_result,text,text,public.monitor_severity,integer)'::regprocedure)) !~ '''(providerRepositoryId|sourceUrl|explanation|remediation|accountLogin)''',true,'read JSON excludes prohibited provider and raw-data keys');
 select is((select count(*)::int from supabase_migrations.schema_migrations where version='20260825014236'),1,'successor migration is applied');
+select is(public.get_mcp_github_compliance_results_v1('00000000-0000-4000-8000-000000000001',null,null,null,null,null,20)->'results','[]'::jsonb,'read RPC returns a bounded empty behavioral result for an inaccessible workspace');
 
 select * from finish();
 rollback;

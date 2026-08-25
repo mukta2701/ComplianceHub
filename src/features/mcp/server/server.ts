@@ -40,7 +40,7 @@ export const MCP_SERVER_INSTRUCTIONS = [
 ].join(" ");
 
 const OAUTH_SECURITY_SCHEMES = [{ type: "oauth2", scopes: ["openid", "email", "profile"] }] as const;
-const READ_ANNOTATIONS: ToolAnnotations = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };
+const READ_ANNOTATIONS: ToolAnnotations = { readOnlyHint: true, destructiveHint: false, openWorldHint: false, idempotentHint: true };
 const WRITE_ANNOTATIONS: ToolAnnotations = { readOnlyHint: false, destructiveHint: false, openWorldHint: true };
 const uuid = z.uuid();
 const dateTime = z.string().datetime({ offset: true });
@@ -86,10 +86,10 @@ const monitoringFinding = z.object({
 }).strict();
 const githubResult = z.object({
   id: z.string().regex(/^github_result:[0-9a-f-]{36}$/), repositoryId: uuid,
-  repositoryLabel: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,62}\/[a-z0-9][a-z0-9._-]{0,62}$/), checkId: z.string().min(1).max(120),
+  repositoryLabel: z.string().regex(/^GitHub repository [0-9a-f]{8}$/), checkId: z.string().min(1).max(120).regex(/^[a-z0-9._-]+$/),
   result: z.enum(["pass", "fail", "unknown", "not_applicable"]), severity: z.enum(DIGEST_SEVERITIES).nullable(),
   observedAt: dateTime, freshUntil: dateTime, materialisedAt: dateTime, freshness: z.enum(["current", "stale"]),
-  mappingVersion: z.string().min(1).max(80), mappingStatus: z.enum(["active", "historical"]), ruleVersion: z.string().min(1).max(80), summary: z.string().min(1).max(280),
+  mappingVersion: z.string().min(1).max(80).regex(/^[A-Za-z0-9._-]+$/), mappingStatus: z.enum(["active", "historical"]), ruleVersion: z.string().min(1).max(80).regex(/^[A-Za-z0-9._-]+$/), summary: z.string().min(1).max(280),
   evidenceId: z.string().regex(/^evidence:[0-9a-f-]{36}$/).nullable(), findingId: z.string().regex(/^monitoring_finding:[0-9a-f-]{36}$/).nullable(),
 }).strict();
 const digestFacts = z.object({

@@ -39,7 +39,7 @@ function serviceStubs(): McpReadServices {
     listGitHubComplianceResults: vi.fn(async () => ({
       schemaVersion: 1 as const, workspace: { id: WORKSPACE_ID, name: "Acme" },
       asOf: "2026-08-25T01:42:36.000Z", truncated: false,
-      results: [{ id: `github_result:${REPORT_ID}`, repositoryId: REPORT_ID, repositoryLabel: "acme/portal", checkId: "branch_protection", result: "fail" as const, severity: "high" as const, observedAt: "2026-08-25T01:00:00.000Z", freshUntil: "2026-08-26T01:00:00.000Z", materialisedAt: "2026-08-25T01:01:00.000Z", freshness: "current" as const, mappingVersion: "github-iso-2026.08", mappingStatus: "active" as const, ruleVersion: "2026-08-17", summary: "Branch protection is not enabled.", evidenceId: null, findingId: null }],
+      results: [{ id: `github_result:${REPORT_ID}`, repositoryId: REPORT_ID, repositoryLabel: "GitHub repository 30000000", checkId: "branch_protection", result: "fail" as const, severity: "high" as const, observedAt: "2026-08-25T01:00:00.000Z", freshUntil: "2026-08-26T01:00:00.000Z", materialisedAt: "2026-08-25T01:01:00.000Z", freshness: "current" as const, mappingVersion: "github-iso-2026.08", mappingStatus: "active" as const, ruleVersion: "2026-08-17", summary: "Branch protection is not enabled.", evidenceId: null, findingId: null }],
     })),
     listMonitoringFindings: vi.fn(async () => ({
       workspace: { id: WORKSPACE_ID, name: "Acme" }, truncated: false,
@@ -92,7 +92,7 @@ describe("ComplianceHub MCP server", () => {
     for (const tool of tools) {
       expect(tool.annotations).toMatchObject(tool.name === "post_daily_digest"
         ? { readOnlyHint: false, destructiveHint: false, openWorldHint: true }
-        : { readOnlyHint: true, destructiveHint: false, openWorldHint: false });
+        : { readOnlyHint: true, destructiveHint: false, openWorldHint: false, idempotentHint: true });
       expect(tool._meta?.securitySchemes).toEqual([{ type: "oauth2", scopes: ["openid", "email", "profile"] }]);
       expect(tool.inputSchema).toMatchObject({ type: "object" });
       if (tool.name !== "list_workspaces") expect(tool.inputSchema).toMatchObject({ additionalProperties: false });
@@ -109,7 +109,7 @@ describe("ComplianceHub MCP server", () => {
     expect(github?.inputSchema).toMatchObject({ additionalProperties: false, properties: expect.objectContaining({ repositoryId: expect.any(Object), result: expect.any(Object), freshness: expect.any(Object), mappingStatus: expect.any(Object), severity: expect.any(Object), limit: expect.any(Object) }) });
   });
 
-  it("calls all seven tools with authenticated user and OAuth-client context and returns stable structured content", async () => {
+  it("calls all eight tools with authenticated user and OAuth-client context and returns stable structured content", async () => {
     const { client, services } = await connected();
     const calls = [
       ["list_workspaces", {}],

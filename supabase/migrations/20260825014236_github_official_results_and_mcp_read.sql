@@ -62,9 +62,13 @@ create function public.materialise_github_observations_server(
   target_organisation_id uuid, target_collection_run_id uuid,
   target_mapping_version text, target_mapping_checksum text, target_decisions jsonb
 ) returns jsonb language plpgsql security definer set search_path = '' as $$
-declare summary_value jsonb; expected_count integer; distinct_count integer; inserted_count integer; matching_count integer; ledger_count integer;
+declare summary_value jsonb; run_status public.github_collection_status; expected_count integer; distinct_count integer; inserted_count integer; matching_count integer; ledger_count integer;
 begin
   summary_value := public.materialise_github_observations_task2_server(target_organisation_id, target_collection_run_id, target_mapping_version, target_mapping_checksum, target_decisions);
+  select run.status into run_status
+  from public.github_collection_runs run
+  where run.id = target_collection_run_id and run.organisation_id = target_organisation_id;
+  if run_status not in ('succeeded', 'partial') then return summary_value; end if;
   insert into public.github_official_compliance_results(
     organisation_id, installation_id, repository_id, provider_repository_id, collection_run_id, observation_id,
     approval_id, mapping_pack_id, mapping_version, mapping_checksum, check_id, rule_version, outcome,
@@ -98,6 +102,8 @@ begin
   join public.github_mapping_approvals approval on approval.id = result.approval_id and approval.organisation_id = target_organisation_id and approval.revoked_at is null
   join public.github_mapping_packs pack on pack.id = result.mapping_pack_id
   join public.github_mapping_entries entry on entry.mapping_pack_id = pack.id and entry.check_id = observation.check_id and entry.rule_version = observation.rule_version
+  left join public.github_evidence_provenance evidence_provenance on evidence_provenance.observation_id = observation.id
+  left join public.github_finding_provenance finding_provenance on finding_provenance.organisation_id = observation.organisation_id and finding_provenance.latest_observation_id = observation.id
   where observation.organisation_id = target_organisation_id and observation.collection_run_id = target_collection_run_id
     and result.organisation_id = target_organisation_id and result.collection_run_id = target_collection_run_id
     and result.installation_id = observation.installation_id and result.repository_id = observation.repository_id and result.provider_repository_id = observation.provider_repository_id
@@ -105,7 +111,9 @@ begin
     and result.check_id = observation.check_id and result.rule_version = observation.rule_version and result.outcome = observation.result
     and result.failure_severity is not distinct from case when observation.result = 'fail' then entry.failure_severity else null end
     and result.catalogue_summary = entry.treatments #>> array[observation.result::text, 'summary']
-    and result.observed_at = observation.observed_at and result.fresh_until = observation.fresh_until;
+    and result.observed_at = observation.observed_at and result.fresh_until = observation.fresh_until
+    and result.evidence_id is not distinct from evidence_provenance.evidence_id
+    and result.finding_id is not distinct from finding_provenance.finding_id;
   if expected_count = 0 or expected_count <> distinct_count or inserted_count not in (0, expected_count) or matching_count <> expected_count or ledger_count <> expected_count then
     raise exception 'official result ledger is incomplete or conflicts' using errcode = 'P0001';
   end if;
@@ -131,7 +139,6 @@ create function public.get_mcp_github_compliance_results_v1(
     select result.*, row_number() over (partition by result.provider_repository_id, result.check_id order by result.observed_at desc, result.id desc) as result_rank
     from public.github_official_compliance_results result
     where result.organisation_id = target_organisation_id
-      and (target_repository_id is null or result.repository_id = target_repository_id)
   ), filtered as (
     select result.*, parameters.as_of,
       case when result.fresh_until > parameters.as_of then 'current' else 'stale' end as freshness,
@@ -140,6 +147,7 @@ create function public.get_mcp_github_compliance_results_v1(
     left join public.github_mapping_approvals approval on approval.organisation_id = result.organisation_id and approval.revoked_at is null
     left join public.github_mapping_packs pack on pack.id = approval.mapping_pack_id
     where result.result_rank = 1
+      and (target_repository_id is null or result.repository_id = target_repository_id)
   ), bounded as (
     select * from filtered
     where (target_result is null or outcome = target_result)
@@ -155,7 +163,7 @@ create function public.get_mcp_github_compliance_results_v1(
     'asOf', (select as_of from parameters),
     'results', pg_catalog.coalesce((select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
       'id', 'github_result:' || id, 'repositoryId', repository_id,
-      'repositoryLabel', pg_catalog.lower(pg_catalog.regexp_replace((select repository.owner_login || '/' || repository.name from public.github_repositories repository where repository.id = bounded.repository_id), '[^A-Za-z0-9._/-]', '-', 'g')),
+      'repositoryLabel', 'GitHub repository ' || pg_catalog.left(repository_id::text, 8),
       'checkId', check_id, 'result', outcome, 'severity', failure_severity,
       'observedAt', observed_at, 'freshUntil', fresh_until, 'materialisedAt', materialised_at,
       'freshness', freshness, 'mappingVersion', mapping_version, 'mappingStatus', mapping_status,
