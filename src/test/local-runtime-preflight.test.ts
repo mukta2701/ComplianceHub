@@ -13,6 +13,20 @@ function localSupabaseKey(role: "anon" | "service_role", reference = "local-comp
   return `${header}.${payload}.test-signature`;
 }
 
+function localDevelopmentSupabaseKey(
+  role: "anon" | "service_role",
+  overrides: Record<string, unknown> = {},
+) {
+  const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
+  const payload = Buffer.from(JSON.stringify({
+    role,
+    iss: "supabase-demo",
+    exp: Math.floor(Date.now() / 1_000) + 3_600,
+    ...overrides,
+  })).toString("base64url");
+  return `${header}.${payload}.test-signature`;
+}
+
 function invoke(environment: Record<string, string>) {
   return spawnSync(script, [], {
     cwd: process.cwd(),
@@ -95,6 +109,49 @@ describe("local runtime preflight", () => {
     expect(mixed.status).not.toBe(0);
     expect(mixed.stderr).toContain("same local Supabase stack");
     expect(mixed.stderr).not.toContain("different-local-stack");
+  });
+
+  it("permits role-correct local Supabase development keys without a project ref", () => {
+    const result = invoke(validEnvironment({
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: localDevelopmentSupabaseKey("anon"),
+      SUPABASE_SERVICE_ROLE_KEY: localDevelopmentSupabaseKey("service_role"),
+    }));
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Local runtime preflight passed");
+    expect(result.stdout).not.toContain("supabase-demo");
+  });
+
+  it("rejects mixed development and project-ref Supabase keys without printing either identity", () => {
+    const result = invoke(validEnvironment({
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: localDevelopmentSupabaseKey("anon"),
+      SUPABASE_SERVICE_ROLE_KEY: localSupabaseKey("service_role", "local-compliancehub"),
+    }));
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("same local Supabase stack");
+    expect(result.stderr).not.toContain("supabase-demo");
+    expect(result.stderr).not.toContain("local-compliancehub");
+  });
+
+  it("rejects expired or algorithm-confused local development keys", () => {
+    const expired = invoke(validEnvironment({
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: localDevelopmentSupabaseKey("anon", { exp: 1 }),
+      SUPABASE_SERVICE_ROLE_KEY: localDevelopmentSupabaseKey("service_role"),
+    }));
+    const unsignedHeader = Buffer.from(JSON.stringify({ alg: "none", typ: "JWT" })).toString("base64url");
+    const badAlgorithm = invoke(validEnvironment({
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: `${unsignedHeader}.${Buffer.from(JSON.stringify({
+        role: "anon", iss: "supabase-demo", exp: Math.floor(Date.now() / 1_000) + 3_600,
+      })).toString("base64url")}.test-signature`,
+      SUPABASE_SERVICE_ROLE_KEY: localDevelopmentSupabaseKey("service_role"),
+    }));
+
+    expect(expired.status).not.toBe(0);
+    expect(expired.stderr).toContain("valid local Supabase keys");
+    expect(badAlgorithm.status).not.toBe(0);
+    expect(badAlgorithm.stderr).toContain("valid local Supabase keys");
+    expect(badAlgorithm.stderr).not.toContain("supabase-demo");
   });
 
   it("rejects an invalid app encryption key without printing it", () => {

@@ -37,31 +37,38 @@ for local_key in NEXT_PUBLIC_SUPABASE_ANON_KEY SUPABASE_SERVICE_ROLE_KEY; do
   esac
 done
 
-jwt_reference() {
+jwt_identity() {
   local expected_role="$1"
   EXPECTED_JWT_ROLE="$expected_role" node -e '
     const value = require("node:fs").readFileSync(0, "utf8");
     const parts = value.split(".");
-    if (parts.length !== 3) process.exit(1);
+    if (parts.length !== 3 || parts.some((part) => part.length === 0)) process.exit(1);
     try {
+      const header = JSON.parse(Buffer.from(parts[0], "base64url").toString("utf8"));
       const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
-      if (payload.role !== process.env.EXPECTED_JWT_ROLE || typeof payload.ref !== "string" || !/^[A-Za-z0-9_-]+$/.test(payload.ref)) process.exit(1);
-      process.stdout.write(payload.ref);
+      if (header.alg !== "HS256" || header.typ !== "JWT" || payload.role !== process.env.EXPECTED_JWT_ROLE) process.exit(1);
+      if (typeof payload.ref === "string" && /^[A-Za-z0-9_-]+$/.test(payload.ref)) {
+        process.stdout.write(`ref:${payload.ref}`);
+        process.exit(0);
+      }
+      const now = Math.floor(Date.now() / 1_000);
+      if (payload.iss !== "supabase-demo" || !Number.isSafeInteger(payload.exp) || payload.exp <= now) process.exit(1);
+      process.stdout.write("local:supabase-demo");
     } catch {
       process.exit(1);
     }
   '
 }
 
-if ! anon_reference="$(printf '%s' "$NEXT_PUBLIC_SUPABASE_ANON_KEY" | jwt_reference anon)"; then
+if ! anon_identity="$(printf '%s' "$NEXT_PUBLIC_SUPABASE_ANON_KEY" | jwt_identity anon)"; then
   printf '%s\n' "Local verification requires valid local Supabase keys." >&2
   exit 1
 fi
-if ! service_reference="$(printf '%s' "$SUPABASE_SERVICE_ROLE_KEY" | jwt_reference service_role)"; then
+if ! service_identity="$(printf '%s' "$SUPABASE_SERVICE_ROLE_KEY" | jwt_identity service_role)"; then
   printf '%s\n' "Local verification requires valid local Supabase keys." >&2
   exit 1
 fi
-if [[ "$anon_reference" != "$service_reference" ]]; then
+if [[ "$anon_identity" != "$service_identity" ]]; then
   printf '%s\n' "Local verification requires keys from the same local Supabase stack." >&2
   exit 1
 fi
