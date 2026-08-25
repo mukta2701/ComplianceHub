@@ -262,7 +262,7 @@ create table public.github_finding_provenance (
   installation_id uuid not null,
   repository_id uuid not null,
   provider_repository_id bigint not null check (provider_repository_id > 0),
-  identity_key text not null check (identity_key ~ '^[0-9a-f]{64}$'),
+  identity_key text not null,
   check_id text not null check (pg_catalog.char_length(check_id) between 1 and 120),
   mapping_version text not null check (
     pg_catalog.char_length(mapping_version) between 1 and 80
@@ -515,7 +515,7 @@ as $$
   canonical_pack as (
     select
       '{"mappings":['
-      || pg_catalog.coalesce(
+      || coalesce(
         pg_catalog.string_agg(
           canonical_entries.canonical_entry,
           ',' order by canonical_entries.check_id collate pg_catalog."C"
@@ -565,7 +565,7 @@ begin
   end if;
   if new.checksum is not null or new.published_at is not null then
     if current_user <> 'postgres'
-      or pg_catalog.coalesce(
+      or coalesce(
         pg_catalog.current_setting('compliancehub.github_mapping_sealer', true), ''
       ) <> 'on'
       or new.checksum is null
@@ -668,7 +668,7 @@ begin
     raise exception 'GitHub finding provenance cannot be deleted' using errcode = 'P0001';
   end if;
   if current_user <> 'postgres'
-    or pg_catalog.coalesce(
+    or coalesce(
       pg_catalog.current_setting('compliancehub.github_materialiser', true), ''
     ) <> 'on'
   then
@@ -719,8 +719,8 @@ begin
     if new.finding_origin = 'github'
       and (
         current_user <> 'postgres'
-        or pg_catalog.coalesce(transition_mode, '') <> 'materialiser'
-        or pg_catalog.coalesce(materialiser_mode, '') <> 'on'
+        or coalesce(transition_mode, '') <> 'materialiser'
+        or coalesce(materialiser_mode, '') <> 'on'
       )
     then
       raise exception 'official GitHub findings require verified materialisation'
@@ -746,8 +746,8 @@ begin
     and new.mapping_version is distinct from old.mapping_version
     and (
       current_user <> 'postgres'
-      or pg_catalog.coalesce(transition_mode, '') <> 'materialiser'
-      or pg_catalog.coalesce(materialiser_mode, '') <> 'on'
+      or coalesce(transition_mode, '') <> 'materialiser'
+      or coalesce(materialiser_mode, '') <> 'on'
     )
   then
     raise exception 'official GitHub finding mapping metadata is server-managed'
@@ -756,7 +756,7 @@ begin
   if old.finding_origin = 'github'
     and (
       current_user <> 'postgres'
-      or pg_catalog.coalesce(transition_mode, '') not in ('materialiser', 'human', 'task')
+      or coalesce(transition_mode, '') not in ('materialiser', 'human', 'task')
     )
   then
     raise exception 'GitHub findings require a verified transition' using errcode = 'P0001';
@@ -786,7 +786,7 @@ begin
     where provenance.evidence_id = target_evidence_id
   ) and (
     current_user <> 'postgres'
-    or pg_catalog.coalesce(
+    or coalesce(
       pg_catalog.current_setting('compliancehub.github_materialiser', true), ''
     ) <> 'on'
   )
@@ -849,7 +849,7 @@ begin
       and provenance.organisation_id = old.organisation_id
   );
   is_materialiser := current_user = 'postgres'
-    and pg_catalog.coalesce(
+    and coalesce(
       pg_catalog.current_setting('compliancehub.github_materialiser', true), ''
     ) = 'on';
   is_verified_daily_expiry := current_user = 'service_role'
@@ -1366,7 +1366,7 @@ begin
       when 'fail' then 'finding'
       else 'explanatory'
     end;
-    select pg_catalog.coalesce(
+    select coalesce(
       pg_catalog.array_agg(reference_value order by ordinal_value),
       array[]::text[]
     )

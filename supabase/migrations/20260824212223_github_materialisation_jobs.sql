@@ -82,7 +82,7 @@ insert into public.github_materialisation_jobs(
 )
 select run.organisation_id, run.installation_id, run.repository_id,
        run.provider_repository_id, run.id,
-       pg_catalog.coalesce(run.completed_at, pg_catalog.now()), pg_catalog.now()
+       coalesce(run.completed_at, pg_catalog.now()), pg_catalog.now()
 from public.github_collection_runs run
 where run.status in ('succeeded', 'partial')
 on conflict (collection_run_id) do nothing;

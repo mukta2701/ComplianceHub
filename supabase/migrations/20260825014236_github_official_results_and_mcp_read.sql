@@ -169,11 +169,11 @@ create function public.get_mcp_github_compliance_results_v1(
     order by observed_at desc, id desc
     limit target_limit + 1
   )
-  select pg_catalog.coalesce(pg_catalog.jsonb_build_object(
+  select coalesce(pg_catalog.jsonb_build_object(
     'schemaVersion', 1,
     'workspace', pg_catalog.jsonb_build_object('id', target_organisation_id, 'name', (select organisation.name from public.organisations organisation where organisation.id = target_organisation_id)),
     'asOf', (select as_of from parameters),
-    'results', pg_catalog.coalesce((select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
+    'results', coalesce((select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
       'id', 'github_result:' || id, 'repositoryId', repository_id,
       'repositoryLabel', 'GitHub repository ' || pg_catalog.left(repository_id::text, 8),
       'checkId', check_id, 'result', outcome, 'severity', failure_severity,

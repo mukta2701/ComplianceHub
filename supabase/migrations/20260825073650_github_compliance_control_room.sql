@@ -285,7 +285,7 @@ begin
       'total', repository_total.total,
       'truncated', target_offset + pg_catalog.least(target_limit, pg_catalog.greatest(repository_total.total - target_offset, 0)) < repository_total.total
     ),
-    'repositories', pg_catalog.coalesce((
+    'repositories', coalesce((
       select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
         'id', repository.id,
         'name', repository.full_name,
@@ -307,7 +307,7 @@ begin
           'availableAt', case when pg_catalog.isfinite(job.available_at) then job.available_at else null end,
           'exhaustedAt', job.exhausted_at
         ) end,
-        'officialResults', pg_catalog.coalesce(results.items, '[]'::jsonb)
+        'officialResults', coalesce(results.items, '[]'::jsonb)
       ) order by repository.full_name collate "C", repository.id)
       from repository_page repository
       left join lateral (
@@ -357,9 +357,9 @@ begin
       ) results on true
     ), '[]'::jsonb),
     'exhaustedAttention', pg_catalog.jsonb_build_object(
-      'total', pg_catalog.coalesce((select pg_catalog.max(exhausted.total) from exhausted_jobs exhausted), 0),
-      'truncated', pg_catalog.coalesce((select pg_catalog.max(exhausted.total) from exhausted_jobs exhausted), 0) > 20,
-      'items', pg_catalog.coalesce((
+      'total', coalesce((select pg_catalog.max(exhausted.total) from exhausted_jobs exhausted), 0),
+      'truncated', coalesce((select pg_catalog.max(exhausted.total) from exhausted_jobs exhausted), 0) > 20,
+      'items', coalesce((
         select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
           'jobId', exhausted.id,
           'repositoryId', exhausted.repository_id,

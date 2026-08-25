@@ -236,7 +236,7 @@ change_page as (
   limit (select github_limit from parameters)
 ),
 change_json as (
-  select pg_catalog.coalesce(pg_catalog.jsonb_agg(
+  select coalesce(pg_catalog.jsonb_agg(
     change.result_json || pg_catalog.jsonb_build_object(
       'id', 'github_change:' || change.kind || ':' || change.result_id::text,
       'resultId', 'github_result:' || change.result_id::text,
@@ -263,7 +263,7 @@ unknown_page as (
   limit (select github_limit from parameters)
 ),
 unknown_json as (
-  select pg_catalog.coalesce(pg_catalog.jsonb_agg(result.result_json order by result.observed_at desc, result.id desc), '[]'::jsonb) as items
+  select coalesce(pg_catalog.jsonb_agg(result.result_json order by result.observed_at desc, result.id desc), '[]'::jsonb) as items
   from unknown_page as result
 ),
 stale_rows as materialized (
@@ -278,7 +278,7 @@ stale_page as (
   limit (select github_limit from parameters)
 ),
 stale_json as (
-  select pg_catalog.coalesce(pg_catalog.jsonb_agg(result.result_json order by result.observed_at desc, result.id desc), '[]'::jsonb) as items
+  select coalesce(pg_catalog.jsonb_agg(result.result_json order by result.observed_at desc, result.id desc), '[]'::jsonb) as items
   from stale_page as result
 ),
 action_rows as materialized (
@@ -296,7 +296,7 @@ action_page as (
   limit (select github_limit from parameters)
 ),
 action_json as (
-  select pg_catalog.coalesce(pg_catalog.jsonb_agg(
+  select coalesce(pg_catalog.jsonb_agg(
     result.result_json
     order by case result.failure_severity when 'critical' then 4 when 'high' then 3 when 'medium' then 2 else 1 end desc,
              result.observed_at desc, result.id desc
