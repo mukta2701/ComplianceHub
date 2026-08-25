@@ -50,7 +50,7 @@ Focused GREEN after the independent-review fix round is 10 files / 59 tests. The
 
 ## Verification
 
-- Full Vitest: 223 files / 1,756 tests passed.
+- Full Vitest: 223 files / 1,760 tests passed.
 - Full ESLint: passed.
 - TypeScript typecheck: passed.
 - Actionlint and `git diff --check`: passed.
@@ -68,3 +68,11 @@ Phase 6 must still run the approved local-only browser proof on desktop and Pixe
 The first read-only review found no Critical issue and three Important issues: a GitHub-origin finding with absent provenance could fall through to provider-derived legacy UI, the mapping lookup used an imprecise pack/check cross-product under a limit, and Monitoring omitted the explicit certification/readiness boundary. All were reproduced with failing tests and fixed. Finding loaders now select and strictly parse origin, load only exact GitHub targets, require one-to-one provenance, and render generic UI only for exact legacy origin. Mapping rows are fetched in deterministic bounded chunks of exact pack/check pairs with exact tuple cardinality. Every official finding carries the explicit technical-signal boundary.
 
 The three Minor findings were also fixed: refreshed lifecycle props derive a valid current select value, an RPC `false` reports an idempotent already-applied state, and highlight CSS responds only to server-validated `data-selected` rather than an arbitrary URL fragment. Re-review then caught one masked Member PostgREST projection omission; its production select and strict test expectation now both include `finding_origin`. The final independent re-review found every prior finding closed, no new Critical or Important issue, and returned Ready to merge.
+
+## Independent-review repair round 1
+
+The follow-up reviewer blocked the pre-repair commit on two exactness defects. Mapping-request construction had incorrectly treated repeated normal result rows with the same mapping tuple as duplicates, while a short mapping query could hide another returned rule version. The loader now deduplicates only the requested `(mapping_pack_id, check_id, rule_version)` tuple, queries bounded pack/check candidates, and rejects any duplicate, missing, unexpected, or alternate-rule returned tuple. A regression proves that two separate repository evidence generations can safely share one exact mapping tuple; another proves that an alternate rule version cannot be silently accepted.
+
+The same review found that an official evidence ledger row without matching provenance could appear as generic legacy evidence. The loader now makes a separate active-organisation, exact-visible-ID ledger query and requires its IDs to equal the provenance IDs before supporting rows or UI rendering. A missing-provenance ledger test and page rejection test prove that raw title/link data and mutation controls cannot become a fallback. Legacy evidence with neither official row remains unchanged.
+
+TDD RED had exactly three intended failures before this repair (shared mapping tuple rejected, alternate rule hidden by the old query limit, and ledger evidence without provenance returned an empty official set). GREEN is 2 files / 19 tests. Final verification is 223 files / 1,760 Vitest tests, full ESLint, TypeScript typecheck, Actionlint, and `git diff --check`, all passing. The independent re-review found no Critical or Important issue and returned Ready to merge; it noted only that a reciprocal provenance-without-ledger regression would be useful extra coverage, while confirming the exact set comparison already rejects it. No migration, Slack, network/provider, hosted, or external-account activity occurred. Phase 6 browser, DB, real-materialiser/readiness, and production-build gates remain open.

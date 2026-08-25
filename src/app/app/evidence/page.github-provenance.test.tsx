@@ -83,6 +83,15 @@ describe("EvidencePage official GitHub records", () => {
       .not.toHaveAttribute("aria-current");
   });
 
+  it("fails closed rather than rendering raw or mutable evidence when official provenance is missing", async () => {
+    hoisted.load.mockRejectedValueOnce(new Error("Could not load official GitHub record provenance"));
+
+    await expect(EvidencePage({ searchParams: Promise.resolve({ evidence: OFFICIAL }) }))
+      .rejects.toThrow("Could not load official GitHub record provenance");
+    expect(screen.queryByText("Provider text must not render")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Withdraw" })).not.toBeInTheDocument();
+  });
+
   it("styles only server-validated selection state, not an arbitrary fragment target", () => {
     const css = readFileSync(`${process.cwd()}/src/app/globals.css`, "utf8");
     expect(css).toContain('.github-official-record[data-selected="true"]');

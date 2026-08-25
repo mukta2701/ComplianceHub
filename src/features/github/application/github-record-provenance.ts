@@ -31,6 +31,11 @@ const evidenceProvenanceRow = z.object({
   created_at: dateTime,
 }).strict();
 
+const officialEvidenceLedgerRow = z.object({
+  organisation_id: uuid,
+  evidence_id: uuid,
+}).strict();
+
 const findingProvenanceRow = z.object({
   finding_id: uuid,
   organisation_id: uuid,
@@ -151,6 +156,25 @@ function mappingKey(row: { mapping_pack_id: string; check_id: string; rule_versi
   return `${row.mapping_pack_id}:${row.check_id}:${row.rule_version}`;
 }
 
+function mappingPairKey(row: { mapping_pack_id: string; check_id: string }): string {
+  return `${row.mapping_pack_id}:${row.check_id}`;
+}
+
+function distinctMappingRequests(rows: Array<{ mapping_pack_id: string; check_id: string; rule_version: string }>) {
+  const requests = new Map<string, { mapping_pack_id: string; check_id: string; rule_version: string }>();
+  for (const row of rows) {
+    const key = mappingKey(row);
+    if (!requests.has(key)) {
+      requests.set(key, {
+        mapping_pack_id: row.mapping_pack_id,
+        check_id: row.check_id,
+        rule_version: row.rule_version,
+      });
+    }
+  }
+  return requests;
+}
+
 async function loadSupportingRows(
   supabase: SupabaseClient,
   organisationId: string,
@@ -174,7 +198,7 @@ async function loadSupportingRows(
   }
 
   const repositoryIds = [...new Set(parsedResults.data.map((row) => row.repository_id))];
-  const requiredMappings = uniqueBy(parsedResults.data, mappingKey);
+  const requiredMappings = distinctMappingRequests(parsedResults.data);
   const mappingRows = [...requiredMappings.values()];
   const mappingChunks = Array.from(
     { length: Math.ceil(mappingRows.length / MAPPING_QUERY_CHUNK) },
@@ -188,10 +212,11 @@ async function loadSupportingRows(
       .limit(MAX_RECORDS),
     Promise.all(mappingChunks.map((chunk) => supabase.from("github_mapping_entries")
       .select("mapping_pack_id,check_id,rule_version,iso_control_references")
-      .or(chunk.map((row) => `and(mapping_pack_id.eq.${row.mapping_pack_id},check_id.eq.${row.check_id})`).join(","))
+      .or([...new Map(chunk.map((row) => [mappingPairKey(row), row])).values()]
+        .map((row) => `and(mapping_pack_id.eq.${row.mapping_pack_id},check_id.eq.${row.check_id})`).join(","))
       .order("mapping_pack_id", { ascending: true })
       .order("check_id", { ascending: true })
-      .limit(chunk.length))),
+      .limit(MAX_RECORDS))),
   ]);
   const parsedRepositories = z.array(repositoryRow).max(MAX_RECORDS).safeParse(repositoryResult.data);
   if (repositoryResult.error || !parsedRepositories.success || mappingResults.some((result) => result.error)) fail();
@@ -208,9 +233,14 @@ async function loadSupportingRows(
     }
   }
 
-  const mappings = uniqueBy(parsedMappings.data, mappingKey);
-  if (mappings.size !== requiredMappings.size
-    || [...mappings.keys()].some((key) => !requiredMappings.has(key))) fail();
+  if (parsedMappings.data.length !== requiredMappings.size) fail();
+  const mappings = new Map<string, z.infer<typeof mappingRow>>();
+  for (const mapping of parsedMappings.data) {
+    const key = mappingKey(mapping);
+    if (!requiredMappings.has(key) || mappings.has(key)) fail();
+    mappings.set(key, mapping);
+  }
+  if (mappings.size !== requiredMappings.size) fail();
 
   return {
     results: uniqueBy(parsedResults.data, (row) => row.observation_id),
@@ -257,14 +287,28 @@ export async function loadOfficialGitHubEvidenceProvenance(
   if (parsedIds.length === 0) return [];
 
   try {
-    const provenanceResult = await supabase.from("github_evidence_provenance")
-      .select("evidence_id,organisation_id,repository_id,observation_id,mapping_pack_id,check_id,rule_version,mapping_version,observed_at,fresh_until,created_at")
-      .eq("organisation_id", parsedOrganisationId.data)
-      .in("evidence_id", parsedIds)
-      .limit(MAX_RECORDS);
+    const [provenanceResult, ledgerResult] = await Promise.all([
+      supabase.from("github_evidence_provenance")
+        .select("evidence_id,organisation_id,repository_id,observation_id,mapping_pack_id,check_id,rule_version,mapping_version,observed_at,fresh_until,created_at")
+        .eq("organisation_id", parsedOrganisationId.data)
+        .in("evidence_id", parsedIds)
+        .limit(MAX_RECORDS),
+      supabase.from("github_official_compliance_results")
+        .select("organisation_id,evidence_id")
+        .eq("organisation_id", parsedOrganisationId.data)
+        .in("evidence_id", parsedIds)
+        .limit(MAX_RECORDS),
+    ]);
     const provenance = z.array(evidenceProvenanceRow).max(MAX_RECORDS).safeParse(provenanceResult.data);
-    if (provenanceResult.error || !provenance.success) fail();
+    const ledger = z.array(officialEvidenceLedgerRow).max(MAX_RECORDS).safeParse(ledgerResult.data);
+    if (provenanceResult.error || !provenance.success || ledgerResult.error || !ledger.success) fail();
     const byEvidence = uniqueBy(provenance.data, (row) => row.evidence_id);
+    const ledgerByEvidence = uniqueBy(ledger.data, (row) => row.evidence_id);
+    for (const row of [...provenance.data, ...ledger.data]) {
+      if (row.organisation_id !== parsedOrganisationId.data || !parsedIds.includes(row.evidence_id)) fail();
+    }
+    if (byEvidence.size !== ledgerByEvidence.size
+      || [...byEvidence.keys()].some((evidenceId) => !ledgerByEvidence.has(evidenceId))) fail();
     const supporting = await loadSupportingRows(supabase, parsedOrganisationId.data, provenance.data.map((row) => row.observation_id));
 
     return parsedIds.flatMap((evidenceId) => {

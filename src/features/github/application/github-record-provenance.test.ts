@@ -10,8 +10,11 @@ const ORG = "20000000-0000-4000-8000-000000000001";
 const EVIDENCE = "30000000-0000-4000-8000-000000000001";
 const FINDING = "40000000-0000-4000-8000-000000000001";
 const REPOSITORY = "50000000-0000-4000-8000-000000000001";
+const REPOSITORY_TWO = "50000000-0000-4000-8000-000000000002";
 const OBSERVATION = "60000000-0000-4000-8000-000000000001";
+const OBSERVATION_TWO = "60000000-0000-4000-8000-000000000002";
 const PACK = "91000000-0000-4000-8000-000000000001";
+const EVIDENCE_TWO = "30000000-0000-4000-8000-000000000002";
 
 type Override = Record<string, unknown>;
 
@@ -33,10 +36,28 @@ type Result = { data: unknown; error: unknown };
 
 function query(result: Result) {
   const chain: Record<string, unknown> = {};
-  for (const method of ["select", "eq", "in", "or", "order", "limit"]) {
+  let limit: number | undefined;
+  let selected: string | undefined;
+  chain.select = vi.fn((value: string) => {
+    selected = value;
+    return chain;
+  });
+  for (const method of ["eq", "in", "or", "order"]) {
     chain[method] = vi.fn(() => chain);
   }
-  chain.then = (resolve: (value: Result) => unknown) => Promise.resolve(result).then(resolve);
+  chain.limit = vi.fn((value: number) => {
+    limit = value;
+    return chain;
+  });
+  chain.then = (resolve: (value: Result) => unknown) => Promise.resolve({
+    ...result,
+    data: Array.isArray(result.data)
+      ? result.data.slice(0, limit).map((row) => {
+        if (selected !== "organisation_id,evidence_id" || !row || typeof row !== "object") return row;
+        return Object.fromEntries(selected.split(",").map((column) => [column, (row as Record<string, unknown>)[column]]));
+      })
+      : result.data,
+  }).then(resolve);
   return chain;
 }
 
@@ -191,6 +212,69 @@ describe("official GitHub record provenance", () => {
     await expect(loadOfficialGitHubEvidenceProvenance(client as never, ORG, evidenceIds))
       .resolves.toHaveLength(count);
     expect(from.mock.calls.filter(([table]) => table === "github_mapping_entries")).toHaveLength(2);
+  });
+
+  it("reuses one exact mapping tuple for separate repository evidence generations", async () => {
+    const provenanceRows = [
+      {
+        evidence_id: EVIDENCE, organisation_id: ORG, repository_id: REPOSITORY, observation_id: OBSERVATION,
+        mapping_pack_id: PACK, check_id: "github.branch.force_pushes", rule_version: "github-repository-v1",
+        mapping_version: "github-iso-27001-v1", observed_at: "2026-08-25T08:00:00.000Z",
+        fresh_until: "2026-08-26T08:00:00.000Z", created_at: "2026-08-25T08:01:00.000Z",
+      },
+      {
+        evidence_id: EVIDENCE_TWO, organisation_id: ORG, repository_id: REPOSITORY_TWO, observation_id: OBSERVATION_TWO,
+        mapping_pack_id: PACK, check_id: "github.branch.force_pushes", rule_version: "github-repository-v1",
+        mapping_version: "github-iso-27001-v1", observed_at: "2026-08-25T09:00:00.000Z",
+        fresh_until: "2026-08-26T09:00:00.000Z", created_at: "2026-08-25T09:01:00.000Z",
+      },
+    ];
+    const { client, from } = clientFor({
+      github_evidence_provenance: { data: provenanceRows, error: null },
+      github_official_compliance_results: { data: [
+        officialResult(),
+        officialResult({ evidence_id: EVIDENCE_TWO, observation_id: OBSERVATION_TWO, repository_id: REPOSITORY_TWO, observed_at: "2026-08-25T09:00:00.000Z", fresh_until: "2026-08-26T09:00:00.000Z", materialised_at: "2026-08-25T09:01:00.000Z" }),
+      ], error: null },
+      github_repositories: { data: [
+        { id: REPOSITORY, organisation_id: ORG, full_name: "mukta2701/ComplianceHub", html_url: "https://github.com/mukta2701/ComplianceHub" },
+        { id: REPOSITORY_TWO, organisation_id: ORG, full_name: "mukta2701/Example", html_url: "https://github.com/mukta2701/Example" },
+      ], error: null },
+      github_mapping_entries: { data: [{ mapping_pack_id: PACK, check_id: "github.branch.force_pushes", rule_version: "github-repository-v1", iso_control_references: ["A.8.25"] }], error: null },
+    });
+
+    await expect(loadOfficialGitHubEvidenceProvenance(client as never, ORG, [EVIDENCE, EVIDENCE_TWO]))
+      .resolves.toHaveLength(2);
+    expect(from.mock.calls.filter(([table]) => table === "github_mapping_entries")).toHaveLength(1);
+  });
+
+  it("fails closed when a same pack/check mapping query returns a second rule version", async () => {
+    const { client } = clientFor({
+      github_evidence_provenance: { data: [{
+        evidence_id: EVIDENCE, organisation_id: ORG, repository_id: REPOSITORY, observation_id: OBSERVATION,
+        mapping_pack_id: PACK, check_id: "github.branch.force_pushes", rule_version: "github-repository-v1",
+        mapping_version: "github-iso-27001-v1", observed_at: "2026-08-25T08:00:00.000Z",
+        fresh_until: "2026-08-26T08:00:00.000Z", created_at: "2026-08-25T08:01:00.000Z",
+      }], error: null },
+      github_official_compliance_results: { data: [officialResult()], error: null },
+      github_repositories: { data: [{ id: REPOSITORY, organisation_id: ORG, full_name: "mukta2701/ComplianceHub", html_url: "https://github.com/mukta2701/ComplianceHub" }], error: null },
+      github_mapping_entries: { data: [
+        { mapping_pack_id: PACK, check_id: "github.branch.force_pushes", rule_version: "github-repository-v1", iso_control_references: ["A.8.25"] },
+        { mapping_pack_id: PACK, check_id: "github.branch.force_pushes", rule_version: "github-repository-v2", iso_control_references: ["A.8.25"] },
+      ], error: null },
+    });
+
+    await expect(loadOfficialGitHubEvidenceProvenance(client as never, ORG, [EVIDENCE]))
+      .rejects.toThrow("Could not load official GitHub record provenance");
+  });
+
+  it("fails closed when an official evidence ledger row has no matching provenance", async () => {
+    const { client } = clientFor({
+      github_evidence_provenance: { data: [], error: null },
+      github_official_compliance_results: { data: [officialResult()], error: null },
+    });
+
+    await expect(loadOfficialGitHubEvidenceProvenance(client as never, ORG, [EVIDENCE]))
+      .rejects.toThrow("Could not load official GitHub record provenance");
   });
 
   it.each(invalidProvenanceCases)("fails closed for %s", async (_label, provenanceOverride, resultOverride, repositoryOverride, mappingOverride = {}) => {
