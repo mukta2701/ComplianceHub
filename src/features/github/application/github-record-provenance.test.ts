@@ -127,7 +127,7 @@ describe("official GitHub record provenance", () => {
       github_mapping_entries: { data: [{ mapping_pack_id: PACK, check_id: "github.branch.force_pushes", rule_version: "github-repository-v1", iso_control_references: ["A.8.25", "A.8.32"] }], error: null },
     });
 
-    await expect(loadOfficialGitHubEvidenceProvenance(client as never, ORG, [EVIDENCE]))
+    await expect(loadOfficialGitHubEvidenceProvenance(client as never, ORG, [EVIDENCE], "2026-08-25T12:00:00.000Z"))
       .resolves.toEqual([expect.objectContaining({
         evidenceId: EVIDENCE,
         repository: { id: REPOSITORY, name: "mukta2701/ComplianceHub", url: "https://github.com/mukta2701/ComplianceHub" },

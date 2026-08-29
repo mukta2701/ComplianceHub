@@ -39,6 +39,7 @@ function invoke(environment: Record<string, string>) {
       SUPABASE_SERVICE_ROLE_KEY: "",
       APP_ENCRYPTION_KEY: "",
       COMPLIANCEHUB_RELEASE_SHA: "",
+      MCP_RESOURCE_URL: "",
       PLAYWRIGHT_PORT: "",
       ...environment,
     },
@@ -53,6 +54,7 @@ function validEnvironment(overrides: Record<string, string> = {}) {
     SUPABASE_SERVICE_ROLE_KEY: localSupabaseKey("service_role"),
     APP_ENCRYPTION_KEY: localAppEncryptionKey,
     COMPLIANCEHUB_RELEASE_SHA: currentSha,
+    MCP_RESOURCE_URL: "http://127.0.0.1:3000/mcp",
     ...overrides,
   };
 }
@@ -164,6 +166,7 @@ describe("local runtime preflight", () => {
 
   it("permits the exact isolated Playwright port without printing it", () => {
     const result = invoke(validEnvironment({
+      MCP_RESOURCE_URL: "http://127.0.0.1:3100/mcp",
       NEXT_PUBLIC_SITE_URL: "http://127.0.0.1:3100",
       PLAYWRIGHT_PORT: "3100",
     }));
@@ -171,6 +174,23 @@ describe("local runtime preflight", () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("Local runtime preflight passed");
     expect(result.stdout).not.toContain("3100");
+  });
+
+  it.each([
+    ["missing", ""],
+    ["wrong local port", "http://127.0.0.1:3000/mcp"],
+    ["wrong path", "http://127.0.0.1:3100/api/mcp"],
+    ["hosted", "https://hosted-project.example/mcp"],
+  ])("rejects a %s MCP resource without printing it", (_label, resource) => {
+    const result = invoke(validEnvironment({
+      MCP_RESOURCE_URL: resource,
+      NEXT_PUBLIC_SITE_URL: "http://127.0.0.1:3100",
+      PLAYWRIGHT_PORT: "3100",
+    }));
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("matching local MCP resource");
+    if (resource) expect(result.stderr).not.toContain(resource);
   });
 
   it("rejects a malformed Playwright port without printing it", () => {

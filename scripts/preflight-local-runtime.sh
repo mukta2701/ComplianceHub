@@ -28,6 +28,11 @@ if [[ "${NEXT_PUBLIC_SITE_URL:-}" != "$expected_site_url" ]]; then
   exit 1
 fi
 
+if [[ "${MCP_RESOURCE_URL:-}" != "${expected_site_url}/mcp" ]]; then
+  printf '%s\n' "Local verification requires a matching local MCP resource." >&2
+  exit 1
+fi
+
 for local_key in NEXT_PUBLIC_SUPABASE_ANON_KEY SUPABASE_SERVICE_ROLE_KEY; do
   case "${!local_key:-}" in
     ""|missing|placeholder|changeme|example|test)
