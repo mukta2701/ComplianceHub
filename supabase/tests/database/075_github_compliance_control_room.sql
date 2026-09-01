@@ -32,6 +32,8 @@ delete from public.monitoring_findings where organisation_id in (
 delete from public.memberships where organisation_id in (
   '75000000-0000-4000-8000-000000000101','75000000-0000-4000-8000-000000000102'
 );
+delete from public.asset_categories where organisation_id in ('75000000-0000-4000-8000-000000000101','75000000-0000-4000-8000-000000000102');
+delete from public.risk_categories where organisation_id in ('75000000-0000-4000-8000-000000000101','75000000-0000-4000-8000-000000000102');
 delete from public.organisations where id in (
   '75000000-0000-4000-8000-000000000101','75000000-0000-4000-8000-000000000102'
 );
@@ -72,9 +74,8 @@ select ok(
   (select prosecdef from pg_catalog.pg_proc where oid='public.retry_github_materialisation_job_server(uuid,uuid,uuid,text)'::pg_catalog.regprocedure),
   'retry is a deliberate security-definer server boundary'
 );
-select is(
-  (select proconfig from pg_catalog.pg_proc where oid='public.retry_github_materialisation_job_server(uuid,uuid,uuid,text)'::pg_catalog.regprocedure),
-  array['search_path='],
+select ok(
+  (select proconfig @> array['search_path=""'] from pg_catalog.pg_proc where oid='public.retry_github_materialisation_job_server(uuid,uuid,uuid,text)'::pg_catalog.regprocedure),
   'retry uses an empty search path'
 );
 select cmp_ok(
@@ -145,9 +146,8 @@ select is(
   's'::"char",
   'the statement-consistent control-room read is stable'
 );
-select is(
-  (select proconfig from pg_catalog.pg_proc where oid='public.get_github_compliance_control_room_v1(uuid,integer,integer)'::pg_catalog.regprocedure),
-  array['search_path='],
+select ok(
+  (select proconfig @> array['search_path=""'] from pg_catalog.pg_proc where oid='public.get_github_compliance_control_room_v1(uuid,integer,integer)'::pg_catalog.regprocedure),
   'the control-room read uses an empty search path'
 );
 
@@ -184,11 +184,12 @@ insert into public.github_repositories(
  ('75000000-0000-4000-8000-000000000303','75000000-0000-4000-8000-000000000102','75000000-0000-4000-8000-000000000202',75403,'Other-Owner','Private','Other-Owner/Private','https://github.com/Other-Owner/Private','private','main',false,true,true);
 insert into public.github_collection_runs(
  id,organisation_id,installation_id,repository_id,provider_repository_id,trigger_type,request_key,
- status,started_at,completed_at,observation_count,passed_count,failed_count,unknown_count,not_applicable_count
+ status,started_at,completed_at,observation_count,passed_count,failed_count,unknown_count,not_applicable_count,
+ lease_token,lease_expires_at,attempt
 ) values
- ('75000000-0000-4000-8000-000000000401','75000000-0000-4000-8000-000000000101','75000000-0000-4000-8000-000000000201','75000000-0000-4000-8000-000000000301',75401,'manual','control-a-one','succeeded','2026-08-25T05:00:00Z','2026-08-25T05:05:00Z',1,0,1,0,0),
- ('75000000-0000-4000-8000-000000000402','75000000-0000-4000-8000-000000000101','75000000-0000-4000-8000-000000000201','75000000-0000-4000-8000-000000000302',75402,'manual','control-a-two','partial','2026-08-25T05:30:00Z','2026-08-25T05:35:00Z',1,0,0,1,0),
- ('75000000-0000-4000-8000-000000000403','75000000-0000-4000-8000-000000000102','75000000-0000-4000-8000-000000000202','75000000-0000-4000-8000-000000000303',75403,'manual','control-b-one','succeeded','2026-08-25T05:00:00Z','2026-08-25T05:05:00Z',1,1,0,0,0);
+ ('75000000-0000-4000-8000-000000000401','75000000-0000-4000-8000-000000000101','75000000-0000-4000-8000-000000000201','75000000-0000-4000-8000-000000000301',75401,'manual','control-a-one','succeeded','2026-08-25T05:00:00Z','2026-08-25T05:05:00Z',1,0,1,0,0,extensions.gen_random_uuid(),'2026-08-25T05:01:00Z',1),
+ ('75000000-0000-4000-8000-000000000402','75000000-0000-4000-8000-000000000101','75000000-0000-4000-8000-000000000201','75000000-0000-4000-8000-000000000302',75402,'manual','control-a-two','partial','2026-08-25T05:30:00Z','2026-08-25T05:35:00Z',1,0,0,1,0,extensions.gen_random_uuid(),'2026-08-25T05:31:00Z',1),
+ ('75000000-0000-4000-8000-000000000403','75000000-0000-4000-8000-000000000102','75000000-0000-4000-8000-000000000202','75000000-0000-4000-8000-000000000303',75403,'manual','control-b-one','succeeded','2026-08-25T05:00:00Z','2026-08-25T05:05:00Z',1,1,0,0,0,extensions.gen_random_uuid(),'2026-08-25T05:01:00Z',1);
 insert into public.github_observations(
  id,organisation_id,installation_id,repository_id,provider_repository_id,collection_run_id,
  observation_key,check_id,rule_version,subject_type,subject_id,result,severity,title,
@@ -412,8 +413,8 @@ select ok(
 );
 reset role;
 
-select extensions.dblink_connect('control_retry_a','host=127.0.0.1 port=5432 dbname='||current_database()||' user=postgres password=postgres connect_timeout=5');
-select extensions.dblink_connect('control_retry_b','host=127.0.0.1 port=5432 dbname='||current_database()||' user=postgres password=postgres connect_timeout=5');
+select extensions.dblink_connect('control_retry_a','host='||pg_catalog.host(pg_catalog.inet_server_addr())||' port='||pg_catalog.inet_server_port()::text||' dbname='||current_database()||' user=postgres password=postgres connect_timeout=5');
+select extensions.dblink_connect('control_retry_b','host='||pg_catalog.host(pg_catalog.inet_server_addr())||' port='||pg_catalog.inet_server_port()::text||' dbname='||current_database()||' user=postgres password=postgres connect_timeout=5');
 select extensions.dblink_exec('control_retry_a','set role service_role');
 select extensions.dblink_exec('control_retry_b','set role service_role');
 select extensions.dblink_send_query('control_retry_a',$remote$
@@ -497,8 +498,8 @@ update public.memberships
 set role='owner'
 where organisation_id='75000000-0000-4000-8000-000000000101'
   and user_id='75000000-0000-4000-8000-000000000002';
-select extensions.dblink_connect('control_role_retry','host=127.0.0.1 port=5432 dbname='||current_database()||' user=postgres password=postgres connect_timeout=5');
-select extensions.dblink_connect('control_role_demote','host=127.0.0.1 port=5432 dbname='||current_database()||' user=postgres password=postgres connect_timeout=5');
+select extensions.dblink_connect('control_role_retry','host='||pg_catalog.host(pg_catalog.inet_server_addr())||' port='||pg_catalog.inet_server_port()::text||' dbname='||current_database()||' user=postgres password=postgres connect_timeout=5');
+select extensions.dblink_connect('control_role_demote','host='||pg_catalog.host(pg_catalog.inet_server_addr())||' port='||pg_catalog.inet_server_port()::text||' dbname='||current_database()||' user=postgres password=postgres connect_timeout=5');
 select extensions.dblink_exec('control_role_retry','set role service_role');
 select extensions.dblink_send_query('control_role_retry',$remote$
   with retried as (
@@ -574,8 +575,8 @@ update public.memberships
 set role='owner'
 where organisation_id='75000000-0000-4000-8000-000000000101'
   and user_id='75000000-0000-4000-8000-000000000002';
-select extensions.dblink_connect('control_selection_owner','host=127.0.0.1 port=5432 dbname='||current_database()||' user=postgres password=postgres connect_timeout=5');
-select extensions.dblink_connect('control_selection_demote','host=127.0.0.1 port=5432 dbname='||current_database()||' user=postgres password=postgres connect_timeout=5');
+select extensions.dblink_connect('control_selection_owner','host='||pg_catalog.host(pg_catalog.inet_server_addr())||' port='||pg_catalog.inet_server_port()::text||' dbname='||current_database()||' user=postgres password=postgres connect_timeout=5');
+select extensions.dblink_connect('control_selection_demote','host='||pg_catalog.host(pg_catalog.inet_server_addr())||' port='||pg_catalog.inet_server_port()::text||' dbname='||current_database()||' user=postgres password=postgres connect_timeout=5');
 select extensions.dblink_exec('control_selection_owner','set role authenticated');
 select extensions.dblink_exec(
   'control_selection_owner',
@@ -646,6 +647,8 @@ delete from public.github_repositories where organisation_id in ('75000000-0000-
 delete from public.github_installations where organisation_id in ('75000000-0000-4000-8000-000000000101','75000000-0000-4000-8000-000000000102');
 delete from public.monitoring_findings where organisation_id in ('75000000-0000-4000-8000-000000000101','75000000-0000-4000-8000-000000000102');
 delete from public.memberships where organisation_id in ('75000000-0000-4000-8000-000000000101','75000000-0000-4000-8000-000000000102');
+delete from public.asset_categories where organisation_id in ('75000000-0000-4000-8000-000000000101','75000000-0000-4000-8000-000000000102');
+delete from public.risk_categories where organisation_id in ('75000000-0000-4000-8000-000000000101','75000000-0000-4000-8000-000000000102');
 delete from public.organisations where id in ('75000000-0000-4000-8000-000000000101','75000000-0000-4000-8000-000000000102');
 delete from public.profiles where id::text like '75000000-0000-4000-8000-00000000000%';
 delete from auth.users where id::text like '75000000-0000-4000-8000-00000000000%';

@@ -89,9 +89,9 @@ select throws_ok(
   'an owner cannot directly resolve an official GitHub finding without a fresh passing observation'
 );
 select results_eq(
-  $$ select enumlabel::text from pg_catalog.pg_enum
+  $$ select enumlabel::text collate "C" from pg_catalog.pg_enum
      where enumtypid='public.monitor_finding_status'::regtype order by enumsortorder $$,
-  $$ values ('open'::text),('acknowledged'),('in_progress'),('exception_requested'),('risk_accepted'),('resolved') $$,
+  $$ values ('open'::text collate "C"),('acknowledged'::text collate "C"),('in_progress'::text collate "C"),('exception_requested'::text collate "C"),('risk_accepted'::text collate "C"),('resolved'::text collate "C") $$,
   'monitoring findings support the complete reviewed lifecycle'
 );
 

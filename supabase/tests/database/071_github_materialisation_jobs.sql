@@ -20,6 +20,8 @@ delete from public.github_installations where organisation_id in (
 delete from public.memberships where organisation_id in (
   '72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002'
 );
+delete from public.asset_categories where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002');
+delete from public.risk_categories where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002');
 delete from public.organisations where id in (
   '72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002'
 );
@@ -34,7 +36,7 @@ select has_column('public','github_materialisation_jobs','lease_token','claims u
 select has_column('public','github_materialisation_jobs','available_at','retry scheduling is durable');
 select has_column('public','github_materialisation_jobs','lease_attempt_incremented','leases remember whether they consumed a real attempt');
 select has_column('public','github_materialisation_jobs','exhausted_at','dead-letter attention has a durable timestamp');
-select has_fk('public','github_materialisation_jobs','github_materialisation_jobs_run_ancestry_fk');
+select ok((select contype='f' and conrelid='public.github_materialisation_jobs'::regclass from pg_catalog.pg_constraint where conname='github_materialisation_jobs_run_ancestry_fk'));
 select ok(
   (select relrowsecurity from pg_catalog.pg_class where oid='public.github_materialisation_jobs'::regclass),
   'materialisation jobs enforce RLS'
@@ -75,14 +77,15 @@ insert into public.github_repositories(
  ('72000000-0000-4000-8000-000000000202','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000102',72302,'Job-B','portal','Job-B/portal','https://github.com/Job-B/portal','private','main',false,true,true);
 insert into public.github_collection_runs(
  id,organisation_id,installation_id,repository_id,provider_repository_id,trigger_type,request_key,
- status,started_at,observation_count,passed_count,failed_count,unknown_count,not_applicable_count
+ status,started_at,observation_count,passed_count,failed_count,unknown_count,not_applicable_count,
+ lease_token,lease_expires_at,attempt
 ) values
- ('72000000-0000-4000-8000-000000000301','72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000101','72000000-0000-4000-8000-000000000201',72301,'manual','job-a-old','running',now()-interval '4 hours',0,0,0,0,0),
- ('72000000-0000-4000-8000-000000000302','72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000101','72000000-0000-4000-8000-000000000201',72301,'manual','job-a-new','running',now()-interval '3 hours',0,0,0,0,0),
- ('72000000-0000-4000-8000-000000000303','72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000101','72000000-0000-4000-8000-000000000201',72301,'manual','job-a-third','running',now()-interval '2 hours',0,0,0,0,0),
- ('72000000-0000-4000-8000-000000000304','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000102','72000000-0000-4000-8000-000000000202',72302,'manual','job-b-old','running',now()-interval '3 hours',0,0,0,0,0),
- ('72000000-0000-4000-8000-000000000305','72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000101','72000000-0000-4000-8000-000000000201',72301,'manual','job-failed','running',now()-interval '1 hour',0,0,0,0,0),
- ('72000000-0000-4000-8000-000000000306','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000102','72000000-0000-4000-8000-000000000202',72302,'manual','job-b-race','running',now()-interval '2 hours',0,0,0,0,0);
+ ('72000000-0000-4000-8000-000000000301','72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000101','72000000-0000-4000-8000-000000000201',72301,'manual','job-a-old','running',now()-interval '4 hours',0,0,0,0,0,extensions.gen_random_uuid(),now()-interval '30 minutes',1),
+ ('72000000-0000-4000-8000-000000000302','72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000101','72000000-0000-4000-8000-000000000201',72301,'manual','job-a-new','running',now()-interval '3 hours',0,0,0,0,0,extensions.gen_random_uuid(),now()-interval '30 minutes',1),
+ ('72000000-0000-4000-8000-000000000303','72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000101','72000000-0000-4000-8000-000000000201',72301,'manual','job-a-third','running',now()-interval '2 hours',0,0,0,0,0,extensions.gen_random_uuid(),now()-interval '30 minutes',1),
+ ('72000000-0000-4000-8000-000000000304','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000102','72000000-0000-4000-8000-000000000202',72302,'manual','job-b-old','running',now()-interval '3 hours',0,0,0,0,0,extensions.gen_random_uuid(),now()-interval '30 minutes',1),
+ ('72000000-0000-4000-8000-000000000305','72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000101','72000000-0000-4000-8000-000000000201',72301,'manual','job-failed','running',now()-interval '1 hour',0,0,0,0,0,extensions.gen_random_uuid(),now()-interval '30 minutes',1),
+ ('72000000-0000-4000-8000-000000000306','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000102','72000000-0000-4000-8000-000000000202',72302,'manual','job-b-race','running',now()-interval '2 hours',0,0,0,0,0,extensions.gen_random_uuid(),now()-interval '30 minutes',1);
 update public.github_collection_runs
 set status=case when id='72000000-0000-4000-8000-000000000302' then 'partial'::public.github_collection_status else 'succeeded'::public.github_collection_status end,
     completed_at=now(), observation_count=15,
@@ -224,8 +227,8 @@ commit;
 set role service_role;
 select is((select count(*) from public.claim_github_materialisation_jobs_server(1,array['72000000-0000-4000-8000-000000000306'::uuid])),1::bigint,'the concurrent approval-ordering fixture is claimed');
 reset role;
-select extensions.dblink_connect('github_job_approval','host=127.0.0.1 port=5432 dbname='||current_database()||' user=postgres password=postgres connect_timeout=5');
-select extensions.dblink_connect('github_job_finalise','host=127.0.0.1 port=5432 dbname='||current_database()||' user=postgres password=postgres connect_timeout=5');
+select extensions.dblink_connect('github_job_approval','host='||pg_catalog.host(pg_catalog.inet_server_addr())||' port='||pg_catalog.inet_server_port()::text||' dbname='||current_database()||' user=postgres password=postgres connect_timeout=5');
+select extensions.dblink_connect('github_job_finalise','host='||pg_catalog.host(pg_catalog.inet_server_addr())||' port='||pg_catalog.inet_server_port()::text||' dbname='||current_database()||' user=postgres password=postgres connect_timeout=5');
 select extensions.dblink_exec('github_job_finalise','set role service_role');
 select extensions.dblink_send_query('github_job_approval',$remote$
   insert into public.github_mapping_approvals(organisation_id,mapping_pack_id,approved_by)
@@ -319,6 +322,8 @@ delete from public.github_collection_runs where organisation_id in ('72000000-00
 delete from public.github_repositories where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002');
 delete from public.github_installations where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002');
 delete from public.memberships where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002');
+delete from public.asset_categories where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002');
+delete from public.risk_categories where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002');
 delete from public.organisations where id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002');
 delete from public.profiles where id::text like '72000000-0000-4000-8000-00000000000%';
 delete from auth.users where id::text like '72000000-0000-4000-8000-00000000000%';

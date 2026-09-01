@@ -46,9 +46,13 @@ reset role;
 select is(
   (select count(*) from public.audit_events where entity_type = 'evidence' and organisation_id = '20000000-0000-4000-8000-000000000001'),
   2::bigint, 'evidence writes are audited');
-select has_fk(
-  'public', 'github_evidence_provenance',
-  'github_evidence_provenance_evidence_tenant_fk',
+select ok(
+  exists (
+    select 1 from pg_catalog.pg_constraint
+    where conname = 'github_evidence_provenance_evidence_tenant_fk'
+      and contype = 'f'
+      and conrelid = 'public.github_evidence_provenance'::regclass
+  ),
   'GitHub evidence provenance cannot cross the evidence tenant boundary'
 );
 select ok(

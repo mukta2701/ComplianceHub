@@ -25,6 +25,8 @@ delete from public.github_collection_runs where organisation_id in ('71000000-00
 delete from public.github_repositories where organisation_id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
 delete from public.github_installations where organisation_id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
 delete from public.memberships where organisation_id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
+delete from public.asset_categories where organisation_id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
+delete from public.risk_categories where organisation_id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
 delete from public.organisations where id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
 delete from public.github_mapping_entries where mapping_pack_id in (
   select id from public.github_mapping_packs
@@ -44,15 +46,15 @@ select has_table('public', 'github_mapping_approvals', 'workspace approvals are 
 select has_table('public', 'github_evidence_provenance', 'official evidence retains GitHub provenance');
 select has_table('public', 'github_finding_provenance', 'official findings retain collision-free GitHub provenance');
 select has_table('public', 'github_finding_transitions', 'GitHub finding lifecycle transitions are audited');
-select has_fk('public', 'github_evidence_provenance', 'github_evidence_provenance_observation_ancestry_fk');
-select has_fk('public', 'github_evidence_provenance', 'github_evidence_provenance_approval_ancestry_fk');
-select has_fk('public', 'github_finding_provenance', 'github_finding_provenance_latest_observation_ancestry_fk');
-select has_fk('public', 'github_finding_provenance', 'github_finding_provenance_latest_approval_ancestry_fk');
+select ok((select contype='f' and conrelid='public.github_evidence_provenance'::regclass from pg_catalog.pg_constraint where conname='github_evidence_provenance_observation_ancestry_fk'));
+select ok((select contype='f' and conrelid='public.github_evidence_provenance'::regclass from pg_catalog.pg_constraint where conname='github_evidence_provenance_approval_ancestry_fk'));
+select ok((select contype='f' and conrelid='public.github_finding_provenance'::regclass from pg_catalog.pg_constraint where conname='github_finding_provenance_latest_observation_ancestry_fk'));
+select ok((select contype='f' and conrelid='public.github_finding_provenance'::regclass from pg_catalog.pg_constraint where conname='github_finding_provenance_latest_approval_ancestry_fk'));
 select has_column('public', 'monitoring_findings', 'stable_subject_identity', 'finding deduplication stores a stable origin-specific subject identity');
 select has_column('public', 'monitoring_findings', 'mapping_version', 'findings retain the latest reviewed mapping version outside their stable identity');
 select has_column('public', 'github_finding_provenance', 'provider_repository_id', 'finding provenance retains the stable GitHub repository identity');
 select has_column('public', 'github_finding_provenance', 'latest_installation_id', 'latest finding ancestry can advance across a GitHub App reinstallation');
-select has_fk('public', 'github_finding_provenance', 'github_finding_provenance_latest_repository_ancestry_fk');
+select ok((select contype='f' and conrelid='public.github_finding_provenance'::regclass from pg_catalog.pg_constraint where conname='github_finding_provenance_latest_repository_ancestry_fk'));
 select has_column('public', 'github_finding_transitions', 'approval_id', 'automated finding history retains the exact mapping approval');
 select has_column('public', 'github_finding_transitions', 'mapping_pack_id', 'automated finding history retains the exact mapping pack');
 select has_column('public', 'github_finding_transitions', 'mapping_version', 'automated finding history retains the exact mapping version');
@@ -221,7 +223,7 @@ insert into public.github_collection_runs(
  ('71000000-0000-4000-8000-000000000315','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000102','71000000-0000-4000-8000-000000000202',73001,'webhook','reconnected-fail','succeeded',null,now()-interval '3 hours',now()-interval '1 minute',1,0,1,0,0,extensions.gen_random_uuid(),now()-interval '179 minutes',1),
  ('71000000-0000-4000-8000-000000000316','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000102','71000000-0000-4000-8000-000000000202',73001,'manual','mapping-v2-fail','succeeded',null,now()-interval '3 hours',now()-interval '40 seconds',1,0,1,0,0,extensions.gen_random_uuid(),now()-interval '179 minutes',1),
  ('71000000-0000-4000-8000-000000000317','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000102','71000000-0000-4000-8000-000000000202',73001,'manual','mapping-v2-pass','succeeded',null,now()-interval '3 hours',now()-interval '20 seconds',1,1,0,0,0,extensions.gen_random_uuid(),now()-interval '179 minutes',1),
- ('71000000-0000-4000-8000-000000000318','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000102','71000000-0000-4000-8000-000000000202',73001,'schedule','post-approver-removal-pass','succeeded',null,now()-interval '3 hours',now()-interval '5 seconds',1,1,0,0,0,extensions.gen_random_uuid(),now()-interval '179 minutes',1);
+ ('71000000-0000-4000-8000-000000000318','71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000102','71000000-0000-4000-8000-000000000202',73001,'scheduled','post-approver-removal-pass','succeeded',null,now()-interval '3 hours',now()-interval '5 seconds',1,1,0,0,0,extensions.gen_random_uuid(),now()-interval '179 minutes',1);
 
 insert into public.github_observations(
  id,organisation_id,installation_id,repository_id,provider_repository_id,collection_run_id,
@@ -502,16 +504,18 @@ select set_config('app.material_summary',public.materialise_github_observations_
 )::text,false);
 select is((current_setting('app.material_summary')::jsonb->>'evidence_created')::int,1,'a fresh pass creates one official evidence record');
 select is((select count(*) from public.evidence where organisation_id='71000000-0000-4000-8000-000000000001'),1::bigint,'one pass produces exactly one evidence row');
-select is((select count(*) from public.evidence_links link join public.controls control on control.id=link.control_id where link.organisation_id='71000000-0000-4000-8000-000000000001' and control.code like 'CH-%'),1::bigint,'ISO requirement A.8.32 resolves through the catalogue to an internal control link');
-select is((select count(*) from public.github_evidence_provenance where observation_id='71000000-0000-4000-8000-000000000401'),1::bigint,'evidence retains exact observation/run/repository/approval provenance');
+reset role;
+select is((select count(*) from public.evidence_links link join public.controls control on control.id=link.control_id where link.organisation_id='71000000-0000-4000-8000-000000000001' and link.evidence_id=(select evidence_id from public.github_evidence_provenance where organisation_id='71000000-0000-4000-8000-000000000001' and observation_id='71000000-0000-4000-8000-000000000401') and control.code like 'CH-%'),1::bigint,'ISO requirement A.8.32 resolves through the catalogue to an internal control link');
+select is((select count(*) from public.github_evidence_provenance where organisation_id='71000000-0000-4000-8000-000000000001' and observation_id='71000000-0000-4000-8000-000000000401'),1::bigint,'evidence retains exact observation/run/repository/approval provenance');
+set role service_role;
 select lives_ok(
   $$ update public.evidence set status='expiring'
-     where id=(select evidence_id from public.github_evidence_provenance where observation_id='71000000-0000-4000-8000-000000000401') $$,
+     where id=(select evidence_id from public.github_evidence_provenance where organisation_id='71000000-0000-4000-8000-000000000001' and observation_id='71000000-0000-4000-8000-000000000401') $$,
   'the service-role daily sweep can mark verified official evidence expiring'
 );
 select throws_ok(
   $$ update public.evidence set status='superseded'
-     where id=(select evidence_id from public.github_evidence_provenance where observation_id='71000000-0000-4000-8000-000000000401') $$,
+     where id=(select evidence_id from public.github_evidence_provenance where organisation_id='71000000-0000-4000-8000-000000000001' and observation_id='71000000-0000-4000-8000-000000000401') $$,
   'P0001', 'official GitHub evidence lifecycle is server-managed',
   'a generic service client still cannot supersede official evidence'
 );
@@ -520,17 +524,17 @@ reset role;
 set session_replication_role = replica;
 update public.evidence
 set status='current', valid_until=current_date-1
-where id=(select evidence_id from public.github_evidence_provenance where observation_id='71000000-0000-4000-8000-000000000401');
+where id=(select evidence_id from public.github_evidence_provenance where organisation_id='71000000-0000-4000-8000-000000000001' and observation_id='71000000-0000-4000-8000-000000000401');
 set session_replication_role = origin;
 set role service_role;
 select lives_ok(
   $$ update public.evidence set status='expired'
-     where id=(select evidence_id from public.github_evidence_provenance where observation_id='71000000-0000-4000-8000-000000000401') $$,
+     where id=(select evidence_id from public.github_evidence_provenance where organisation_id='71000000-0000-4000-8000-000000000001' and observation_id='71000000-0000-4000-8000-000000000401') $$,
   'the service-role daily sweep can mark verified official evidence expired'
 );
 select throws_ok(
   $$ update public.evidence set status='withdrawn'
-     where id=(select evidence_id from public.github_evidence_provenance where observation_id='71000000-0000-4000-8000-000000000401') $$,
+     where id=(select evidence_id from public.github_evidence_provenance where organisation_id='71000000-0000-4000-8000-000000000001' and observation_id='71000000-0000-4000-8000-000000000401') $$,
   'P0001', 'official GitHub evidence lifecycle is server-managed',
   'a generic service client still cannot withdraw official evidence'
 );
@@ -538,26 +542,48 @@ reset role;
 
 set role authenticated;
 select set_config('request.jwt.claims','{"sub":"71000000-0000-4000-8000-000000000003","role":"authenticated"}',false);
-select throws_ok(
+select lives_ok(
   $$ update public.evidence set status='withdrawn'
-     where id=(select evidence_id from public.github_evidence_provenance where observation_id='71000000-0000-4000-8000-000000000401') $$,
-  'P0001', 'official GitHub evidence lifecycle is server-managed',
-  'a generic member evidence update cannot withdraw official GitHub evidence'
+     where id=(select evidence_id from public.github_evidence_provenance where organisation_id='71000000-0000-4000-8000-000000000001' and observation_id='71000000-0000-4000-8000-000000000401') $$,
+  'a plain member update is RLS-filtered before the official-evidence trigger'
 );
-select throws_ok(
+select is(
+  (select status::text from public.evidence where id=(select evidence_id from public.github_evidence_provenance where organisation_id='71000000-0000-4000-8000-000000000001' and observation_id='71000000-0000-4000-8000-000000000401')),
+  'expired', 'a plain member leaves official evidence unchanged'
+);
+select lives_ok(
   $$ delete from public.evidence_links
-     where evidence_id=(select evidence_id from public.github_evidence_provenance where observation_id='71000000-0000-4000-8000-000000000401') $$,
-  'P0001', 'official GitHub evidence links are server-managed',
-  'a generic member link deletion cannot detach official GitHub evidence from its mapped control'
+     where evidence_id=(select evidence_id from public.github_evidence_provenance where organisation_id='71000000-0000-4000-8000-000000000001' and observation_id='71000000-0000-4000-8000-000000000401') $$,
+  'a plain member delete is RLS-filtered before the official-link trigger'
+);
+select is(
+  (select count(*) from public.evidence_links where evidence_id=(select evidence_id from public.github_evidence_provenance where organisation_id='71000000-0000-4000-8000-000000000001' and observation_id='71000000-0000-4000-8000-000000000401')),
+  1::bigint, 'a plain member leaves official evidence links unchanged'
 );
 select throws_ok(
   $$ insert into public.evidence_links(organisation_id,evidence_id,control_id,created_by)
      select '71000000-0000-4000-8000-000000000001',provenance.evidence_id,control.id,'71000000-0000-4000-8000-000000000003'
      from public.github_evidence_provenance provenance cross join lateral (
        select id from public.controls where id not in (select control_id from public.evidence_links where evidence_id=provenance.evidence_id) limit 1
-     ) control where provenance.observation_id='71000000-0000-4000-8000-000000000401' $$,
+     ) control where provenance.organisation_id='71000000-0000-4000-8000-000000000001' and provenance.observation_id='71000000-0000-4000-8000-000000000401' $$,
   'P0001', 'official GitHub evidence links are server-managed',
   'a generic member cannot add an unapproved control link to official GitHub evidence'
+);
+reset role;
+
+set role authenticated;
+select set_config('request.jwt.claims','{"sub":"71000000-0000-4000-8000-000000000001","role":"authenticated"}',false);
+select throws_ok(
+  $$ update public.evidence set status='withdrawn'
+     where id=(select evidence_id from public.github_evidence_provenance where organisation_id='71000000-0000-4000-8000-000000000001' and observation_id='71000000-0000-4000-8000-000000000401') $$,
+  'P0001', 'official GitHub evidence lifecycle is server-managed',
+  'an operator reaches the official-evidence lifecycle trigger'
+);
+select throws_ok(
+  $$ delete from public.evidence_links
+     where evidence_id=(select evidence_id from public.github_evidence_provenance where organisation_id='71000000-0000-4000-8000-000000000001' and observation_id='71000000-0000-4000-8000-000000000401') $$,
+  'P0001', 'official GitHub evidence links are server-managed',
+  'an operator reaches the official-link lifecycle trigger'
 );
 reset role;
 
@@ -579,7 +605,7 @@ select set_config('app.material_summary',public.materialise_github_observations_
 select is((current_setting('app.material_summary')::jsonb->>'evidence_refreshed')::int,1,'a newer pass refreshes evidence with a new immutable record');
 select is((select count(*) from public.evidence where organisation_id='71000000-0000-4000-8000-000000000001'),2::bigint,'a refresh retains both historical and current evidence');
 select is((select count(*) from public.evidence where organisation_id='71000000-0000-4000-8000-000000000001' and status='superseded'),1::bigint,'the prior evidence is superseded atomically');
-select is((select count(*) from public.github_evidence_provenance where supersedes_evidence_id is not null),1::bigint,'the new provenance records one supersession lineage edge');
+select is((select count(*) from public.github_evidence_provenance where organisation_id='71000000-0000-4000-8000-000000000001' and observation_id='71000000-0000-4000-8000-000000000402' and supersedes_evidence_id is not null),1::bigint,'the new provenance records one supersession lineage edge');
 
 select set_config('app.material_summary',public.materialise_github_observations_server(
   '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000305',
@@ -595,7 +621,13 @@ select set_config('app.material_summary',public.materialise_github_observations_
   pg_temp.github_decision('71000000-0000-4000-8000-000000000403','finding')
 )::text,false);
 select is((current_setting('app.material_summary')::jsonb->>'findings_created')::int,1,'a failure creates one mapped GitHub finding');
-select is((select count(*) from public.monitoring_findings where organisation_id='71000000-0000-4000-8000-000000000001' and finding_origin='github'),1::bigint,'the stable GitHub finding identity deduplicates separately from legacy monitors');
+select set_config('app.github_fixture_finding',(
+  select id::text from public.monitoring_findings
+  where organisation_id='71000000-0000-4000-8000-000000000001'
+    and provider_repository_id=73001
+    and check_id='github.branch.stale_approvals'
+),false);
+select is((select count(*) from public.monitoring_findings where id=current_setting('app.github_fixture_finding')::uuid),1::bigint,'the stable GitHub finding identity deduplicates separately from legacy monitors');
 
 select set_config('app.material_summary',public.materialise_github_observations_server(
   '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000304',
@@ -603,15 +635,15 @@ select set_config('app.material_summary',public.materialise_github_observations_
   pg_temp.github_decision('71000000-0000-4000-8000-000000000404','finding')
 )::text,false);
 select is((current_setting('app.material_summary')::jsonb->>'findings_refreshed')::int,1,'a newer repeat failure refreshes the most-recent detection');
-select is((select count(*) from public.monitoring_findings where organisation_id='71000000-0000-4000-8000-000000000001' and finding_origin='github'),1::bigint,'repeat failure does not duplicate the finding');
-select is((select latest_failed_observation_id from public.github_finding_provenance), '71000000-0000-4000-8000-000000000404'::uuid, 'finding provenance advances to the newest failure');
+select is((select count(*) from public.monitoring_findings where id=current_setting('app.github_fixture_finding')::uuid),1::bigint,'repeat failure does not duplicate the finding');
+select is((select latest_failed_observation_id from public.github_finding_provenance where finding_id=current_setting('app.github_fixture_finding')::uuid), '71000000-0000-4000-8000-000000000404'::uuid, 'finding provenance advances to the newest failure');
 
 select set_config('app.material_summary',public.materialise_github_observations_server(
   '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000306',
   'github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',
   pg_temp.github_decision('71000000-0000-4000-8000-000000000406','evidence')
 )::text,false);
-select is((select status::text from public.monitoring_findings where finding_origin='github'),'open','a pass older than the newest failure cannot resolve the finding');
+select is((select status::text from public.monitoring_findings where id=current_setting('app.github_fixture_finding')::uuid),'open','a pass older than the newest failure cannot resolve the finding');
 
 select set_config('app.material_summary',public.materialise_github_observations_server(
   '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000307',
@@ -624,55 +656,55 @@ select set_config('app.material_summary',public.materialise_github_observations_
   'github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',
   pg_temp.github_decision('71000000-0000-4000-8000-000000000408','explanatory')
 )::text,false);
-select is((select status::text from public.monitoring_findings where finding_origin='github'),'open','not-applicable observations cannot resolve a finding');
+select is((select status::text from public.monitoring_findings where id=current_setting('app.github_fixture_finding')::uuid),'open','not-applicable observations cannot resolve a finding');
 select set_config('app.material_summary',public.materialise_github_observations_server(
   '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000309',
   'github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',
   pg_temp.github_decision('71000000-0000-4000-8000-000000000409','evidence')
 )::text,false);
-select is((select status::text from public.monitoring_findings where finding_origin='github'),'open','a passing observation from a failed run cannot resolve a finding');
+select is((select status::text from public.monitoring_findings where id=current_setting('app.github_fixture_finding')::uuid),'open','a passing observation from a failed run cannot resolve a finding');
 reset role;
 
 set role service_role;
 select lives_ok(
-  $$ select public.transition_github_finding_server('71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001',(select id from public.monitoring_findings where finding_origin='github'),'acknowledged','Owner reviewed the finding.') $$,
+  $$ select public.transition_github_finding_server('71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001',current_setting('app.github_fixture_finding')::uuid,'acknowledged','Owner reviewed the finding.') $$,
   'an Owner can record an acknowledged transition with a reason'
 );
 select lives_ok(
-  $$ select public.transition_github_finding_server('71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001',(select id from public.monitoring_findings where finding_origin='github'),'in_progress','Remediation has started.') $$,
+  $$ select public.transition_github_finding_server('71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001',current_setting('app.github_fixture_finding')::uuid,'in_progress','Remediation has started.') $$,
   'an Owner can move a GitHub finding into progress'
 );
 select lives_ok(
-  $$ select public.transition_github_finding_server('71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001',(select id from public.monitoring_findings where finding_origin='github'),'exception_requested','An exception review is required.') $$,
+  $$ select public.transition_github_finding_server('71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001',current_setting('app.github_fixture_finding')::uuid,'exception_requested','An exception review is required.') $$,
   'an Owner can request an exception with an audited reason'
 );
 select lives_ok(
-  $$ select public.transition_github_finding_server('71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001',(select id from public.monitoring_findings where finding_origin='github'),'open','Return the unresolved technical condition to open.') $$,
+  $$ select public.transition_github_finding_server('71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001',current_setting('app.github_fixture_finding')::uuid,'open','Return the unresolved technical condition to open.') $$,
   'a reviewed non-resolution state can return to open'
 );
 select throws_ok(
-  $$ select public.transition_github_finding_server('71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001',(select id from public.monitoring_findings where finding_origin='github'),'resolved','Human closure is not verification.') $$,
+  $$ select public.transition_github_finding_server('71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001',current_setting('app.github_fixture_finding')::uuid,'resolved','Human closure is not verification.') $$,
   '22023', 'a GitHub finding resolves only through a newer fresh pass', 'a human transition cannot mark the finding resolved'
 );
-select is((select count(*) from public.github_finding_transitions where actor_id='71000000-0000-4000-8000-000000000001' and observation_id is null),4::bigint,'every valid human finding-state transition is retained with its actor and reason');
+select is((select count(*) from public.github_finding_transitions where finding_id=current_setting('app.github_fixture_finding')::uuid and actor_id='71000000-0000-4000-8000-000000000001' and observation_id is null),4::bigint,'every valid human finding-state transition is retained with its actor and reason');
 reset role;
 
 set role authenticated;
 select set_config('request.jwt.claims','{"sub":"71000000-0000-4000-8000-000000000001","role":"authenticated"}',false);
 select set_config('app.github_task',public.raise_monitoring_finding_task(
-  '71000000-0000-4000-8000-000000000001',(select id from public.monitoring_findings where finding_origin='github'),'71000000-0000-4000-8000-000000000001'
+  '71000000-0000-4000-8000-000000000001',current_setting('app.github_fixture_finding')::uuid,'71000000-0000-4000-8000-000000000001'
 )::text,false);
 select is((select source::text from public.tasks where id=current_setting('app.github_task')::uuid),'github','a remediation task linked to an official finding has explicit GitHub source');
-select is((select task_id from public.monitoring_findings where finding_origin='github'),current_setting('app.github_task')::uuid,'finding-task linkage is atomic and tenant-safe');
+select is((select task_id from public.monitoring_findings where id=current_setting('app.github_fixture_finding')::uuid),current_setting('app.github_task')::uuid,'finding-task linkage is atomic and tenant-safe');
 update public.tasks set status='done' where id=current_setting('app.github_task')::uuid;
-select isnt((select status::text from public.monitoring_findings where finding_origin='github'),'resolved','task completion cannot resolve the technical finding');
+select isnt((select status::text from public.monitoring_findings where id=current_setting('app.github_fixture_finding')::uuid),'resolved','task completion cannot resolve the technical finding');
 insert into public.integration_connections(id,organisation_id,provider,label,config,connected_by) values (
  '71000000-0000-4000-8000-000000000601','71000000-0000-4000-8000-000000000001','github','Test GitHub Issues','{}','71000000-0000-4000-8000-000000000001'
 );
 insert into public.task_tickets(organisation_id,task_id,connection_id,provider,external_id,external_status,created_by) values (
  '71000000-0000-4000-8000-000000000001',current_setting('app.github_task')::uuid,'71000000-0000-4000-8000-000000000601','github','issue-1','closed','71000000-0000-4000-8000-000000000001'
 );
-select isnt((select status::text from public.monitoring_findings where finding_origin='github'),'resolved','GitHub Issue completion cannot resolve the technical finding');
+select isnt((select status::text from public.monitoring_findings where id=current_setting('app.github_fixture_finding')::uuid),'resolved','GitHub Issue completion cannot resolve the technical finding');
 reset role;
 
 set role service_role;
@@ -682,7 +714,7 @@ select set_config('app.material_summary',public.materialise_github_observations_
   pg_temp.github_decision('71000000-0000-4000-8000-000000000410','evidence')
 )::text,false);
 select is((current_setting('app.material_summary')::jsonb->>'findings_resolved')::int,1,'only a newer fresh pass resolves the mapped GitHub finding');
-select is((select status::text from public.monitoring_findings where finding_origin='github'),'resolved','fresh verification persists the resolved state');
+select is((select status::text from public.monitoring_findings where id=current_setting('app.github_fixture_finding')::uuid),'resolved','fresh verification persists the resolved state');
 
 select set_config('app.material_summary',public.materialise_github_observations_server(
   '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000311',
@@ -690,10 +722,10 @@ select set_config('app.material_summary',public.materialise_github_observations_
   pg_temp.github_decision('71000000-0000-4000-8000-000000000411','finding')
 )::text,false);
 select is((current_setting('app.material_summary')::jsonb->>'findings_reopened')::int,1,'a newer failure reopens the same resolved finding');
-select is((select count(*) from public.monitoring_findings where finding_origin='github'),1::bigint,'reopening retains one stable finding');
+select is((select count(*) from public.monitoring_findings where id=current_setting('app.github_fixture_finding')::uuid),1::bigint,'reopening retains one stable finding');
 
 select lives_ok(
-  $$ select public.transition_github_finding_server('71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001',(select id from public.monitoring_findings where finding_origin='github'),'risk_accepted','The Owner records the business decision while the technical condition stays visible.') $$,
+  $$ select public.transition_github_finding_server('71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001',current_setting('app.github_fixture_finding')::uuid,'risk_accepted','The Owner records the business decision while the technical condition stays visible.') $$,
   'risk acceptance is a valid audited state'
 );
 select set_config('app.material_summary',public.materialise_github_observations_server(
@@ -701,7 +733,7 @@ select set_config('app.material_summary',public.materialise_github_observations_
   'github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',
   pg_temp.github_decision('71000000-0000-4000-8000-000000000413','finding')
 )::text,false);
-select is((select status::text from public.monitoring_findings where finding_origin='github'),'risk_accepted','a repeat technical failure does not turn risk acceptance into a pass');
+select is((select status::text from public.monitoring_findings where id=current_setting('app.github_fixture_finding')::uuid),'risk_accepted','a repeat technical failure does not turn risk acceptance into a pass');
 
 select set_config('app.material_summary',public.materialise_github_observations_server(
   '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000315',
@@ -709,16 +741,16 @@ select set_config('app.material_summary',public.materialise_github_observations_
   pg_temp.github_decision('71000000-0000-4000-8000-000000000415','finding')
 )::text,false);
 select is((current_setting('app.material_summary')::jsonb->>'findings_refreshed')::int,1,'reinstallation refreshes the same stable GitHub finding without conflict');
-select is((select count(*) from public.monitoring_findings where finding_origin='github'),1::bigint,'reinstallation does not duplicate the stable repository finding');
-select is((select status::text from public.monitoring_findings where finding_origin='github'),'risk_accepted','reinstallation refresh preserves the unresolved human state');
-select is((select provider_repository_id from public.github_finding_provenance),73001::bigint,'finding identity retains the provider repository ID');
-select is((select mapping_version from public.github_finding_provenance),'github-iso-27001-v1','finding identity retains the reviewed mapping version');
-select is((select installation_id from public.github_finding_provenance),'71000000-0000-4000-8000-000000000101'::uuid,'initial installation ancestry remains immutable');
-select is((select latest_installation_id from public.github_finding_provenance),'71000000-0000-4000-8000-000000000102'::uuid,'latest ancestry advances to the reconnected installation');
-select is((select latest_repository_id from public.github_finding_provenance),'71000000-0000-4000-8000-000000000202'::uuid,'latest ancestry advances to the reconnected repository row');
-select is((select latest_failed_observation_id from public.github_finding_provenance),'71000000-0000-4000-8000-000000000415'::uuid,'latest failed observation retains its reconnected ancestry');
+select is((select count(*) from public.monitoring_findings where id=current_setting('app.github_fixture_finding')::uuid),1::bigint,'reinstallation does not duplicate the stable repository finding');
+select is((select status::text from public.monitoring_findings where id=current_setting('app.github_fixture_finding')::uuid),'risk_accepted','reinstallation refresh preserves the unresolved human state');
+select is((select provider_repository_id from public.github_finding_provenance where finding_id=current_setting('app.github_fixture_finding')::uuid),73001::bigint,'finding identity retains the provider repository ID');
+select is((select mapping_version from public.github_finding_provenance where finding_id=current_setting('app.github_fixture_finding')::uuid),'github-iso-27001-v1','finding identity retains the reviewed mapping version');
+select is((select installation_id from public.github_finding_provenance where finding_id=current_setting('app.github_fixture_finding')::uuid),'71000000-0000-4000-8000-000000000101'::uuid,'initial installation ancestry remains immutable');
+select is((select latest_installation_id from public.github_finding_provenance where finding_id=current_setting('app.github_fixture_finding')::uuid),'71000000-0000-4000-8000-000000000102'::uuid,'latest ancestry advances to the reconnected installation');
+select is((select latest_repository_id from public.github_finding_provenance where finding_id=current_setting('app.github_fixture_finding')::uuid),'71000000-0000-4000-8000-000000000202'::uuid,'latest ancestry advances to the reconnected repository row');
+select is((select latest_failed_observation_id from public.github_finding_provenance where finding_id=current_setting('app.github_fixture_finding')::uuid),'71000000-0000-4000-8000-000000000415'::uuid,'latest failed observation retains its reconnected ancestry');
 select is(
-  (select identity_key from public.github_finding_provenance),
+  (select identity_key from public.github_finding_provenance where finding_id=current_setting('app.github_fixture_finding')::uuid),
   pg_catalog.encode(extensions.digest(pg_catalog.convert_to(pg_catalog.jsonb_build_array(
     '71000000-0000-4000-8000-000000000001'::uuid,73001::bigint,'github.branch.stale_approvals'
   )::text,'UTF8'),'sha256'),'hex'),
@@ -755,17 +787,17 @@ select is(
 );
 select is(
   (select count(*) from public.monitoring_findings
-   where organisation_id='71000000-0000-4000-8000-000000000001' and finding_origin='github'),
+   where id=current_setting('app.github_fixture_finding')::uuid),
   1::bigint,
   'a mapping-version change cannot duplicate the stable technical finding'
 );
 select is(
-  (select status::text from public.monitoring_findings where finding_origin='github'),
+  (select status::text from public.monitoring_findings where id=current_setting('app.github_fixture_finding')::uuid),
   'risk_accepted',
   'the v2 failure preserves the unresolved human lifecycle state'
 );
 select is(
-  (select mapping_version from public.monitoring_findings where finding_origin='github'),
+  (select mapping_version from public.monitoring_findings where id=current_setting('app.github_fixture_finding')::uuid),
   'github-iso-27001-v2',
   'the stable finding exposes its latest reviewed mapping version without changing identity'
 );
@@ -781,19 +813,19 @@ select is(
 );
 select is(
   (select count(*) from public.monitoring_findings
-   where organisation_id='71000000-0000-4000-8000-000000000001' and finding_origin='github'),
+   where id=current_setting('app.github_fixture_finding')::uuid),
   1::bigint,
   'the v1 failure and v2 fail/pass lifecycle retains exactly one finding'
 );
 select is(
-  (select status::text from public.monitoring_findings where finding_origin='github'),
+  (select status::text from public.monitoring_findings where id=current_setting('app.github_fixture_finding')::uuid),
   'resolved',
   'the same stable finding records the newer verified resolution'
 );
 select results_eq(
   $$ select distinct transition.mapping_version
      from public.github_finding_transitions transition
-     where transition.finding_id=(select id from public.monitoring_findings where finding_origin='github')
+     where transition.finding_id=current_setting('app.github_fixture_finding')::uuid
        and transition.observation_id is not null
      order by transition.mapping_version $$,
   $$ values ('github-iso-27001-v1'::text),('github-iso-27001-v2'::text) $$,
@@ -802,7 +834,7 @@ select results_eq(
 select is(
   (select count(distinct transition.approval_id)
    from public.github_finding_transitions transition
-   where transition.finding_id=(select id from public.monitoring_findings where finding_origin='github')
+   where transition.finding_id=current_setting('app.github_fixture_finding')::uuid
      and transition.observation_id is not null),
   2::bigint,
   'append-only finding history retains both exact mapping approvals'
@@ -811,7 +843,8 @@ select results_eq(
   $$ select transition.reason,transition.from_status::text,transition.to_status::text,
             transition.mapping_version,transition.approval_id
      from public.github_finding_transitions transition
-     where transition.observation_id in (
+     where transition.finding_id=current_setting('app.github_fixture_finding')::uuid
+       and transition.observation_id in (
        '71000000-0000-4000-8000-000000000416','71000000-0000-4000-8000-000000000417'
      )
      order by transition.observation_id $$,
@@ -826,7 +859,8 @@ select results_eq(
   $$ select initial_pack.version,latest_pack.version
      from public.github_finding_provenance provenance
      join public.github_mapping_packs initial_pack on initial_pack.id=provenance.initial_mapping_pack_id
-     join public.github_mapping_packs latest_pack on latest_pack.id=provenance.latest_mapping_pack_id $$,
+     join public.github_mapping_packs latest_pack on latest_pack.id=provenance.latest_mapping_pack_id
+     where provenance.finding_id=current_setting('app.github_fixture_finding')::uuid $$,
   $$ values ('github-iso-27001-v1'::text,'github-iso-27001-v2'::text) $$,
   'finding provenance preserves initial v1 ancestry while advancing latest ancestry to v2'
 );
@@ -848,10 +882,6 @@ select throws_ok(
   'P0001', 'approved ISO requirement has no internal control mapping', 'a missing requirement-to-control mapping aborts materialisation'
 );
 select is((select count(*) from public.evidence where organisation_id='71000000-0000-4000-8000-000000000001'),current_setting('app.evidence_before_bad')::bigint,'missing mapping failure is atomic with no partial evidence');
-select set_config('app.github_approval',public.approve_github_mapping_pack_server(
-  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001',
-  'github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f'
-)::text,false);
 reset role;
 
 -- Automated reconciliation is authorised by the still-active immutable
@@ -860,13 +890,34 @@ update public.memberships
 set role='owner'
 where organisation_id='71000000-0000-4000-8000-000000000001'
   and user_id='71000000-0000-4000-8000-000000000002';
-delete from public.memberships
+update public.memberships
+set role='admin'
 where organisation_id='71000000-0000-4000-8000-000000000001'
   and user_id='71000000-0000-4000-8000-000000000001';
+update public.memberships
+set role='owner'
+where organisation_id='71000000-0000-4000-8000-000000000001'
+  and user_id='71000000-0000-4000-8000-000000000003';
+select is(
+  public.revoke_github_mapping_approval_server(
+    '71000000-0000-4000-8000-000000000001',
+    '71000000-0000-4000-8000-000000000003',
+    current_setting('app.bad_approval')::uuid
+  ),
+  true,
+  'the newly promoted Owner can replace the earlier active approval before offboarding'
+);
+select set_config('app.github_approval',public.approve_github_mapping_pack_server(
+  '71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000003',
+  'github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f'
+)::text,false);
+delete from public.memberships
+where organisation_id='71000000-0000-4000-8000-000000000001'
+  and user_id='71000000-0000-4000-8000-000000000003';
 select is(
   (select approved_by from public.github_mapping_approvals
    where id=current_setting('app.github_approval')::uuid and revoked_at is null),
-  '71000000-0000-4000-8000-000000000001'::uuid,
+  '71000000-0000-4000-8000-000000000003'::uuid,
   'the active approval retains the original approving Owner'
 );
 select results_eq(
@@ -894,19 +945,21 @@ select results_eq(
      join public.evidence evidence
        on evidence.id=provenance.evidence_id
       and evidence.organisation_id=provenance.organisation_id
-     where provenance.observation_id='71000000-0000-4000-8000-000000000418' $$,
+     where provenance.organisation_id='71000000-0000-4000-8000-000000000001'
+       and provenance.observation_id='71000000-0000-4000-8000-000000000418' $$,
   $$ values (
-       '71000000-0000-4000-8000-000000000001'::uuid,
-       '71000000-0000-4000-8000-000000000001'::uuid,
+       '71000000-0000-4000-8000-000000000003'::uuid,
+       null::uuid,
        current_setting('app.github_approval')::uuid
      ) $$,
-  'created records derive attribution and provenance from the immutable approval lineage'
+  'created records retain approval attribution but leave operational ownership empty after offboarding'
 );
 select is(
   (select count(*) from public.evidence_links link
    join public.github_evidence_provenance provenance on provenance.evidence_id=link.evidence_id
-   where provenance.observation_id='71000000-0000-4000-8000-000000000418'
-     and link.created_by='71000000-0000-4000-8000-000000000001'),
+   where provenance.organisation_id='71000000-0000-4000-8000-000000000001'
+     and provenance.observation_id='71000000-0000-4000-8000-000000000418'
+     and link.created_by='71000000-0000-4000-8000-000000000003'),
   1::bigint,
   'mapped control links derive created_by from the original approval'
 );
@@ -920,7 +973,7 @@ select results_eq(
   $$ values (
        null::uuid,
        current_setting('app.github_approval')::text,
-       '71000000-0000-4000-8000-000000000001'::text,
+       '71000000-0000-4000-8000-000000000003'::text,
        'true'::text
      ) $$,
   'automated audit truthfully binds approval lineage without attributing a human action actor'
@@ -931,12 +984,14 @@ select ok(
    join public.github_evidence_provenance provenance
      on audit.entity_type='github_evidence_provenance'
     and audit.entity_id=provenance.id::text
-   where provenance.observation_id='71000000-0000-4000-8000-000000000418'),
+   where provenance.organisation_id='71000000-0000-4000-8000-000000000001'
+     and provenance.observation_id='71000000-0000-4000-8000-000000000418'),
   'automated provenance triggers cannot inherit a stale or caller-supplied human JWT actor'
 );
 select is(
   (select count(*) from public.github_finding_transitions
-   where reason in (
+   where finding_id=current_setting('app.github_fixture_finding')::uuid
+     and reason in (
      'failed_observation_created','failed_observation_refreshed',
      'failed_observation_reopened','fresh_pass_resolved'
    ) and actor_id is not null),
@@ -945,7 +1000,8 @@ select is(
 );
 select is(
   (select actor_id from public.github_finding_transitions
-   where observation_id is null and approval_id is null and to_status='risk_accepted'),
+   where finding_id=current_setting('app.github_fixture_finding')::uuid
+     and observation_id is null and approval_id is null and to_status='risk_accepted'),
   '71000000-0000-4000-8000-000000000001'::uuid,
   'human finding transitions still retain their exact verified Owner actor'
 );
@@ -963,16 +1019,22 @@ select throws_ok(
     evidence_id,organisation_id,installation_id,repository_id,collection_run_id,observation_id,
     approval_id,mapping_pack_id,identity_key,check_id,rule_version,mapping_version,observed_at,fresh_until
   ) select '71000000-0000-4000-8000-000000000700',
-      '71000000-0000-4000-8000-000000000002',installation_id,repository_id,collection_run_id,observation_id,
+      '71000000-0000-4000-8000-000000000002',installation_id,repository_id,collection_run_id,'71000000-0000-4000-8000-000000000414'::uuid,
       approval_id,mapping_pack_id,repeat('f',64),check_id,rule_version,mapping_version,observed_at,fresh_until
-    from public.github_evidence_provenance limit 1 $$,
+    from public.github_evidence_provenance
+    where organisation_id='71000000-0000-4000-8000-000000000001'
+      and observation_id='71000000-0000-4000-8000-000000000401' $$,
   '23503', null, 'composite provenance ancestry rejects a cross-tenant evidence attachment'
 );
 select throws_ok(
-  $$ update public.github_evidence_provenance set check_id='tampered' where organisation_id='71000000-0000-4000-8000-000000000001' $$,
+  $$ update public.github_evidence_provenance set check_id='tampered' where organisation_id='71000000-0000-4000-8000-000000000001' and observation_id='71000000-0000-4000-8000-000000000401' $$,
   'P0001', 'GitHub evidence provenance is immutable', 'evidence provenance cannot be rewritten'
 );
 
+-- Restore the offboarded profile only after the offboarding/materialisation
+-- assertions above so the ordinary Member read-policy checks remain independent.
+insert into public.memberships(organisation_id,user_id,role) values
+  ('71000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000003','member');
 set role authenticated;
 select set_config('request.jwt.claims','{"sub":"71000000-0000-4000-8000-000000000003","role":"authenticated"}',false);
 select cmp_ok((select count(*) from public.github_mapping_approvals where organisation_id='71000000-0000-4000-8000-000000000001'),'>',0::bigint,'a workspace Member can read safe approval history');
@@ -994,8 +1056,8 @@ select cmp_ok((select count(*) from public.audit_events where organisation_id='7
 -- must wait on the same transaction-scoped run/identity lock, then observe the
 -- committed provenance and return a skip instead of creating a duplicate.
 create temporary table github_materialisation_concurrency_results(summary jsonb);
-select extensions.dblink_connect('github_materialise_a','host=127.0.0.1 port=5432 dbname='||current_database()||' user=postgres password=postgres connect_timeout=5');
-select extensions.dblink_connect('github_materialise_b','host=127.0.0.1 port=5432 dbname='||current_database()||' user=postgres password=postgres connect_timeout=5');
+select extensions.dblink_connect('github_materialise_a','host='||pg_catalog.host(pg_catalog.inet_server_addr())||' port='||pg_catalog.inet_server_port()::text||' dbname='||current_database()||' user=postgres password=postgres connect_timeout=5');
+select extensions.dblink_connect('github_materialise_b','host='||pg_catalog.host(pg_catalog.inet_server_addr())||' port='||pg_catalog.inet_server_port()::text||' dbname='||current_database()||' user=postgres password=postgres connect_timeout=5');
 select extensions.dblink_exec('github_materialise_a','set role service_role');
 select extensions.dblink_exec('github_materialise_b','set role service_role');
 select extensions.dblink_exec('github_materialise_a','begin');
@@ -1020,7 +1082,7 @@ select is(extensions.dblink_is_busy('github_materialise_b'),1,'a concurrent repl
 select extensions.dblink_exec('github_materialise_a','commit');
 insert into github_materialisation_concurrency_results
 select summary from extensions.dblink_get_result('github_materialise_b') as result(summary jsonb);
-select is((select count(*) from public.github_evidence_provenance where observation_id='71000000-0000-4000-8000-000000000412'),1::bigint,'concurrent calls materialise one provenance row exactly once');
+select is((select count(*) from public.github_evidence_provenance where organisation_id='71000000-0000-4000-8000-000000000001' and observation_id='71000000-0000-4000-8000-000000000412'),1::bigint,'concurrent calls materialise one provenance row exactly once');
 select is((select count(*) from public.github_official_compliance_results where observation_id='71000000-0000-4000-8000-000000000412'),1::bigint,'concurrent wrapper calls persist one official result exactly once');
 select is((select sum((summary->>'skipped')::int) from github_materialisation_concurrency_results),1::bigint,'one concurrent caller reports the committed duplicate as skipped');
 select extensions.dblink_disconnect('github_materialise_a');
@@ -1048,6 +1110,8 @@ delete from public.github_collection_runs where organisation_id in ('71000000-00
 delete from public.github_repositories where organisation_id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
 delete from public.github_installations where organisation_id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
 delete from public.memberships where organisation_id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
+delete from public.asset_categories where organisation_id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
+delete from public.risk_categories where organisation_id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
 delete from public.organisations where id in ('71000000-0000-4000-8000-000000000001', '71000000-0000-4000-8000-000000000002');
 delete from public.github_mapping_entries where mapping_pack_id in (
   select id from public.github_mapping_packs

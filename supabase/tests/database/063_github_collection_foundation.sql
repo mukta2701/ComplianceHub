@@ -10,8 +10,8 @@ select has_table('public', 'github_oauth_states', 'GitHub OAuth callbacks have a
 select has_view('public', 'github_repository_shadow_summaries', 'repositories have one bounded latest-run summary');
 select col_is_pk('public', 'github_installations', 'id', 'GitHub installation ids are primary keys');
 select has_unique('public', 'github_installations', 'github_installations_provider_id_key');
-select has_fk('public', 'github_repositories', 'github_repositories_installation_tenant_fk');
-select has_fk('public', 'github_observations', 'github_observations_repository_tenant_fk');
+select ok((select contype='f' and conrelid='public.github_repositories'::regclass from pg_catalog.pg_constraint where conname='github_repositories_installation_tenant_fk'));
+select ok((select contype='f' and conrelid='public.github_observations'::regclass from pg_catalog.pg_constraint where conname='github_observations_repository_tenant_fk'));
 select has_column('public', 'github_webhook_deliveries', 'provider_installation_id', 'webhook intake retains the validated provider installation id');
 select has_column('public', 'github_webhook_deliveries', 'provider_repository_id', 'webhook intake retains the optional validated provider repository id');
 
@@ -591,7 +591,7 @@ select throws_ok(
        81101, 82101, 'Member-Co', 'Organization', 'selected',
        '{"contents":"read"}'::jsonb, true, '[]'::jsonb
      ) $$,
-  '42501', 'GitHub installation claim requires a current workspace operator',
+  '42501', 'GitHub installation claim requires a current workspace Owner',
   'the service claim rechecks the actor after callback before writing'
 );
 

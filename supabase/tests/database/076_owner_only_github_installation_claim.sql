@@ -14,6 +14,8 @@ delete from public.github_installations where organisation_id in (
 delete from public.memberships where organisation_id in (
   '76000000-0000-4000-8000-000000000101','76000000-0000-4000-8000-000000000102'
 );
+delete from public.asset_categories where organisation_id in ('76000000-0000-4000-8000-000000000101','76000000-0000-4000-8000-000000000102');
+delete from public.risk_categories where organisation_id in ('76000000-0000-4000-8000-000000000101','76000000-0000-4000-8000-000000000102');
 delete from public.organisations where id in (
   '76000000-0000-4000-8000-000000000101','76000000-0000-4000-8000-000000000102'
 );
@@ -53,9 +55,8 @@ select ok(
   (select prosecdef from pg_catalog.pg_proc where oid='public.claim_github_installation_server(uuid,uuid,bigint,bigint,text,text,text,jsonb,boolean,jsonb)'::pg_catalog.regprocedure),
   'claim remains a deliberate security-definer boundary'
 );
-select is(
-  (select proconfig from pg_catalog.pg_proc where oid='public.claim_github_installation_server(uuid,uuid,bigint,bigint,text,text,text,jsonb,boolean,jsonb)'::pg_catalog.regprocedure),
-  array['search_path='],
+select ok(
+  (select proconfig @> array['search_path=""'] from pg_catalog.pg_proc where oid='public.claim_github_installation_server(uuid,uuid,bigint,bigint,text,text,text,jsonb,boolean,jsonb)'::pg_catalog.regprocedure),
   'claim retains an empty search path'
 );
 select cmp_ok(
@@ -95,7 +96,7 @@ insert into public.memberships(organisation_id,user_id,role) values
  ('76000000-0000-4000-8000-000000000102','76000000-0000-4000-8000-000000000001','member');
 commit;
 
-set local role service_role;
+set role service_role;
 select lives_ok(
   $$ select public.claim_github_installation_server(
        '76000000-0000-4000-8000-000000000101','76000000-0000-4000-8000-000000000001',
@@ -137,8 +138,8 @@ select throws_ok(
 );
 reset role;
 
-select extensions.dblink_connect('claim_owner','host=127.0.0.1 port=5432 dbname='||current_database()||' user=postgres password=postgres connect_timeout=5');
-select extensions.dblink_connect('claim_demote','host=127.0.0.1 port=5432 dbname='||current_database()||' user=postgres password=postgres connect_timeout=5');
+select extensions.dblink_connect('claim_owner','host='||pg_catalog.host(pg_catalog.inet_server_addr())||' port='||pg_catalog.inet_server_port()::text||' dbname='||current_database()||' user=postgres password=postgres connect_timeout=5');
+select extensions.dblink_connect('claim_demote','host='||pg_catalog.host(pg_catalog.inet_server_addr())||' port='||pg_catalog.inet_server_port()::text||' dbname='||current_database()||' user=postgres password=postgres connect_timeout=5');
 select extensions.dblink_exec('claim_owner','set role service_role');
 select extensions.dblink_send_query('claim_owner',$remote$
   with claimed as (
@@ -203,6 +204,8 @@ delete from public.github_installations where organisation_id in (
 delete from public.memberships where organisation_id in (
   '76000000-0000-4000-8000-000000000101','76000000-0000-4000-8000-000000000102'
 );
+delete from public.asset_categories where organisation_id in ('76000000-0000-4000-8000-000000000101','76000000-0000-4000-8000-000000000102');
+delete from public.risk_categories where organisation_id in ('76000000-0000-4000-8000-000000000101','76000000-0000-4000-8000-000000000102');
 delete from public.organisations where id in (
   '76000000-0000-4000-8000-000000000101','76000000-0000-4000-8000-000000000102'
 );

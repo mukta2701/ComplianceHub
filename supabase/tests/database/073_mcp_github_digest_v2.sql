@@ -116,13 +116,15 @@ begin
   diagnostic := case when outcome='unknown' then 'permission_denied' else null end;
   insert into public.github_collection_runs(
     id,organisation_id,installation_id,repository_id,provider_repository_id,trigger_type,request_key,
-    status,started_at,completed_at,observation_count,passed_count,failed_count,unknown_count,not_applicable_count
+    status,started_at,completed_at,observation_count,passed_count,failed_count,unknown_count,not_applicable_count,
+    lease_token,lease_expires_at,attempt
   ) values (
     run_id,'76000000-0000-4000-8000-000000000001','76000000-0000-4000-8000-000000000301',
     '76000000-0000-4000-8000-000000000302',76303,'manual','digest-'||run_id,'succeeded',
     observed_at-interval '1 minute',observed_at,1,
     case when outcome='pass' then 1 else 0 end,case when outcome='fail' then 1 else 0 end,
-    case when outcome='unknown' then 1 else 0 end,case when outcome='not_applicable' then 1 else 0 end
+    case when outcome='unknown' then 1 else 0 end,case when outcome='not_applicable' then 1 else 0 end,
+    extensions.gen_random_uuid(),observed_at-interval '30 seconds',1
   );
   insert into public.github_observations(
     id,organisation_id,installation_id,repository_id,provider_repository_id,collection_run_id,
@@ -146,7 +148,7 @@ begin
          observation.provider_repository_id,observation.collection_run_id,observation.id,approval.id,
          pack.id,pack.version,pack.checksum,observation.check_id,observation.rule_version,observation.result,
          case when observation.result='fail' then 'high'::public.monitor_severity else null end,
-         'Approved catalogue summary for '||check_id,observation.observed_at,observation.fresh_until,materialised_at
+         'Approved catalogue summary for '||observation.check_id,observation.observed_at,observation.fresh_until,materialised_at
   from public.github_observations as observation
   join public.github_mapping_approvals as approval on approval.id=approval_id and approval.organisation_id=observation.organisation_id
   join public.github_mapping_packs as pack on pack.id=approval.mapping_pack_id
@@ -243,10 +245,11 @@ select is((public.get_mcp_compliance_bundle('76000000-0000-4000-8000-00000000000
 reset role;
 insert into public.github_collection_runs(
  id,organisation_id,installation_id,repository_id,provider_repository_id,trigger_type,request_key,status,
- started_at,completed_at,observation_count,passed_count,failed_count,unknown_count,not_applicable_count
+ started_at,completed_at,observation_count,passed_count,failed_count,unknown_count,not_applicable_count,
+ lease_token,lease_expires_at,attempt
 ) values (
  '76000000-0000-4000-8000-000000000510','76000000-0000-4000-8000-000000000001','76000000-0000-4000-8000-000000000301',
- '76000000-0000-4000-8000-000000000302',76303,'manual','digest-shadow-only','succeeded',now()-interval '2 minutes',now()-interval '1 minute',1,0,1,0,0
+ '76000000-0000-4000-8000-000000000302',76303,'manual','digest-shadow-only','succeeded',now()-interval '2 minutes',now()-interval '1 minute',1,0,1,0,0,extensions.gen_random_uuid(),now()-interval '90 seconds',1
 );
 insert into public.github_observations(
  id,organisation_id,installation_id,repository_id,provider_repository_id,collection_run_id,
