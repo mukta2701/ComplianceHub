@@ -6,6 +6,7 @@ export type McpJwtAlgorithm = "RS256" | "ES256";
 
 export type McpOAuthConfig = {
   resource: string;
+  allowedOrigins: readonly string[];
   authorizationServer: string;
   jwksUrl: string;
   supabaseUrl: string;
@@ -27,6 +28,24 @@ function canonicalUrl(value: string, options: { production: boolean; path?: stri
   return url.toString().replace(/\/$/, "");
 }
 
+function parseAllowedOrigins(value: string | undefined, options: { production: boolean; resource: string }) {
+  if (value === undefined) return [new URL(options.resource).origin];
+
+  const origins = value.split(",").map((item) => item.trim());
+  if (!origins.length || origins.some((origin) => !origin)) throw new Error("invalid origin list");
+
+  const canonicalOrigins = origins.map((origin) => {
+    if (origin === "null" || origin.includes("*")) throw new Error("invalid origin");
+    const url = new URL(origin);
+    if (url.username || url.password || url.pathname !== "/" || url.search || url.hash) throw new Error("invalid origin");
+    if (options.production ? url.protocol !== "https:" : url.protocol !== "http:") throw new Error("invalid origin protocol");
+    if (!options.production && url.hostname !== "127.0.0.1") throw new Error("invalid local origin");
+    return url.origin;
+  });
+  if (new Set(canonicalOrigins).size !== canonicalOrigins.length) throw new Error("duplicate origin");
+  return canonicalOrigins;
+}
+
 export function parseMcpOAuthEnvironment(environment: Record<string, string | undefined>): McpOAuthConfig {
   try {
     const production = environment.NODE_ENV === "production";
@@ -42,12 +61,13 @@ export function parseMcpOAuthEnvironment(environment: Record<string, string | un
         ?? (production ? "" : "http://127.0.0.1:3100/mcp"),
       { production, path: "/mcp" },
     );
+    const allowedOrigins = parseAllowedOrigins(configuredValue(environment, "MCP_ALLOWED_ORIGINS"), { production, resource });
     const supabaseKey = configuredValue(environment, "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY") ?? configuredValue(environment, "NEXT_PUBLIC_SUPABASE_ANON_KEY") ?? (production ? "" : "local-publishable-key-placeholder");
     z.string().min(20).parse(supabaseKey);
     const algorithms = (configuredValue(environment, "MCP_JWT_ALGORITHMS") ?? (production ? "" : "RS256,ES256"))
       .split(",").map((item) => item.trim()).filter(Boolean);
     if (!algorithms.length || algorithms.some((item) => !allowedAlgorithms.has(item as McpJwtAlgorithm))) throw new Error("algorithm mismatch");
-    return { resource, authorizationServer, jwksUrl, supabaseUrl, supabaseKey, algorithms: [...new Set(algorithms)] as McpJwtAlgorithm[], scopes: ["openid", "email", "profile"] };
+    return { resource, allowedOrigins, authorizationServer, jwksUrl, supabaseUrl, supabaseKey, algorithms: [...new Set(algorithms)] as McpJwtAlgorithm[], scopes: ["openid", "email", "profile"] };
   } catch {
     throw new Error("MCP OAuth environment is invalid");
   }

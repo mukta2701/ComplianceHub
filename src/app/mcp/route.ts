@@ -20,6 +20,7 @@ type AuthenticatedMcpRequest = {
 
 type McpRouteDependencies = {
   resource: string;
+  allowedOrigins: readonly string[];
   authenticate: (request: Request) => Promise<AuthenticatedMcpRequest>;
   rateLimit: (key: string) => Promise<void>;
   createServer: (context: McpRequestContext) => McpServer;
@@ -124,6 +125,7 @@ function defaultRouteDependencies(): McpRouteDependencies {
   const config = getMcpOAuthConfig();
   return {
     resource: config.resource,
+    allowedOrigins: config.allowedOrigins,
     authenticate: (request) => authenticateMcpRequest(request, { config }),
     rateLimit: (key) => enforceRateLimit(key, { limit: 60, windowMs: 60_000 }),
     createServer: (context) => createComplianceMcpServer(context),
@@ -143,6 +145,11 @@ export async function handleMcpPost(
   request: Request,
   dependencies: McpRouteDependencies = defaultRouteDependencies(),
 ): Promise<Response> {
+  const origin = request.headers.get("origin");
+  if (origin !== null && !dependencies.allowedOrigins.includes(origin)) {
+    return jsonRpcError(403, -32000, "Forbidden.");
+  }
+
   let authenticated: AuthenticatedMcpRequest;
   try {
     authenticated = await dependencies.authenticate(request);

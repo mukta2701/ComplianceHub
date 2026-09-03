@@ -37,6 +37,7 @@ function request(body = initialize, headers: Record<string, string> = {}) {
 function dependencies(overrides: Record<string, unknown> = {}) {
   return {
     resource: RESOURCE,
+    allowedOrigins: ["https://compliance.example"],
     authenticate: vi.fn(async () => authContext()),
     rateLimit: vi.fn(async (key: string) => { void key; }),
     createServer: vi.fn((context: Parameters<typeof createComplianceMcpServer>[0]) => createComplianceMcpServer(context, {
@@ -56,6 +57,34 @@ async function jsonRpcPayload(response: Response) {
 }
 
 describe("POST /mcp", () => {
+  it("accepts missing and exact allowlisted browser origins", async () => {
+    for (const origin of [undefined, "https://compliance.example"]) {
+      const deps = dependencies();
+      const response = await handleMcpPost(request(initialize, origin ? { origin } : {}), deps as never);
+
+      expect(response.status).toBe(200);
+      expect(deps.authenticate).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it.each([
+    "null",
+    "malformed origin",
+    "*",
+    "http://127.0.0.1:3100.attacker.example",
+    "https://attacker.example",
+  ])("rejects a hostile browser origin before authentication or rate limiting: %s", async (origin) => {
+    const deps = dependencies();
+    const response = await handleMcpPost(request("{not-json", { origin }), deps as never);
+
+    expect(response.status).toBe(403);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    await expect(response.json()).resolves.toMatchObject({ jsonrpc: "2.0", id: null, error: { message: expect.any(String) } });
+    expect(deps.authenticate).not.toHaveBeenCalled();
+    expect(deps.rateLimit).not.toHaveBeenCalled();
+    expect(deps.createServer).not.toHaveBeenCalled();
+  });
+
   it("serves current protocol tool discovery through the stateless route", async () => {
     const response = await handleMcpPost(new Request("http://127.0.0.1:3100/mcp", {
       method: "POST",
