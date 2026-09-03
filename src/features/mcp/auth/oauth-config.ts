@@ -28,17 +28,30 @@ function canonicalUrl(value: string, options: { production: boolean; path?: stri
   return url.toString().replace(/\/$/, "");
 }
 
-function hasForbiddenOriginSyntax(value: string) {
-  if (value === "null" || value.includes("*") || value.includes("@") || value.includes("?") || value.includes("#") || value.includes("\\")) return true;
-  const schemeEnd = value.indexOf("://");
-  if (schemeEnd === -1) return true;
-  const authorityAndPath = value.slice(schemeEnd + 3);
-  const pathStart = authorityAndPath.indexOf("/");
-  return pathStart !== -1 && authorityAndPath.slice(pathStart) !== "/";
+type RawUrl = { authority: string; path: string };
+
+function parseRawUrl(value: string): RawUrl {
+  if (/[\u0000-\u001F\u007F]/.test(value) || value.includes("*") || value.includes("\\")) throw new Error("invalid URL syntax");
+  const match = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]+)(\/[^?#]*)?$/i.exec(value);
+  if (!match || match[1].includes("@")) throw new Error("invalid URL syntax");
+  return { authority: match[1], path: match[2] ?? "" };
+}
+
+function hasExactLoopbackAuthority(authority: string) {
+  return /^(?:127\.0\.0\.1|\[::1\])(?::\d+)?$/.test(authority);
+}
+
+function validateRawMcpResource(value: string, production: boolean) {
+  const raw = parseRawUrl(value);
+  if (raw.path !== "/mcp") throw new Error("invalid resource path");
+  if (!production && !hasExactLoopbackAuthority(raw.authority)) throw new Error("invalid local resource");
 }
 
 function canonicalAllowedOrigin(origin: string, production: boolean) {
-  if (hasForbiddenOriginSyntax(origin)) throw new Error("invalid origin");
+  if (origin === "null") throw new Error("invalid origin");
+  const raw = parseRawUrl(origin);
+  if (raw.path !== "" && raw.path !== "/") throw new Error("invalid origin");
+  if (!production && !hasExactLoopbackAuthority(raw.authority)) throw new Error("invalid local origin");
   const url = new URL(origin);
   if (url.username || url.password || url.pathname !== "/" || url.search || url.hash) throw new Error("invalid origin");
   if (production ? url.protocol !== "https:" : url.protocol !== "http:") throw new Error("invalid origin protocol");
@@ -67,11 +80,9 @@ export function parseMcpOAuthEnvironment(environment: Record<string, string | un
     const expectedJwks = `${authorizationServer}/.well-known/jwks.json`;
     const jwksUrl = canonicalUrl(configuredValue(environment, "SUPABASE_OAUTH_JWKS_URL") ?? (production ? "" : expectedJwks), { production, path: "/auth/v1/.well-known/jwks.json" });
     if (jwksUrl !== expectedJwks) throw new Error("JWKS mismatch");
-    const resource = canonicalUrl(
-      configuredValue(environment, "MCP_RESOURCE_URL")
-        ?? (production ? "" : "http://127.0.0.1:3100/mcp"),
-      { production, path: "/mcp" },
-    );
+    const rawResource = configuredValue(environment, "MCP_RESOURCE_URL") ?? (production ? "" : "http://127.0.0.1:3100/mcp");
+    validateRawMcpResource(rawResource, production);
+    const resource = canonicalUrl(rawResource, { production, path: "/mcp" });
     const allowedOrigins = parseAllowedOrigins(configuredValue(environment, "MCP_ALLOWED_ORIGINS"), { production, resource });
     const supabaseKey = configuredValue(environment, "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY") ?? configuredValue(environment, "NEXT_PUBLIC_SUPABASE_ANON_KEY") ?? (production ? "" : "local-publishable-key-placeholder");
     z.string().min(20).parse(supabaseKey);

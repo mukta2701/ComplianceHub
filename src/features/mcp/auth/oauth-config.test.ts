@@ -51,6 +51,28 @@ describe("parseMcpOAuthEnvironment", () => {
     expect(() => parseMcpOAuthEnvironment({ NODE_ENV: "test", MCP_RESOURCE_URL })).toThrow("MCP OAuth environment is invalid");
   });
 
+  it.each([
+    ["backslash path separator", "http://127.0.0.1:3100\\mcp"],
+    ["normalized dot-segment path", "http://127.0.0.1:3100/a/../mcp"],
+    ["encoded dot path", "http://127.0.0.1:3100/%2e/mcp"],
+    ["userinfo marker", "http://@127.0.0.1:3100/mcp"],
+    ["empty query marker", "http://127.0.0.1:3100/mcp?"],
+    ["empty fragment marker", "http://127.0.0.1:3100/mcp#"],
+    ["embedded tab", "http://127.0.0.1:3100/m\tcp"],
+    ["embedded newline", "http://127.0.0.1:3100/m\ncp"],
+    ["embedded control whitespace", "http://127.0.0.1:3100/m\u000bcp"],
+  ])("fails closed for raw configured local resource with %s", (_label, MCP_RESOURCE_URL) => {
+    expect(() => parseMcpOAuthEnvironment({ NODE_ENV: "test", MCP_RESOURCE_URL })).toThrow("MCP OAuth environment is invalid");
+  });
+
+  it.each([
+    ["backslash path separator", "https://compliance.example\\mcp"],
+    ["empty query marker", "https://compliance.example/mcp?"],
+    ["embedded tab", "https://compliance.example/m\tcp"],
+  ])("fails closed for raw configured production resource with %s", (_label, MCP_RESOURCE_URL) => {
+    expect(() => parseMcpOAuthEnvironment({ ...production, MCP_RESOURCE_URL })).toThrow("MCP OAuth environment is invalid");
+  });
+
   it("allows literal IPv4 and IPv6 loopback origins outside production", () => {
     const explicitIpv6 = parseMcpOAuthEnvironment({ NODE_ENV: "test", MCP_ALLOWED_ORIGINS: "http://[::1]:3100" });
     const resourceDerivedIpv6 = parseMcpOAuthEnvironment({ NODE_ENV: "test", MCP_RESOURCE_URL: "http://[::1]:3100/mcp" });
@@ -88,6 +110,14 @@ describe("parseMcpOAuthEnvironment", () => {
     ["deceptive loopback suffix", "http://127.0.0.1:3100.attacker.example"],
   ])("fails closed for a %s configured local browser origin", (_label, MCP_ALLOWED_ORIGINS) => {
     expect(() => parseMcpOAuthEnvironment({ NODE_ENV: "test", MCP_ALLOWED_ORIGINS })).toThrow("MCP OAuth environment is invalid");
+  });
+
+  it.each([
+    ["numeric IPv4 alias", { NODE_ENV: "test" }, "http://2130706433:3100"],
+    ["embedded tab", { NODE_ENV: "test" }, "http://127.0.0.1:\t3100"],
+    ["embedded newline", production, "https://compliance.example:\n443"],
+  ])("fails closed for a %s configured browser origin with raw control or authority alias", (_label, environment, MCP_ALLOWED_ORIGINS) => {
+    expect(() => parseMcpOAuthEnvironment({ ...environment, MCP_ALLOWED_ORIGINS })).toThrow("MCP OAuth environment is invalid");
   });
 
   it.each([
