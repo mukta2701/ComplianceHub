@@ -28,20 +28,31 @@ function canonicalUrl(value: string, options: { production: boolean; path?: stri
   return url.toString().replace(/\/$/, "");
 }
 
-function parseAllowedOrigins(value: string | undefined, options: { production: boolean; resource: string }) {
-  if (value === undefined) return [new URL(options.resource).origin];
+function hasForbiddenOriginSyntax(value: string) {
+  if (value === "null" || value.includes("*") || value.includes("@") || value.includes("?") || value.includes("#")) return true;
+  const schemeEnd = value.indexOf("://");
+  if (schemeEnd === -1) return true;
+  const authorityAndPath = value.slice(schemeEnd + 3);
+  const pathStart = authorityAndPath.indexOf("/");
+  return pathStart !== -1 && authorityAndPath.slice(pathStart) !== "/";
+}
 
-  const origins = value.split(",").map((item) => item.trim());
+function canonicalAllowedOrigin(origin: string, production: boolean) {
+  if (hasForbiddenOriginSyntax(origin)) throw new Error("invalid origin");
+  const url = new URL(origin);
+  if (url.username || url.password || url.pathname !== "/" || url.search || url.hash) throw new Error("invalid origin");
+  if (production ? url.protocol !== "https:" : url.protocol !== "http:") throw new Error("invalid origin protocol");
+  if (!production && url.hostname !== "127.0.0.1") throw new Error("invalid local origin");
+  return url.origin;
+}
+
+function parseAllowedOrigins(value: string | undefined, options: { production: boolean; resource: string }) {
+  const origins = value === undefined
+    ? [new URL(options.resource).origin]
+    : value.split(",").map((item) => item.trim());
   if (!origins.length || origins.some((origin) => !origin)) throw new Error("invalid origin list");
 
-  const canonicalOrigins = origins.map((origin) => {
-    if (origin === "null" || origin.includes("*")) throw new Error("invalid origin");
-    const url = new URL(origin);
-    if (url.username || url.password || url.pathname !== "/" || url.search || url.hash) throw new Error("invalid origin");
-    if (options.production ? url.protocol !== "https:" : url.protocol !== "http:") throw new Error("invalid origin protocol");
-    if (!options.production && url.hostname !== "127.0.0.1") throw new Error("invalid local origin");
-    return url.origin;
-  });
+  const canonicalOrigins = origins.map((origin) => canonicalAllowedOrigin(origin, options.production));
   if (new Set(canonicalOrigins).size !== canonicalOrigins.length) throw new Error("duplicate origin");
   return canonicalOrigins;
 }

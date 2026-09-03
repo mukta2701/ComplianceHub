@@ -43,6 +43,13 @@ describe("parseMcpOAuthEnvironment", () => {
     expect(value.authorizationServer).toBe("http://127.0.0.1:54321/auth/v1");
   });
 
+  it.each([
+    ["TLS resource", "https://attacker.example/mcp"],
+    ["non-loopback HTTP resource", "http://attacker.example/mcp"],
+  ])("fails closed when a %s derives the local browser-origin default", (_label, MCP_RESOURCE_URL) => {
+    expect(() => parseMcpOAuthEnvironment({ NODE_ENV: "test", MCP_RESOURCE_URL })).toThrow("MCP OAuth environment is invalid");
+  });
+
   it("allows an explicitly configured exact browser origin", () => {
     const local = parseMcpOAuthEnvironment({ NODE_ENV: "test", MCP_ALLOWED_ORIGINS: "http://127.0.0.1:3100" });
     const hosted = parseMcpOAuthEnvironment({ ...production, MCP_ALLOWED_ORIGINS: "https://compliance.example" });
@@ -71,6 +78,28 @@ describe("parseMcpOAuthEnvironment", () => {
     ["deceptive loopback suffix", "http://127.0.0.1:3100.attacker.example"],
   ])("fails closed for a %s configured local browser origin", (_label, MCP_ALLOWED_ORIGINS) => {
     expect(() => parseMcpOAuthEnvironment({ NODE_ENV: "test", MCP_ALLOWED_ORIGINS })).toThrow("MCP OAuth environment is invalid");
+  });
+
+  it.each([
+    ["non-canonical scheme separator", "http:127.0.0.1:3100"],
+    ["encoded dot path", "http://127.0.0.1:3100/%2e"],
+    ["normalized dot-segment path", "http://127.0.0.1:3100/a/.."],
+    ["empty query marker", "http://127.0.0.1:3100?"],
+    ["empty fragment marker", "http://127.0.0.1:3100#"],
+    ["empty userinfo marker", "http://@127.0.0.1:3100"],
+  ])("fails closed for raw local %s that URL normalization could erase", (_label, MCP_ALLOWED_ORIGINS) => {
+    expect(() => parseMcpOAuthEnvironment({ NODE_ENV: "test", MCP_ALLOWED_ORIGINS })).toThrow("MCP OAuth environment is invalid");
+  });
+
+  it.each([
+    ["non-canonical scheme separator", "https:compliance.example"],
+    ["encoded dot path", "https://compliance.example/%2e"],
+    ["normalized dot-segment path", "https://compliance.example/a/.."],
+    ["empty query marker", "https://compliance.example?"],
+    ["empty fragment marker", "https://compliance.example#"],
+    ["empty userinfo marker", "https://@compliance.example"],
+  ])("fails closed for raw hosted %s that URL normalization could erase", (_label, MCP_ALLOWED_ORIGINS) => {
+    expect(() => parseMcpOAuthEnvironment({ ...production, MCP_ALLOWED_ORIGINS })).toThrow("MCP OAuth environment is invalid");
   });
 
   it("treats blank optional values like omitted local configuration", () => {
