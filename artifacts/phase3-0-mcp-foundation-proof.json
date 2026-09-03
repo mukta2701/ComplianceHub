@@ -1,0 +1,433 @@
+{
+  "schemaVersion": 2,
+  "protocols": {
+    "current": "2026-07-28",
+    "legacy": "2025-11-25"
+  },
+  "generatedAt": "2026-09-03T23:01:12.014Z",
+  "endpoint": "http://127.0.0.1:3100/mcp",
+  "negotiatedProtocol": "2025-11-25",
+  "oauth": {
+    "discovery": true,
+    "dynamicClientRegistration": true,
+    "grant": "authorization-code",
+    "pkce": "S256",
+    "stateValidated": true,
+    "consent": "approved",
+    "audienceMatched": true
+  },
+  "server": {
+    "name": "compliancehub-internal",
+    "version": "0.4.0",
+    "initialized": true
+  },
+  "tools": [
+    {
+      "name": "list_workspaces",
+      "readOnly": true,
+      "destructive": false,
+      "openWorld": false,
+      "idempotent": true
+    },
+    {
+      "name": "get_compliance_overview",
+      "readOnly": true,
+      "destructive": false,
+      "openWorld": false,
+      "idempotent": true
+    },
+    {
+      "name": "list_attention_items",
+      "readOnly": true,
+      "destructive": false,
+      "openWorld": false,
+      "idempotent": true
+    },
+    {
+      "name": "list_monitoring_findings",
+      "readOnly": true,
+      "destructive": false,
+      "openWorld": false,
+      "idempotent": true
+    },
+    {
+      "name": "list_github_compliance_results",
+      "readOnly": true,
+      "destructive": false,
+      "openWorld": false,
+      "idempotent": true
+    },
+    {
+      "name": "get_latest_leadership_report",
+      "readOnly": true,
+      "destructive": false,
+      "openWorld": false,
+      "idempotent": true
+    },
+    {
+      "name": "prepare_daily_digest",
+      "readOnly": true,
+      "destructive": false,
+      "openWorld": false,
+      "idempotent": true
+    }
+  ],
+  "workspaceRead": true,
+  "githubRead": {
+    "readOnly": true,
+    "destructive": false,
+    "openWorld": false,
+    "initialRequestHadCursor": false,
+    "limit": 1,
+    "pages": [
+      {
+        "pageKind": "initial",
+        "resultCount": 1,
+        "nextCursor": {
+          "present": true,
+          "sha256Prefix": "9f76d6d5b36c"
+        }
+      },
+      {
+        "pageKind": "continuation",
+        "resultCount": 1,
+        "nextCursor": {
+          "present": true,
+          "sha256Prefix": "f17079499171"
+        }
+      },
+      {
+        "pageKind": "continuation",
+        "resultCount": 1,
+        "nextCursor": {
+          "present": true,
+          "sha256Prefix": "ba0434f5e974"
+        }
+      },
+      {
+        "pageKind": "continuation",
+        "resultCount": 1,
+        "nextCursor": {
+          "present": true,
+          "sha256Prefix": "10b17415f2d1"
+        }
+      },
+      {
+        "pageKind": "continuation",
+        "resultCount": 1,
+        "nextCursor": {
+          "present": true,
+          "sha256Prefix": "fbc9b5d6e86e"
+        }
+      },
+      {
+        "pageKind": "continuation",
+        "resultCount": 1,
+        "nextCursor": {
+          "present": true,
+          "sha256Prefix": "8590c27aac3b"
+        }
+      },
+      {
+        "pageKind": "continuation",
+        "resultCount": 1,
+        "nextCursor": {
+          "present": true,
+          "sha256Prefix": "c035e508585f"
+        }
+      },
+      {
+        "pageKind": "continuation",
+        "resultCount": 1,
+        "nextCursor": {
+          "present": true,
+          "sha256Prefix": "d5625338b32c"
+        }
+      },
+      {
+        "pageKind": "continuation",
+        "resultCount": 1,
+        "nextCursor": {
+          "present": true,
+          "sha256Prefix": "d8c9d257d9f5"
+        }
+      },
+      {
+        "pageKind": "continuation",
+        "resultCount": 1,
+        "nextCursor": {
+          "present": true,
+          "sha256Prefix": "6cc83c850442"
+        }
+      },
+      {
+        "pageKind": "continuation",
+        "resultCount": 1,
+        "nextCursor": {
+          "present": true,
+          "sha256Prefix": "7613595a7424"
+        }
+      },
+      {
+        "pageKind": "continuation",
+        "resultCount": 1,
+        "nextCursor": {
+          "present": true,
+          "sha256Prefix": "f1ac866df05f"
+        }
+      },
+      {
+        "pageKind": "continuation",
+        "resultCount": 1,
+        "nextCursor": {
+          "present": true,
+          "sha256Prefix": "6b0e78015452"
+        }
+      },
+      {
+        "pageKind": "continuation",
+        "resultCount": 1,
+        "nextCursor": {
+          "present": true,
+          "sha256Prefix": "2af4b11a83df"
+        }
+      },
+      {
+        "pageKind": "continuation",
+        "resultCount": 1,
+        "nextCursor": null
+      }
+    ],
+    "traversedToNull": true,
+    "totalResults": 15
+  },
+  "databaseUnchanged": true,
+  "database": {
+    "scope": "tenant-compliance-state-plus-global-github-mapping-catalogue",
+    "before": {
+      "evidence": {
+        "rowCount": 8,
+        "sha256": "33c556d871ca61156ec8c395ed662ef15e704d8f0a99daefd06f1a82b745c063"
+      },
+      "evidenceLinks": {
+        "rowCount": 15,
+        "sha256": "983eb44ab45b57ce3a715442610cfff26547fa46f1ed2ccebc6ce631c6073bc3"
+      },
+      "notifications": {
+        "rowCount": 3,
+        "sha256": "c8453dea341c30fa15039ac7fe59b45a529999ea912e77e51354b1a941e1e39f"
+      },
+      "evidenceSources": {
+        "rowCount": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "githubMappingPacks": {
+        "rowCount": 1,
+        "sha256": "30e57a2c91526285081d374d633db213be3b16d1c499dc0c33b4f557271d44ac"
+      },
+      "githubObservations": {
+        "rowCount": 15,
+        "sha256": "9ac33d7557e9e2b5e6e63614766424f6342a4b89bf769367b09b418cace14d46"
+      },
+      "githubRepositories": {
+        "rowCount": 1,
+        "sha256": "d88d7076a5aca6af12881600dd44a0fde809b012f4eb881f348d91a99fbd234d"
+      },
+      "monitoringFindings": {
+        "rowCount": 5,
+        "sha256": "269bd6ddf19fd99c54a9354bbef767996cbef8fb6b334fa973515119899d2626"
+      },
+      "githubInstallations": {
+        "rowCount": 1,
+        "sha256": "fd1c3fedb6c18d605c2816993497d8ed189c5cb73228fe8d3f6f78b4e8b35f4c"
+      },
+      "githubCollectionRuns": {
+        "rowCount": 1,
+        "sha256": "fa2c13386a7c26f7ae717eab47f7a0b57181650b2bbffb3ad2ebf7b80e76da2c"
+      },
+      "githubMappingEntries": {
+        "rowCount": 15,
+        "sha256": "71d4f8253b5a67d25eea40f10af85dcc63f49a4ec6915d34f2f0adfd5d433d80"
+      },
+      "dailyDigestDeliveries": {
+        "rowCount": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "githubOfficialResults": {
+        "rowCount": 15,
+        "sha256": "99ff8f92fcd490beaf611f3e46ad4f27563043ee9868947eeacd5c2bfc3ae93b"
+      },
+      "githubMappingApprovals": {
+        "rowCount": 1,
+        "sha256": "a06af234c2a42d6c490f59a3ea5188fe38dd25f1750c90f99a3a928d46916058"
+      },
+      "integrationConnections": {
+        "rowCount": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "githubFindingProvenance": {
+        "rowCount": 5,
+        "sha256": "51a491a6b25f92e8b7e6b9844120cb6836a65f7ee75865f9c792504de8d44c07"
+      },
+      "githubWebhookDeliveries": {
+        "rowCount": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "githubEvidenceProvenance": {
+        "rowCount": 8,
+        "sha256": "6277418f11b1c10a58dabd221ef5c5c2b404b3f74228bfd658fe02f18612a33e"
+      },
+      "githubFindingTransitions": {
+        "rowCount": 5,
+        "sha256": "37a2b8cb143f77e9e7c7d8dcf298e13f66cd5f6517048cc7a2b717196142fc08"
+      },
+      "githubMaterialisationJobs": {
+        "rowCount": 1,
+        "sha256": "cb452df28e2b3b60c53ec589374567a96d5fd400eaff8c19c4a7d116c10e63d0"
+      },
+      "dailyDigestDeliveryAttempts": {
+        "rowCount": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      }
+    },
+    "after": {
+      "evidence": {
+        "rowCount": 8,
+        "sha256": "33c556d871ca61156ec8c395ed662ef15e704d8f0a99daefd06f1a82b745c063"
+      },
+      "evidenceLinks": {
+        "rowCount": 15,
+        "sha256": "983eb44ab45b57ce3a715442610cfff26547fa46f1ed2ccebc6ce631c6073bc3"
+      },
+      "notifications": {
+        "rowCount": 3,
+        "sha256": "c8453dea341c30fa15039ac7fe59b45a529999ea912e77e51354b1a941e1e39f"
+      },
+      "evidenceSources": {
+        "rowCount": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "githubMappingPacks": {
+        "rowCount": 1,
+        "sha256": "30e57a2c91526285081d374d633db213be3b16d1c499dc0c33b4f557271d44ac"
+      },
+      "githubObservations": {
+        "rowCount": 15,
+        "sha256": "9ac33d7557e9e2b5e6e63614766424f6342a4b89bf769367b09b418cace14d46"
+      },
+      "githubRepositories": {
+        "rowCount": 1,
+        "sha256": "d88d7076a5aca6af12881600dd44a0fde809b012f4eb881f348d91a99fbd234d"
+      },
+      "monitoringFindings": {
+        "rowCount": 5,
+        "sha256": "269bd6ddf19fd99c54a9354bbef767996cbef8fb6b334fa973515119899d2626"
+      },
+      "githubInstallations": {
+        "rowCount": 1,
+        "sha256": "fd1c3fedb6c18d605c2816993497d8ed189c5cb73228fe8d3f6f78b4e8b35f4c"
+      },
+      "githubCollectionRuns": {
+        "rowCount": 1,
+        "sha256": "fa2c13386a7c26f7ae717eab47f7a0b57181650b2bbffb3ad2ebf7b80e76da2c"
+      },
+      "githubMappingEntries": {
+        "rowCount": 15,
+        "sha256": "71d4f8253b5a67d25eea40f10af85dcc63f49a4ec6915d34f2f0adfd5d433d80"
+      },
+      "dailyDigestDeliveries": {
+        "rowCount": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "githubOfficialResults": {
+        "rowCount": 15,
+        "sha256": "99ff8f92fcd490beaf611f3e46ad4f27563043ee9868947eeacd5c2bfc3ae93b"
+      },
+      "githubMappingApprovals": {
+        "rowCount": 1,
+        "sha256": "a06af234c2a42d6c490f59a3ea5188fe38dd25f1750c90f99a3a928d46916058"
+      },
+      "integrationConnections": {
+        "rowCount": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "githubFindingProvenance": {
+        "rowCount": 5,
+        "sha256": "51a491a6b25f92e8b7e6b9844120cb6836a65f7ee75865f9c792504de8d44c07"
+      },
+      "githubWebhookDeliveries": {
+        "rowCount": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "githubEvidenceProvenance": {
+        "rowCount": 8,
+        "sha256": "6277418f11b1c10a58dabd221ef5c5c2b404b3f74228bfd658fe02f18612a33e"
+      },
+      "githubFindingTransitions": {
+        "rowCount": 5,
+        "sha256": "37a2b8cb143f77e9e7c7d8dcf298e13f66cd5f6517048cc7a2b717196142fc08"
+      },
+      "githubMaterialisationJobs": {
+        "rowCount": 1,
+        "sha256": "cb452df28e2b3b60c53ec589374567a96d5fd400eaff8c19c4a7d116c10e63d0"
+      },
+      "dailyDigestDeliveryAttempts": {
+        "rowCount": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      }
+    },
+    "unchanged": true,
+    "reconciliation": {
+      "mcpResultCount": 15,
+      "databaseResultCount": 15,
+      "matched": true,
+      "resultSetHash": "9dfdfac98a8b549a6e44ee2f9760e6b73fe9a5870adbe1787037a0b39b2b4627"
+    }
+  },
+  "observations": {
+    "clientNetwork": {
+      "scope": "proof-client-process",
+      "loopbackOnly": true,
+      "githubCalls": 0,
+      "slackCalls": 0
+    },
+    "invokedTools": {
+      "listWorkspaces": 1,
+      "githubReadPages": 15,
+      "writeTools": []
+    },
+    "staticServerCallPath": {
+      "scope": "reviewed-source",
+      "databaseReadOnly": true,
+      "githubProviderReachable": false,
+      "slackWriteReachable": false
+    }
+  },
+  "answers": [
+    {
+      "question": "Which GitHub checks currently fail?",
+      "supported": true,
+      "answer": "github.workflow.security: A failed github.workflow.security observation creates or refreshes a finding. github.branch.approving_reviews: A failed github.branch.approving_reviews observation creates or refreshes a finding. github.branch.stale_approvals: A failed github.branch.stale_approvals observation creates or refreshes a finding. github.branch.code_owner_reviews: A failed github.branch.code_owner_reviews observation creates or refreshes a finding. github.repository.visibility: A failed github.repository.visibility observation creates or refreshes a finding."
+    },
+    {
+      "question": "Which information is unknown or unavailable?",
+      "supported": true,
+      "answer": "github.code_scanning.high_critical: GitHub could not establish github.code_scanning.high_critical; no compliance-positive record is created. github.dependabot.high_critical: GitHub could not establish github.dependabot.high_critical; no compliance-positive record is created."
+    },
+    {
+      "question": "Which results are stale or need rechecking?",
+      "supported": true,
+      "answer": "None were returned by the exhaustive MCP read."
+    },
+    {
+      "question": "What changed and what should we prioritise?",
+      "supported": false,
+      "answer": "This MCP result view does not include verified change history, so it cannot claim what changed. Prioritise the returned current failures, then unknown and stale results: github.workflow.security: A failed github.workflow.security observation creates or refreshes a finding. github.branch.approving_reviews: A failed github.branch.approving_reviews observation creates or refreshes a finding. github.branch.stale_approvals: A failed github.branch.stale_approvals observation creates or refreshes a finding. github.branch.code_owner_reviews: A failed github.branch.code_owner_reviews observation creates or refreshes a finding. github.repository.visibility: A failed github.repository.visibility observation creates or refreshes a finding. github.code_scanning.high_critical: GitHub could not establish github.code_scanning.high_critical; no compliance-positive record is created. github.dependabot.high_critical: GitHub could not establish github.dependabot.high_critical; no compliance-positive record is created."
+    },
+    {
+      "question": "Does this prove ISO 27001 certification?",
+      "supported": true,
+      "answer": "No. This does not prove ISO 27001 certification, overall compliance, readiness, or security."
+    }
+  ]
+}

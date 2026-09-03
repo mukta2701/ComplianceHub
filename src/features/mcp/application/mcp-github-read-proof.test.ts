@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  buildPhase2Proof,
+  buildPhase3Proof,
   buildProtectedDomainSnapshotQuery,
   buildReconciliationQuery,
   buildProtectedDomainSnapshot,
@@ -14,6 +14,7 @@ import {
   inspectStaticServerCallPath,
   reconcileOfficialResults,
   redactCursor,
+  selectProofProtocol,
   requireLocalPostgresSettings,
   parseProtectedDomainDigest,
   validateDockerIdentity,
@@ -70,9 +71,10 @@ const domainSnapshot = buildProtectedDomainSnapshot(protectedRows({
 }));
 
 function validProof() {
-  return buildPhase2Proof({
+  return buildPhase3Proof({
     generatedAt: "2026-09-03T16:00:00.000Z",
     endpoint: "http://127.0.0.1:3100/mcp",
+    negotiatedProtocol: "2026-07-28",
     oauth: {
       discovery: true,
       dynamicClientRegistration: true,
@@ -82,25 +84,28 @@ function validProof() {
       consent: "approved",
       audienceMatched: true,
     },
-    server: { name: "compliancehub-internal", version: "0.3.0", initialized: true },
-    tools: {
-      listed: true,
-      workspaceRead: true,
-      githubRead: {
-        readOnly: true,
-        destructive: false,
-        openWorld: false,
-        initialRequestHadCursor: false,
-        limit: 1,
-        pages: [
-          { pageKind: "initial", resultCount: 1, nextCursor: redactCursor("ch4.first-secret-cursor") },
-          { pageKind: "continuation", resultCount: 1, nextCursor: redactCursor("ch4.second-secret-cursor") },
-          { pageKind: "continuation", resultCount: 1, nextCursor: null },
-        ],
-        traversedToNull: true,
-        totalResults: results.length,
-      },
+    server: { name: "compliancehub-internal", version: "0.4.0", initialized: true },
+    tools: [
+      "list_workspaces", "get_compliance_overview", "list_attention_items",
+      "list_monitoring_findings", "list_github_compliance_results",
+      "get_latest_leadership_report", "prepare_daily_digest",
+    ].map((name) => ({ name, readOnly: true, destructive: false, openWorld: false, idempotent: true })) as never,
+    workspaceRead: true,
+    githubRead: {
+      readOnly: true,
+      destructive: false,
+      openWorld: false,
+      initialRequestHadCursor: false,
+      limit: 1,
+      pages: [
+        { pageKind: "initial", resultCount: 1, nextCursor: redactCursor("ch4.first-secret-cursor") },
+        { pageKind: "continuation", resultCount: 1, nextCursor: redactCursor("ch4.second-secret-cursor") },
+        { pageKind: "continuation", resultCount: 1, nextCursor: null },
+      ],
+      traversedToNull: true,
+      totalResults: results.length,
     },
+    databaseUnchanged: true,
     database: {
       scope: "tenant-compliance-state-plus-global-github-mapping-catalogue",
       before: domainSnapshot,
@@ -122,17 +127,21 @@ function validProof() {
   });
 }
 
-describe("Phase 2 local MCP GitHub read proof", () => {
+describe("Phase 3 local MCP foundation proof", () => {
   it("captures the complete read-only contract without persisting an opaque cursor", () => {
     const proof = validProof();
 
     expect(proof.endpoint).toBe("http://127.0.0.1:3100/mcp");
+    expect(proof.protocols).toEqual({ current: "2026-07-28", legacy: "2025-11-25" });
+    expect(proof.tools.every((tool) => tool.readOnly)).toBe(true);
+    expect(proof.tools.some((tool) => String(tool.name) === "post_daily_digest")).toBe(false);
+    expect(proof.databaseUnchanged).toBe(true);
     expect(proof.oauth.pkce).toBe("S256");
     expect(proof.oauth.audienceMatched).toBe(true);
-    expect(proof.tools.githubRead.readOnly).toBe(true);
-    expect(proof.tools.githubRead.initialRequestHadCursor).toBe(false);
-    expect(proof.tools.githubRead.pages.at(-1)?.nextCursor).toBeNull();
-    expect(proof.tools.githubRead.traversedToNull).toBe(true);
+    expect(proof.githubRead.readOnly).toBe(true);
+    expect(proof.githubRead.initialRequestHadCursor).toBe(false);
+    expect(proof.githubRead.pages.at(-1)?.nextCursor).toBeNull();
+    expect(proof.githubRead.traversedToNull).toBe(true);
     expect(proof.database.reconciliation.matched).toBe(true);
     expect(proof.database.scope).toBe("tenant-compliance-state-plus-global-github-mapping-catalogue");
     expect(PROTECTED_DOMAIN_TABLES).toMatchObject({
@@ -157,6 +166,13 @@ describe("Phase 2 local MCP GitHub read proof", () => {
     expect(() => validateProofForPersistence(proof)).not.toThrow();
   });
 
+  it("selects only the explicit current or legacy proof client contract", () => {
+    expect(selectProofProtocol({ MCP_PROOF_PROTOCOL: "current" })).toBe("2026-07-28");
+    expect(selectProofProtocol({ MCP_PROOF_PROTOCOL: "legacy" })).toBe("2025-11-25");
+    expect(() => selectProofProtocol({})).toThrow(/MCP_PROOF_PROTOCOL/i);
+    expect(() => selectProofProtocol({ MCP_PROOF_PROTOCOL: "auto" })).toThrow(/MCP_PROOF_PROTOCOL/i);
+  });
+
   it("answers only from MCP facts and refuses change-history and certification claims", () => {
     const answers = createAcceptanceAnswers(results);
 
@@ -174,11 +190,21 @@ describe("Phase 2 local MCP GitHub read proof", () => {
     const proof = validProof();
     const prohibitedAccessField = ["access", "token"].join("_");
     const prohibitedServiceField = ["service", "role", "key"].join("_");
+    const prohibitedEmailField = ["email"].join("");
+    const prohibitedProviderField = ["provider", "payload"].join("_");
+    const prohibitedCredentialField = ["credential"].join("");
+    const prohibitedDestinationField = ["destination"].join("");
+    const prohibitedWebhookField = ["webhook", "url"].join("_");
     const prohibitedValue = ["not", "persistable"].join("-");
     expect(() => validateProofForPersistence({ ...proof, leaked: `Bearer ${prohibitedValue}` })).toThrow(/sensitive/i);
     expect(() => validateProofForPersistence({ ...proof, cursor: "ch4.full-opaque-cursor" })).toThrow(/sensitive/i);
     expect(() => validateProofForPersistence({ ...proof, [prohibitedAccessField]: prohibitedValue })).toThrow(/sensitive/i);
     expect(() => validateProofForPersistence({ ...proof, [prohibitedServiceField]: prohibitedValue })).toThrow(/sensitive/i);
+    expect(() => validateProofForPersistence({ ...proof, [prohibitedEmailField]: ["person", "example.test"].join("@") })).toThrow(/sensitive/i);
+    expect(() => validateProofForPersistence({ ...proof, [prohibitedProviderField]: prohibitedValue })).toThrow(/sensitive/i);
+    expect(() => validateProofForPersistence({ ...proof, [prohibitedCredentialField]: prohibitedValue })).toThrow(/sensitive/i);
+    expect(() => validateProofForPersistence({ ...proof, [prohibitedDestinationField]: prohibitedValue })).toThrow(/sensitive/i);
+    expect(() => validateProofForPersistence({ ...proof, [prohibitedWebhookField]: prohibitedValue })).toThrow(/sensitive/i);
 
     const directory = await mkdtemp(join(tmpdir(), "compliancehub-mcp-proof-"));
     const output = join(directory, "proof.json");
@@ -192,13 +218,10 @@ describe("Phase 2 local MCP GitHub read proof", () => {
     const proof = validProof();
     const empty = {
       ...proof,
-      tools: {
-        ...proof.tools,
-        githubRead: {
-          ...proof.tools.githubRead,
-          pages: [{ pageKind: "initial" as const, resultCount: 0, nextCursor: null }],
-          totalResults: 0,
-        },
+      githubRead: {
+        ...proof.githubRead,
+        pages: [{ pageKind: "initial" as const, resultCount: 0, nextCursor: null }],
+        totalResults: 0,
       },
       database: {
         ...proof.database,
@@ -325,17 +348,22 @@ describe("Phase 2 local MCP GitHub read proof", () => {
     const proof = validProof();
     const cases: unknown[] = [
       { ...proof, server: { ...proof.server, version: "0.2.0" } },
-      { ...proof, tools: { ...proof.tools, githubRead: { ...proof.tools.githubRead, totalResults: 2 } } },
-      { ...proof, tools: { ...proof.tools, githubRead: { ...proof.tools.githubRead, pages: [
-        proof.tools.githubRead.pages[0],
-        { ...proof.tools.githubRead.pages[1], pageKind: "initial" },
-        proof.tools.githubRead.pages[2],
-      ] } } },
+      { ...proof, negotiatedProtocol: "2026-01-01" },
+      { ...proof, protocols: { current: "2026-07-28", legacy: "2025-03-26" } },
+      { ...proof, tools: proof.tools.slice(0, -1) },
+      { ...proof, tools: proof.tools.map((tool, index) => index === 0 ? { ...tool, readOnly: false } : tool) },
+      { ...proof, databaseUnchanged: false },
+      { ...proof, githubRead: { ...proof.githubRead, totalResults: 2 } },
+      { ...proof, githubRead: { ...proof.githubRead, pages: [
+        proof.githubRead.pages[0],
+        { ...proof.githubRead.pages[1], pageKind: "initial" },
+        proof.githubRead.pages[2],
+      ] } },
       { ...proof, database: { ...proof.database, reconciliation: { ...proof.database.reconciliation, databaseResultCount: 2 } } },
       { ...proof, database: { ...proof.database, reconciliation: { ...proof.database.reconciliation, matched: false } } },
       { ...proof, database: { ...proof.database, after: buildProtectedDomainSnapshot(protectedRows({ evidence: [{ id: "changed" }] })) } },
       { ...proof, observations: { ...proof.observations, invokedTools: { ...proof.observations.invokedTools, githubReadPages: 2 } } },
-      { ...proof, tools: { ...proof.tools, githubRead: { ...proof.tools.githubRead, pages: proof.tools.githubRead.pages.map((page, index) => index === 0 ? { ...page, nextCursor: null } : page) } } },
+      { ...proof, githubRead: { ...proof.githubRead, pages: proof.githubRead.pages.map((page, index) => index === 0 ? { ...page, nextCursor: null } : page) } },
       { ...proof, answers: proof.answers.map((answer, index) => index === 4 ? { ...answer, answer: "Yes, certified." } : answer) },
     ];
 

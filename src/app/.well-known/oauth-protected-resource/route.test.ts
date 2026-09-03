@@ -9,11 +9,11 @@ describe("GET /.well-known/oauth-protected-resource", () => {
     vi.stubEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "local-publishable-key-placeholder");
     vi.stubEnv("SUPABASE_OAUTH_ISSUER", "http://127.0.0.1:54321/auth/v1");
     vi.stubEnv("SUPABASE_OAUTH_JWKS_URL", "http://127.0.0.1:54321/auth/v1/.well-known/jwks.json");
-    vi.stubEnv("MCP_RESOURCE_URL", "http://localhost:3000/mcp");
+    vi.stubEnv("MCP_RESOURCE_URL", "http://127.0.0.1:3100/mcp");
     vi.stubEnv("MCP_JWT_ALGORITHMS", "RS256,ES256");
     const response = await GET();
     expect(await response.json()).toEqual({
-      resource: "http://localhost:3000/mcp",
+      resource: "http://127.0.0.1:3100/mcp",
       authorization_servers: ["http://127.0.0.1:54321/auth/v1"],
       scopes_supported: ["openid", "email", "profile"],
       bearer_methods_supported: ["header"],

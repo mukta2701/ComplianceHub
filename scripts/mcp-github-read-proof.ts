@@ -8,6 +8,7 @@ import {
   Client,
   StreamableHTTPClientTransport,
   UnauthorizedError,
+  type ClientOptions,
   type OAuthClientInformationMixed,
   type OAuthClientMetadata,
   type OAuthClientProvider,
@@ -19,12 +20,23 @@ import { z } from "zod";
 
 const DEFAULT_ENDPOINT = "http://127.0.0.1:3100/mcp";
 const DEFAULT_CALLBACK_PORT = 18765;
-const DEFAULT_OUTPUT = "artifacts/phase2-local-mcp-github-read-proof.json";
+const DEFAULT_OUTPUT = "artifacts/phase3-0-mcp-foundation-proof.json";
+const CURRENT_PROTOCOL = "2026-07-28" as const;
+const LEGACY_PROTOCOL = "2025-11-25" as const;
 const REQUIRED_SCOPES = "openid email profile";
 const MAX_PAGES = 500;
 const DOCKER_BIN = "/opt/homebrew/bin/docker";
 const DEFAULT_DATABASE_CONTAINER = "supabase_db_compliancehub";
 const PROTECTED_STATE_SCOPE = "tenant-compliance-state-plus-global-github-mapping-catalogue" as const;
+const REQUIRED_TOOL_NAMES = Object.freeze([
+  "list_workspaces",
+  "get_compliance_overview",
+  "list_attention_items",
+  "list_monitoring_findings",
+  "list_github_compliance_results",
+  "get_latest_leadership_report",
+  "prepare_daily_digest",
+] as const);
 export const PROTECTED_DOMAIN_TABLES = Object.freeze({
   githubInstallations: "github_installations",
   githubRepositories: "github_repositories",
@@ -151,10 +163,20 @@ export type AcceptanceAnswer = {
   answer: string;
 };
 
-export type Phase2Proof = {
-  schemaVersion: 1;
+export type Phase3ProofTool = {
+  name: typeof REQUIRED_TOOL_NAMES[number];
+  readOnly: true;
+  destructive: false;
+  openWorld: false;
+  idempotent: true;
+};
+
+export type Phase3Proof = {
+  schemaVersion: 2;
   generatedAt: string;
   endpoint: string;
+  protocols: { current: typeof CURRENT_PROTOCOL; legacy: typeof LEGACY_PROTOCOL };
+  negotiatedProtocol: typeof CURRENT_PROTOCOL | typeof LEGACY_PROTOCOL;
   oauth: {
     discovery: boolean;
     dynamicClientRegistration: boolean;
@@ -164,21 +186,20 @@ export type Phase2Proof = {
     consent: "approved";
     audienceMatched: boolean;
   };
-  server: { name: string; version: "0.3.0"; initialized: boolean };
-  tools: {
-    listed: boolean;
-    workspaceRead: boolean;
-    githubRead: {
-      readOnly: boolean;
-      destructive: boolean;
-      openWorld: boolean;
-      initialRequestHadCursor: false;
-      limit: 1;
-      pages: Array<{ pageKind: "initial" | "continuation"; resultCount: number; nextCursor: CursorRedaction | null }>;
-      traversedToNull: boolean;
-      totalResults: number;
-    };
+  server: { name: string; version: "0.4.0"; initialized: boolean };
+  tools: Phase3ProofTool[];
+  workspaceRead: true;
+  githubRead: {
+    readOnly: boolean;
+    destructive: boolean;
+    openWorld: boolean;
+    initialRequestHadCursor: false;
+    limit: 1;
+    pages: Array<{ pageKind: "initial" | "continuation"; resultCount: number; nextCursor: CursorRedaction | null }>;
+    traversedToNull: boolean;
+    totalResults: number;
   };
+  databaseUnchanged: true;
   database: {
     scope: typeof PROTECTED_STATE_SCOPE;
     before: ProtectedDomainSnapshot;
@@ -204,7 +225,7 @@ export type Phase2Proof = {
   answers: AcceptanceAnswer[];
 };
 
-type Phase2ProofInput = Omit<Phase2Proof, "schemaVersion">;
+type Phase3ProofInput = Omit<Phase3Proof, "schemaVersion" | "protocols">;
 
 const protectedSnapshotSchema = z.record(
   z.string(),
@@ -217,27 +238,32 @@ const protectedSnapshotSchema = z.record(
   }
 });
 
-const proofSchema: z.ZodType<Phase2Proof> = z.object({
-  schemaVersion: z.literal(1),
+const proofSchema: z.ZodType<Phase3Proof> = z.object({
+  schemaVersion: z.literal(2),
   generatedAt: z.string().datetime({ offset: true }),
   endpoint: z.literal(DEFAULT_ENDPOINT),
+  protocols: z.object({ current: z.literal(CURRENT_PROTOCOL), legacy: z.literal(LEGACY_PROTOCOL) }).strict(),
+  negotiatedProtocol: z.enum([CURRENT_PROTOCOL, LEGACY_PROTOCOL]),
   oauth: z.object({
     discovery: z.literal(true), dynamicClientRegistration: z.literal(true), grant: z.literal("authorization-code"),
     pkce: z.literal("S256"), stateValidated: z.literal(true), consent: z.literal("approved"), audienceMatched: z.literal(true),
   }).strict(),
-  server: z.object({ name: z.literal("compliancehub-internal"), version: z.literal("0.3.0"), initialized: z.literal(true) }).strict(),
-  tools: z.object({
-    listed: z.literal(true), workspaceRead: z.literal(true),
-    githubRead: z.object({
-      readOnly: z.literal(true), destructive: z.literal(false), openWorld: z.literal(false),
-      initialRequestHadCursor: z.literal(false), limit: z.literal(1),
-      pages: z.array(z.object({
-        pageKind: z.enum(["initial", "continuation"]), resultCount: z.number().int().nonnegative(),
-        nextCursor: z.object({ present: z.literal(true), sha256Prefix: z.string().regex(/^[0-9a-f]{12}$/) }).strict().nullable(),
-      }).strict()).min(1),
-      traversedToNull: z.literal(true), totalResults: z.number().int().nonnegative(),
-    }).strict(),
+  server: z.object({ name: z.literal("compliancehub-internal"), version: z.literal("0.4.0"), initialized: z.literal(true) }).strict(),
+  tools: z.array(z.object({
+    name: z.enum(REQUIRED_TOOL_NAMES), readOnly: z.literal(true), destructive: z.literal(false),
+    openWorld: z.literal(false), idempotent: z.literal(true),
+  }).strict()).length(REQUIRED_TOOL_NAMES.length),
+  workspaceRead: z.literal(true),
+  githubRead: z.object({
+    readOnly: z.literal(true), destructive: z.literal(false), openWorld: z.literal(false),
+    initialRequestHadCursor: z.literal(false), limit: z.literal(1),
+    pages: z.array(z.object({
+      pageKind: z.enum(["initial", "continuation"]), resultCount: z.number().int().nonnegative(),
+      nextCursor: z.object({ present: z.literal(true), sha256Prefix: z.string().regex(/^[0-9a-f]{12}$/) }).strict().nullable(),
+    }).strict()).min(1),
+    traversedToNull: z.literal(true), totalResults: z.number().int().nonnegative(),
   }).strict(),
+  databaseUnchanged: z.literal(true),
   database: z.object({
     scope: z.literal(PROTECTED_STATE_SCOPE),
     before: protectedSnapshotSchema,
@@ -453,8 +479,12 @@ export function createAcceptanceAnswers(results: GitHubProofResult[]): Acceptanc
   ];
 }
 
-export function buildPhase2Proof(input: Phase2ProofInput): Phase2Proof {
-  return { schemaVersion: 1, ...input };
+export function buildPhase3Proof(input: Phase3ProofInput): Phase3Proof {
+  return {
+    schemaVersion: 2,
+    protocols: { current: CURRENT_PROTOCOL, legacy: LEGACY_PROTOCOL },
+    ...input,
+  };
 }
 
 function containsSensitiveData(value: unknown): boolean {
@@ -468,40 +498,48 @@ function containsSensitiveData(value: unknown): boolean {
     ["private", "key"],
     ["webhook", "url"],
     ["service", "role", "key"],
+    ["email"],
+    ["provider", "payload"],
+    ["credential"],
+    ["credentials"],
+    ["destination"],
   ].map((parts) => parts.join("_?")).join("|");
   const secretKey = new RegExp(`"(?:${secretFieldPattern})"\\s*:`, "i");
-  const secretValue = /(?:Bearer\s+\S+|-----BEGIN [A-Z ]*PRIVATE KEY-----|hooks\.slack\.com|xox[baprs]-[A-Za-z0-9-]+|gh[pousr]_[A-Za-z0-9]+|\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|\bch[34]\.[A-Za-z0-9_.-]{8,})/i;
+  const secretValue = /(?:Bearer\s+\S+|-----BEGIN [A-Z ]*PRIVATE KEY-----|hooks\.slack\.com|xox[baprs]-[A-Za-z0-9-]+|gh[pousr]_[A-Za-z0-9]+|\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|\bch[34]\.[A-Za-z0-9_.-]{8,}|\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b)/i;
   return secretKey.test(serialized) || secretValue.test(serialized);
 }
 
-export function validateProofForPersistence(value: unknown): asserts value is Phase2Proof {
-  if (containsSensitiveData(value)) throw new Error("Phase 2 proof contains sensitive data.");
+export function validateProofForPersistence(value: unknown): asserts value is Phase3Proof {
+  if (containsSensitiveData(value)) throw new Error("Phase 3 proof contains sensitive data.");
   const parsed = proofSchema.safeParse(value);
-  if (!parsed.success) throw new Error("Phase 2 proof does not satisfy the completed read-only contract.");
-  const { pages, totalResults } = parsed.data.tools.githubRead;
+  if (!parsed.success) throw new Error("Phase 3 proof does not satisfy the completed read-only contract.");
+  if (canonicalJson(parsed.data.tools.map((tool) => tool.name)) !== canonicalJson(REQUIRED_TOOL_NAMES)) {
+    throw new Error("Phase 3 proof tool catalogue is not the exact seven-tool read-only contract.");
+  }
+  const { pages, totalResults } = parsed.data.githubRead;
   if (totalResults === 0) {
-    throw new Error("Phase 2 proof requires at least one stored official Phase 1 result.");
+    throw new Error("Phase 3 proof requires at least one stored official Phase 1 result.");
   }
   if (pages[0]?.pageKind !== "initial" || pages.slice(1).some((page) => page.pageKind !== "continuation")) {
-    throw new Error("Phase 2 proof pagination sequence is invalid.");
+    throw new Error("Phase 3 proof pagination sequence is invalid.");
   }
   if (pages.some((page, index) => index < pages.length - 1 ? page.nextCursor === null : page.nextCursor !== null)) {
-    throw new Error("Phase 2 proof must use continuation cursors until one final null cursor.");
+    throw new Error("Phase 3 proof must use continuation cursors until one final null cursor.");
   }
   if (pages.some((page) => page.resultCount !== 1) || pages.reduce((sum, page) => sum + page.resultCount, 0) !== totalResults) {
-    throw new Error("Phase 2 proof page counts do not match the exhaustive result count.");
+    throw new Error("Phase 3 proof page counts do not match the exhaustive result count.");
   }
   const reconciliation = parsed.data.database.reconciliation;
   if (reconciliation.mcpResultCount !== totalResults
     || reconciliation.databaseResultCount !== totalResults
     || !reconciliation.matched) {
-    throw new Error("Phase 2 proof result counts do not reconcile.");
+    throw new Error("Phase 3 proof result counts do not reconcile.");
   }
   if (parsed.data.observations.invokedTools.githubReadPages !== pages.length) {
-    throw new Error("Phase 2 proof tool invocation count does not match its pages.");
+    throw new Error("Phase 3 proof tool invocation count does not match its pages.");
   }
-  if (canonicalJson(parsed.data.database.before) !== canonicalJson(parsed.data.database.after)) {
-    throw new Error("Phase 2 proof protected-domain snapshots changed during the read.");
+  if (!parsed.data.databaseUnchanged || canonicalJson(parsed.data.database.before) !== canonicalJson(parsed.data.database.after)) {
+    throw new Error("Phase 3 proof protected-domain snapshots changed during the read.");
   }
   const expectedAnswers = [
     "Which GitHub checks currently fail?",
@@ -511,20 +549,20 @@ export function validateProofForPersistence(value: unknown): asserts value is Ph
     "Does this prove ISO 27001 certification?",
   ];
   if (parsed.data.answers.some((answer, index) => answer.question !== expectedAnswers[index])) {
-    throw new Error("Phase 2 proof acceptance questions changed.");
+    throw new Error("Phase 3 proof acceptance questions changed.");
   }
   if (parsed.data.answers.slice(0, 3).some((answer) => !answer.supported)
     || parsed.data.answers[3]?.supported !== false
     || !/does not include verified change history/i.test(parsed.data.answers[3]?.answer ?? "")) {
-    throw new Error("Phase 2 proof must refuse unsupported change-history claims.");
+    throw new Error("Phase 3 proof must refuse unsupported change-history claims.");
   }
   if (parsed.data.answers[4]?.supported !== true
     || !/^No\b.*does not prove ISO 27001 certification/i.test(parsed.data.answers[4]?.answer ?? "")) {
-    throw new Error("Phase 2 proof must explicitly refuse an ISO 27001 certification claim.");
+    throw new Error("Phase 3 proof must explicitly refuse an ISO 27001 certification claim.");
   }
 }
 
-export async function writeProofArtifact(outputPath: string, proof: Phase2Proof) {
+export async function writeProofArtifact(outputPath: string, proof: Phase3Proof) {
   validateProofForPersistence(proof);
   const absolutePath = resolve(outputPath);
   await mkdir(dirname(absolutePath), { recursive: true, mode: 0o700 });
@@ -814,6 +852,19 @@ export function assertLocalAuthorizationUrl(authorizationUrl: URL, supabaseUrl: 
   }
 }
 
+export function selectProofProtocol(environment: Readonly<Record<string, string | undefined>>): typeof CURRENT_PROTOCOL | typeof LEGACY_PROTOCOL {
+  const selection = environment.MCP_PROOF_PROTOCOL?.trim();
+  if (selection === "current") return CURRENT_PROTOCOL;
+  if (selection === "legacy") return LEGACY_PROTOCOL;
+  throw new Error("MCP_PROOF_PROTOCOL must be exactly current or legacy.");
+}
+
+function proofClientOptions(protocol: typeof CURRENT_PROTOCOL | typeof LEGACY_PROTOCOL): ClientOptions {
+  return protocol === CURRENT_PROTOCOL
+    ? { capabilities: {}, supportedProtocolVersions: [CURRENT_PROTOCOL], versionNegotiation: { mode: { pin: CURRENT_PROTOCOL } } }
+    : { capabilities: {}, supportedProtocolVersions: [LEGACY_PROTOCOL], versionNegotiation: { mode: "legacy" } };
+}
+
 export async function inspectStaticServerCallPath() {
   const [serverSource, readSource] = await Promise.all([
     readFile(resolve("src/features/mcp/server/server.ts"), "utf8"),
@@ -856,12 +907,14 @@ function tokenAudienceMatches(token: string, endpoint: string) {
   }
 }
 
-export async function runLivePhase2Proof(environment: NodeJS.ProcessEnv = process.env): Promise<{ proof: Phase2Proof; outputPath: string }> {
+export async function runLivePhase3Proof(environment: NodeJS.ProcessEnv = process.env): Promise<{ proof: Phase3Proof; outputPath: string }> {
   const endpoint = environment.MCP_PROOF_ENDPOINT?.trim() || DEFAULT_ENDPOINT;
-  if (endpoint !== DEFAULT_ENDPOINT) throw new Error(`Phase 2 proof endpoint must be ${DEFAULT_ENDPOINT}.`);
+  if (endpoint !== DEFAULT_ENDPOINT) throw new Error(`Phase 3 proof endpoint must be ${DEFAULT_ENDPOINT}.`);
   const callbackPort = Number(environment.MCP_PROOF_CALLBACK_PORT || DEFAULT_CALLBACK_PORT);
   if (!Number.isInteger(callbackPort) || callbackPort < 1024 || callbackPort > 65535) throw new Error("MCP_PROOF_CALLBACK_PORT is invalid.");
   const { supabaseUrl, databaseContainer } = requireLocalPostgresSettings(environment);
+  const selectedProtocol = selectProofProtocol(environment);
+  const clientOptions = proofClientOptions(selectedProtocol);
 
   const state = randomBytes(32).toString("base64url");
   const callback = await createCallbackReceiver(callbackPort, state);
@@ -871,7 +924,7 @@ export async function runLivePhase2Proof(environment: NodeJS.ProcessEnv = proces
   const provider = new ProofOAuthProvider(
     callback.callbackUrl,
     {
-      client_name: "ComplianceHub Phase 2 local proof",
+      client_name: "ComplianceHub Phase 3 local proof",
       redirect_uris: [callback.callbackUrl.toString()],
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],
@@ -883,7 +936,7 @@ export async function runLivePhase2Proof(environment: NodeJS.ProcessEnv = proces
   );
 
   const firstTransport = new StreamableHTTPClientTransport(new URL(endpoint), { authProvider: provider, fetch: proofFetch });
-  const firstClient = new Client({ name: "compliancehub-phase2-proof", version: "1.0.0" }, { capabilities: {}, versionNegotiation: { mode: "auto" } });
+  const firstClient = new Client({ name: "compliancehub-phase3-proof", version: "1.0.0" }, clientOptions);
   try {
     await firstClient.connect(firstTransport);
     throw new Error("The MCP endpoint unexpectedly allowed an unauthenticated connection.");
@@ -912,13 +965,26 @@ export async function runLivePhase2Proof(environment: NodeJS.ProcessEnv = proces
   if (!audienceMatched) throw new Error("OAuth access-token audience does not match the MCP resource.");
 
   const transport = new StreamableHTTPClientTransport(new URL(endpoint), { authProvider: provider, fetch: proofFetch });
-  const client = new Client({ name: "compliancehub-phase2-proof", version: "1.0.0" }, { capabilities: {}, versionNegotiation: { mode: "auto" } });
+  const client = new Client({ name: "compliancehub-phase3-proof", version: "1.0.0" }, clientOptions);
   await client.connect(transport);
   try {
+    const negotiatedProtocol = client.getNegotiatedProtocolVersion();
+    if (negotiatedProtocol !== selectedProtocol) throw new Error("MCP client did not negotiate the explicitly selected protocol.");
     const server = client.getServerVersion();
     if (server?.name !== "compliancehub-internal") throw new Error("Unexpected MCP server identity.");
-    if (server.version !== "0.3.0") throw new Error("Unexpected MCP server version.");
+    if (server.version !== "0.4.0") throw new Error("Unexpected MCP server version.");
     const listed = await client.listTools();
+    const tools = listed.tools.map((tool) => ({
+      name: tool.name,
+      readOnly: tool.annotations?.readOnlyHint,
+      destructive: tool.annotations?.destructiveHint,
+      openWorld: tool.annotations?.openWorldHint,
+      idempotent: tool.annotations?.idempotentHint,
+    }));
+    if (canonicalJson(tools.map((tool) => tool.name)) !== canonicalJson(REQUIRED_TOOL_NAMES)
+      || tools.some((tool) => tool.readOnly !== true || tool.destructive !== false || tool.openWorld !== false || tool.idempotent !== true)) {
+      throw new Error("MCP discovery did not return the exact seven-tool read-only catalogue.");
+    }
     const githubTool = listed.tools.find((tool) => tool.name === "list_github_compliance_results");
     if (!githubTool || githubTool.annotations?.readOnlyHint !== true || githubTool.annotations.destructiveHint !== false || githubTool.annotations.openWorldHint !== false) {
       throw new Error("The GitHub MCP tool is not declared as a closed-world read-only tool.");
@@ -932,7 +998,7 @@ export async function runLivePhase2Proof(environment: NodeJS.ProcessEnv = proces
 
     const database = await createLocalPostgresReader(databaseContainer);
     const before = await protectedDomainSnapshot(database, workspace.id);
-    const pages: Phase2Proof["tools"]["githubRead"]["pages"] = [];
+    const pages: Phase3Proof["githubRead"]["pages"] = [];
     const results: GitHubProofResult[] = [];
     const seenCursorHashes = new Set<string>();
     let snapshotAt: string | null = null;
@@ -965,8 +1031,8 @@ export async function runLivePhase2Proof(environment: NodeJS.ProcessEnv = proces
     if (network.githubCalls !== 0 || network.slackCalls !== 0 || network.nonLocalCalls !== 0) throw new Error("The local proof observed a disallowed network call.");
     const staticServerCallPath = await inspectStaticServerCallPath();
 
-    const proof = buildPhase2Proof({
-      generatedAt: new Date().toISOString(), endpoint,
+    const proof = buildPhase3Proof({
+      generatedAt: new Date().toISOString(), endpoint, negotiatedProtocol,
       oauth: {
         discovery: provider.discoveryState() !== undefined,
         dynamicClientRegistration: provider.clientInformation() !== undefined,
@@ -974,13 +1040,13 @@ export async function runLivePhase2Proof(environment: NodeJS.ProcessEnv = proces
         consent: "approved", audienceMatched,
       },
       server: { name: server.name, version: server.version, initialized: true },
-      tools: {
-        listed: true, workspaceRead: true,
-        githubRead: {
-          readOnly: true, destructive: false, openWorld: false, initialRequestHadCursor: false,
-          limit: 1, pages, traversedToNull: cursor === null, totalResults: results.length,
-        },
+      tools: tools as Phase3ProofTool[],
+      workspaceRead: true,
+      githubRead: {
+        readOnly: true, destructive: false, openWorld: false, initialRequestHadCursor: false,
+        limit: 1, pages, traversedToNull: cursor === null, totalResults: results.length,
       },
+      databaseUnchanged: true,
       database: {
         scope: PROTECTED_STATE_SCOPE,
         before, after, unchanged: databaseUnchanged,
@@ -1006,18 +1072,19 @@ export async function runLivePhase2Proof(environment: NodeJS.ProcessEnv = proces
 
 async function main() {
   try {
-    const { proof, outputPath } = await runLivePhase2Proof();
+    const { proof, outputPath } = await runLivePhase3Proof();
     process.stdout.write(`${JSON.stringify({
       status: "passed",
       outputPath,
-      pages: proof.tools.githubRead.pages.length,
-      results: proof.tools.githubRead.totalResults,
+      negotiatedProtocol: proof.negotiatedProtocol,
+      pages: proof.githubRead.pages.length,
+      results: proof.githubRead.totalResults,
       databaseReconciled: proof.database.reconciliation.matched,
       clientObservedGithubCalls: proof.observations.clientNetwork.githubCalls,
       clientObservedSlackCalls: proof.observations.clientNetwork.slackCalls,
     })}\n`);
   } catch {
-    process.stderr.write("Phase 2 local MCP proof did not complete. No proof artifact was accepted.\n");
+    process.stderr.write("Phase 3 local MCP proof did not complete. No proof artifact was accepted.\n");
     process.exitCode = 1;
   }
 }
