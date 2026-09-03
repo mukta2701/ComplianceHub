@@ -50,6 +50,9 @@ const invitationSecurityHeaders = [
 const nextConfig: NextConfig = {
   output: "standalone",
   poweredByHeader: false,
+  // Next 16 otherwise writes full incoming request URLs, including OAuth
+  // callback query values, to the development terminal.
+  logging: { incomingRequests: false },
   // Dev-only: the e2e suite and local browsers reach the dev server via
   // 127.0.0.1, which Next.js treats as a disallowed dev origin and rejects
   // the Turbopack HMR websocket, leaving pages unhydrated.

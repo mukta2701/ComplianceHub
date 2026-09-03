@@ -9,6 +9,12 @@ describe("container deployment output", () => {
   });
 });
 
+describe("request log privacy", () => {
+  it("disables framework incoming-request logs so OAuth callback query values are never printed", () => {
+    expect(nextConfig.logging).toEqual(expect.objectContaining({ incomingRequests: false }));
+  });
+});
+
 describe("buildConnectSrc", () => {
   it("allows the configured local Supabase HTTP and WebSocket origins in development", () => {
     expect(buildConnectSrc("http://127.0.0.1:54321")).toBe(

@@ -99,6 +99,14 @@ describe("GET /api/github/callback", () => {
     );
   });
 
+  it("accepts GitHub's optional exact canonical OAuth issuer", async () => {
+    const response = await GET(request("?code=code-value&state=state-value&installation_id=77&iss=https%3A%2F%2Fgithub.com%2Flogin%2Foauth"));
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe("https://compliance.example/app/integrations?github=connected");
+    expect(hoisted.exchange).toHaveBeenCalledWith(expect.objectContaining({ code: "code-value" }));
+  });
+
   it("completes a verified local personal installation claim", async () => {
     vi.stubEnv("GITHUB_ALLOWED_ACCOUNT_TYPE", "User");
     vi.stubEnv("NODE_ENV", "test");
@@ -213,6 +221,22 @@ describe("GET /api/github/callback", () => {
     expect(response.headers.get("location")).toBe("https://compliance.example/app/integrations?github=invalid_request");
     expect(hoisted.exchange).not.toHaveBeenCalled();
     expect(hoisted.sequence[0]).toBe("clear-cookie");
+  });
+
+  it.each([
+    ["duplicate issuer", "?code=a&state=state-value&installation_id=77&iss=https%3A%2F%2Fgithub.com%2Flogin%2Foauth&iss=https%3A%2F%2Fgithub.com%2Flogin%2Foauth"],
+    ["wrong issuer host", "?code=a&state=state-value&installation_id=77&iss=https%3A%2F%2Fevil.example%2Flogin%2Foauth"],
+    ["wrong issuer path", "?code=a&state=state-value&installation_id=77&iss=https%3A%2F%2Fgithub.com%2Flogin%2Fauthorize"],
+    ["issuer trailing slash", "?code=a&state=state-value&installation_id=77&iss=https%3A%2F%2Fgithub.com%2Flogin%2Foauth%2F"],
+    ["issuer query", "?code=a&state=state-value&installation_id=77&iss=https%3A%2F%2Fgithub.com%2Flogin%2Foauth%3Fx%3D1"],
+    ["issuer fragment", "?code=a&state=state-value&installation_id=77&iss=https%3A%2F%2Fgithub.com%2Flogin%2Foauth%23x"],
+    ["issuer credentials", "?code=a&state=state-value&installation_id=77&iss=https%3A%2F%2Fuser%3Asecret%40github.com%2Flogin%2Foauth"],
+    ["unknown callback parameter", "?code=a&state=state-value&installation_id=77&unexpected=none"],
+  ])("rejects %s before token exchange", async (_label, query) => {
+    const response = await GET(request(query));
+
+    expect(response.headers.get("location")).toBe("https://compliance.example/app/integrations?github=invalid_request");
+    expect(hoisted.exchange).not.toHaveBeenCalled();
   });
 
   it("rejects changed or demoted actor/workspace before consuming state", async () => {

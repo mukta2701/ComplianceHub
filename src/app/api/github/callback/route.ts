@@ -75,12 +75,14 @@ function onlyValue(url: URL, key: string, required: boolean): string | null | ty
 
 function readCallback(url: URL): { code: string; state: string; installationId: number | null } | null {
   for (const key of url.searchParams.keys()) {
-    if (key !== "code" && key !== "state" && key !== "installation_id") return null;
+    if (key !== "code" && key !== "state" && key !== "installation_id" && key !== "iss") return null;
   }
   const code = onlyValue(url, "code", true);
   const state = onlyValue(url, "state", true);
   const installation = onlyValue(url, "installation_id", false);
-  if (code === INVALID_QUERY_VALUE || state === INVALID_QUERY_VALUE || installation === INVALID_QUERY_VALUE || code === null || state === null) return null;
+  const issuer = onlyValue(url, "iss", false);
+  if (code === INVALID_QUERY_VALUE || state === INVALID_QUERY_VALUE || installation === INVALID_QUERY_VALUE || issuer === INVALID_QUERY_VALUE || code === null || state === null) return null;
+  if (issuer !== null && issuer !== "https://github.com/login/oauth") return null;
   if (code.length > 1_000 || state.length > 200) return null;
   if (installation === null) return { code, state, installationId: null };
   if (!/^[1-9][0-9]*$/.test(installation)) return null;
