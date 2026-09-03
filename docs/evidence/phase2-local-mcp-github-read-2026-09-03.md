@@ -2,7 +2,7 @@
 
 Date: 2026-09-03
 Phase: 2 only
-Status: `PASS — AWAITING FINAL FULL-SUITE GATE` — the real local OAuth/MCP conversation, exhaustive GitHub-result traversal, independent database reconciliation, protected-state comparison, and evidence-redaction checks passed. This is Phase 2 read-path evidence, not an ISO 27001 certification or a production-deployment claim.
+Status: `PASS — PHASE 2 COMPLETE` — the real local OAuth/MCP conversation, exhaustive GitHub-result traversal, independent database reconciliation, protected-state comparison, evidence-redaction checks, full regression suite, and three-role review gate passed. This is Phase 2 read-path evidence, not an ISO 27001 certification or a production-deployment claim.
 
 ## What the proof harness verifies
 
@@ -35,8 +35,13 @@ The accepted JSON evidence is written with filesystem mode `0600`. It contains n
 - No-mutation evidence: `PASS`. Database-side before/after digests for all `21` protected domains were identical. The proof invoked no write tools, and its loopback-only client observed `0` GitHub calls and `0` Slack calls. Static source inspection also confirmed that the MCP GitHub-result path reaches the database read only, not GitHub or Slack.
 - Redacted JSON proof: `PASS`, written to `artifacts/phase2-local-mcp-github-read-proof.json` with filesystem mode `0600`. A separate secret scan found no token, authorization-code, client-secret, private-key, service-role, GitHub-credential, or Slack-webhook pattern.
 - Visual evidence: `docs/evidence/phase2-mcp-consent-2026-09-03.jpg` and `docs/evidence/phase2-monitoring-official-results-2026-09-03.jpg`.
-- Phase 2 verdict: live Task 4 proof passed; final full-suite Task 5 and the independent supervisor close-out remain before the phase can be marked complete.
+- Full application gate: `PASS` — `238` Vitest files, `1,956` tests passed and `1` skipped; repository type-check, full lint, production build, and diff check succeeded.
+- Full database gate: `PASS` — `89` pgTAP files and `1,879` assertions passed against the local database.
+- Runtime authorization gate: `PASS` — health returned application/database `ok`; protected-resource metadata named the exact MCP resource and local authorization server; an unauthenticated MCP request returned the expected OAuth challenge.
+- Phase 1 browser regression: `1/1 PASS` — repository selection in Connections and official collection health in Monitoring completed in Chromium.
+- Three-role verdict: implementer `DONE`, independent reviewer `APPROVED`, supervisor `GO`.
+- Phase 2 verdict: `COMPLETE`.
 
 The harness also fails closed when Supabase is non-local, the Docker host/context is remote, the configured container name is unsafe, container identity or networking does not match the local Supabase project, a database transaction is not read-only, a digest/projection envelope is malformed, any PostgreSQL query fails, or no official Phase 1 result exists. The local OAuth audience is `http://127.0.0.1:3100/mcp`, and the GitHub App homepage, callback, and setup URLs use port `3100`. GitHub installation `154509880` remains restricted to the personal pilot account and exactly one selected repository with read-only permissions.
 
-This status remains fail-closed: Task 4 is proven, while the broader Task 5 regression suite and final independent GO verdict are still required before declaring Phase 2 complete.
+Phase 2 is complete at commit `7c4bf17` plus this evidence close-out. Slack delivery, hosted deployment, organisation-wide rollout, Jira, and mobile work remain outside this phase.
