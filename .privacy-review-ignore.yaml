@@ -1,6 +1,6 @@
-# Narrow false-positive suppressions for static, independently authored
-# assessment copy. These strings are product content and are never sent to an
-# LLM or populated with user data.
+# Narrow, temporary false-positive suppressions for static source text
+# containing no user-derived, personal, or secret data. Each entry documents
+# its exact context and reviewed data flow.
 max_ttl_days: 14
 require_github_issue: false
 entries:
