@@ -37,8 +37,8 @@
   lint/typecheck/unit/build, integration, and the full desktop/mobile
   Playwright gate all passed.
 - MCP evidence: local DCR + S256 PKCE, authorization-code exchange, refresh,
-  authenticated initialize/tools/list, and revocation all passed. The local
-  audience row is configured for `http://127.0.0.1:3000/mcp` only.
+  authenticated initialize/tools/list, and revocation all passed. The canonical
+  local audience row is configured for `http://127.0.0.1:3100/mcp` only.
 - Slack evidence: local digest reservation/finalisation and concurrency tests
   pass with an injected transport. Any earlier Ankit, AdTecher, or KT-SME
   workspace/channel smoke is invalid historical evidence and not authorised for use.

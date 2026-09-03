@@ -37,7 +37,11 @@ export function parseMcpOAuthEnvironment(environment: Record<string, string | un
     const expectedJwks = `${authorizationServer}/.well-known/jwks.json`;
     const jwksUrl = canonicalUrl(configuredValue(environment, "SUPABASE_OAUTH_JWKS_URL") ?? (production ? "" : expectedJwks), { production, path: "/auth/v1/.well-known/jwks.json" });
     if (jwksUrl !== expectedJwks) throw new Error("JWKS mismatch");
-    const resource = canonicalUrl(configuredValue(environment, "MCP_RESOURCE_URL") ?? (production ? "" : "http://127.0.0.1:3000/mcp"), { production, path: "/mcp" });
+    const resource = canonicalUrl(
+      configuredValue(environment, "MCP_RESOURCE_URL")
+        ?? (production ? "" : "http://127.0.0.1:3100/mcp"),
+      { production, path: "/mcp" },
+    );
     const supabaseKey = configuredValue(environment, "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY") ?? configuredValue(environment, "NEXT_PUBLIC_SUPABASE_ANON_KEY") ?? (production ? "" : "local-publishable-key-placeholder");
     z.string().min(20).parse(supabaseKey);
     const algorithms = (configuredValue(environment, "MCP_JWT_ALGORITHMS") ?? (production ? "" : "RS256,ES256"))

@@ -19,6 +19,7 @@ describe("local Supabase OAuth configuration", () => {
 
     expect(siteUrl).toBeTruthy();
     expect(seededAudience).toBe(new URL("/mcp", siteUrl).toString());
+    expect(seededAudience).toBe("http://127.0.0.1:3100/mcp");
   });
 
   it("allows only the app callback globally", () => {
