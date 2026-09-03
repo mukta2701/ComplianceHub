@@ -1,6 +1,6 @@
 {
   "name": "compliancehub-internal",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Inspect ComplianceHub status, prepare a verified brief, and post it only with explicit delivery intent.",
   "author": {
     "name": "ComplianceHub"

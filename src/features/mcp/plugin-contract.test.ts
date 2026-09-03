@@ -20,6 +20,8 @@ describe("private ComplianceHub plugin safety contract", () => {
     expect(skill).toMatch(/Owner role[\s\S]*not sufficient/i);
     expect(skill).toMatch(/`list_github_compliance_results`[\s\S]*read-only/i);
     expect(skill).toMatch(/schema-v2[\s\S]*official results[\s\S]*immutable/i);
+    expect(skill).toMatch(/when(?:ever)?[^.]*`list_github_compliance_results`[\s\S]*starts without a cursor[\s\S]*same workspace[\s\S]*all\s+(?:normalized\s+)?filters[\s\S]*limit[\s\S]*nextCursor[\s\S]*until\s+null/i);
+    expect(skill).toMatch(/pageKind=continuation[\s\S]*never exhaustive[\s\S]*truncated=true[\s\S]*more rows follow/i);
     expect(skill).toMatch(/Verified GitHub technical fact:[\s\S]*Unknown GitHub information:[\s\S]*Stale GitHub result:[\s\S]*Recommended follow-up:/i);
     expect(skill).toMatch(/historical[\s\S]*never[\s\S]*(?:pass|passing)/i);
     expect(skill).toMatch(/ordinary chat[\s\S]*scheduled[\s\S]*not enough/i);
@@ -57,6 +59,7 @@ describe("private ComplianceHub plugin safety contract", () => {
     expect(MCP_SERVER_INSTRUCTIONS).toMatch(/Authorization to send[\s\S]*not sufficient/i);
     expect(MCP_SERVER_INSTRUCTIONS).not.toMatch(/Summarize evidence and policies/i);
     expect(MCP_SERVER_INSTRUCTIONS).toMatch(/singular[^.]*<N>[^.]*1[^.]*plural/i);
+    expect(MCP_SERVER_INSTRUCTIONS).toMatch(/starts without a cursor[\s\S]*every exact returned nextCursor[\s\S]*continuation page[\s\S]*never exhaustive/i);
   });
 
   it("documents composition forms that the server accepts", () => {
@@ -146,7 +149,7 @@ describe("private ComplianceHub plugin safety contract", () => {
     const vercel = JSON.parse(read("vercel.json")) as { crons?: Array<{ path: string; schedule: string }> };
     const manifest = JSON.parse(read("plugins/compliancehub-internal/.codex-plugin/plugin.json")) as { version: string };
 
-    expect(manifest.version).toBe("0.2.0");
+    expect(manifest.version).toBe("0.3.0");
 
     expect(appMap.apps).toEqual({
       compliancehub: { id: "asdk_app_6a82f504a814819182e544ececddefc9" },

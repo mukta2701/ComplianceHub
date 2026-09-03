@@ -1,6 +1,21 @@
 # Narrow false-positive suppressions for static, independently authored
 # assessment copy. These strings are product content and are never sent to an
 # LLM or populated with user data.
+max_ttl_days: 14
+require_github_issue: false
+entries:
+  - id: "7ed1326f2bd376c7"
+    reason: "Static TypeScript manifest shape naming the plugin defaultPrompt field; no user or personal data"
+    privacy_approver: "Phase 2 contract reviewer"
+    security_approver: "Phase 2 scope supervisor"
+    created_on: "2026-09-03"
+    expires_on: "2026-09-17"
+  - id: "2b8fdc8dd814739d"
+    reason: "Static MCP safety instruction about delivery intent; no user content or personal data is embedded"
+    privacy_approver: "Phase 2 contract reviewer"
+    security_approver: "Phase 2 scope supervisor"
+    created_on: "2026-09-03"
+    expires_on: "2026-09-17"
 ignore:
   - fingerprint: "e29890cc4c9d9f21"
     reason: "Static assessment catalogue copy; no user or personal data and no LLM call"

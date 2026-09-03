@@ -47,7 +47,7 @@ describe("POST /mcp", () => {
     const deps = dependencies();
     const response = await handleMcpPost(request(), deps as never);
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({ jsonrpc: "2.0", id: 1, result: { serverInfo: { name: "compliancehub-internal", version: "0.2.0" } } });
+    await expect(response.json()).resolves.toMatchObject({ jsonrpc: "2.0", id: 1, result: { serverInfo: { name: "compliancehub-internal", version: "0.3.0" } } });
     expect(deps.authenticate).toHaveBeenCalledTimes(1);
     expect(deps.rateLimit).toHaveBeenCalledWith(expect.stringMatching(/^mcp:/));
     expect(deps.createServer).toHaveBeenCalledWith(expect.objectContaining({ userId: USER_ID, clientId: "codex-client" }));

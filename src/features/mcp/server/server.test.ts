@@ -2,6 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { McpError } from "../auth/errors";
+import { githubPublicPageHash } from "../application/github-results-cursor";
 import { WorkspaceRequiredError } from "../application/workspace-access";
 import { buildDailyDigestFacts } from "../domain/digest";
 import { createComplianceMcpServer, MCP_SERVER_INSTRUCTIONS, type McpReadServices } from "./server";
@@ -30,6 +31,48 @@ const digestFacts = buildDailyDigestFacts({
   },
 });
 
+const GITHUB_CURSOR = `ch4.${"a".repeat(16)}.${"b".repeat(200)}.${"c".repeat(22)}.${"d".repeat(64)}`;
+const githubV2ResultCore = {
+  schemaVersion: 2 as const,
+  workspace: { id: WORKSPACE_ID, name: "Acme" },
+  snapshotAt: "2026-08-25T01:42:36.000Z",
+  results: [{
+    id: `github_result:${REPORT_ID}`,
+    repositoryId: REPORT_ID,
+    repositoryLabel: "GitHub repository 30000000",
+    collectionRunId: "github_run:40000000-0000-4000-8000-000000000001",
+    runMode: "official" as const,
+    checkId: "github.branch.stale_approvals",
+    result: "fail" as const,
+    severity: "high" as const,
+    observedAt: "2026-08-25T01:00:00.000Z",
+    freshUntil: "2026-08-26T01:00:00.000Z",
+    materialisedAt: "2026-08-25T01:01:00.000Z",
+    freshness: "current" as const,
+    mappingVersion: "github-iso-27001-v1",
+    mappingChecksum: "b".repeat(64),
+    mappingStatus: "active" as const,
+    ruleVersion: "github-repository-v1",
+    sourceResponseFingerprint: "c".repeat(64),
+    summary: "A failed GitHub branch-control observation creates or refreshes a finding.",
+    evidenceId: null,
+    findingId: `monitoring_finding:${REPORT_ID}`,
+    recordHash: "d".repeat(64),
+  }],
+  nextCursor: null as string | null,
+  truncated: false,
+  pageKind: "initial" as "initial" | "continuation",
+};
+
+type GitHubV2ResultCore = typeof githubV2ResultCore;
+
+function githubPage(overrides: Partial<GitHubV2ResultCore> = {}, pageHash?: string) {
+  const page = { ...githubV2ResultCore, ...overrides };
+  return { ...page, pageHash: pageHash ?? githubPublicPageHash(page) };
+}
+
+const githubV2Result = githubPage();
+
 const servers: Array<{ close(): Promise<void> }> = [];
 const clients: Client[] = [];
 
@@ -49,11 +92,9 @@ function serviceStubs(): McpReadServices {
       workspace: { id: WORKSPACE_ID, name: "Acme" }, truncated: false,
       items: [{ id: `task:${REPORT_ID}`, source: "task" as const, category: "overdue_task" as const, severity: "high" as const, summary: "Overdue task", dueOn: "2026-08-05" }],
     })),
-    listGitHubComplianceResults: vi.fn(async () => ({
-      schemaVersion: 1 as const, workspace: { id: WORKSPACE_ID, name: "Acme" },
-      asOf: "2026-08-25T01:42:36.000Z", truncated: false,
-      results: [{ id: `github_result:${REPORT_ID}`, repositoryId: REPORT_ID, repositoryLabel: "GitHub repository 30000000", checkId: "branch_protection", result: "fail" as const, severity: "high" as const, observedAt: "2026-08-25T01:00:00.000Z", freshUntil: "2026-08-26T01:00:00.000Z", materialisedAt: "2026-08-25T01:01:00.000Z", freshness: "current" as const, mappingVersion: "github-iso-2026.08", mappingStatus: "active" as const, ruleVersion: "2026-08-17", summary: "Branch protection is not enabled.", evidenceId: null, findingId: null }],
-    })),
+    listGitHubComplianceResults: vi.fn(async (_supabase, _userId, input) => githubPage({
+      pageKind: input.cursor ? "continuation" : "initial",
+    })) as never,
     listMonitoringFindings: vi.fn(async () => ({
       workspace: { id: WORKSPACE_ID, name: "Acme" }, truncated: false,
       findings: [{ id: `monitoring_finding:${REPORT_ID}`, severity: "critical" as const, status: "open" as const, title: "Branch protection disabled", controlRef: "A.8.1", detectedAt: "2026-08-06T10:00:00.000Z", resolvedAt: null, hasRemediationTask: false }],
@@ -85,10 +126,21 @@ async function connected(services = serviceStubs()) {
   return { client, services };
 }
 
+async function expectGitHubPageRejected(
+  page: ReturnType<typeof githubPage>,
+  input: Record<string, unknown> = {},
+) {
+  const services = serviceStubs();
+  vi.mocked(services.listGitHubComplianceResults).mockResolvedValueOnce(page as never);
+  const { client } = await connected(services);
+  const response = await client.callTool({ name: "list_github_compliance_results", arguments: input });
+  expect(response).toMatchObject({ isError: true, structuredContent: { error: { code: "INTERNAL_ERROR" } } });
+}
+
 describe("ComplianceHub MCP server", () => {
   it("initializes with stable identity, safety-first instructions, and exactly eight tools", async () => {
     const { client } = await connected();
-    expect(client.getServerVersion()).toEqual({ name: "compliancehub-internal", version: "0.2.0" });
+    expect(client.getServerVersion()).toEqual({ name: "compliancehub-internal", version: "0.3.0" });
     expect(client.getInstructions()).toBe(MCP_SERVER_INSTRUCTIONS);
     expect(MCP_SERVER_INSTRUCTIONS.slice(0, 512)).toMatch(/Supabase is canonical[\s\S]*closed-world[\s\S]*Never invent/);
 
@@ -115,7 +167,10 @@ describe("ComplianceHub MCP server", () => {
     expect(post?.inputSchema.required).toEqual(expect.arrayContaining(["localDate", "factHash", "headline", "priorities", "actions"]));
     const github = tools.find(({ name }) => name === "list_github_compliance_results");
     expect(github?.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false, openWorldHint: false });
-    expect(github?.inputSchema).toMatchObject({ additionalProperties: false, properties: expect.objectContaining({ repositoryId: expect.any(Object), result: expect.any(Object), freshness: expect.any(Object), mappingStatus: expect.any(Object), severity: expect.any(Object), limit: expect.any(Object) }) });
+    expect(github?.description).toMatch(/starts without a cursor[\s\S]*same workspace[\s\S]*(?:normalized )?filters[\s\S]*limit[\s\S]*nextCursor[\s\S]*until null[\s\S]*pageKind=continuation[\s\S]*never exhaustive/i);
+    expect(github?.inputSchema).toMatchObject({ additionalProperties: false, properties: expect.objectContaining({ repositoryId: expect.any(Object), result: expect.any(Object), freshness: expect.any(Object), mappingStatus: expect.any(Object), severity: expect.any(Object), limit: expect.any(Object), cursor: expect.any(Object) }) });
+    expect(JSON.stringify(github?.outputSchema)).toContain('"const":2');
+    expect(JSON.stringify(github?.outputSchema)).toMatch(/collectionRunId[\s\S]*runMode[\s\S]*mappingChecksum[\s\S]*sourceResponseFingerprint[\s\S]*recordHash[\s\S]*nextCursor[\s\S]*pageKind[\s\S]*pageHash/);
     const prepare = tools.find(({ name }) => name === "prepare_daily_digest");
     expect(prepare?.description).toMatch(/schema-v2[\s\S]*verified[\s\S]*unknown[\s\S]*stale[\s\S]*historical/i);
     expect(JSON.stringify(prepare?.outputSchema)).toContain('"const":2');
@@ -144,7 +199,11 @@ describe("ComplianceHub MCP server", () => {
     expect(services.listWorkspaces).toHaveBeenCalledWith(expect.anything(), USER_ID);
     expect(services.getComplianceOverview).toHaveBeenCalledWith(expect.anything(), USER_ID, { workspaceId: WORKSPACE_ID });
     expect(services.listAttentionItems).toHaveBeenCalledWith(expect.anything(), USER_ID, { workspaceId: WORKSPACE_ID, categories: ["overdue_task"], severity: "high", limit: 5 });
-    expect(services.listGitHubComplianceResults).toHaveBeenCalledWith(expect.anything(), USER_ID, { workspaceId: WORKSPACE_ID, result: "fail", freshness: "current", limit: 5 });
+    expect(services.listGitHubComplianceResults).toHaveBeenCalledWith(
+      expect.anything(), USER_ID,
+      { workspaceId: WORKSPACE_ID, result: "fail", freshness: "current", limit: 5 },
+      { clientId: "codex-test", resource: RESOURCE },
+    );
     expect(services.prepareDailyDigest).toHaveBeenCalledWith(expect.anything(), USER_ID, { workspaceId: WORKSPACE_ID, localDate: "2026-08-07" });
     expect(services.postDailyDigest).toHaveBeenCalledWith(expect.objectContaining({ userId: USER_ID, clientId: "codex-test" }));
   });
@@ -192,5 +251,188 @@ describe("ComplianceHub MCP server", () => {
     const result = await client.callTool({ name: "get_latest_leadership_report", arguments: {} });
     expect(result).toMatchObject({ isError: true, structuredContent: { error: { code: "INTERNAL_ERROR" } } });
     expect(JSON.stringify(result)).not.toContain("not-a-stable-id");
+  });
+
+  it("accepts a 120-character rule version and rejects malformed provenance UUIDs on the GitHub result read", async () => {
+    const services = serviceStubs();
+    const { client } = await connected(services);
+    vi.mocked(services.listGitHubComplianceResults).mockResolvedValueOnce(githubPage({
+      results: [{ ...githubV2Result.results[0], ruleVersion: "r".repeat(120) }],
+    }) as never);
+    const boundaryResponse = await client.callTool({ name: "list_github_compliance_results", arguments: {} });
+    expect(boundaryResponse.isError).not.toBe(true);
+
+    const malformedUuid = "-".repeat(36);
+    for (const result of [
+      { ...githubV2Result.results[0], id: `github_result:${malformedUuid}` },
+      { ...githubV2Result.results[0], collectionRunId: `github_run:${malformedUuid}` },
+      { ...githubV2Result.results[0], result: "pass", severity: null, evidenceId: `evidence:${malformedUuid}`, findingId: null },
+      { ...githubV2Result.results[0], findingId: `monitoring_finding:${malformedUuid}` },
+      { ...githubV2Result.results[0], ruleVersion: "r".repeat(121) },
+    ]) {
+      vi.mocked(services.listGitHubComplianceResults).mockResolvedValueOnce(githubPage({ results: [result] as never }) as never);
+      const response = await client.callTool({ name: "list_github_compliance_results", arguments: {} });
+      expect(response).toMatchObject({ isError: true, structuredContent: { error: { code: "INTERNAL_ERROR" } } });
+      expect(JSON.stringify(response)).not.toContain(malformedUuid);
+    }
+  });
+
+  it("returns schema-v2 official provenance and an opaque continuation cursor through the unchanged read-only tool name", async () => {
+    const services = serviceStubs();
+    const continuedPage = githubPage({
+      nextCursor: GITHUB_CURSOR,
+      truncated: true,
+      pageKind: "continuation",
+    });
+    vi.mocked(services.listGitHubComplianceResults).mockResolvedValueOnce(continuedPage as never);
+    const { client } = await connected(services);
+
+    const result = await client.callTool({
+      name: "list_github_compliance_results",
+      arguments: { workspaceId: WORKSPACE_ID, result: "fail", limit: 1, cursor: GITHUB_CURSOR },
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect(result).toMatchObject({ structuredContent: { ok: true, data: continuedPage } });
+    expect(services.listGitHubComplianceResults).toHaveBeenCalledWith(
+      expect.anything(),
+      USER_ID,
+      { workspaceId: WORKSPACE_ID, result: "fail", limit: 1, cursor: GITHUB_CURSOR },
+      { clientId: "codex-test", resource: RESOURCE },
+    );
+  });
+
+  it("fails closed when a passing GitHub result lacks evidence or claims a finding or severity", async () => {
+    const base = githubV2Result.results[0];
+    for (const contradiction of [
+      { evidenceId: null, findingId: null, severity: null },
+      { evidenceId: `evidence:${REPORT_ID}`, findingId: `monitoring_finding:${REPORT_ID}`, severity: null },
+      { evidenceId: `evidence:${REPORT_ID}`, findingId: null, severity: "high" },
+    ]) {
+      await expectGitHubPageRejected(githubPage({
+        results: [{ ...base, result: "pass", ...contradiction }] as never,
+      }));
+    }
+  });
+
+  it("fails closed when a failing GitHub result lacks a finding or severity or claims pass evidence", async () => {
+    const base = githubV2Result.results[0];
+    for (const contradiction of [
+      { severity: null, evidenceId: null, findingId: `monitoring_finding:${REPORT_ID}` },
+      { severity: "high", evidenceId: null, findingId: null },
+      { severity: "high", evidenceId: `evidence:${REPORT_ID}`, findingId: `monitoring_finding:${REPORT_ID}` },
+    ]) {
+      await expectGitHubPageRejected(githubPage({ results: [{ ...base, ...contradiction }] as never }));
+    }
+  });
+
+  it("fails closed when unknown or not-applicable GitHub results claim severity or lifecycle records", async () => {
+    const base = githubV2Result.results[0];
+    for (const result of ["unknown", "not_applicable"] as const) {
+      for (const contradiction of [
+        { severity: "high", evidenceId: null, findingId: null },
+        { severity: null, evidenceId: `evidence:${REPORT_ID}`, findingId: null },
+        { severity: null, evidenceId: null, findingId: `monitoring_finding:${REPORT_ID}` },
+      ]) {
+        await expectGitHubPageRejected(githubPage({
+          results: [{ ...base, result, ...contradiction }] as never,
+        }));
+      }
+    }
+  });
+
+  it("accepts only the coherent lifecycle shape for each GitHub outcome", async () => {
+    const base = githubV2Result.results[0];
+    const validOutcomes = [
+      { result: "pass", severity: null, evidenceId: `evidence:${REPORT_ID}`, findingId: null },
+      { result: "fail", severity: "high", evidenceId: null, findingId: `monitoring_finding:${REPORT_ID}` },
+      { result: "unknown", severity: null, evidenceId: null, findingId: null },
+      { result: "not_applicable", severity: null, evidenceId: null, findingId: null },
+    ];
+    const services = serviceStubs();
+    for (const outcome of validOutcomes) {
+      vi.mocked(services.listGitHubComplianceResults).mockResolvedValueOnce(githubPage({
+        results: [{ ...base, ...outcome }] as never,
+      }) as never);
+    }
+    const { client } = await connected(services);
+
+    for (const outcome of validOutcomes) {
+      const response = await client.callTool({ name: "list_github_compliance_results", arguments: {} });
+      expect(response).toMatchObject({
+        structuredContent: { ok: true, data: { results: [expect.objectContaining({ result: outcome.result })] } },
+      });
+    }
+  });
+
+  it("fails closed on impossible result chronology or freshness relative to the snapshot", async () => {
+    const base = githubV2Result.results[0];
+    for (const contradiction of [
+      { freshUntil: base.observedAt },
+      { materialisedAt: "2026-08-25T00:59:59.000Z" },
+      { materialisedAt: "2026-08-25T01:42:37.000Z" },
+      { freshUntil: "2026-08-25T01:42:36.000Z", freshness: "current" },
+      { freshUntil: "2026-08-26T01:00:00.000Z", freshness: "stale" },
+    ]) {
+      await expectGitHubPageRejected(githubPage({ results: [{ ...base, ...contradiction }] as never }));
+    }
+  });
+
+  it("fails closed instead of returning an unsafe GitHub result summary", async () => {
+    const unsafeSummary = "Review https://github.com/acme/private?token=secret";
+    const page = githubPage({ results: [{ ...githubV2Result.results[0], summary: unsafeSummary }] as never });
+    const services = serviceStubs();
+    vi.mocked(services.listGitHubComplianceResults).mockResolvedValueOnce(page as never);
+    const { client } = await connected(services);
+
+    const response = await client.callTool({ name: "list_github_compliance_results", arguments: {} });
+
+    expect(response).toMatchObject({ isError: true, structuredContent: { error: { code: "INTERNAL_ERROR" } } });
+    expect(JSON.stringify(response)).not.toContain(unsafeSummary);
+  });
+
+  it("fails closed on duplicate or non-deterministically ordered GitHub result rows", async () => {
+    const base = githubV2Result.results[0];
+    const lowerId = {
+      ...base,
+      id: "github_result:20000000-0000-4000-8000-000000000001",
+      repositoryId: "50000000-0000-4000-8000-000000000001",
+      repositoryLabel: "GitHub repository 50000000",
+      findingId: "monitoring_finding:50000000-0000-4000-8000-000000000001",
+    };
+    await expectGitHubPageRejected(githubPage({ results: [base, base] as never }));
+    await expectGitHubPageRejected(githubPage({ results: [lowerId, base] as never }));
+  });
+
+  it("fails closed when truncation and continuation cursor state contradict each other or the requested limit", async () => {
+    await expectGitHubPageRejected(githubPage({ truncated: true, nextCursor: null }));
+    await expectGitHubPageRejected(githubPage({ truncated: false, nextCursor: GITHUB_CURSOR }));
+    await expectGitHubPageRejected(githubPage({ truncated: true, nextCursor: GITHUB_CURSOR }), { limit: 2 });
+  });
+
+  it("requires pageKind to match whether the client supplied a continuation cursor", async () => {
+    await expectGitHubPageRejected(githubPage({ pageKind: "continuation" }));
+    await expectGitHubPageRejected(githubPage({ pageKind: "initial" }), { cursor: GITHUB_CURSOR });
+  });
+
+  it("recomputes and verifies pageHash over the exact public page", async () => {
+    const tamperedHash = githubPage({}, "0".repeat(64));
+    await expectGitHubPageRejected(tamperedHash);
+  });
+
+  it("performs no Slack or GitHub network write while listing GitHub compliance results", async () => {
+    const services = serviceStubs();
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("external fetch is forbidden"));
+    try {
+      const { client } = await connected(services);
+      const response = await client.callTool({ name: "list_github_compliance_results", arguments: {} });
+
+      expect(response.isError).not.toBe(true);
+      expect(services.listGitHubComplianceResults).toHaveBeenCalledTimes(1);
+      expect(services.postDailyDigest).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 });

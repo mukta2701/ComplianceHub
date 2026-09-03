@@ -14,6 +14,11 @@ reconstruct facts from shadow observations.
 `list_github_compliance_results` is a read-only tool for bounded official GitHub
 compliance outcomes. Treat its returned outcome, freshness, and mapping status
 as facts; do not reconstruct history from raw observations or use it to post.
+Whenever `list_github_compliance_results` is used, a traversal is exhaustive
+only when it starts without a cursor, keeps the same workspace and all
+normalized filters including limit, and follows every exact `nextCursor` until
+null. A `pageKind=continuation` response is never exhaustive by itself;
+`truncated=true` or a non-null cursor means more rows follow the current page.
 
 ## Decide delivery intent first
 

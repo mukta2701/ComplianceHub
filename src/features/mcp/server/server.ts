@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { MONITORING_FINDING_STATUSES } from "@/features/monitoring/domain/finding-status";
 import { readinessReportSchema } from "@/features/reports/application/leadership-snapshots";
+import { githubPublicPageHash } from "../application/github-results-cursor";
 import {
   getComplianceOverview,
   getLatestLeadershipReport,
@@ -17,6 +18,7 @@ import { postDailyDigest, postDailyDigestInputSchema } from "../application/post
 import { listWorkspaces } from "../application/workspace-access";
 import { McpError, mcpErrorResult } from "../auth/errors";
 import { DIGEST_ATTENTION_CATEGORIES, DIGEST_SEVERITIES } from "../domain/digest";
+import { safeSummary } from "../domain/safe-summary";
 
 export const MCP_SERVER_INSTRUCTIONS = [
   "Supabase is canonical.",
@@ -37,6 +39,7 @@ export const MCP_SERVER_INSTRUCTIONS = [
   "Use only the safe evidence and policy summaries supplied by the tools; never return their bodies or person-level fields.",
   "post_daily_digest is an external Slack write, is restricted to the server-authorized sending role, and always uses the server-configured channel; never request or supply a destination.",
   "Read results are bounded snapshots and may be truncated.",
+  "A GitHub result traversal is exhaustive only when it starts without a cursor and follows every exact returned nextCursor with the same workspace and filters until null; a continuation page is never exhaustive by itself.",
   "Prepared schema-v2 GitHub digest facts come only from immutable official results and lifecycle events, and separate current pass, current failure, unknown, not-applicable, stale, and historical-mapping results.",
   "For GitHub content copy only exact server-owned lines returned in facts.github.lines; they begin with Verified GitHub technical fact:, Unknown GitHub information:, Stale GitHub result:, or Recommended follow-up:.",
   "Never present unknown, stale, or historical-mapping GitHub results as passing, and never claim that a GitHub result proves certification, readiness, security, or overall compliance.",
@@ -46,6 +49,10 @@ const OAUTH_SECURITY_SCHEMES = [{ type: "oauth2", scopes: ["openid", "email", "p
 const READ_ANNOTATIONS: ToolAnnotations = { readOnlyHint: true, destructiveHint: false, openWorldHint: false, idempotentHint: true };
 const WRITE_ANNOTATIONS: ToolAnnotations = { readOnlyHint: false, destructiveHint: false, openWorldHint: true };
 const uuid = z.uuid();
+const prefixedUuid = (prefix: string) => z.string().refine(
+  (value) => value.startsWith(prefix) && uuid.safeParse(value.slice(prefix.length)).success,
+  `${prefix} UUID required`,
+);
 const dateTime = z.string().datetime({ offset: true });
 const localDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
   const [year, month, day] = value.split("-").map(Number);
@@ -73,6 +80,7 @@ const githubResultsInputSchema = z.object({
   workspaceId: uuid.optional(), repositoryId: uuid.optional(), result: z.enum(["pass", "fail", "unknown", "not_applicable"]).optional(),
   freshness: z.enum(["current", "stale"]).optional(), mappingStatus: z.enum(["active", "historical"]).optional(),
   severity: z.enum(DIGEST_SEVERITIES).optional(), limit: z.number().int().min(1).max(50).default(20).optional(),
+  cursor: z.string().min(200).max(4_096).regex(/^ch4\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{1,3800}\.[A-Za-z0-9_-]{22}\.[0-9a-f]{64}$/).optional(),
 }).strict();
 
 const attentionItem = z.object({
@@ -88,13 +96,71 @@ const monitoringFinding = z.object({
   resolvedAt: dateTime.nullable(), hasRemediationTask: z.boolean(),
 }).strict();
 const githubResult = z.object({
-  id: z.string().regex(/^github_result:[0-9a-f-]{36}$/), repositoryId: uuid,
-  repositoryLabel: z.string().regex(/^GitHub repository [0-9a-f]{8}$/), checkId: z.string().min(1).max(120).regex(/^[a-z0-9._-]+$/),
+  id: prefixedUuid("github_result:"), repositoryId: uuid,
+  repositoryLabel: z.string().regex(/^GitHub repository [0-9a-f]{8}$/),
+  collectionRunId: prefixedUuid("github_run:"), runMode: z.literal("official"),
+  checkId: z.string().min(1).max(120).regex(/^[a-z0-9._-]+$/),
   result: z.enum(["pass", "fail", "unknown", "not_applicable"]), severity: z.enum(DIGEST_SEVERITIES).nullable(),
   observedAt: dateTime, freshUntil: dateTime, materialisedAt: dateTime, freshness: z.enum(["current", "stale"]),
-  mappingVersion: z.string().min(1).max(80).regex(/^[A-Za-z0-9._-]+$/), mappingStatus: z.enum(["active", "historical"]), ruleVersion: z.string().min(1).max(80).regex(/^[A-Za-z0-9._-]+$/), summary: z.string().min(1).max(280),
-  evidenceId: z.string().regex(/^evidence:[0-9a-f-]{36}$/).nullable(), findingId: z.string().regex(/^monitoring_finding:[0-9a-f-]{36}$/).nullable(),
-}).strict();
+  mappingVersion: z.string().min(1).max(80).regex(/^[A-Za-z0-9._-]+$/), mappingChecksum: z.string().regex(/^[0-9a-f]{64}$/),
+  mappingStatus: z.enum(["active", "historical"]), ruleVersion: z.string().min(1).max(120).regex(/^[A-Za-z0-9._-]+$/),
+  sourceResponseFingerprint: z.string().regex(/^[0-9a-f]{64}$/), summary: z.string().min(1).max(280),
+  evidenceId: prefixedUuid("evidence:").nullable(), findingId: prefixedUuid("monitoring_finding:").nullable(),
+  recordHash: z.string().regex(/^[0-9a-f]{64}$/),
+}).strict().superRefine((row, ctx) => {
+  if (row.result === "pass" && (row.severity !== null || row.evidenceId === null || row.findingId !== null)) {
+    ctx.addIssue({ code: "custom", message: "passing result has contradictory lifecycle references" });
+  }
+  if (row.result === "fail" && (row.severity === null || row.evidenceId !== null || row.findingId === null)) {
+    ctx.addIssue({ code: "custom", message: "failing result has contradictory lifecycle references" });
+  }
+  if ((row.result === "unknown" || row.result === "not_applicable")
+    && (row.severity !== null || row.evidenceId !== null || row.findingId !== null)) {
+    ctx.addIssue({ code: "custom", message: "explanatory result claims lifecycle references" });
+  }
+  if (Date.parse(row.freshUntil) <= Date.parse(row.observedAt)
+    || Date.parse(row.materialisedAt) < Date.parse(row.observedAt)) {
+    ctx.addIssue({ code: "custom", message: "invalid result chronology" });
+  }
+  if (row.repositoryLabel !== `GitHub repository ${row.repositoryId.slice(0, 8)}`) {
+    ctx.addIssue({ code: "custom", message: "unsafe repository label" });
+  }
+  if (safeSummary(row.summary, 280, "GitHub compliance result") !== row.summary) {
+    ctx.addIssue({ code: "custom", message: "unsafe summary" });
+  }
+});
+const githubResultsPage = z.object({
+  schemaVersion: z.literal(2), workspace: workspaceSummary, snapshotAt: dateTime,
+  results: z.array(githubResult).max(50), nextCursor: githubResultsInputSchema.shape.cursor.unwrap().nullable(),
+  truncated: z.boolean(), pageKind: z.enum(["initial", "continuation"]), pageHash: z.string().regex(/^[0-9a-f]{64}$/),
+}).strict().superRefine((page, ctx) => {
+  const snapshotAt = Date.parse(page.snapshotAt);
+  const ids = new Set<string>();
+  let previous: z.infer<typeof githubResult> | null = null;
+  for (const row of page.results) {
+    if (ids.has(row.id)) ctx.addIssue({ code: "custom", message: "duplicate result id" });
+    ids.add(row.id);
+    if (Date.parse(row.materialisedAt) > snapshotAt
+      || ((row.freshness === "current") !== (Date.parse(row.freshUntil) > snapshotAt))) {
+      ctx.addIssue({ code: "custom", message: "freshness contradicts snapshot" });
+    }
+    if (previous) {
+      const previousObservedAt = Date.parse(previous.observedAt);
+      const observedAt = Date.parse(row.observedAt);
+      if (previousObservedAt < observedAt || (previousObservedAt === observedAt && previous.id < row.id)) {
+        ctx.addIssue({ code: "custom", message: "non-deterministic result ordering" });
+      }
+    }
+    previous = row;
+  }
+  if (page.truncated !== (page.nextCursor !== null)) {
+    ctx.addIssue({ code: "custom", message: "truncation contradicts continuation cursor" });
+  }
+  const { pageHash, ...publicPage } = page;
+  if (githubPublicPageHash(publicPage) !== pageHash) {
+    ctx.addIssue({ code: "custom", message: "page hash does not match public page" });
+  }
+});
 const digestGithubResult = z.object({
   id: z.string().regex(/^github_result:[0-9a-f-]{36}$/), repositoryId: uuid,
   repositoryLabel: z.string().regex(/^GitHub repository [0-9a-f]{8}$/), checkId: z.string().min(1).max(120).regex(/^[a-z0-9._-]+$/),
@@ -194,7 +260,7 @@ export function createComplianceMcpServer(
   services: McpReadServices = defaultServices,
 ): McpServer {
   const server = new McpServer(
-    { name: "compliancehub-internal", version: "0.2.0" },
+    { name: "compliancehub-internal", version: "0.3.0" },
     { instructions: MCP_SERVER_INSTRUCTIONS },
   );
 
@@ -241,12 +307,23 @@ export function createComplianceMcpServer(
     }),
     defineTool({
       name: "list_github_compliance_results", title: "List approved GitHub compliance results",
-      description: "List bounded, caller-scoped official GitHub compliance results with explicit outcome, freshness, and mapping status. This read never exposes provider data or performs writes.",
+      description: "List bounded, caller-scoped official GitHub compliance results with explicit outcome, freshness, and mapping status. A traversal is exhaustive only when it starts without a cursor, keeps the same workspace and normalized filters including limit, and follows each exact nextCursor until null. pageKind=continuation is never exhaustive by itself; truncated=true or a non-null cursor means more rows follow the current page. This read never exposes provider data or performs writes.",
       input: githubResultsInputSchema,
-      output: success(z.object({ schemaVersion: z.literal(1), workspace: workspaceSummary, asOf: dateTime, results: z.array(githubResult).max(50), truncated: z.boolean() }).strict()),
+      output: success(githubResultsPage),
       run: async (input) => {
-        const data = await services.listGitHubComplianceResults(context.supabase, context.userId, input);
-        return successResult(data, `Found ${data.results.length} approved GitHub compliance result${data.results.length === 1 ? "" : "s"} for ${data.workspace.name}.`);
+        const data = await services.listGitHubComplianceResults(context.supabase, context.userId, input, {
+          clientId: context.clientId,
+          resource: context.resource,
+        });
+        const page = githubResultsPage.safeParse(data);
+        const limit = input.limit ?? 20;
+        if (!page.success
+          || page.data.pageKind !== (input.cursor ? "continuation" : "initial")
+          || page.data.results.length > limit
+          || (page.data.truncated && page.data.results.length !== limit)) {
+          throw new McpError("INTERNAL_ERROR");
+        }
+        return successResult(page.data, `Found ${page.data.results.length} approved GitHub compliance result${page.data.results.length === 1 ? "" : "s"} for ${page.data.workspace.name}.`);
       },
     }),
     defineTool({
