@@ -1,0 +1,433 @@
+import { mkdtemp, readFile, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import {
+  buildPhase2Proof,
+  buildProtectedDomainSnapshotQuery,
+  buildReconciliationQuery,
+  buildProtectedDomainSnapshot,
+  PROTECTED_DOMAIN_TABLES,
+  createAcceptanceAnswers,
+  deriveExpectedOfficialResults,
+  assertLocalAuthorizationUrl,
+  inspectStaticServerCallPath,
+  reconcileOfficialResults,
+  redactCursor,
+  requireLocalPostgresSettings,
+  parseProtectedDomainDigest,
+  validateDockerIdentity,
+  validateLocalDockerContext,
+  validateProofForPersistence,
+  writeProofArtifact,
+  type GitHubProofResult,
+} from "../../../../scripts/mcp-github-read-proof";
+
+function result(index: number, override: Partial<GitHubProofResult>): GitHubProofResult {
+  const suffix = String(index).padStart(12, "0");
+  return {
+    id: `github_result:10000000-0000-4000-8000-${suffix}`,
+    repositoryId: "40000000-0000-4000-8000-000000000001",
+    repositoryLabel: "GitHub repository 40000000",
+    collectionRunId: `github_run:70000000-0000-4000-8000-${suffix}`,
+    runMode: "official",
+    checkId: "github.branch.protection",
+    result: "pass",
+    severity: null,
+    observedAt: "2026-09-03T15:00:00.000Z",
+    freshUntil: "2026-09-04T16:00:00.000Z",
+    materialisedAt: "2026-09-03T15:01:00.000Z",
+    freshness: "current",
+    mappingVersion: "iso-v1",
+    mappingChecksum: "a".repeat(64),
+    mappingStatus: "active",
+    ruleVersion: "rule-v1",
+    sourceResponseFingerprint: "b".repeat(64),
+    summary: "The approved result was returned.",
+    evidenceId: `evidence:90000000-0000-4000-8000-${suffix}`,
+    findingId: null,
+    recordHash: "c".repeat(64),
+    ...override,
+  };
+}
+
+const results: GitHubProofResult[] = [
+  result(1, { result: "fail", severity: "high", evidenceId: null, findingId: "monitoring_finding:a0000000-0000-4000-8000-000000000001", summary: "The approved check found that branch protection needs attention." }),
+  result(2, { checkId: "github.code_scanning", result: "unknown", evidenceId: null, summary: "The approved check could not verify code scanning." }),
+  result(3, { checkId: "github.dependabot", freshness: "stale", summary: "The approved result needs to be checked again." }),
+];
+
+function protectedRows(overrides: Record<string, unknown[]> = {}) {
+  return {
+    ...Object.fromEntries(Object.keys(PROTECTED_DOMAIN_TABLES).map((domain) => [domain, []])),
+    ...overrides,
+  };
+}
+
+const domainSnapshot = buildProtectedDomainSnapshot(protectedRows({
+  githubOfficialResults: [{ id: "row-1", status: "current" }],
+  evidence: [{ id: "evidence-1", status: "active" }],
+}));
+
+function validProof() {
+  return buildPhase2Proof({
+    generatedAt: "2026-09-03T16:00:00.000Z",
+    endpoint: "http://127.0.0.1:3100/mcp",
+    oauth: {
+      discovery: true,
+      dynamicClientRegistration: true,
+      grant: "authorization-code",
+      pkce: "S256",
+      stateValidated: true,
+      consent: "approved",
+      audienceMatched: true,
+    },
+    server: { name: "compliancehub-internal", version: "0.3.0", initialized: true },
+    tools: {
+      listed: true,
+      workspaceRead: true,
+      githubRead: {
+        readOnly: true,
+        destructive: false,
+        openWorld: false,
+        initialRequestHadCursor: false,
+        limit: 1,
+        pages: [
+          { pageKind: "initial", resultCount: 1, nextCursor: redactCursor("ch4.first-secret-cursor") },
+          { pageKind: "continuation", resultCount: 1, nextCursor: redactCursor("ch4.second-secret-cursor") },
+          { pageKind: "continuation", resultCount: 1, nextCursor: null },
+        ],
+        traversedToNull: true,
+        totalResults: results.length,
+      },
+    },
+    database: {
+      scope: "tenant-compliance-state-plus-global-github-mapping-catalogue",
+      before: domainSnapshot,
+      after: domainSnapshot,
+      unchanged: true,
+      reconciliation: {
+        mcpResultCount: 3,
+        databaseResultCount: 3,
+        matched: true,
+        resultSetHash: "a".repeat(64),
+      },
+    },
+    observations: {
+      clientNetwork: { scope: "proof-client-process", loopbackOnly: true, githubCalls: 0, slackCalls: 0 },
+      invokedTools: { listWorkspaces: 1, githubReadPages: 3, writeTools: [] },
+      staticServerCallPath: { scope: "reviewed-source", databaseReadOnly: true, githubProviderReachable: false, slackWriteReachable: false },
+    },
+    answers: createAcceptanceAnswers(results),
+  });
+}
+
+describe("Phase 2 local MCP GitHub read proof", () => {
+  it("captures the complete read-only contract without persisting an opaque cursor", () => {
+    const proof = validProof();
+
+    expect(proof.endpoint).toBe("http://127.0.0.1:3100/mcp");
+    expect(proof.oauth.pkce).toBe("S256");
+    expect(proof.oauth.audienceMatched).toBe(true);
+    expect(proof.tools.githubRead.readOnly).toBe(true);
+    expect(proof.tools.githubRead.initialRequestHadCursor).toBe(false);
+    expect(proof.tools.githubRead.pages.at(-1)?.nextCursor).toBeNull();
+    expect(proof.tools.githubRead.traversedToNull).toBe(true);
+    expect(proof.database.reconciliation.matched).toBe(true);
+    expect(proof.database.scope).toBe("tenant-compliance-state-plus-global-github-mapping-catalogue");
+    expect(PROTECTED_DOMAIN_TABLES).toMatchObject({
+      githubMappingPacks: "github_mapping_packs",
+      githubMappingEntries: "github_mapping_entries",
+    });
+    expect(proof.database.unchanged).toBe(true);
+    expect(proof.observations.clientNetwork).toEqual({
+      scope: "proof-client-process",
+      loopbackOnly: true,
+      githubCalls: 0,
+      slackCalls: 0,
+    });
+    expect(proof.observations.invokedTools.writeTools).toEqual([]);
+    expect(proof.observations.staticServerCallPath).toEqual({
+      scope: "reviewed-source",
+      databaseReadOnly: true,
+      githubProviderReachable: false,
+      slackWriteReachable: false,
+    });
+    expect(JSON.stringify(proof)).not.toContain("ch4.first-secret-cursor");
+    expect(() => validateProofForPersistence(proof)).not.toThrow();
+  });
+
+  it("answers only from MCP facts and refuses change-history and certification claims", () => {
+    const answers = createAcceptanceAnswers(results);
+
+    expect(answers).toHaveLength(5);
+    expect(answers[0]?.answer).toContain("github.branch.protection");
+    expect(answers[1]?.answer).toContain("github.code_scanning");
+    expect(answers[2]?.answer).toContain("github.dependabot");
+    expect(answers[3]).toMatchObject({ supported: false });
+    expect(answers[3]?.answer).toMatch(/does not include verified change history/i);
+    expect(answers[4]).toMatchObject({ supported: true });
+    expect(answers[4]?.answer).toMatch(/^No\b.*does not prove ISO 27001 certification/i);
+  });
+
+  it("rejects secret-bearing artifacts and writes accepted proof owner-only", async () => {
+    const proof = validProof();
+    const prohibitedAccessField = ["access", "token"].join("_");
+    const prohibitedServiceField = ["service", "role", "key"].join("_");
+    const prohibitedValue = ["not", "persistable"].join("-");
+    expect(() => validateProofForPersistence({ ...proof, leaked: `Bearer ${prohibitedValue}` })).toThrow(/sensitive/i);
+    expect(() => validateProofForPersistence({ ...proof, cursor: "ch4.full-opaque-cursor" })).toThrow(/sensitive/i);
+    expect(() => validateProofForPersistence({ ...proof, [prohibitedAccessField]: prohibitedValue })).toThrow(/sensitive/i);
+    expect(() => validateProofForPersistence({ ...proof, [prohibitedServiceField]: prohibitedValue })).toThrow(/sensitive/i);
+
+    const directory = await mkdtemp(join(tmpdir(), "compliancehub-mcp-proof-"));
+    const output = join(directory, "proof.json");
+    await writeProofArtifact(output, proof);
+
+    expect((await stat(output)).mode & 0o777).toBe(0o600);
+    expect(JSON.parse(await readFile(output, "utf8"))).toEqual(proof);
+  });
+
+  it("fails closed when the local database has no official Phase 1 results", () => {
+    const proof = validProof();
+    const empty = {
+      ...proof,
+      tools: {
+        ...proof.tools,
+        githubRead: {
+          ...proof.tools.githubRead,
+          pages: [{ pageKind: "initial" as const, resultCount: 0, nextCursor: null }],
+          totalResults: 0,
+        },
+      },
+      database: {
+        ...proof.database,
+        reconciliation: {
+          mcpResultCount: 0,
+          databaseResultCount: 0,
+          matched: true as const,
+          resultSetHash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        },
+      },
+    };
+
+    expect(() => validateProofForPersistence(empty)).toThrow(/official Phase 1 result/i);
+  });
+
+  it("independently derives the eligible terminal latest-result set from stored table rows", () => {
+    const snapshotAt = "2026-09-03T16:00:00.000Z";
+    const base = {
+      organisation_id: "20000000-0000-4000-8000-000000000001",
+      installation_id: "30000000-0000-4000-8000-000000000001",
+      repository_id: "40000000-0000-4000-8000-000000000001",
+      provider_repository_id: 42,
+      mapping_pack_id: "50000000-0000-4000-8000-000000000001",
+      mapping_version: "iso-v1",
+      mapping_checksum: "a".repeat(64),
+      approval_id: "60000000-0000-4000-8000-000000000001",
+      check_id: "github.branch.protection",
+      fresh_until: "2026-09-04T16:00:00.000Z",
+    };
+    const officialRows = [
+      { ...base, id: "10000000-0000-4000-8000-000000000001", collection_run_id: "70000000-0000-4000-8000-000000000001", observation_id: "80000000-0000-4000-8000-000000000001", observed_at: "2026-09-03T14:00:00.000Z", materialised_at: "2026-09-03T14:01:00.000Z" },
+      { ...base, id: "10000000-0000-4000-8000-000000000002", collection_run_id: "70000000-0000-4000-8000-000000000002", observation_id: "80000000-0000-4000-8000-000000000002", observed_at: "2026-09-03T15:00:00.000Z", materialised_at: "2026-09-03T15:01:00.000Z" },
+      { ...base, id: "10000000-0000-4000-8000-000000000003", collection_run_id: "70000000-0000-4000-8000-000000000003", observation_id: "80000000-0000-4000-8000-000000000003", observed_at: "2026-09-03T15:30:00.000Z", materialised_at: "2026-09-03T16:01:00.000Z" },
+      { ...base, id: "10000000-0000-4000-8000-000000000004", collection_run_id: "70000000-0000-4000-8000-000000000004", observation_id: "80000000-0000-4000-8000-000000000004", observed_at: "2026-09-03T15:45:00.000Z", materialised_at: "2026-09-03T15:46:00.000Z" },
+    ];
+    const observations = officialRows.map((row) => ({
+      id: row.observation_id,
+      organisation_id: row.organisation_id,
+      installation_id: row.installation_id,
+      repository_id: row.repository_id,
+      provider_repository_id: row.provider_repository_id,
+      collection_run_id: row.collection_run_id,
+      fingerprint: "b".repeat(64),
+    }));
+    const runs = officialRows.map((row, index) => ({
+      id: row.collection_run_id,
+      organisation_id: row.organisation_id,
+      installation_id: row.installation_id,
+      repository_id: row.repository_id,
+      provider_repository_id: row.provider_repository_id,
+      run_mode: index === 3 ? "shadow" : "official",
+      status: "succeeded",
+      completed_at: "2026-09-03T15:50:00.000Z",
+    }));
+    const approvals = [{ id: base.approval_id, organisation_id: base.organisation_id, mapping_pack_id: base.mapping_pack_id, approved_at: "2026-09-01T00:00:00.000Z", revoked_at: null }];
+    const packs = [{ id: base.mapping_pack_id, version: base.mapping_version, checksum: base.mapping_checksum, published_at: "2026-09-01T00:00:00.000Z" }];
+
+    expect(deriveExpectedOfficialResults({
+      officialRows: officialRows.map((row) => ({
+        ...row,
+        outcome: "fail",
+        failure_severity: "high",
+        rule_version: "rule-v1",
+        catalogue_summary: "The approved check found that branch protection needs attention.",
+        evidence_id: null,
+        finding_id: "a0000000-0000-4000-8000-000000000001",
+      })),
+      observations,
+      runs,
+      approvals,
+      packs,
+      snapshotAt,
+    })).toEqual([{
+      id: "github_result:10000000-0000-4000-8000-000000000002",
+      repositoryId: base.repository_id,
+      repositoryLabel: "GitHub repository 40000000",
+      collectionRunId: "github_run:70000000-0000-4000-8000-000000000002",
+      runMode: "official",
+      checkId: "github.branch.protection",
+      result: "fail",
+      severity: "high",
+      observedAt: "2026-09-03T15:00:00.000Z",
+      freshUntil: "2026-09-04T16:00:00.000Z",
+      materialisedAt: "2026-09-03T15:01:00.000Z",
+      freshness: "current",
+      mappingVersion: "iso-v1",
+      mappingChecksum: "a".repeat(64),
+      mappingStatus: "active",
+      ruleVersion: "rule-v1",
+      sourceResponseFingerprint: "b".repeat(64),
+      summary: "The approved check found that branch protection needs attention.",
+      evidenceId: null,
+      findingId: "monitoring_finding:a0000000-0000-4000-8000-000000000001",
+    }]);
+  });
+
+  it("rejects an MCP outcome that disagrees with the independently stored result", () => {
+    const expected = results.map(({ recordHash: _recordHash, ...row }) => {
+      void _recordHash;
+      return row;
+    });
+
+    expect(reconcileOfficialResults(results, expected)).toMatchObject({ matched: true });
+    expect(reconcileOfficialResults([
+      { ...results[0]!, result: "unknown", severity: null, findingId: null },
+      ...results.slice(1),
+    ], expected)).toMatchObject({ matched: false });
+  });
+
+  it("detects protected-domain updates even when every table keeps the same row count", () => {
+    const before = buildProtectedDomainSnapshot(protectedRows({ evidence: [{ id: "row-1", status: "active" }] }));
+    const after = buildProtectedDomainSnapshot(protectedRows({ evidence: [{ id: "row-1", status: "withdrawn" }] }));
+    expect(before.evidence.rowCount).toBe(after.evidence.rowCount);
+    expect(before.evidence.sha256).not.toBe(after.evidence.sha256);
+
+    const proof = validProof();
+    expect(() => validateProofForPersistence({
+      ...proof,
+      database: { ...proof.database, before, after, unchanged: true },
+    })).toThrow(/snapshot/i);
+  });
+
+  it("fails closed on internally contradictory pagination, counts, versions, and answers", () => {
+    const proof = validProof();
+    const cases: unknown[] = [
+      { ...proof, server: { ...proof.server, version: "0.2.0" } },
+      { ...proof, tools: { ...proof.tools, githubRead: { ...proof.tools.githubRead, totalResults: 2 } } },
+      { ...proof, tools: { ...proof.tools, githubRead: { ...proof.tools.githubRead, pages: [
+        proof.tools.githubRead.pages[0],
+        { ...proof.tools.githubRead.pages[1], pageKind: "initial" },
+        proof.tools.githubRead.pages[2],
+      ] } } },
+      { ...proof, database: { ...proof.database, reconciliation: { ...proof.database.reconciliation, databaseResultCount: 2 } } },
+      { ...proof, database: { ...proof.database, reconciliation: { ...proof.database.reconciliation, matched: false } } },
+      { ...proof, database: { ...proof.database, after: buildProtectedDomainSnapshot(protectedRows({ evidence: [{ id: "changed" }] })) } },
+      { ...proof, observations: { ...proof.observations, invokedTools: { ...proof.observations.invokedTools, githubReadPages: 2 } } },
+      { ...proof, tools: { ...proof.tools, githubRead: { ...proof.tools.githubRead, pages: proof.tools.githubRead.pages.map((page, index) => index === 0 ? { ...page, nextCursor: null } : page) } } },
+      { ...proof, answers: proof.answers.map((answer, index) => index === 4 ? { ...answer, answer: "Yes, certified." } : answer) },
+    ];
+
+    for (const candidate of cases) expect(() => validateProofForPersistence(candidate)).toThrow();
+  });
+
+  it("accepts only the exact local authorization-server URL before browser handoff", () => {
+    const supabaseUrl = new URL("http://127.0.0.1:54321");
+    expect(() => assertLocalAuthorizationUrl(
+      new URL("http://127.0.0.1:54321/auth/v1/oauth/authorize?client_id=local"),
+      supabaseUrl,
+    )).not.toThrow();
+    expect(() => assertLocalAuthorizationUrl(
+      new URL("https://attacker.example/auth/v1/oauth/authorize?client_id=local"),
+      supabaseUrl,
+    )).toThrow(/authorization URL/i);
+    expect(() => assertLocalAuthorizationUrl(
+      new URL("http://localhost:54321/auth/v1/oauth/authorize?client_id=local"),
+      supabaseUrl,
+    )).toThrow(/authorization URL/i);
+  });
+
+  it("records static server call-path evidence separately from client network observations", async () => {
+    await expect(inspectStaticServerCallPath()).resolves.toEqual({
+      scope: "reviewed-source",
+      databaseReadOnly: true,
+      githubProviderReachable: false,
+      slackWriteReachable: false,
+    });
+  });
+
+  it("requires an exact local Docker/PostgreSQL boundary and never reconciles through REST or the v2 RPC", async () => {
+    expect(requireLocalPostgresSettings({
+      NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:54321",
+      MCP_PROOF_DB_CONTAINER: "supabase_db_compliancehub",
+    })).toEqual({
+      supabaseUrl: "http://127.0.0.1:54321",
+      databaseContainer: "supabase_db_compliancehub",
+    });
+    expect(() => requireLocalPostgresSettings({
+      NEXT_PUBLIC_SUPABASE_URL: "https://project.supabase.co",
+      MCP_PROOF_DB_CONTAINER: "supabase_db_compliancehub",
+    })).toThrow(/local/i);
+    expect(() => requireLocalPostgresSettings({
+      NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:54321",
+      MCP_PROOF_DB_CONTAINER: "supabase_db_compliancehub; rm -rf",
+    })).toThrow(/container/i);
+    expect(() => requireLocalPostgresSettings({
+      NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:54321",
+      DOCKER_HOST: "tcp://remote.example:2375",
+    })).toThrow(/remote Docker/i);
+
+    expect(() => validateLocalDockerContext({ contextName: "remote", host: "tcp://remote.example:2375" })).toThrow(/local Unix/i);
+    expect(() => validateLocalDockerContext({ contextName: "colima", host: "unix:///Users/test/.colima/default/docker.sock" })).not.toThrow();
+    const identity = {
+      name: "/supabase_db_compliancehub",
+      running: true,
+      image: "public.ecr.aws/supabase/postgres:15.8.1.085",
+      composeProject: "compliancehub",
+      supabaseProject: "compliancehub",
+      networks: ["supabase_network_compliancehub"],
+      aliases: ["db", "db.supabase.internal"],
+    };
+    expect(() => validateDockerIdentity(identity, "supabase_db_compliancehub")).not.toThrow();
+    expect(() => validateDockerIdentity({ ...identity, composeProject: "attacker" }, "supabase_db_compliancehub")).toThrow(/identity/i);
+    expect(() => validateDockerIdentity({ ...identity, networks: ["bridge"] }, "supabase_db_compliancehub")).toThrow(/network/i);
+
+    const source = await readFile(join(process.cwd(), "scripts/mcp-github-read-proof.ts"), "utf8");
+    expect(source).not.toMatch(/\.rpc\s*\(\s*["']get_mcp_github_compliance_results_v2["']/);
+    expect(source).not.toContain("SUPABASE_SERVICE_ROLE_KEY");
+    expect(source).not.toContain("createClient(");
+    expect(source).toContain("execFile(");
+    expect(source).not.toContain("shell: true");
+    expect(source).not.toContain("authorizationUrl.toString()}\\n");
+  });
+
+  it("uses atomic read-only SQL and returns only protected-domain digests", () => {
+    const workspaceId = "20000000-0000-4000-8000-000000000001";
+    for (const query of [buildProtectedDomainSnapshotQuery(workspaceId), buildReconciliationQuery(workspaceId)]) {
+      expect(query).toMatch(/begin transaction read only/i);
+      expect(query).toMatch(/current_setting\('transaction_read_only'\)/i);
+      expect(query).not.toMatch(/select\s+\*/i);
+      expect(query).toMatch(/commit/i);
+    }
+    expect(() => buildProtectedDomainSnapshotQuery("' OR true; --")).toThrow();
+    expect(() => buildReconciliationQuery("' OR true; --")).toThrow();
+
+    const digest = Object.fromEntries(Object.keys(PROTECTED_DOMAIN_TABLES).map((domain) => [
+      domain,
+      { rowCount: 0, sha256: "e".repeat(64) },
+    ]));
+    expect(parseProtectedDomainDigest(JSON.stringify({ readOnly: true, scope: "tenant-compliance-state-plus-global-github-mapping-catalogue", tables: digest }))).toEqual(digest);
+    expect(() => parseProtectedDomainDigest(JSON.stringify({ readOnly: true, tables: { evidence: { rows: [{ access_token: "secret" }] } } }))).toThrow(/digest/i);
+  });
+});
