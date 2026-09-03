@@ -1,24 +1,41 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import {
   getComplianceOverview,
   getLatestLeadershipReport,
   dateInLondon,
   listAttentionItems,
-  listGitHubComplianceResults,
+  listGitHubComplianceResults as listGitHubComplianceResultsService,
   listMonitoringFindings,
   mapDeliveryStatus,
   MCP_BUNDLE_REQUEST_TIMEOUT_MS,
   prepareDailyDigest,
 } from "./mcp-reads";
+import { githubPublicPageHash, issueGitHubResultsCursor, verifyGitHubResultsCursor } from "./github-results-cursor";
 
 const USER = "10000000-0000-4000-8000-000000000001";
 const ORG = "20000000-0000-4000-8000-000000000001";
 const REPORT = "30000000-0000-4000-8000-000000000001";
+const CURSOR_CONTEXT = {
+  clientId: "codex-test",
+  resource: "https://compliance.example/mcp",
+  now: new Date("2026-08-25T01:43:00.000Z"),
+};
+process.env.APP_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
 const readiness = { soaPercent: 75, soaTotal: 4, riskBands: { low: 1, moderate: 1, high: 0, very_high: 0 }, tasksOpen: 2, tasksOverdue: 1, evidence: { total: 3, expiring: 1, expired: 0 }, openAudits: 1, openNonConformities: 0 };
 
 type State = { table: string; select?: string; filters: Array<[string, unknown, unknown?]>; orders: Array<[string, boolean]>; range?: [number, number]; limit?: number };
 type Resolver = (state: State) => { data: unknown; error: unknown; count?: number | null };
 type RpcResolver = (name: string, args: Record<string, unknown>) => { data: unknown; error: unknown };
+
+function listGitHubComplianceResults(
+  supabase: never,
+  verifiedUserId: string,
+  input: Parameters<typeof listGitHubComplianceResultsService>[2],
+  cursorContext = CURSOR_CONTEXT,
+) {
+  return listGitHubComplianceResultsService(supabase, verifiedUserId, input, cursorContext);
+}
 
 function fakeSupabase(resolvers: Record<string, Resolver>, rpcResolver?: RpcResolver) {
   const states: State[] = [];
@@ -121,55 +138,343 @@ function githubDigestBundle(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function githubResults(overrides: Record<string, unknown> = {}) {
+const GITHUB_INNER_CURSOR = `ch3.eyJzbmFwc2hvdEF0IjoiMjAyNi0wOC0yNVQwMTo0MjozNi4wMDBaIn0.${"a".repeat(64)}`;
+
+function githubPageCursor(input: {
+  userId?: string;
+  organisationId?: string;
+  clientId?: string;
+  resource?: string;
+  repositoryId?: string | null;
+  result?: "pass" | "fail" | "unknown" | "not_applicable" | null;
+  freshness?: "current" | "stale" | null;
+  mappingStatus?: "active" | "historical" | null;
+  severity?: "low" | "medium" | "high" | "critical" | null;
+  limit?: number;
+  innerCursor?: string;
+  issuedAt?: string;
+  expiresAt?: string;
+} = {}) {
+  return issueGitHubResultsCursor({
+    scope: {
+      userId: input.userId ?? USER,
+      clientId: input.clientId ?? CURSOR_CONTEXT.clientId,
+      organisationId: input.organisationId ?? ORG,
+      resource: input.resource ?? CURSOR_CONTEXT.resource,
+      filters: {
+        repositoryId: input.repositoryId ?? null,
+        result: input.result ?? null,
+        freshness: input.freshness ?? null,
+        mappingStatus: input.mappingStatus ?? null,
+        severity: input.severity ?? null,
+        limit: input.limit ?? 20,
+      },
+    },
+    innerCursor: input.innerCursor ?? GITHUB_INNER_CURSOR,
+    timing: {
+      issuedAt: input.issuedAt ?? "2026-08-25T01:42:00.000Z",
+      expiresAt: input.expiresAt ?? "2026-08-25T01:57:00.000Z",
+    },
+    now: new Date("2026-08-25T01:42:00.000Z"),
+  });
+}
+
+function githubResultsV2(overrides: Record<string, unknown> = {}) {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     workspace: { id: ORG, name: "Acme" },
-    asOf: "2026-08-25T01:42:36.000Z",
+    snapshotAt: "2026-08-25T01:42:36.000Z",
     results: [{
       id: "github_result:40000000-0000-4000-8000-000000000001",
       repositoryId: "50000000-0000-4000-8000-000000000001",
       repositoryLabel: "GitHub repository 50000000",
-      checkId: "branch_protection",
+      collectionRunId: "github_run:70000000-0000-4000-8000-000000000001",
+      runMode: "official",
+      checkId: "github.branch.stale_approvals",
       result: "fail",
       severity: "high",
       observedAt: "2026-08-25T01:00:00.000Z",
       freshUntil: "2026-08-26T01:00:00.000Z",
       materialisedAt: "2026-08-25T01:01:00.000Z",
       freshness: "current",
-      mappingVersion: "github-iso-2026.08",
+      mappingVersion: "github-iso-27001-v1",
+      mappingChecksum: "b".repeat(64),
       mappingStatus: "active",
-      ruleVersion: "2026-08-17",
-      summary: "Branch protection is not enabled.",
+      ruleVersion: "github-repository-v1",
+      sourceResponseFingerprint: "c".repeat(64),
+      summary: "A failed GitHub branch-control observation creates or refreshes a finding.",
       evidenceId: null,
       findingId: "monitoring_finding:60000000-0000-4000-8000-000000000001",
+      recordHash: "d".repeat(64),
     }],
+    nextCursor: null,
     truncated: false,
+    pageKind: "initial",
+    pageHash: "e".repeat(64),
     ...overrides,
   };
 }
 
+function githubPageRows(count: number) {
+  const base = githubResultsV2().results[0]!;
+  return Array.from({ length: count }, (_, index) => {
+    const suffix = String(count - index).padStart(12, "0");
+    return {
+      ...base,
+      id: `github_result:40000000-0000-4000-8000-${suffix}`,
+      repositoryId: `50000000-0000-4000-8000-${suffix}`,
+      repositoryLabel: `GitHub repository 50000000`,
+      checkId: `github.check.${suffix}`,
+    };
+  });
+}
+
 describe("MCP public read services", () => {
+  it("accepts only the schema-v2 official result contract with complete local provenance and canonical hashes", async () => {
+    const fake = fakeSupabase({ memberships: membership("member") }, () => ({ data: githubResultsV2(), error: null }));
+
+    await expect(listGitHubComplianceResults(fake.client as never, USER, { workspaceId: ORG, limit: 1 }))
+      .resolves.toMatchObject({ schemaVersion: 2, pageKind: "initial", nextCursor: null, truncated: false, pageHash: expect.stringMatching(/^[0-9a-f]{64}$/) });
+  });
+
+  it("passes an opaque continuation cursor to v2 so an organisation can exhaust more than fifty official results", async () => {
+    const secondPage = githubResultsV2({
+      results: [{
+        ...(githubResultsV2().results[0] as object),
+        id: "github_result:30000000-0000-4000-8000-000000000001",
+        repositoryId: "80000000-0000-4000-8000-000000000001",
+        repositoryLabel: "GitHub repository 80000000",
+        collectionRunId: "github_run:90000000-0000-4000-8000-000000000001",
+        recordHash: "f".repeat(64),
+      }],
+      nextCursor: null,
+      truncated: false,
+      pageKind: "continuation",
+      pageHash: "a".repeat(64),
+    });
+    const outerCursor = githubPageCursor({ result: "fail", freshness: "current", mappingStatus: "active", severity: "high", limit: 50 });
+    const fake = fakeSupabase({ memberships: membership("member") }, (_name, args) => ({
+      data: args.target_cursor === GITHUB_INNER_CURSOR ? secondPage : null,
+      error: null,
+    }));
+
+    await expect(listGitHubComplianceResults(fake.client as never, USER, {
+      workspaceId: ORG,
+      result: "fail",
+      freshness: "current",
+      mappingStatus: "active",
+      severity: "high",
+      limit: 50,
+      cursor: outerCursor,
+    } as never)).resolves.toMatchObject({ pageKind: "continuation", nextCursor: null, truncated: false, results: secondPage.results });
+    expect(fake.rpc).toHaveBeenCalledWith("get_mcp_github_compliance_results_v2", {
+      target_organisation_id: ORG,
+      target_repository_id: null,
+      target_result: "fail",
+      target_freshness: "current",
+      target_mapping_status: "active",
+      target_severity: "high",
+      target_limit: 50,
+      target_cursor: GITHUB_INNER_CURSOR,
+    });
+  });
+
+  it("rejects raw DB ch3, legacy ch2 and clear ch3, malformed, or oversized public cursors without RPC execution", async () => {
+    const legacyCh2 = GITHUB_INNER_CURSOR.replace(/^ch3\./, "ch2.");
+    for (const cursor of ["", GITHUB_INNER_CURSOR, legacyCh2, "ch3.not-base64.short", "ch4.not.valid", `ch4.${"a".repeat(4_100)}.${"b".repeat(64)}`]) {
+      const fake = fakeSupabase({ memberships: membership("member") });
+      await expect(listGitHubComplianceResults(fake.client as never, USER, { workspaceId: ORG, cursor } as never))
+        .rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+      expect(fake.states).toEqual([]);
+      expect(fake.rpc).not.toHaveBeenCalled();
+    }
+  });
+
+  it("rejects forged, expired, future, or differently bound encrypted ch4 cursors after independent membership resolution", async () => {
+    const valid = githubPageCursor();
+    const cursorParts = valid.split(".");
+    const signedBody = cursorParts.slice(0, -1).join(".");
+    const publicShaForgery = `${signedBody}.${createHash("sha256").update(signedBody).digest("hex")}`;
+    const expired = githubPageCursor({ issuedAt: "2026-08-25T01:20:00.000Z", expiresAt: "2026-08-25T01:35:00.000Z" });
+    const future = githubPageCursor({ issuedAt: "2026-08-25T01:44:00.000Z", expiresAt: "2026-08-25T01:59:00.000Z" });
+    const cases = [
+      { cursor: `${valid.slice(0, -1)}0`, input: {}, userId: USER, context: CURSOR_CONTEXT },
+      { cursor: publicShaForgery, input: {}, userId: USER, context: CURSOR_CONTEXT },
+      { cursor: expired, input: {}, userId: USER, context: CURSOR_CONTEXT },
+      { cursor: future, input: {}, userId: USER, context: CURSOR_CONTEXT },
+      { cursor: valid, input: {}, userId: "10000000-0000-4000-8000-000000000002", context: CURSOR_CONTEXT },
+      { cursor: valid, input: {}, userId: USER, context: { ...CURSOR_CONTEXT, clientId: "other-client" } },
+      { cursor: valid, input: {}, userId: USER, context: { ...CURSOR_CONTEXT, resource: "https://other.example/mcp" } },
+      { cursor: valid, input: { result: "pass" }, userId: USER, context: CURSOR_CONTEXT },
+      { cursor: valid, input: { limit: 21 }, userId: USER, context: CURSOR_CONTEXT },
+      { cursor: githubPageCursor({ organisationId: "20000000-0000-4000-8000-000000000002" }), input: {}, userId: USER, context: CURSOR_CONTEXT },
+    ];
+    for (const testCase of cases) {
+      const fake = fakeSupabase({ memberships: membership("member") });
+      await expect(listGitHubComplianceResults(fake.client as never, testCase.userId, {
+        workspaceId: ORG,
+        ...testCase.input,
+        cursor: testCase.cursor,
+      }, testCase.context)).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+      expect(fake.states.map(({ table }) => table)).toEqual(["memberships"]);
+      expect(fake.rpc).not.toHaveBeenCalled();
+    }
+  });
+
+  it("normalizes default limit, preserves the original TTL, and truthfully labels retried continuation pages", async () => {
+    const innerTwo = `ch3.${"b".repeat(120)}.${"c".repeat(64)}`;
+    const fake = fakeSupabase({ memberships: membership("member") }, (_name, args) => ({
+      data: args.target_cursor === null
+        ? githubResultsV2({ results: githubPageRows(20), nextCursor: GITHUB_INNER_CURSOR, truncated: true, pageKind: "initial" })
+        : args.target_cursor === GITHUB_INNER_CURSOR
+          ? githubResultsV2({ results: githubPageRows(20), nextCursor: innerTwo, truncated: true, pageKind: "continuation", pageHash: "f".repeat(64) })
+          : githubResultsV2({ results: githubPageRows(20), nextCursor: null, truncated: false, pageKind: "continuation", pageHash: "1".repeat(64) }),
+      error: null,
+    }));
+
+    const initial = await listGitHubComplianceResults(fake.client as never, USER, { workspaceId: ORG });
+    expect(initial).toMatchObject({ pageKind: "initial", truncated: true, nextCursor: expect.stringMatching(/^ch4\./) });
+    expect(initial.nextCursor).not.toContain("ch3.");
+    expect(initial.pageHash).not.toBe("e".repeat(64));
+    const initialProjection = {
+      schemaVersion: initial.schemaVersion,
+      workspace: initial.workspace,
+      snapshotAt: initial.snapshotAt,
+      results: initial.results,
+      nextCursor: initial.nextCursor,
+      truncated: initial.truncated,
+      pageKind: initial.pageKind,
+    };
+    expect(initial.pageHash).toBe(githubPublicPageHash(initialProjection));
+    expect(initial.pageHash).not.toBe(githubPublicPageHash({ ...initialProjection, pageKind: "continuation" }));
+
+    const continued = await listGitHubComplianceResults(fake.client as never, USER, {
+      workspaceId: ORG, limit: 20, cursor: initial.nextCursor!,
+    });
+    const retried = await listGitHubComplianceResults(fake.client as never, USER, {
+      workspaceId: ORG, cursor: initial.nextCursor!,
+    });
+    expect(continued).toMatchObject({ pageKind: "continuation", truncated: true, nextCursor: expect.stringMatching(/^ch4\./) });
+    expect(retried.nextCursor).toBe(continued.nextCursor);
+    expect(retried.pageHash).toBe(continued.pageHash);
+    expect(initial.nextCursor).not.toContain(USER);
+    expect(initial.nextCursor).not.toContain(ORG);
+    expect(initial.nextCursor).not.toContain(GITHUB_INNER_CURSOR);
+    expect(initial.nextCursor).not.toContain(Buffer.from(GITHUB_INNER_CURSOR, "utf8").toString("base64url"));
+    const initialVerified = verifyGitHubResultsCursor({ cursor: initial.nextCursor!, scope: {
+      userId: USER, clientId: CURSOR_CONTEXT.clientId, organisationId: ORG, resource: CURSOR_CONTEXT.resource,
+      filters: { repositoryId: null, result: null, freshness: null, mappingStatus: null, severity: null, limit: 20 },
+    }, now: CURSOR_CONTEXT.now });
+    const continuedVerified = verifyGitHubResultsCursor({ cursor: continued.nextCursor!, scope: {
+      userId: USER, clientId: CURSOR_CONTEXT.clientId, organisationId: ORG, resource: CURSOR_CONTEXT.resource,
+      filters: { repositoryId: null, result: null, freshness: null, mappingStatus: null, severity: null, limit: 20 },
+    }, now: CURSOR_CONTEXT.now });
+    expect(initialVerified).toMatchObject({ innerCursor: GITHUB_INNER_CURSOR });
+    expect(continuedVerified.timing).toEqual(initialVerified.timing);
+
+    await expect(listGitHubComplianceResults(fake.client as never, USER, {
+      workspaceId: ORG, cursor: continued.nextCursor!,
+    })).resolves.toMatchObject({ pageKind: "continuation", truncated: false, nextCursor: null });
+  });
+
+  it("keeps a worst-case client/resource binding and internal cursor inside the reviewed public bound", async () => {
+    const resource = `https://example.com/${"r".repeat(2_028)}`;
+    expect(resource).toHaveLength(2_048);
+    const longestInner = `ch3.${"a".repeat(1_900)}.${"b".repeat(64)}`;
+    const fake = fakeSupabase({ memberships: membership("member") }, () => ({
+      data: githubResultsV2({ results: githubPageRows(20), nextCursor: longestInner, truncated: true }), error: null,
+    }));
+    const page = await listGitHubComplianceResults(fake.client as never, USER, {}, {
+      clientId: "c".repeat(200), resource, now: CURSOR_CONTEXT.now,
+    });
+    expect(page.nextCursor).toMatch(/^ch4\./);
+    expect(Buffer.byteLength(page.nextCursor!, "utf8")).toBeLessThanOrEqual(4_096);
+    expect(page.nextCursor).not.toContain(resource);
+    expect(page.nextCursor).not.toContain("c".repeat(200));
+  });
+
+  it("issues deterministic encrypted cursors and invalidates them after application-key rotation", () => {
+    const cursor = githubPageCursor();
+    expect(githubPageCursor()).toBe(cursor);
+    expect(cursor).toMatch(/^ch4\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{22}\.[0-9a-f]{64}$/);
+    const originalKey = process.env.APP_ENCRYPTION_KEY;
+    process.env.APP_ENCRYPTION_KEY = Buffer.alloc(32, 8).toString("base64");
+    expect(() => verifyGitHubResultsCursor({ cursor, scope: {
+      userId: USER, clientId: CURSOR_CONTEXT.clientId, organisationId: ORG, resource: CURSOR_CONTEXT.resource,
+      filters: { repositoryId: null, result: null, freshness: null, mappingStatus: null, severity: null, limit: 20 },
+    }, now: CURSOR_CONTEXT.now })).toThrow("Invalid GitHub compliance continuation cursor");
+    expect(githubPageCursor()).not.toBe(cursor);
+    process.env.APP_ENCRYPTION_KEY = originalKey;
+  });
+
+  it("maps a v2 RPC cursor rejection to a safe validation error and keeps other database failures internal", async () => {
+    const rejectedCursor = fakeSupabase({ memberships: membership("member") }, () => ({
+      data: null, error: { code: "22023", message: "cursor tuple missing: private-ledger-detail" },
+    }));
+    const cursorFailure = await listGitHubComplianceResults(rejectedCursor.client as never, USER, {
+      workspaceId: ORG, cursor: githubPageCursor(),
+    } as never).catch((error: unknown) => error);
+    expect(cursorFailure).toMatchObject({ code: "VALIDATION_ERROR" });
+    expect(JSON.stringify(cursorFailure)).not.toContain("private-ledger-detail");
+    expect(rejectedCursor.states.map(({ table }) => table)).toEqual(["memberships"]);
+    expect(rejectedCursor.rpc).toHaveBeenCalledTimes(1);
+
+    const databaseFailure = fakeSupabase({ memberships: membership("member") }, () => ({
+      data: null, error: { code: "XX000", message: "database secret detail" },
+    }));
+    const internalFailure = await listGitHubComplianceResults(databaseFailure.client as never, USER, {
+      workspaceId: ORG, cursor: githubPageCursor(),
+    } as never).catch((error: unknown) => error);
+    expect(internalFailure).toMatchObject({ code: "INTERNAL_ERROR" });
+    expect(JSON.stringify(internalFailure)).not.toContain("database secret detail");
+  });
+
+  it("fails closed when a v2 RPC row does not honour its workspace-bound normalized filters", async () => {
+    const mismatches = [
+      { repositoryId: "90000000-0000-4000-8000-000000000001" },
+      { result: "pass", severity: null, evidenceId: "evidence:90000000-0000-4000-8000-000000000002", findingId: null },
+      { freshness: "stale" },
+      { mappingStatus: "historical" },
+      { severity: "critical" },
+      { runMode: "shadow" },
+    ];
+    for (const mismatch of mismatches) {
+      const row = { ...githubResultsV2().results[0], ...mismatch };
+      const fake = fakeSupabase({ memberships: membership("member") }, () => ({
+        data: githubResultsV2({ results: [row], nextCursor: null }), error: null,
+      }));
+      await expect(listGitHubComplianceResults(fake.client as never, USER, {
+        workspaceId: ORG,
+        repositoryId: "50000000-0000-4000-8000-000000000001",
+        result: "fail",
+        freshness: "current",
+        mappingStatus: "active",
+        severity: "high",
+        limit: 20,
+      })).rejects.toMatchObject({ code: "INTERNAL_ERROR" });
+    }
+  });
+
   it("loads only the caller-scoped official-result RPC with exact bounded filters and fails closed on unsafe rows", async () => {
-    const exact = fakeSupabase({ memberships: membership("member") }, () => ({ data: githubResults(), error: null }));
+    const exact = fakeSupabase({ memberships: membership("member") }, () => ({ data: githubResultsV2(), error: null }));
     await expect(listGitHubComplianceResults(exact.client as never, USER, {
       workspaceId: ORG, repositoryId: "50000000-0000-4000-8000-000000000001", result: "fail",
       freshness: "current", mappingStatus: "active", severity: "high", limit: 7,
     })).resolves.toMatchObject({
-      schemaVersion: 1, workspace: { id: ORG, name: "Acme" },
+      schemaVersion: 2, workspace: { id: ORG, name: "Acme" },
       results: [{ id: "github_result:40000000-0000-4000-8000-000000000001", repositoryLabel: "GitHub repository 50000000" }],
     });
-    expect(exact.rpc).toHaveBeenCalledWith("get_mcp_github_compliance_results_v1", {
+    expect(exact.rpc).toHaveBeenCalledWith("get_mcp_github_compliance_results_v2", {
       target_organisation_id: ORG,
       target_repository_id: "50000000-0000-4000-8000-000000000001",
       target_result: "fail", target_freshness: "current", target_mapping_status: "active",
-      target_severity: "high", target_limit: 7,
+      target_severity: "high", target_limit: 7, target_cursor: null,
     });
     expect(exact.states.map(({ table }) => table)).toEqual(["memberships"]);
     expect(exact.rpcSignals).toHaveLength(1);
 
     const unsafe = fakeSupabase({ memberships: membership() }, () => ({
-      data: githubResults({ results: [{ ...githubResults().results[0] as object, repositoryLabel: "acme/portal?token=secret" }] }), error: null,
+      data: githubResultsV2({ results: [{ ...githubResultsV2().results[0] as object, repositoryLabel: "acme/portal?token=secret" }] }), error: null,
     }));
     await expect(listGitHubComplianceResults(unsafe.client as never, USER, {})).rejects.toMatchObject({ code: "INTERNAL_ERROR" });
     await expect(listGitHubComplianceResults(exact.client as never, USER, { result: "broken" }))
@@ -177,17 +482,22 @@ describe("MCP public read services", () => {
   });
 
   it("uses only deterministic local repository labels and rejects unordered, impossible, duplicate, or inconsistent result pages", async () => {
-    const base = githubResults();
+    const base = githubResultsV2();
     const row = base.results[0] as Record<string, unknown>;
-    const fallback = fakeSupabase({ memberships: membership() }, () => ({ data: githubResults({ results: [{ ...row, repositoryLabel: "" }] }), error: null }));
+    const fallback = fakeSupabase({ memberships: membership() }, () => ({ data: githubResultsV2({ results: [{ ...row, repositoryLabel: "" }] }), error: null }));
     await expect(listGitHubComplianceResults(fallback.client as never, USER, {})).resolves.toMatchObject({ results: [{ repositoryLabel: "GitHub repository 50000000" }] });
+    const exactRuleBoundary = fakeSupabase({ memberships: membership() }, () => ({ data: githubResultsV2({ results: [{ ...row, ruleVersion: "r".repeat(120) }] }), error: null }));
+    await expect(listGitHubComplianceResults(exactRuleBoundary.client as never, USER, {})).resolves.toMatchObject({ results: [{ ruleVersion: "r".repeat(120) }] });
 
     for (const malformed of [
-      githubResults({ results: [{ ...row, repositoryLabel: "octo/private" }] }),
-      githubResults({ asOf: "2026-08-25T00:30:00.000Z" }),
-      githubResults({ results: [{ ...row, materialisedAt: "2026-08-25T00:30:00.000Z" }] }),
-      githubResults({ results: [row, row] }),
-      githubResults({ truncated: false, results: Array.from({ length: 21 }, () => row) }),
+      githubResultsV2({ results: [{ ...row, repositoryLabel: "octo/private" }] }),
+      githubResultsV2({ results: [{ ...row, summary: "https://github.com/Provider-A/one?token=secret" }] }),
+      githubResultsV2({ snapshotAt: "2026-08-25T00:30:00.000Z" }),
+      githubResultsV2({ results: [{ ...row, materialisedAt: "2026-08-25T00:30:00.000Z" }] }),
+      githubResultsV2({ results: [{ ...row, ruleVersion: "r".repeat(121) }] }),
+      githubResultsV2({ results: [{ ...row, result: "pass", severity: null, evidenceId: null, findingId: null }] }),
+      githubResultsV2({ results: [row, row] }),
+      githubResultsV2({ results: Array.from({ length: 21 }, () => row) }),
     ]) {
       const fake = fakeSupabase({ memberships: membership() }, () => ({ data: malformed, error: null }));
       await expect(listGitHubComplianceResults(fake.client as never, USER, {})).rejects.toMatchObject({ code: "INTERNAL_ERROR" });
@@ -198,7 +508,7 @@ describe("MCP public read services", () => {
   });
 
   it("accepts the hidden limit-plus-one truncation shape and requires descending IDs for equal observed times", async () => {
-    const base = githubResults();
+    const base = githubResultsV2();
     const first = base.results[0] as Record<string, unknown>;
     const second = {
       ...first,
@@ -207,21 +517,43 @@ describe("MCP public read services", () => {
       repositoryLabel: "GitHub repository 60000000",
       checkId: "secret_scanning",
     };
-    const valid = fakeSupabase({ memberships: membership() }, () => ({ data: githubResults({ results: [second, first], truncated: true }), error: null }));
+    const valid = fakeSupabase({ memberships: membership() }, () => ({ data: githubResultsV2({ results: [second, first], nextCursor: GITHUB_INNER_CURSOR, truncated: true }), error: null }));
     await expect(listGitHubComplianceResults(valid.client as never, USER, { limit: 2 })).resolves.toMatchObject({ truncated: true, results: [{ id: second.id }, { id: first.id }] });
+    const exhausted = fakeSupabase({ memberships: membership() }, () => ({ data: githubResultsV2({ results: [second, first] }), error: null }));
+    await expect(listGitHubComplianceResults(exhausted.client as never, USER, { limit: 2 })).resolves.toMatchObject({ truncated: false, nextCursor: null, results: [{ id: second.id }, { id: first.id }] });
 
     for (const data of [
-      githubResults({ results: [first], truncated: true }),
-      githubResults({ results: [first, second, { ...second, id: "github_result:70000000-0000-4000-8000-000000000001", repositoryId: "70000000-0000-4000-8000-000000000001", repositoryLabel: "GitHub repository 70000000", checkId: "dependabot" }], truncated: true }),
-      githubResults({ results: [first, second], truncated: false }),
+      githubResultsV2({ results: [first], nextCursor: GITHUB_INNER_CURSOR, truncated: true }),
+      githubResultsV2({ results: [first, second, { ...second, id: "github_result:70000000-0000-4000-8000-000000000001", repositoryId: "70000000-0000-4000-8000-000000000001", repositoryLabel: "GitHub repository 70000000", checkId: "dependabot" }], nextCursor: GITHUB_INNER_CURSOR, truncated: true }),
+      githubResultsV2({ results: [second, first], nextCursor: GITHUB_INNER_CURSOR, truncated: false }),
+      githubResultsV2({ results: [second, first], nextCursor: null, truncated: true }),
     ]) {
       const invalid = fakeSupabase({ memberships: membership() }, () => ({ data, error: null }));
       await expect(listGitHubComplianceResults(invalid.client as never, USER, { limit: 2 })).rejects.toMatchObject({ code: "INTERNAL_ERROR" });
     }
   });
 
+  it("treats freshUntil equal to the frozen snapshot as stale and rejects contradictory freshness", async () => {
+    const equalBoundary = {
+      ...githubResultsV2().results[0],
+      freshUntil: githubResultsV2().snapshotAt,
+      freshness: "stale" as const,
+    };
+    const valid = fakeSupabase({ memberships: membership() }, () => ({
+      data: githubResultsV2({ results: [equalBoundary] }), error: null,
+    }));
+    await expect(listGitHubComplianceResults(valid.client as never, USER, { freshness: "stale" }))
+      .resolves.toMatchObject({ results: [{ freshness: "stale" }] });
+
+    const invalid = fakeSupabase({ memberships: membership() }, () => ({
+      data: githubResultsV2({ results: [{ ...equalBoundary, freshness: "current" }] }), error: null,
+    }));
+    await expect(listGitHubComplianceResults(invalid.client as never, USER, { freshness: "current" }))
+      .rejects.toMatchObject({ code: "INTERNAL_ERROR" });
+  });
+
   it("orders result instants across offsets and applies ID descent to equal DST instants", async () => {
-    const base = githubResults();
+    const base = githubResultsV2();
     const row = base.results[0] as Record<string, unknown>;
     const laterZulu = {
       ...row,
@@ -236,13 +568,13 @@ describe("MCP public read services", () => {
       observedAt: "2026-08-25T01:30:00.000+02:00",
     };
     const mixedOffsetValid = fakeSupabase({ memberships: membership() }, () => ({
-      data: githubResults({ results: [laterZulu, earlierPlusTwo] }), error: null,
+      data: githubResultsV2({ results: [laterZulu, earlierPlusTwo] }), error: null,
     }));
     await expect(listGitHubComplianceResults(mixedOffsetValid.client as never, USER, { limit: 2 }))
       .resolves.toMatchObject({ results: [{ id: laterZulu.id }, { id: earlierPlusTwo.id }] });
 
     const mixedOffsetInvalid = fakeSupabase({ memberships: membership() }, () => ({
-      data: githubResults({ results: [earlierPlusTwo, laterZulu] }), error: null,
+      data: githubResultsV2({ results: [earlierPlusTwo, laterZulu] }), error: null,
     }));
     await expect(listGitHubComplianceResults(mixedOffsetInvalid.client as never, USER, { limit: 2 }))
       .rejects.toMatchObject({ code: "INTERNAL_ERROR" });
@@ -263,8 +595,8 @@ describe("MCP public read services", () => {
       freshUntil: "2026-10-26T01:30:00.000+01:00",
       materialisedAt: "2026-10-25T01:31:00.000+01:00",
     };
-    const dstPage = (results: Record<string, unknown>[]) => githubResults({
-      asOf: "2026-10-25T02:00:00.000Z", results,
+    const dstPage = (results: Record<string, unknown>[]) => githubResultsV2({
+      snapshotAt: "2026-10-25T02:00:00.000Z", results,
     });
     const equalDstValid = fakeSupabase({ memberships: membership() }, () => ({
       data: dstPage([equalDstHighId, equalDstLowId]), error: null,

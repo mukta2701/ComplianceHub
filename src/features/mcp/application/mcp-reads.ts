@@ -1,6 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import {
+  githubPublicPageHash,
+  githubResultsCursor,
+  issueGitHubResultsCursor,
+  verifyGitHubResultsCursor,
+  type GitHubResultsCursorFilters,
+} from "./github-results-cursor";
+import {
   ACTIVE_MONITORING_FINDING_STATUSES,
   MONITORING_FINDING_STATUSES,
 } from "@/features/monitoring/domain/finding-status";
@@ -167,6 +174,8 @@ const githubResultRow = z.object({
   id: prefixedUuid("github_result:"),
   repositoryId: uuid,
   repositoryLabel: z.string().max(40),
+  collectionRunId: prefixedUuid("github_run:"),
+  runMode: z.literal("official"),
   checkId: z.string().min(1).max(120).regex(/^[a-z0-9._-]+$/),
   result: z.enum(["pass", "fail", "unknown", "not_applicable"]),
   severity: z.enum(DIGEST_SEVERITIES).nullable(),
@@ -175,27 +184,36 @@ const githubResultRow = z.object({
   materialisedAt: dateTime,
   freshness: z.enum(["current", "stale"]),
   mappingVersion: z.string().min(1).max(80).regex(/^[A-Za-z0-9._-]+$/),
+  mappingChecksum: z.string().regex(/^[0-9a-f]{64}$/),
   mappingStatus: z.enum(["active", "historical"]),
-  ruleVersion: z.string().min(1).max(80).regex(/^[A-Za-z0-9._-]+$/),
+  ruleVersion: z.string().min(1).max(120).regex(/^[A-Za-z0-9._-]+$/),
+  sourceResponseFingerprint: z.string().regex(/^[0-9a-f]{64}$/),
   summary: z.string().min(1).max(280),
   evidenceId: prefixedUuid("evidence:").nullable(),
   findingId: prefixedUuid("monitoring_finding:").nullable(),
+  recordHash: z.string().regex(/^[0-9a-f]{64}$/),
 }).strict().superRefine((row, ctx) => {
   if ((row.result === "fail") !== (row.severity !== null)) ctx.addIssue({ code: "custom", message: "severity must match failure outcome" });
-  if (new Date(row.freshUntil) <= new Date(row.observedAt) || new Date(row.materialisedAt) < new Date(row.observedAt)) ctx.addIssue({ code: "custom", message: "invalid result chronology" });
+  if (row.result === "fail" && (row.evidenceId !== null || row.findingId === null)) ctx.addIssue({ code: "custom", message: "failure references must match outcome" });
+  if (row.result === "pass" && (row.evidenceId === null || row.findingId !== null)) ctx.addIssue({ code: "custom", message: "passing references must match outcome" });
+  if ((row.result === "unknown" || row.result === "not_applicable") && (row.evidenceId !== null || row.findingId !== null)) ctx.addIssue({ code: "custom", message: "explanatory outcomes cannot claim lifecycle records" });
+  if (Date.parse(row.freshUntil) <= Date.parse(row.observedAt) || Date.parse(row.materialisedAt) < Date.parse(row.observedAt)) ctx.addIssue({ code: "custom", message: "invalid result chronology" });
   if (safeSummary(row.summary, 280, "GitHub compliance result") !== row.summary) ctx.addIssue({ code: "custom", message: "unsafe summary" });
   if (row.repositoryLabel !== "" && row.repositoryLabel !== `GitHub repository ${row.repositoryId.slice(0, 8)}`) ctx.addIssue({ code: "custom", message: "unsafe repository label" });
 });
+const githubInnerCursor = z.string().min(80).max(2_048).regex(/^ch3\.[A-Za-z0-9_-]{1,1900}\.[0-9a-f]{64}$/);
 const githubResultsSchema = z.object({
-  schemaVersion: z.literal(1), workspace: z.object({ id: uuid, name: z.string() }).strict(),
-  asOf: dateTime, results: z.array(githubResultRow).max(51), truncated: z.boolean(),
+  schemaVersion: z.literal(2), workspace: z.object({ id: uuid, name: z.string().min(1).max(160) }).strict(),
+  snapshotAt: dateTime, results: z.array(githubResultRow).max(50),
+  nextCursor: githubInnerCursor.nullable(), truncated: z.boolean(), pageKind: z.enum(["initial", "continuation"]),
+  pageHash: z.string().regex(/^[0-9a-f]{64}$/),
 }).strict().superRefine((value, ctx) => {
   const ids = new Set<string>();
   let previous: z.infer<typeof githubResultRow> | null = null;
   for (const row of value.results) {
     if (ids.has(row.id)) ctx.addIssue({ code: "custom", message: "duplicate result id" });
     ids.add(row.id);
-    if ((row.freshness === "current") !== (new Date(row.freshUntil) > new Date(value.asOf)) || new Date(row.materialisedAt) > new Date(value.asOf)) ctx.addIssue({ code: "custom", message: "invalid freshness" });
+    if ((row.freshness === "current") !== (Date.parse(row.freshUntil) > Date.parse(value.snapshotAt)) || Date.parse(row.materialisedAt) > Date.parse(value.snapshotAt)) ctx.addIssue({ code: "custom", message: "invalid freshness" });
     const observedAtEpoch = Date.parse(row.observedAt);
     if (previous) {
       const previousObservedAtEpoch = Date.parse(previous.observedAt);
@@ -396,33 +414,103 @@ export async function listMonitoringFindings(supabase: SupabaseClient, verifiedU
 export async function listGitHubComplianceResults(
   supabase: SupabaseClient,
   verifiedUserId: string,
-  input: { workspaceId?: string; repositoryId?: string; result?: string; freshness?: string; mappingStatus?: string; severity?: string; limit?: number },
+  input: { workspaceId?: string; repositoryId?: string; result?: string; freshness?: string; mappingStatus?: string; severity?: string; limit?: number; cursor?: string },
+  cursorContext: { clientId: string; resource: string; now?: Date },
 ) {
   const parsed = z.object({
     workspaceId: uuid.optional(), repositoryId: uuid.optional(), result: z.enum(["pass", "fail", "unknown", "not_applicable"]).optional(),
     freshness: z.enum(["current", "stale"]).optional(), mappingStatus: z.enum(["active", "historical"]).optional(),
-    severity: z.enum(DIGEST_SEVERITIES).optional(), limit: z.number().int().min(1).max(50).default(20),
+    severity: z.enum(DIGEST_SEVERITIES).optional(), limit: z.number().int().min(1).max(50).default(20), cursor: githubResultsCursor.optional(),
   }).strict().safeParse(input);
   if (!parsed.success) throw new McpError("VALIDATION_ERROR");
+  const context = z.object({
+    clientId: z.string().min(1).max(200), resource: z.string().url().max(2_048), now: z.date().optional(),
+  }).strict().safeParse(cursorContext);
+  if (!context.success) queryFailure();
   const workspace = await resolveWorkspace(supabase, verifiedUserId, parsed.data.workspaceId);
+  const filters: GitHubResultsCursorFilters = {
+    repositoryId: parsed.data.repositoryId ?? null,
+    result: parsed.data.result ?? null,
+    freshness: parsed.data.freshness ?? null,
+    mappingStatus: parsed.data.mappingStatus ?? null,
+    severity: parsed.data.severity ?? null,
+    limit: parsed.data.limit,
+  };
+  const cursorScope = {
+    userId: verifiedUserId,
+    clientId: context.data.clientId,
+    organisationId: workspace.id,
+    resource: context.data.resource,
+    filters,
+  };
+  let continuation: ReturnType<typeof verifyGitHubResultsCursor> | null = null;
+  if (parsed.data.cursor !== undefined) {
+    try {
+      continuation = verifyGitHubResultsCursor({ cursor: parsed.data.cursor, scope: cursorScope, now: context.data.now });
+    } catch {
+      throw new McpError("VALIDATION_ERROR");
+    }
+  }
   let response: { data: unknown; error: unknown };
   try {
-    response = await supabase.rpc("get_mcp_github_compliance_results_v1", {
+    response = await supabase.rpc("get_mcp_github_compliance_results_v2", {
       target_organisation_id: workspace.id, target_repository_id: parsed.data.repositoryId ?? null,
       target_result: parsed.data.result ?? null, target_freshness: parsed.data.freshness ?? null,
       target_mapping_status: parsed.data.mappingStatus ?? null, target_severity: parsed.data.severity ?? null,
-      target_limit: parsed.data.limit,
+      target_limit: parsed.data.limit, target_cursor: continuation?.innerCursor ?? null,
     }).abortSignal(AbortSignal.timeout(MCP_BUNDLE_REQUEST_TIMEOUT_MS));
   } catch { queryFailure(); }
-  if (response.error || !response.data) queryFailure();
+  if (response.error) {
+    const errorCode = z.object({ code: z.string() }).passthrough().safeParse(response.error);
+    if (continuation && errorCode.success && errorCode.data.code === "22023") throw new McpError("VALIDATION_ERROR");
+    queryFailure();
+  }
+  if (!response.data) queryFailure();
   const result = githubResultsSchema.safeParse(response.data);
-  if (!result.success || result.data.workspace.id !== workspace.id || result.data.results.length > parsed.data.limit || (result.data.truncated && result.data.results.length !== parsed.data.limit)) queryFailure();
-  return {
-    ...result.data,
+  if (!result.success
+    || result.data.workspace.id !== workspace.id
+    || result.data.pageKind !== (continuation ? "continuation" : "initial")
+    || safeSummary(result.data.workspace.name, 160, "Workspace") !== result.data.workspace.name
+    || result.data.results.length > parsed.data.limit
+    || (result.data.truncated && (result.data.results.length !== parsed.data.limit || result.data.nextCursor === null))
+    || (!result.data.truncated && result.data.nextCursor !== null)
+    || result.data.results.some((row) =>
+      (parsed.data.repositoryId !== undefined && row.repositoryId !== parsed.data.repositoryId)
+      || (parsed.data.result !== undefined && row.result !== parsed.data.result)
+      || (parsed.data.freshness !== undefined && row.freshness !== parsed.data.freshness)
+      || (parsed.data.mappingStatus !== undefined && row.mappingStatus !== parsed.data.mappingStatus)
+      || (parsed.data.severity !== undefined && row.severity !== parsed.data.severity)
+    )) queryFailure();
+  // The database hash is format/schema-checked as part of the internal SQL-page
+  // envelope, but is not independently recomputed here and is never forwarded.
+  // Database ch3 is encrypted into public ch4, so the exact transformed public
+  // projection receives its own recomputed hash below.
+  const internalPageHash = result.data.pageHash;
+  if (internalPageHash.length !== 64) queryFailure();
+  const innerNextCursor = result.data.nextCursor;
+  let nextCursor: string | null = null;
+  if (innerNextCursor) {
+    try {
+      nextCursor = issueGitHubResultsCursor({
+        scope: cursorScope,
+        innerCursor: innerNextCursor,
+        timing: continuation?.timing,
+        now: context.data.now,
+      });
+    } catch {
+      queryFailure();
+    }
+  }
+  const publicPage = {
+    schemaVersion: result.data.schemaVersion,
     workspace: { id: result.data.workspace.id, name: safeSummary(result.data.workspace.name, 160, "Workspace") },
+    snapshotAt: result.data.snapshotAt,
     results: result.data.results.slice(0, parsed.data.limit).map((row) => ({ ...row, repositoryLabel: `GitHub repository ${row.repositoryId.slice(0, 8)}`, summary: safeSummary(row.summary, 280, "GitHub compliance result") })),
+    nextCursor,
     truncated: result.data.truncated,
+    pageKind: continuation ? "continuation" as const : "initial" as const,
   };
+  return { ...publicPage, pageHash: githubPublicPageHash(publicPage) };
 }
 
 export async function getLatestLeadershipReport(supabase: SupabaseClient, verifiedUserId: string, input: { workspaceId?: string }) {
