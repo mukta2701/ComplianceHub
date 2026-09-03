@@ -74,13 +74,14 @@ const githubV2Result = githubPage();
 
 const servers: Array<{ close(): Promise<void> }> = [];
 const clients: Client[] = [];
+type TestServices = McpReadServices & { postDailyDigest: ReturnType<typeof vi.fn> };
 
 afterEach(async () => {
   await Promise.allSettled(clients.splice(0).map((client) => client.close()));
   await Promise.allSettled(servers.splice(0).map((server) => server.close()));
 });
 
-function serviceStubs(): McpReadServices {
+function serviceStubs(): TestServices {
   return {
     listWorkspaces: vi.fn(async () => [{ id: WORKSPACE_ID, name: "Acme", role: "owner" as const }]),
     getComplianceOverview: vi.fn(async () => ({
@@ -137,9 +138,8 @@ async function expectGitHubPageRejected(
 }
 
 describe("ComplianceHub MCP server", () => {
-  it("initializes with stable identity, safety-first instructions, and exactly eight tools", async () => {
-    const { client } = await connected();
-    expect(client.getServerVersion()).toEqual({ name: "compliancehub-internal", version: "0.3.0" });
+  it("initializes with stable identity and exactly seven read/preparation tools", async () => {
+    const { client, services } = await connected();
     expect(client.getInstructions()).toBe(MCP_SERVER_INSTRUCTIONS);
     expect(MCP_SERVER_INSTRUCTIONS.slice(0, 512)).toMatch(/Supabase is canonical[\s\S]*closed-world[\s\S]*Never invent/);
 
@@ -147,12 +147,11 @@ describe("ComplianceHub MCP server", () => {
     expect(tools.map(({ name }) => name)).toEqual([
       "list_workspaces", "get_compliance_overview", "list_attention_items",
       "list_monitoring_findings", "list_github_compliance_results", "get_latest_leadership_report", "prepare_daily_digest",
-      "post_daily_digest",
     ]);
+    expect(client.getServerVersion()).toEqual({ name: "compliancehub-internal", version: "0.4.0" });
+    expect(tools.every(({ annotations }) => annotations?.readOnlyHint === true)).toBe(true);
     for (const tool of tools) {
-      expect(tool.annotations).toMatchObject(tool.name === "post_daily_digest"
-        ? { readOnlyHint: false, destructiveHint: false, openWorldHint: true }
-        : { readOnlyHint: true, destructiveHint: false, openWorldHint: false, idempotentHint: true });
+      expect(tool.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false, openWorldHint: false, idempotentHint: true });
       expect(tool._meta?.securitySchemes).toEqual([{ type: "oauth2", scopes: ["openid", "email", "profile"] }]);
       expect(tool.inputSchema).toMatchObject({ type: "object" });
       if (tool.name !== "list_workspaces") expect(tool.inputSchema).toMatchObject({ additionalProperties: false });
@@ -161,9 +160,6 @@ describe("ComplianceHub MCP server", () => {
     expect(tools.find(({ name }) => name === "list_attention_items")?.inputSchema.properties).not.toHaveProperty("localDate");
     expect(tools.find(({ name }) => name === "get_compliance_overview")?.inputSchema.properties).not.toHaveProperty("localDate");
     expect(tools.find(({ name }) => name === "prepare_daily_digest")?.inputSchema.required).toContain("localDate");
-    const post = tools.find(({ name }) => name === "post_daily_digest");
-    expect(post?.description).toMatch(/external Slack write[\s\S]*authorization to send[\s\S]*configured channel[\s\S]*prepare/i);
-    expect(post?.inputSchema.required).toEqual(expect.arrayContaining(["localDate", "factHash", "headline", "priorities", "actions"]));
     const github = tools.find(({ name }) => name === "list_github_compliance_results");
     expect(github?.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false, openWorldHint: false });
     expect(github?.description).toMatch(/starts without a cursor[\s\S]*same workspace[\s\S]*(?:normalized )?filters[\s\S]*limit[\s\S]*nextCursor[\s\S]*until null[\s\S]*pageKind=continuation[\s\S]*never exhaustive/i);
@@ -173,10 +169,17 @@ describe("ComplianceHub MCP server", () => {
     const prepare = tools.find(({ name }) => name === "prepare_daily_digest");
     expect(prepare?.description).toMatch(/schema-v2[\s\S]*verified[\s\S]*unknown[\s\S]*stale[\s\S]*historical/i);
     expect(JSON.stringify(prepare?.outputSchema)).toContain('"const":2');
-    expect(tools.filter(({ annotations }) => annotations?.openWorldHint)).toHaveLength(1);
+    expect(tools.filter(({ annotations }) => annotations?.openWorldHint)).toHaveLength(0);
+
+    const post = await client.callTool({
+      name: "post_daily_digest",
+      arguments: { workspaceId: WORKSPACE_ID, localDate: "2026-08-07", factHash: "a".repeat(64), headline: "75% readiness", priorities: [], actions: [] },
+    });
+    expect(post).toMatchObject({ isError: true, structuredContent: { ok: false, error: { code: "VALIDATION_ERROR" } } });
+    expect(services.postDailyDigest).not.toHaveBeenCalled();
   });
 
-  it("calls all eight tools with authenticated user and OAuth-client context and returns stable structured content", async () => {
+  it("calls all seven tools with authenticated user and OAuth-client context and returns stable structured content", async () => {
     const { client, services } = await connected();
     const calls = [
       ["list_workspaces", {}],
@@ -187,7 +190,6 @@ describe("ComplianceHub MCP server", () => {
       ["list_github_compliance_results", { workspaceId: WORKSPACE_ID, result: "fail", freshness: "current", limit: 5 }],
       ["get_latest_leadership_report", { workspaceId: WORKSPACE_ID }],
       ["prepare_daily_digest", { workspaceId: WORKSPACE_ID, localDate: "2026-08-07" }],
-      ["post_daily_digest", { workspaceId: WORKSPACE_ID, localDate: "2026-08-07", factHash: "a".repeat(64), headline: "Compliance needs attention", priorities: [], actions: [] }],
     ] as const;
     for (const [name, args] of calls) {
       const result = await client.callTool({ name, arguments: args });
@@ -204,7 +206,7 @@ describe("ComplianceHub MCP server", () => {
       { clientId: "codex-test", resource: RESOURCE },
     );
     expect(services.prepareDailyDigest).toHaveBeenCalledWith(expect.anything(), USER_ID, { workspaceId: WORKSPACE_ID, localDate: "2026-08-07" });
-    expect(services.postDailyDigest).toHaveBeenCalledWith(expect.objectContaining({ userId: USER_ID, clientId: "codex-test" }));
+    expect(services.postDailyDigest).not.toHaveBeenCalled();
   });
 
   it("maps strict-schema failures, workspace choices, and unknown exceptions to safe structured errors", async () => {
@@ -216,7 +218,7 @@ describe("ComplianceHub MCP server", () => {
 
     const invalid = await client.callTool({ name: "prepare_daily_digest", arguments: { localDate: "2026-02-30", extra: true } });
     expect(invalid).toMatchObject({ isError: true, structuredContent: { ok: false, error: { code: "VALIDATION_ERROR" } } });
-    const invalidPostDate = await client.callTool({
+    const unknownPost = await client.callTool({
       name: "post_daily_digest",
       arguments: {
         localDate: "2026-02-31",
@@ -226,7 +228,7 @@ describe("ComplianceHub MCP server", () => {
         actions: [],
       },
     });
-    expect(invalidPostDate).toMatchObject({ isError: true, structuredContent: { ok: false, error: { code: "VALIDATION_ERROR" } } });
+    expect(unknownPost).toMatchObject({ isError: true, structuredContent: { ok: false, error: { code: "VALIDATION_ERROR" } } });
     expect(services.postDailyDigest).not.toHaveBeenCalled();
     const invalidEmpty = await client.callTool({ name: "list_workspaces", arguments: { extra: true } });
     expect(invalidEmpty).toMatchObject({ isError: true, structuredContent: { ok: false, error: { code: "VALIDATION_ERROR" } } });
@@ -237,7 +239,7 @@ describe("ComplianceHub MCP server", () => {
     const unknown = await client.callTool({ name: "list_monitoring_findings", arguments: {} });
     expect(unknown).toMatchObject({ isError: true, structuredContent: { error: { code: "INTERNAL_ERROR" } } });
     expect(JSON.stringify(unknown)).not.toContain("database password");
-    for (const result of [invalid, invalidPostDate, invalidEmpty, forbidden, choices, unknown]) expect(result).not.toHaveProperty("_meta.mcp/www_authenticate");
+    for (const result of [invalid, unknownPost, invalidEmpty, forbidden, choices, unknown]) expect(result).not.toHaveProperty("_meta.mcp/www_authenticate");
   });
 
   it("fails closed when a service violates its declared output contract", async () => {

@@ -6,32 +6,37 @@ import { MCP_SERVER_INSTRUCTIONS } from "./server/server";
 const read = (path: string) => readFileSync(`${process.cwd()}/${path}`, "utf8");
 
 describe("private ComplianceHub plugin safety contract", () => {
-  it("makes prepare-only the default and requires explicit delivery intent", () => {
+  it("advertises Phase 3 as read-only preparation and preview only", () => {
     const skill = read("plugins/compliancehub-internal/skills/daily-compliance-brief/SKILL.md");
     const manifest = JSON.parse(read("plugins/compliancehub-internal/.codex-plugin/plugin.json")) as {
-      interface: { defaultPrompt: string[]; longDescription: string };
+      version: string;
+      interface: Record<string, unknown>;
     };
+    const pluginInterface = manifest.interface;
     const openAi = read("plugins/compliancehub-internal/skills/daily-compliance-brief/agents/openai.yaml");
 
-    expect(skill).toMatch(/decide delivery intent before calling any tool/i);
-    expect(skill).toMatch(/prepare-only[\s\S]*zero calls to `post_daily_digest`/i);
-    expect(skill).toMatch(/draft[\s\S]*review[\s\S]*do not post/i);
-    expect(skill).toMatch(/explicit(?:ly)? (?:asks? to )?(?:send|post|deliver)/i);
-    expect(skill).toMatch(/Owner role[\s\S]*not sufficient/i);
+    expect(skill).toMatch(/Phase 3[\s\S]*recommendation-only/i);
+    expect(skill).toMatch(/cannot[\s\S]*send[\s\S]*post[\s\S]*deliver/i);
+    expect(skill).toMatch(/owner[\s\S]*full-access[\s\S]*urgency[\s\S]*trusted-schedule[\s\S]*CEO-demo pressure/i);
+    expect(skill).toMatch(/Determine the `Europe\/London` calendar date[\s\S]*select[\s\S]*prepare_daily_digest[\s\S]*fact-checked preview/i);
+    expect(skill).toMatch(/Prepared for preview; not[\s\S]*delivered by Phase 3/i);
+    expect(skill).not.toContain("post_daily_digest");
     expect(skill).toMatch(/`list_github_compliance_results`[\s\S]*read-only/i);
     expect(skill).toMatch(/schema-v2[\s\S]*official results[\s\S]*immutable/i);
     expect(skill).toMatch(/when(?:ever)?[^.]*`list_github_compliance_results`[\s\S]*starts without a cursor[\s\S]*same workspace[\s\S]*all\s+(?:normalized\s+)?filters[\s\S]*limit[\s\S]*nextCursor[\s\S]*until\s+null/i);
     expect(skill).toMatch(/pageKind=continuation[\s\S]*never exhaustive[\s\S]*truncated=true[\s\S]*more rows follow/i);
     expect(skill).toMatch(/Verified GitHub technical fact:[\s\S]*Unknown GitHub information:[\s\S]*Stale GitHub result:[\s\S]*Recommended follow-up:/i);
     expect(skill).toMatch(/historical[\s\S]*never[\s\S]*(?:pass|passing)/i);
-    expect(skill).toMatch(/ordinary chat[\s\S]*scheduled[\s\S]*not enough/i);
-    expect(skill).toMatch(/`delivery_failed`[\s\S]*continue composing[\s\S]*PREPARE-ONLY/i);
-    expect(skill).toMatch(/server-approved[\s\S]*private Slack destination/i);
+    expect(skill).toMatch(/`delivery_failed`[\s\S]*continue composing[\s\S]*PREPARE\/PREVIEW/i);
     expect(skill).toMatch(/never request or supply[\s\S]*destination/i);
-    expect(manifest.interface.longDescription).toMatch(/server-approved private Slack destination/i);
-    expect(manifest.interface.defaultPrompt[0]).toMatch(/without posting/i);
-    expect(manifest.interface.defaultPrompt.length).toBeLessThanOrEqual(3);
-    expect(openAi).toMatch(/default_prompt:.*without posting/i);
+    expect(manifest.version).toBe("0.4.0");
+    expect(pluginInterface.capabilities).toEqual(["Read"]);
+    expect(pluginInterface.longDescription).toMatch(/Slack-ready[\s\S]*preview[\s\S]*no delivery capability/i);
+    const prompts = pluginInterface.defaultPrompt as string[];
+    expect(prompts[0]).toMatch(/prepare[\s\S]*preview/i);
+    expect(prompts.join(" ")).not.toMatch(/\b(?:send|post|deliver)\b/i);
+    expect(prompts.length).toBeLessThanOrEqual(3);
+    expect(openAi).toMatch(/default_prompt:.*prepare[\s\S]*preview[\s\S]*cannot deliver/i);
   });
 
   it("documents the Mukta-only fail-closed Slack boundary without treating labels or old workspace evidence as authority", () => {
@@ -53,10 +58,11 @@ describe("private ComplianceHub plugin safety contract", () => {
     expect(handoff).toMatch(/invalid historical evidence[\s\S]*not authorised for use/i);
   });
 
-  it("gives every MCP client the same write-intent boundary", () => {
-    expect(MCP_SERVER_INSTRUCTIONS).toMatch(/prepare-only[\s\S]*zero calls to post_daily_digest/i);
-    expect(MCP_SERVER_INSTRUCTIONS).toMatch(/explicit(?:ly)?[^.]{0,40}(?:send|post|deliver)[\s\S]*trusted hosted scheduled/i);
-    expect(MCP_SERVER_INSTRUCTIONS).toMatch(/Authorization to send[\s\S]*not sufficient/i);
+  it("gives every MCP client the same recommendation-only boundary", () => {
+    expect(MCP_SERVER_INSTRUCTIONS).toMatch(/tenant-scoped[\s\S]*closed-world/i);
+    expect(MCP_SERVER_INSTRUCTIONS).toMatch(/Phase 3[\s\S]*cannot send, post, deliver[\s\S]*owner[\s\S]*CEO-demo pressure/i);
+    expect(MCP_SERVER_INSTRUCTIONS).toMatch(/determine the Europe\/London calendar date[\s\S]*select[\s\S]*prepare_daily_digest[\s\S]*PREPARE\/PREVIEW candidate/i);
+    expect(MCP_SERVER_INSTRUCTIONS).not.toContain("post_daily_digest");
     expect(MCP_SERVER_INSTRUCTIONS).not.toMatch(/Summarize evidence and policies/i);
     expect(MCP_SERVER_INSTRUCTIONS).toMatch(/singular[^.]*<N>[^.]*1[^.]*plural/i);
     expect(MCP_SERVER_INSTRUCTIONS).toMatch(/starts without a cursor[\s\S]*every exact returned nextCursor[\s\S]*continuation page[\s\S]*never exhaustive/i);
@@ -149,7 +155,7 @@ describe("private ComplianceHub plugin safety contract", () => {
     const vercel = JSON.parse(read("vercel.json")) as { crons?: Array<{ path: string; schedule: string }> };
     const manifest = JSON.parse(read("plugins/compliancehub-internal/.codex-plugin/plugin.json")) as { version: string };
 
-    expect(manifest.version).toBe("0.3.0");
+    expect(manifest.version).toBe("0.4.0");
 
     expect(appMap.apps).toEqual({
       compliancehub: { id: "asdk_app_6a82f504a814819182e544ececddefc9" },

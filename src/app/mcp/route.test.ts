@@ -242,7 +242,7 @@ describe("POST /mcp", () => {
     const deps = dependencies();
     const response = await handleMcpPost(request(), deps as never);
     expect(response.status).toBe(200);
-    await expect(jsonRpcPayload(response)).resolves.toMatchObject({ jsonrpc: "2.0", id: 1, result: { serverInfo: { name: "compliancehub-internal", version: "0.3.0" } } });
+    await expect(jsonRpcPayload(response)).resolves.toMatchObject({ jsonrpc: "2.0", id: 1, result: { serverInfo: { name: "compliancehub-internal", version: "0.4.0" } } });
     expect(deps.authenticate).toHaveBeenCalledTimes(1);
     expect(deps.rateLimit).toHaveBeenCalledWith(expect.stringMatching(/^mcp:/));
     expect(deps.createServer).toHaveBeenCalledWith(expect.objectContaining({ userId: USER_ID, clientId: "codex-client" }));
@@ -256,11 +256,19 @@ describe("POST /mcp", () => {
     const response = await handleMcpPost(request(body), dependencies() as never);
     expect(response.status).toBe(200);
     const payload = await jsonRpcPayload(response);
-    expect(payload.result.tools).toHaveLength(8);
+    expect(payload.result.tools.map(({ name }: { name: string }) => name)).toEqual([
+      "list_workspaces",
+      "get_compliance_overview",
+      "list_attention_items",
+      "list_monitoring_findings",
+      "list_github_compliance_results",
+      "get_latest_leadership_report",
+      "prepare_daily_digest",
+    ]);
     for (const tool of payload.result.tools) {
       expect(tool.securitySchemes).toEqual([{ type: "oauth2", scopes: ["openid", "email", "profile"] }]);
       expect(tool._meta.securitySchemes).toEqual(tool.securitySchemes);
-      if (tool.name !== "post_daily_digest") expect(tool.annotations).toMatchObject({ readOnlyHint: true, idempotentHint: true });
+      expect(tool.annotations).toMatchObject({ readOnlyHint: true, idempotentHint: true });
     }
   });
 

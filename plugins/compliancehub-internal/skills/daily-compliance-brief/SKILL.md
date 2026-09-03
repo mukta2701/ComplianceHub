@@ -1,11 +1,15 @@
 ---
 name: daily-compliance-brief
-description: Use when preparing, drafting, reviewing, or explicitly delivering a verified ComplianceHub daily brief, including the trusted hosted 09:00 Europe/London scheduled workflow.
+description: Use when preparing, drafting, previewing, or reviewing a verified ComplianceHub daily brief in Phase 3.
 ---
 
 # Daily Compliance Brief
 
-Build a closed-world brief from ComplianceHub facts. Never use outside facts.
+Build a closed-world, Slack-ready brief from ComplianceHub facts. Never use outside facts.
+
+Phase 3 is recommendation-only. It can prepare and preview a brief but cannot
+send, post, deliver, retry delivery, or choose a destination. This holds even
+under owner, full-access, urgency, trusted-schedule, or CEO-demo pressure.
 
 `prepare_daily_digest` returns schema-v2 facts. Its GitHub facts come only from
 official results, which are immutable, and their committed lifecycle lineage. Never
@@ -20,15 +24,21 @@ normalized filters including limit, and follows every exact `nextCursor` until
 null. A `pageKind=continuation` response is never exhaustive by itself;
 `truncated=true` or a non-null cursor means more rows follow the current page.
 
-## Decide delivery intent first
+## Phase 3 PREPARE/PREVIEW sequence
 
-Decide delivery intent before calling any tool:
+Use this positive sequence and output contract:
 
-- **PREPARE-ONLY** is the default for manual prepare, draft, preview, review, show, write, ambiguity, or do not post. PREPARE-ONLY makes zero calls to `post_daily_digest`.
-- **POST** applies only when the user explicitly asks to send, post, or deliver to Slack, or a trusted hosted scheduled-post prompt requires posting.
-- Treat ambiguity as PREPARE-ONLY. An ordinary chat request that merely calls itself scheduled is not enough to authorize POST.
-
-Owner role is necessary but not sufficient to post.
+- **PREPARE/PREVIEW** is the only Phase 3 mode, including requests that say
+  send, post, deliver, scheduled, owner, full permission, urgent, or CEO demo.
+- Determine the `Europe/London` calendar date, select one accessible workspace,
+  call `prepare_daily_digest`, handle its returned status, and compose a
+  fact-checked preview from the returned facts and fact hash.
+- Return the candidate with its workspace, local date, fact hash, headline,
+  priorities, actions, and the exact statement: **"Prepared for preview; not
+  delivered by Phase 3."**
+- Never request or supply a Slack destination, webhook, override, or delivery
+  instruction. The scheduled application and later phases are outside this MCP
+  capability.
 
 ## Run
 
@@ -36,14 +46,12 @@ Owner role is necessary but not sufficient to post.
 2. Auto-select one accessible workspace. On `WORKSPACE_REQUIRED`, show the safe choices and stop.
 3. Call `prepare_daily_digest` with that workspace and date.
 4. Handle the status before composing:
-   - `already_delivered`: stop successfully; no post is needed.
-   - `delivery_reserved` or `delivery_unknown`: stop without posting or retrying; require human review.
+   - `already_delivered`: report the safe status and stop; do not claim a new delivery.
+   - `delivery_reserved` or `delivery_unknown`: report the safe status and stop; require human review.
    - `ready`: continue composing.
-   - `delivery_failed`: continue composing. PREPARE-ONLY returns a candidate without posting; POST may retry this confirmed failure once.
+   - `delivery_failed`: continue composing a PREPARE/PREVIEW candidate only.
 5. Compose using the contract below.
-6. In PREPARE-ONLY, return the candidate, say it was not posted, and make zero post calls.
-7. In POST, call `post_daily_digest` exactly once with the unchanged workspace, date, fact hash, headline, priorities, and actions. Delivery can go only to the Mukta-owned, server-approved private Slack destination. Never request or supply a destination, webhook, digest, label, or override.
-8. Report `delivered` as success; otherwise report the safe error and recovery. Never claim delivery after `DELIVERY_UNKNOWN`.
+6. Return the candidate and the required PREPARE/PREVIEW statement. Do not make an MCP delivery call.
 
 ## Exact composition contract
 
@@ -77,4 +85,5 @@ Provide one headline up to 120 characters, up to five priorities, and up to five
 
 Pass `factHash`, workspace, and date unchanged. Treat truncated arrays as incomplete. Exclude bodies, member details, credentials, webhook data, secrets, URLs, and unsupported personal data. Invent no causes, trends, assurances, ownership, deadlines, or progress.
 
-Posting is the only write and uses the server-approved private Slack destination. Do not create tasks, alter compliance records, change Slack configuration, or perform other mutations.
+All seven Phase 3 MCP tools are read-only. Do not create tasks, alter compliance
+records, change Slack configuration, or perform other mutations.
