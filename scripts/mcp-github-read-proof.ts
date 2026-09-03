@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
-import { chmod, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -888,25 +888,171 @@ async function createLocalPostgresReader(databaseContainer: string) {
 
 type LocalPostgresReader = Awaited<ReturnType<typeof createLocalPostgresReader>>;
 
-const serverNetworkLedgerSchema = z.object({
-  guardActive: z.literal(true),
-  githubAttempts: z.number().int().nonnegative(),
-  slackAttempts: z.number().int().nonnegative(),
+const proofServerRunIdSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
+const ownedServerControlSchema = z.object({
+  schemaVersion: z.literal(1),
+  runId: proofServerRunIdSchema,
+  status: z.literal("ready"),
+  port: z.literal(3100),
+  launcherPid: z.number().int().positive(),
+  childPid: z.number().int().positive(),
+  listenerPid: z.number().int().positive(),
 }).strict();
+const ownedServerLedgerSchema = z.object({
+  schemaVersion: z.literal(1), runId: proofServerRunIdSchema, guardActive: z.literal(true),
+}).strict();
+const ownedServerEventSchema = z.discriminatedUnion("kind", [
+  z.object({
+    schemaVersion: z.literal(1), runId: proofServerRunIdSchema, kind: z.literal("activation"),
+    pid: z.number().int().positive(), parentPid: z.number().int().nonnegative(),
+  }).strict(),
+  z.object({
+    schemaVersion: z.literal(1), runId: proofServerRunIdSchema, kind: z.literal("provider-attempt"),
+    provider: z.enum(["github", "slack"]), pid: z.number().int().positive(),
+  }).strict(),
+]);
 
-async function readServerNetworkLedger(environment: NodeJS.ProcessEnv) {
-  const configuredPath = environment.MCP_PROOF_SERVER_NETWORK_LEDGER?.trim();
-  if (!configuredPath) throw new Error("The dedicated server-process network ledger is required.");
-  const ledgerPath = resolve(configuredPath);
-  const info = await stat(ledgerPath);
-  if ((info.mode & 0o777) !== 0o600) throw new Error("The server-process network ledger must be owner-only.");
-  let decoded: unknown;
-  try { decoded = JSON.parse(await readFile(ledgerPath, "utf8")); } catch {
-    throw new Error("The server-process network ledger is invalid.");
+type OwnedServerStateInput = {
+  expectedRunId: string;
+  control: unknown;
+  ledger: unknown;
+  currentListenerPid: number;
+  liveProcessIds: number[];
+  parentByPid: Record<string | number, number>;
+  activationPids: number[];
+  providerEvents: Array<"github" | "slack">;
+  launcherCommand: string;
+};
+
+function isDescendantOf(pid: number, ancestorPid: number, parentByPid: Record<string | number, number>) {
+  const visited = new Set<number>();
+  let current = pid;
+  while (!visited.has(current) && current > 0) {
+    if (current === ancestorPid) return true;
+    visited.add(current);
+    current = parentByPid[current] ?? 0;
   }
-  const ledger = serverNetworkLedgerSchema.safeParse(decoded);
-  if (!ledger.success) throw new Error("The server-process network ledger is invalid.");
-  return ledger.data;
+  return false;
+}
+
+export function validateOwnedServerState(input: OwnedServerStateInput) {
+  const fail = () => { throw new Error("Phase 3 proof requires a live launcher-owned guarded server."); };
+  const expectedRunId = proofServerRunIdSchema.safeParse(input.expectedRunId);
+  const control = ownedServerControlSchema.safeParse(input.control);
+  const ledger = ownedServerLedgerSchema.safeParse(input.ledger);
+  if (!expectedRunId.success || !control.success || !ledger.success) return fail();
+  const active = new Set(input.liveProcessIds);
+  const activations = new Set(input.activationPids);
+  if (control.data.runId !== expectedRunId.data
+    || ledger.data.runId !== expectedRunId.data
+    || input.currentListenerPid !== control.data.listenerPid
+    || !active.has(control.data.launcherPid)
+    || !active.has(control.data.childPid)
+    || !active.has(control.data.listenerPid)
+    || !isDescendantOf(control.data.childPid, control.data.launcherPid, input.parentByPid)
+    || !isDescendantOf(control.data.listenerPid, control.data.childPid, input.parentByPid)
+    || !activations.has(control.data.childPid)
+    || !activations.has(control.data.listenerPid)
+    || !/(?:^|[/\\])mcp-proof-owned-server\.ts(?:\s|$)/.test(input.launcherCommand)) return fail();
+  const githubAttempts = input.providerEvents.filter((provider) => provider === "github").length;
+  const slackAttempts = input.providerEvents.filter((provider) => provider === "slack").length;
+  return { guardActive: true as const, githubAttempts, slackAttempts };
+}
+
+export function assertLauncherCanClaimPort(listenerPids: number[]) {
+  if (listenerPids.length !== 0) throw new Error("Another listener already owns the exact proof port.");
+}
+
+function runProcessInspection(file: string, args: string[], allowEmptyFailure = false) {
+  return new Promise<string>((resolvePromise, rejectPromise) => {
+    execFile(file, args, { encoding: "utf8", maxBuffer: 1024 * 1024 }, (error, stdout) => {
+      if (error && !(allowEmptyFailure && stdout.trim() === "")) {
+        rejectPromise(new Error("The owned proof-server process inspection failed."));
+        return;
+      }
+      resolvePromise(stdout.trim());
+    });
+  });
+}
+
+export async function findProofPortListenerPids() {
+  const output = await runProcessInspection(
+    "/usr/sbin/lsof",
+    ["-nP", "-t", "-iTCP@127.0.0.1:3100", "-sTCP:LISTEN"],
+    true,
+  );
+  if (output === "") return [];
+  const parsed = output.split(/\s+/).map(Number);
+  if (parsed.some((pid) => !Number.isSafeInteger(pid) || pid <= 0)) {
+    throw new Error("The owned proof-server listener inspection was invalid.");
+  }
+  return [...new Set(parsed)];
+}
+
+async function processDetails(pid: number) {
+  const output = await runProcessInspection("/bin/ps", ["-o", "ppid=,command=", "-p", String(pid)]);
+  const match = output.match(/^\s*(\d+)\s+([\s\S]+)$/);
+  if (!match) throw new Error("The owned proof-server process inspection was invalid.");
+  return { parentPid: Number(match[1]), command: match[2]! };
+}
+
+async function readOwnerOnlyJson(path: string) {
+  const info = await stat(path);
+  if ((info.mode & 0o777) !== 0o600) throw new Error("The owned proof-server state must be owner-only.");
+  try { return JSON.parse(await readFile(path, "utf8")); } catch {
+    throw new Error("The owned proof-server state was invalid.");
+  }
+}
+
+export async function verifyOwnedProofServer(environment: NodeJS.ProcessEnv) {
+  const expectedRunId = environment.MCP_PROOF_SERVER_RUN_ID?.trim();
+  const configuredControl = environment.MCP_PROOF_SERVER_CONTROL_FILE?.trim();
+  const configuredLedger = environment.MCP_PROOF_SERVER_NETWORK_LEDGER?.trim();
+  if (!expectedRunId || !configuredControl || !configuredLedger) {
+    throw new Error("The owned proof-server identity is required.");
+  }
+  const controlPath = resolve(configuredControl);
+  const ledgerPath = resolve(configuredLedger);
+  const [controlValue, ledgerValue, listenerPids, eventFiles] = await Promise.all([
+    readOwnerOnlyJson(controlPath),
+    readOwnerOnlyJson(ledgerPath),
+    findProofPortListenerPids(),
+    readdir(`${ledgerPath}.events`),
+  ]);
+  const control = ownedServerControlSchema.safeParse(controlValue);
+  if (!control.success || listenerPids.length !== 1) {
+    throw new Error("Phase 3 proof requires a live launcher-owned guarded server.");
+  }
+  const events = await Promise.all(eventFiles.map(async (file) => {
+    if (!/^[A-Za-z0-9._-]+\.json$/.test(file)) {
+      throw new Error("The owned proof-server event ledger was invalid.");
+    }
+    return ownedServerEventSchema.parse(await readOwnerOnlyJson(resolve(`${ledgerPath}.events`, file)));
+  }));
+  const liveProcessIds = new Set<number>();
+  const parentByPid: Record<number, number> = {};
+  const commands = new Map<number, string>();
+  for (const start of [control.data.launcherPid, control.data.childPid, control.data.listenerPid]) {
+    let current = start;
+    for (let depth = 0; current > 0 && depth < 32 && !liveProcessIds.has(current); depth += 1) {
+      const details = await processDetails(current);
+      liveProcessIds.add(current);
+      parentByPid[current] = details.parentPid;
+      commands.set(current, details.command);
+      current = details.parentPid;
+    }
+  }
+  return validateOwnedServerState({
+    expectedRunId,
+    control: control.data,
+    ledger: ledgerValue,
+    currentListenerPid: listenerPids[0]!,
+    liveProcessIds: [...liveProcessIds],
+    parentByPid,
+    activationPids: events.filter((event) => event.kind === "activation").map((event) => event.pid),
+    providerEvents: events.filter((event) => event.kind === "provider-attempt").map((event) => event.provider),
+    launcherCommand: commands.get(control.data.launcherPid) ?? "",
+  });
 }
 
 async function protectedDomainSnapshot(database: LocalPostgresReader, workspaceId: string): Promise<ProtectedDomainSnapshot> {
@@ -1001,15 +1147,15 @@ export async function runLivePhase3Proof(environment: NodeJS.ProcessEnv = proces
   const { supabaseUrl, databaseContainer } = requireLocalPostgresSettings(environment);
   const selectedProtocol = selectProofProtocol(environment);
   const clientOptions = proofClientOptions(selectedProtocol);
+  const initialServerNetwork = await verifyOwnedProofServer(environment);
+  if (initialServerNetwork.githubAttempts !== 0 || initialServerNetwork.slackAttempts !== 0) {
+    throw new Error("The owned server-process event ledger was not clean before the proof.");
+  }
   const database = await createLocalPostgresReader(databaseContainer);
   liveProofStage = "workspace-selection";
   const requestedWorkspace = environment.MCP_PROOF_WORKSPACE_ID?.trim() || undefined;
   const workspaceId = await selectProofWorkspace(database, requestedWorkspace);
   const workspaceSelectedAt = new Date().toISOString();
-  const initialServerNetwork = await readServerNetworkLedger(environment);
-  if (initialServerNetwork.githubAttempts !== 0 || initialServerNetwork.slackAttempts !== 0) {
-    throw new Error("The dedicated server-process network ledger was not clean before the proof.");
-  }
   liveProofStage = "protected-baseline";
   const before = await protectedDomainSnapshot(database, workspaceId);
   const baselineCapturedAt = new Date().toISOString();
@@ -1140,7 +1286,7 @@ export async function runLivePhase3Proof(environment: NodeJS.ProcessEnv = proces
     await transport.close().catch(() => undefined);
     transportClosed = true;
     liveProofStage = "server-network-ledger";
-    const finalServerNetwork = await readServerNetworkLedger(environment);
+    const finalServerNetwork = await verifyOwnedProofServer(environment);
     if (finalServerNetwork.githubAttempts !== 0 || finalServerNetwork.slackAttempts !== 0) {
       throw new Error("The dedicated server process attempted provider network access during the proof.");
     }

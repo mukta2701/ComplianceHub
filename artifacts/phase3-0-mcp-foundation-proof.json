@@ -4,7 +4,7 @@
     "current": "2026-07-28",
     "legacy": "2025-11-25"
   },
-  "generatedAt": "2026-09-03T23:29:51.758Z",
+  "generatedAt": "2026-09-03T23:53:21.203Z",
   "endpoint": "http://127.0.0.1:3100/mcp",
   "negotiatedProtocol": "2025-11-25",
   "oauth": {
@@ -160,11 +160,11 @@
   },
   "databaseUnchanged": true,
   "protectedStateBracket": {
-    "workspaceSelectedAt": "2026-09-03T23:29:28.352Z",
-    "baselineCapturedAt": "2026-09-03T23:29:28.446Z",
-    "workflowStartedAt": "2026-09-03T23:29:28.446Z",
-    "workflowCompletedAt": "2026-09-03T23:29:51.696Z",
-    "afterCapturedAt": "2026-09-03T23:29:51.758Z",
+    "workspaceSelectedAt": "2026-09-03T23:52:32.765Z",
+    "baselineCapturedAt": "2026-09-03T23:52:32.822Z",
+    "workflowStartedAt": "2026-09-03T23:52:32.822Z",
+    "workflowCompletedAt": "2026-09-03T23:53:21.151Z",
+    "afterCapturedAt": "2026-09-03T23:53:21.203Z",
     "baselineBeforeWorkflow": true,
     "afterAfterWorkflow": true
   },

@@ -1,10 +1,11 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
+import * as proofHarness from "../../../../scripts/mcp-github-read-proof";
 import {
   buildPhase3Proof,
   buildProtectedDomainSnapshotQuery,
@@ -143,6 +144,51 @@ function validProof() {
 }
 
 describe("Phase 3 local MCP foundation proof", () => {
+  it("accepts only a live launcher-owned guarded server for the exact unpredictable run", () => {
+    const validate = (proofHarness as unknown as {
+      validateOwnedServerState?: (input: unknown) => unknown;
+    }).validateOwnedServerState;
+    expect(validate).toBeTypeOf("function");
+    if (!validate) return;
+    const runId = "A".repeat(43);
+    const valid = {
+      expectedRunId: runId,
+      control: {
+        schemaVersion: 1, runId, status: "ready", port: 3100,
+        launcherPid: 101, childPid: 102, listenerPid: 103,
+      },
+      ledger: { schemaVersion: 1, runId, guardActive: true },
+      currentListenerPid: 103,
+      liveProcessIds: [101, 102, 103],
+      parentByPid: { 102: 101, 103: 102 },
+      activationPids: [102, 103],
+      providerEvents: [],
+      launcherCommand: "node scripts/mcp-proof-owned-server.ts",
+    };
+
+    expect(validate(valid)).toEqual({ guardActive: true, githubAttempts: 0, slackAttempts: 0 });
+    const rejected = [
+      { ...valid, expectedRunId: "B".repeat(43) },
+      { ...valid, ledger: { ...valid.ledger, runId: "B".repeat(43) } },
+      { ...valid, liveProcessIds: [101, 103] },
+      { ...valid, parentByPid: { 102: 101, 103: 999 } },
+      { ...valid, currentListenerPid: 104 },
+      { ...valid, activationPids: [102] },
+      { ...valid, launcherCommand: "node arbitrary-server.ts" },
+    ];
+    for (const candidate of rejected) expect(() => validate(candidate)).toThrow(/owned guarded server/i);
+  });
+
+  it("refuses to launch while any process already owns the exact proof port", () => {
+    const assertCanClaim = (proofHarness as unknown as {
+      assertLauncherCanClaimPort?: (listenerPids: number[]) => void;
+    }).assertLauncherCanClaimPort;
+    expect(assertCanClaim).toBeTypeOf("function");
+    if (!assertCanClaim) return;
+    expect(() => assertCanClaim([])).not.toThrow();
+    expect(() => assertCanClaim([333])).toThrow(/another listener/i);
+  });
+
   it("captures the complete read-only contract without persisting an opaque cursor", () => {
     const proof = validProof();
 
@@ -420,9 +466,13 @@ describe("Phase 3 local MCP foundation proof", () => {
     });
   });
 
-  it("blocks and counts provider fetch attempts in the dedicated server process while allowing loopback", async () => {
+  it("atomically records string, URL, and Request provider attempts while allowing loopback", async () => {
     const directory = await mkdtemp(join(tmpdir(), "compliancehub-mcp-server-network-"));
     const ledger = join(directory, "ledger.json");
+    const events = `${ledger}.events`;
+    const runId = "A".repeat(43);
+    await mkdir(events, { mode: 0o700 });
+    await writeFile(ledger, `${JSON.stringify({ schemaVersion: 1, runId, guardActive: true })}\n`, { mode: 0o600 });
     const guard = join(process.cwd(), "scripts/mcp-proof-server-network-guard.cjs");
     const server = createServer((_request, response) => { response.writeHead(204); response.end(); });
     await new Promise<void>((resolvePromise) => server.listen(0, "127.0.0.1", resolvePromise));
@@ -431,24 +481,36 @@ describe("Phase 3 local MCP foundation proof", () => {
     try {
       const child = [
         "await fetch(process.argv[1])",
-        "for (const target of [\"https://api.github.com/user\", \"https://hooks.slack.com/services/test\"]) {",
+        "const githubUrl = new URL(\"https://api.github.com/user\")",
+        "const githubRequest = new Request(\"https://github.com/settings\")",
+        "const slackRequest = new Request(\"https://hooks.slack.com/services/test\")",
+        "for (const target of [githubUrl, githubRequest, slackRequest]) {",
         "  try { await fetch(target) } catch {}",
         "}",
       ].join(";");
       await execFileAsync(process.execPath, [
         "--require", guard, "--input-type=module", "--eval", child, `http://127.0.0.1:${address.port}/health`,
       ], {
-        env: { ...process.env, MCP_PROOF_SERVER_NETWORK_LEDGER: ledger },
+        env: {
+          ...process.env,
+          MCP_PROOF_SERVER_NETWORK_LEDGER: ledger,
+          MCP_PROOF_SERVER_RUN_ID: runId,
+        },
       });
     } finally {
       await new Promise<void>((resolvePromise, rejectPromise) => server.close((error) => error ? rejectPromise(error) : resolvePromise()));
     }
-    expect(JSON.parse(await readFile(ledger, "utf8"))).toEqual({
-      guardActive: true,
-      githubAttempts: 1,
-      slackAttempts: 1,
-    });
+    expect(JSON.parse(await readFile(ledger, "utf8"))).toEqual({ schemaVersion: 1, runId, guardActive: true });
     expect((await stat(ledger)).mode & 0o777).toBe(0o600);
+    const eventFiles = await readdir(events);
+    const eventRecords = await Promise.all(eventFiles.map(async (file) => {
+      expect((await stat(join(events, file))).mode & 0o777).toBe(0o600);
+      return JSON.parse(await readFile(join(events, file), "utf8"));
+    }));
+    expect(eventRecords.filter((event) => event.kind === "activation")).toHaveLength(1);
+    expect(eventRecords.filter((event) => event.kind === "provider-attempt").map((event) => event.provider)).toEqual([
+      "github", "github", "slack",
+    ]);
   });
 
   it("requires an exact local Docker/PostgreSQL boundary and never reconciles through REST or the v2 RPC", async () => {

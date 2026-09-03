@@ -43,11 +43,11 @@ after snapshot.
 The retained legacy proof records this monotonic sequence:
 
 ```
-workspace selected  2026-09-03T23:29:28.352Z
-baseline captured   2026-09-03T23:29:28.446Z
-workflow started    2026-09-03T23:29:28.446Z
-workflow completed  2026-09-03T23:29:51.696Z
-after captured      2026-09-03T23:29:51.758Z
+workspace selected  2026-09-03T23:52:32.765Z
+baseline captured   2026-09-03T23:52:32.822Z
+workflow started    2026-09-03T23:52:32.822Z
+workflow completed  2026-09-03T23:53:21.151Z
+after captured      2026-09-03T23:53:21.203Z
 ```
 
 Its complete before and after protected-domain snapshots are byte-equivalent
@@ -55,19 +55,89 @@ under canonical JSON comparison.
 
 ## Provider-network observation
 
-The dedicated port-3100 server was started with a proof-only Node preload that
-wrapped the effective server-process `fetch`. It allowed the local application
-and Supabase traffic, but would synchronously count, persist, block, and fail the
-proof for any GitHub or Slack provider-host attempt—even if application code
-swallowed the resulting exception. Its owner-only ledger remained:
+The committed launcher exclusively claimed port 3100, generated an unpredictable
+per-run ID plus owner-only ledger and control files, installed the proof-only
+Node preload before application code, and launched Next as its own child. Before
+and after each client, it verified the live launcher → Next child → listener
+ancestry, exact listener PID, matching run ID, and preload activation records.
+A stale or arbitrary ledger, wrong run ID, dead or unrelated process, missing
+activation, or competing listener fails closed.
+
+The preload wrapped the effective server-process `fetch`. It allowed the local
+application and Supabase traffic, but synchronously wrote one exclusive
+append-only event file, blocked, and failed the proof for any GitHub or Slack
+provider-host attempt—even if application code swallowed the exception. This
+avoids shared read-modify-write counter races. Only the safe final summary was
+persisted in the proof artifact:
 
 ```
 {"guardActive":true,"githubAttempts":0,"slackAttempts":0}
 ```
 
 A focused subprocess test separately proved that loopback fetch succeeds while
-attempted GitHub and Slack fetches are each blocked and counted. The normal
-unguarded local application server was restored after both live proofs.
+GitHub and Slack attempts supplied as string, `URL`, and `Request` inputs are
+blocked and atomically recorded. After both live proofs, the launcher terminated
+its child, verified port 3100 was released, and removed its private temporary
+ledger, control, event, and current-artifact files. The normal unguarded local
+application server was then restored.
+
+## Redaction-safe reproduction commands
+
+The normal local listener must first be stopped through its owning terminal or
+process supervisor. Confirm that the exact proof port is free:
+
+```bash
+test -z "$(lsof -nP -t -iTCP@127.0.0.1:3100 -sTCP:LISTEN)"
+```
+
+Map the local Supabase values without printing them, then run the committed
+owner. It starts the guarded Next child, runs both pinned clients, verifies
+ownership before and after each, and performs its own guarded-child cleanup:
+
+```bash
+eval "$(supabase status -o env 2>/dev/null)"
+NEXT_PUBLIC_SUPABASE_URL="$API_URL" \
+NEXT_PUBLIC_SUPABASE_ANON_KEY="$ANON_KEY" \
+SUPABASE_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY" \
+npx tsx scripts/mcp-proof-owned-server.ts
+```
+
+The launcher generates `$RUN_ID`, `$CONTROL_FILE`, `$LEDGER_FILE`, and
+`$PRIVATE_CURRENT_OUTPUT` inside its mode-0700 temporary directory. Its exact
+pinned child proof invocations are equivalent to:
+
+```bash
+MCP_PROOF_PROTOCOL=current \
+MCP_PROOF_OUTPUT="$PRIVATE_CURRENT_OUTPUT" \
+MCP_PROOF_SERVER_RUN_ID="$RUN_ID" \
+MCP_PROOF_SERVER_CONTROL_FILE="$CONTROL_FILE" \
+MCP_PROOF_SERVER_NETWORK_LEDGER="$LEDGER_FILE" \
+npx tsx scripts/mcp-github-read-proof.ts
+
+MCP_PROOF_PROTOCOL=legacy \
+MCP_PROOF_OUTPUT=artifacts/phase3-0-mcp-foundation-proof.json \
+MCP_PROOF_SERVER_RUN_ID="$RUN_ID" \
+MCP_PROOF_SERVER_CONTROL_FILE="$CONTROL_FILE" \
+MCP_PROOF_SERVER_NETWORK_LEDGER="$LEDGER_FILE" \
+npx tsx scripts/mcp-github-read-proof.ts
+```
+
+After the launcher exits and confirms cleanup, restore the normal server without
+the proof preload:
+
+```bash
+eval "$(supabase status -o env 2>/dev/null)"
+NEXT_PUBLIC_SUPABASE_URL="$API_URL" \
+NEXT_PUBLIC_SUPABASE_ANON_KEY="$ANON_KEY" \
+SUPABASE_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY" \
+NEXT_PUBLIC_SITE_URL=http://127.0.0.1:3100 \
+MCP_RESOURCE_URL=http://127.0.0.1:3100/mcp \
+APP_ENCRYPTION_KEY="$(openssl rand -base64 32)" \
+npm run dev -- --hostname 127.0.0.1 --port 3100
+```
+
+None of these commands prints a token, key, authorization code, personal
+address, provider payload, or destination.
 
 ## Persisted evidence and privacy
 
@@ -76,14 +146,14 @@ The retained machine-readable artifact is
 Phase 3 proof schema, has mode `0600`, and has SHA-256:
 
 ```
-d51418dedae995298fdb5e7f510dfa5628ff4c87ce1b210c170e76c1ed4b9ae4
+812394e7c2fb5785233589c18141b626f46113609c96d839226962ed0b83ed03
 ```
 
 The independently validated current-client artifact was temporary, also mode
 `0600`, and had SHA-256:
 
 ```
-7104ad47e8f64f4dd4d4dea8dbd9034e0d673236fcae1b89c3c59bdcdbf69b90
+499a448ea4c036b57c21854e015702355418d4d6498cae2758a8c62579dc64cd
 ```
 
 No authorization material, personal address, provider response body,
@@ -96,8 +166,8 @@ artifact was not edited; its preserved SHA-256 is
 
 ## Regression gate and Codex configuration
 
-The focused proof and protected-resource tests passed: 2 files, 16 tests. The
-fresh final gate passed lint, type checking, all 239 test files (2,033 passed,
+The focused proof and protected-resource tests passed: 2 files, 18 tests. The
+fresh final gate passed lint, type checking, all 239 test files (2,035 passed,
 3 skipped), and the production build with all 29 static pages generated.
 Artifact schema validation, exact `0600` mode, the cursor-field privacy scan,
 and `git diff --check` also passed.
