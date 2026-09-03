@@ -1,6 +1,5 @@
 import "server-only";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { CallToolRequestSchema, ListToolsRequestSchema, type CallToolResult, type ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
+import { McpServer, type CallToolResult, type Tool, type ToolAnnotations } from "@modelcontextprotocol/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { MONITORING_FINDING_STATUSES } from "@/features/monitoring/domain/finding-status";
@@ -235,10 +234,10 @@ function successResult<T extends Record<string, unknown>>(data: T, text: string)
   return { structuredContent: { ok: true, data }, content: [{ type: "text", text }] };
 }
 
-function toolJsonSchema(schema: z.ZodType) {
+function toolJsonSchema(schema: z.ZodType): Tool["inputSchema"] {
   const json = z.toJSONSchema(schema, { target: "draft-7", unrepresentable: "any" });
   if (json.type !== "object") throw new Error("MCP tool schema must be an object");
-  return json as { type: "object"; properties?: Record<string, object>; required?: string[]; [key: string]: unknown };
+  return json as Tool["inputSchema"];
 }
 
 async function executeTool(definition: ToolDefinition, rawInput: unknown, resource: string): Promise<CallToolResult> {
@@ -377,7 +376,7 @@ export function createComplianceMcpServer(
   ];
 
   server.server.registerCapabilities({ tools: { listChanged: false } });
-  server.server.setRequestHandler(ListToolsRequestSchema, () => ({
+  server.server.setRequestHandler("tools/list", () => ({
     tools: definitions.map((definition) => ({
       name: definition.name,
       title: definition.title,
@@ -391,7 +390,7 @@ export function createComplianceMcpServer(
       _meta: { securitySchemes: OAUTH_SECURITY_SCHEMES },
     })),
   }));
-  server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  server.server.setRequestHandler("tools/call", async (request) => {
     const definition = definitions.find(({ name }) => name === request.params.name);
     if (!definition) return mcpErrorResult(new McpError("VALIDATION_ERROR"), context.resource);
     return executeTool(definition, request.params.arguments, context.resource);

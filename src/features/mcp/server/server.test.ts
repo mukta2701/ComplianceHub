@@ -1,5 +1,4 @@
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { McpError } from "../auth/errors";
 import { githubPublicPageHash } from "../application/github-results-cursor";
@@ -117,7 +116,7 @@ function serviceStubs(): McpReadServices {
 
 async function connected(services = serviceStubs()) {
   const server = createComplianceMcpServer({ userId: USER_ID, clientId: "codex-test", supabase: {} as never, resource: RESOURCE }, services);
-  const client = new Client({ name: "test-client", version: "1.0.0" });
+  const client = new Client({ name: "test-client", version: "1.0.0" }, { versionNegotiation: { mode: "auto" } });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
   await client.connect(clientTransport);

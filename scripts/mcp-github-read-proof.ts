@@ -4,10 +4,16 @@ import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { UnauthorizedError, type OAuthClientProvider, type OAuthDiscoveryState } from "@modelcontextprotocol/sdk/client/auth.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import type { OAuthClientInformationMixed, OAuthClientMetadata, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
+import {
+  Client,
+  StreamableHTTPClientTransport,
+  UnauthorizedError,
+  type OAuthClientInformationMixed,
+  type OAuthClientMetadata,
+  type OAuthClientProvider,
+  type OAuthDiscoveryState,
+  type OAuthTokens,
+} from "@modelcontextprotocol/client";
 import { decodeJwt } from "jose";
 import { z } from "zod";
 
@@ -877,7 +883,7 @@ export async function runLivePhase2Proof(environment: NodeJS.ProcessEnv = proces
   );
 
   const firstTransport = new StreamableHTTPClientTransport(new URL(endpoint), { authProvider: provider, fetch: proofFetch });
-  const firstClient = new Client({ name: "compliancehub-phase2-proof", version: "1.0.0" }, { capabilities: {} });
+  const firstClient = new Client({ name: "compliancehub-phase2-proof", version: "1.0.0" }, { capabilities: {}, versionNegotiation: { mode: "auto" } });
   try {
     await firstClient.connect(firstTransport);
     throw new Error("The MCP endpoint unexpectedly allowed an unauthenticated connection.");
@@ -906,7 +912,7 @@ export async function runLivePhase2Proof(environment: NodeJS.ProcessEnv = proces
   if (!audienceMatched) throw new Error("OAuth access-token audience does not match the MCP resource.");
 
   const transport = new StreamableHTTPClientTransport(new URL(endpoint), { authProvider: provider, fetch: proofFetch });
-  const client = new Client({ name: "compliancehub-phase2-proof", version: "1.0.0" }, { capabilities: {} });
+  const client = new Client({ name: "compliancehub-phase2-proof", version: "1.0.0" }, { capabilities: {}, versionNegotiation: { mode: "auto" } });
   await client.connect(transport);
   try {
     const server = client.getServerVersion();

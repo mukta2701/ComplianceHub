@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 import { oauthChallenge } from "@/features/mcp/auth/errors";
 import { createComplianceMcpServer } from "@/features/mcp/server/server";
 import { parseBearerToken } from "@/features/mcp/auth/request-auth";
-import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { DELETE, GET, handleMcpPost, MCP_MAX_BODY_BYTES } from "./route";
 
 const USER_ID = "10000000-0000-4000-8000-000000000001";
@@ -37,17 +36,81 @@ function dependencies(overrides: Record<string, unknown> = {}) {
       getComplianceOverview: vi.fn(), listAttentionItems: vi.fn(), listMonitoringFindings: vi.fn(),
       listGitHubComplianceResults: vi.fn(), getLatestLeadershipReport: vi.fn(), prepareDailyDigest: vi.fn(), postDailyDigest: vi.fn(),
     })),
-    createTransport: vi.fn(() => new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true })),
     ...overrides,
   };
 }
 
+async function jsonRpcPayload(response: Response) {
+  if (response.headers.get("content-type")?.startsWith("application/json")) return response.json();
+  const data = (await response.text()).split(/\r?\n/).find((line) => line.startsWith("data: "));
+  if (!data) throw new Error("MCP response did not contain a JSON-RPC payload.");
+  return JSON.parse(data.slice("data: ".length));
+}
+
 describe("POST /mcp", () => {
+  it("serves current protocol tool discovery through the stateless route", async () => {
+    const response = await handleMcpPost(new Request("http://127.0.0.1:3100/mcp", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer a.b.c",
+        "content-type": "application/json",
+        "MCP-Protocol-Version": "2026-07-28",
+        "Mcp-Method": "tools/list",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/list",
+        params: {
+          _meta: {
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientInfo": { name: "route-test", version: "1.0.0" },
+            "io.modelcontextprotocol/clientCapabilities": {},
+          },
+        },
+      }),
+    }), dependencies() as never);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      jsonrpc: "2.0",
+      id: 1,
+      result: { tools: expect.arrayContaining([expect.objectContaining({ name: "list_workspaces" })]) },
+    });
+  });
+
+  it("rejects a current protocol method-header mismatch before application dispatch", async () => {
+    const deps = dependencies();
+    const response = await handleMcpPost(new Request("http://127.0.0.1:3100/mcp", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer a.b.c",
+        "content-type": "application/json",
+        "MCP-Protocol-Version": "2026-07-28",
+        "Mcp-Method": "tools/list",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "list_workspaces", arguments: {} },
+      }),
+    }), deps as never);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      jsonrpc: "2.0",
+      id: 1,
+      error: { code: expect.any(Number), message: expect.any(String) },
+    });
+    expect(deps.createServer).not.toHaveBeenCalled();
+  });
+
   it("authenticates, rate limits by user and client, and completes a stateless initialize without caching", async () => {
     const deps = dependencies();
     const response = await handleMcpPost(request(), deps as never);
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({ jsonrpc: "2.0", id: 1, result: { serverInfo: { name: "compliancehub-internal", version: "0.3.0" } } });
+    await expect(jsonRpcPayload(response)).resolves.toMatchObject({ jsonrpc: "2.0", id: 1, result: { serverInfo: { name: "compliancehub-internal", version: "0.3.0" } } });
     expect(deps.authenticate).toHaveBeenCalledTimes(1);
     expect(deps.rateLimit).toHaveBeenCalledWith(expect.stringMatching(/^mcp:/));
     expect(deps.createServer).toHaveBeenCalledWith(expect.objectContaining({ userId: USER_ID, clientId: "codex-client" }));
@@ -60,7 +123,7 @@ describe("POST /mcp", () => {
     const body = JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
     const response = await handleMcpPost(request(body), dependencies() as never);
     expect(response.status).toBe(200);
-    const payload = await response.json();
+    const payload = await jsonRpcPayload(response);
     expect(payload.result.tools).toHaveLength(8);
     for (const tool of payload.result.tools) {
       expect(tool.securitySchemes).toEqual([{ type: "oauth2", scopes: ["openid", "email", "profile"] }]);
@@ -77,7 +140,7 @@ describe("POST /mcp", () => {
     });
     const callResponse = await handleMcpPost(request(call), deps as never);
     expect(callResponse.status).toBe(200);
-    await expect(callResponse.json()).resolves.toMatchObject({
+    await expect(jsonRpcPayload(callResponse)).resolves.toMatchObject({
       jsonrpc: "2.0", id: 3,
       result: { structuredContent: { ok: true, data: { workspaces: [] } } },
     });
@@ -87,7 +150,6 @@ describe("POST /mcp", () => {
     expect(notificationResponse.status).toBe(202);
     expect(await notificationResponse.text()).toBe("");
     expect(deps.createServer).toHaveBeenCalledTimes(2);
-    expect(deps.createTransport).toHaveBeenCalledTimes(2);
   });
 
   it("rejects every JSON-RPC batch shape before creating a server or transport", async () => {
@@ -114,7 +176,6 @@ describe("POST /mcp", () => {
       expect(deps.authenticate).toHaveBeenCalledTimes(1);
       expect(deps.rateLimit).toHaveBeenCalledTimes(1);
       expect(deps.createServer).not.toHaveBeenCalled();
-      expect(deps.createTransport).not.toHaveBeenCalled();
     }
   });
 
@@ -126,7 +187,6 @@ describe("POST /mcp", () => {
     expect(deps.authenticate).toHaveBeenCalledTimes(20);
     expect(deps.rateLimit).toHaveBeenCalledTimes(20);
     expect(deps.createServer).not.toHaveBeenCalled();
-    expect(deps.createTransport).not.toHaveBeenCalled();
   });
 
   it("returns exact OAuth challenges for absent, malformed, and rejected bearer tokens", async () => {
@@ -183,7 +243,7 @@ describe("POST /mcp", () => {
     expect(body).not.toContain("credential");
   });
 
-  it("uses fresh server and transport state for concurrent users", async () => {
+  it("uses fresh server state for concurrent users", async () => {
     const servers: unknown[] = [];
     let call = 0;
     const deps = dependencies({
@@ -198,8 +258,6 @@ describe("POST /mcp", () => {
     expect(responses.map(({ status }) => status)).toEqual([200, 200]);
     expect(new Set(servers).size).toBe(2);
     expect(deps.createServer).toHaveBeenCalledTimes(2);
-    expect(deps.createTransport).toHaveBeenCalledTimes(2);
-    expect(deps.createTransport.mock.results[0]?.value).not.toBe(deps.createTransport.mock.results[1]?.value);
     expect(deps.rateLimit).toHaveBeenCalledTimes(2);
     expect(deps.rateLimit.mock.calls[0]?.[0]).not.toBe(deps.rateLimit.mock.calls[1]?.[0]);
   });

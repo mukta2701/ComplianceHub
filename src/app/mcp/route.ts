@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
-import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { createMcpHandler, type McpServer } from "@modelcontextprotocol/server";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import type { JWTPayload } from "jose";
 import { McpError, oauthErrorResponse } from "@/features/mcp/auth/errors";
@@ -24,8 +23,9 @@ type McpRouteDependencies = {
   authenticate: (request: Request) => Promise<AuthenticatedMcpRequest>;
   rateLimit: (key: string) => Promise<void>;
   createServer: (context: McpRequestContext) => McpServer;
-  createTransport: () => WebStandardStreamableHTTPServerTransport;
 };
+
+type BoundedJsonBody = { parsedBody: unknown; bytes: Uint8Array };
 
 class McpHttpRequestError extends Error {
   constructor(readonly status: number, readonly rpcCode: number, message: string) {
@@ -62,7 +62,7 @@ function applicationError(error: McpError) {
   return jsonRpcError(error.status, -32000, error.message, error.toStructuredContent().error);
 }
 
-async function readBoundedJson(request: Request): Promise<unknown> {
+async function readBoundedJson(request: Request): Promise<BoundedJsonBody> {
   const contentType = request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
   if (contentType !== "application/json") throw new McpHttpRequestError(415, -32000, "Content-Type must be application/json.");
   const declaredLength = request.headers.get("content-length");
@@ -94,7 +94,7 @@ async function readBoundedJson(request: Request): Promise<unknown> {
   let offset = 0;
   for (const chunk of chunks) { body.set(chunk, offset); offset += chunk.byteLength; }
   try {
-    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body));
+    return { parsedBody: JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body)), bytes: body };
   } catch {
     throw new McpHttpRequestError(400, -32700, "Invalid JSON request.");
   }
@@ -118,11 +118,16 @@ function defaultRouteDependencies(): McpRouteDependencies {
     authenticate: (request) => authenticateMcpRequest(request, { config }),
     rateLimit: (key) => enforceRateLimit(key, { limit: 60, windowMs: 60_000 }),
     createServer: (context) => createComplianceMcpServer(context),
-    createTransport: () => new WebStandardStreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-      enableJsonResponse: true,
-    }),
   };
+}
+
+function forwardedMcpHeaders(headers: Headers) {
+  const result = new Headers();
+  for (const name of ["accept", "authorization", "content-type", "mcp-method", "mcp-protocol-version"]) {
+    const value = headers.get(name);
+    if (value !== null) result.set(name, value);
+  }
+  return result;
 }
 
 export async function handleMcpPost(
@@ -148,28 +153,36 @@ export async function handleMcpPost(
     return applicationError(new McpError("RATE_LIMITED"));
   }
 
-  let parsedBody: unknown;
+  let body: BoundedJsonBody;
   try {
-    parsedBody = await readBoundedJson(request);
+    body = await readBoundedJson(request);
   } catch (error) {
     if (error instanceof McpHttpRequestError) return jsonRpcError(error.status, error.rpcCode, error.message);
     return jsonRpcError(400, -32700, "Invalid JSON request.");
   }
   // V1 intentionally accepts exactly one JSON-RPC message per HTTP request.
   // Reject batches before constructing any MCP context or invoking SDK handlers.
-  if (Array.isArray(parsedBody)) return jsonRpcError(400, -32600, "Invalid Request.");
+  if (Array.isArray(body.parsedBody)) return jsonRpcError(400, -32600, "Invalid Request.");
 
-  const server = dependencies.createServer({
-    userId: authenticated.user.id,
-    clientId: authenticated.claims.client_id,
-    supabase: authenticated.supabase,
-    resource: dependencies.resource,
+  const handler = createMcpHandler(
+    () => dependencies.createServer({
+      userId: authenticated.user.id,
+      clientId: authenticated.claims.client_id,
+      supabase: authenticated.supabase,
+      resource: dependencies.resource,
+    }),
+    { legacy: "stateless" },
+  );
+  const validatedBytes = new Uint8Array(body.bytes.byteLength);
+  validatedBytes.set(body.bytes);
+  const validatedRequest = new Request(request.url, {
+    method: "POST",
+    headers: forwardedMcpHeaders(request.headers),
+    body: validatedBytes.buffer,
   });
-  const transport = dependencies.createTransport();
   try {
-    await server.connect(transport);
-    const response = await transport.handleRequest(request, {
-      parsedBody,
+    const response = await handler.fetch(validatedRequest, {
+      parsedBody: body.parsedBody,
       authInfo: {
         token: parseBearerToken(request.headers.get("authorization")),
         clientId: authenticated.claims.client_id,
@@ -183,7 +196,7 @@ export async function handleMcpPost(
   } catch {
     return jsonRpcError(500, -32603, "Internal server error.");
   } finally {
-    await server.close().catch(() => undefined);
+    await handler.close().catch(() => undefined);
   }
 }
 
