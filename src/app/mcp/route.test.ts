@@ -43,7 +43,7 @@ function dependencies(overrides: Record<string, unknown> = {}) {
     createServer: vi.fn((context: Parameters<typeof createComplianceMcpServer>[0]) => createComplianceMcpServer(context, {
       listWorkspaces: vi.fn(async () => []),
       getComplianceOverview: vi.fn(), listAttentionItems: vi.fn(), listMonitoringFindings: vi.fn(),
-      listGitHubComplianceResults: vi.fn(), getLatestLeadershipReport: vi.fn(), prepareDailyDigest: vi.fn(), postDailyDigest: vi.fn(),
+      listGitHubComplianceResults: vi.fn(), getLatestLeadershipReport: vi.fn(), prepareDailyDigest: vi.fn(),
     })),
     ...overrides,
   };
@@ -122,7 +122,7 @@ describe("POST /mcp", () => {
       createServer: vi.fn((context: Parameters<typeof createComplianceMcpServer>[0]) => createComplianceMcpServer(context, {
         listWorkspaces,
         getComplianceOverview: vi.fn(), listAttentionItems: vi.fn(), listMonitoringFindings: vi.fn(),
-        listGitHubComplianceResults: vi.fn(), getLatestLeadershipReport: vi.fn(), prepareDailyDigest: vi.fn(), postDailyDigest: vi.fn(),
+        listGitHubComplianceResults: vi.fn(), getLatestLeadershipReport: vi.fn(), prepareDailyDigest: vi.fn(),
       })),
     });
     const response = await handleMcpPost(new Request("http://127.0.0.1:3100/mcp", {
@@ -389,7 +389,7 @@ describe("POST /mcp", () => {
     const deps = dependencies({
       authenticate: vi.fn(async () => authContext(call++ === 0 ? USER_ID : "10000000-0000-4000-8000-000000000002", `client-${call}`)),
       createServer: vi.fn((context: Parameters<typeof createComplianceMcpServer>[0]) => {
-        const server = createComplianceMcpServer(context, { listWorkspaces: vi.fn(async () => []), getComplianceOverview: vi.fn(), listAttentionItems: vi.fn(), listMonitoringFindings: vi.fn(), listGitHubComplianceResults: vi.fn(), getLatestLeadershipReport: vi.fn(), prepareDailyDigest: vi.fn(), postDailyDigest: vi.fn() });
+        const server = createComplianceMcpServer(context, { listWorkspaces: vi.fn(async () => []), getComplianceOverview: vi.fn(), listAttentionItems: vi.fn(), listMonitoringFindings: vi.fn(), listGitHubComplianceResults: vi.fn(), getLatestLeadershipReport: vi.fn(), prepareDailyDigest: vi.fn() });
         servers.push(server);
         return server;
       }),
