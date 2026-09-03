@@ -33,7 +33,7 @@ type RawUrl = { authority: string; path: string };
 function parseRawUrl(value: string): RawUrl {
   if (/[\u0000-\u001F\u007F]/.test(value) || value.includes("*") || value.includes("\\")) throw new Error("invalid URL syntax");
   const match = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]+)(\/[^?#]*)?$/i.exec(value);
-  if (!match || match[1].includes("@")) throw new Error("invalid URL syntax");
+  if (!match || match[1].includes("@") || match[1].includes("%")) throw new Error("invalid URL syntax");
   return { authority: match[1], path: match[2] ?? "" };
 }
 

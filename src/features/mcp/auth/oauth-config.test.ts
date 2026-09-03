@@ -67,6 +67,8 @@ describe("parseMcpOAuthEnvironment", () => {
 
   it.each([
     ["backslash path separator", "https://compliance.example\\mcp"],
+    ["encoded hostname label", "https://%63ompliance.example/mcp"],
+    ["encoded hostname separator", "https://compliance%2eexample/mcp"],
     ["empty query marker", "https://compliance.example/mcp?"],
     ["embedded tab", "https://compliance.example/m\tcp"],
   ])("fails closed for raw configured production resource with %s", (_label, MCP_RESOURCE_URL) => {
@@ -89,9 +91,31 @@ describe("parseMcpOAuthEnvironment", () => {
     expect(hosted.allowedOrigins).toEqual(["https://compliance.example"]);
   });
 
+  it("preserves canonical production DNS, port, and IPv6 authorities", () => {
+    const canonicalDns = parseMcpOAuthEnvironment({
+      ...production,
+      MCP_RESOURCE_URL: "https://Compliance.Example:443/mcp",
+    });
+    const customPort = parseMcpOAuthEnvironment({
+      ...production,
+      MCP_RESOURCE_URL: "https://compliance.example:8443/mcp",
+    });
+    const ipv6 = parseMcpOAuthEnvironment({
+      ...production,
+      MCP_RESOURCE_URL: "https://[2001:db8::1]:8443/mcp",
+    });
+
+    expect(canonicalDns.resource).toBe("https://compliance.example/mcp");
+    expect(canonicalDns.allowedOrigins).toEqual(["https://compliance.example"]);
+    expect(customPort.allowedOrigins).toEqual(["https://compliance.example:8443"]);
+    expect(ipv6.allowedOrigins).toEqual(["https://[2001:db8::1]:8443"]);
+  });
+
   it.each([
     ["null", "null"],
     ["wildcard", "*"],
+    ["encoded hostname label", "https://%63ompliance.example"],
+    ["encoded hostname separator", "https://compliance%2eexample"],
     ["credentials", "https://user:password@compliance.example"],
     ["path", "https://compliance.example/mcp"],
     ["query", "https://compliance.example?next=attacker"],
