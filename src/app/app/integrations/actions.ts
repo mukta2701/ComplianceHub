@@ -1,15 +1,7 @@
 "use server";
 
-import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { buildCollectionDependencies } from "@/features/github/application/collection-deps";
-import {
-  buildMaterialisationDependencies,
-  reconcileApprovedGitHubObservations,
-  type ReconciliationSummary,
-} from "@/features/github/application/materialise-approved-observations";
-import { runGitHubCollection, type CollectionSummary } from "@/features/github/application/run-collection";
 import { requireAppContext } from "@/lib/app-context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { decryptSecret, encryptSecret } from "@/lib/security/secrets";
@@ -46,25 +38,6 @@ const digestChannelSchema = z.object({
 const githubRepositorySelectionSchema = z.object({
   repositoryId: z.uuid(),
   selected: z.enum(["true", "false"]).transform((value) => value === "true"),
-}).strict();
-const githubInstallationRecheckSchema = z.object({
-  installationId: z.uuid(),
-}).strict();
-const githubCollectionSummarySchema = z.object({
-  installationsChecked: z.number().int().nonnegative(),
-  repositoriesChecked: z.number().int().nonnegative(),
-  observationsStored: z.number().int().nonnegative(),
-  repositoriesFailed: z.number().int().nonnegative(),
-  repositoriesDeferred: z.number().int().nonnegative(),
-  runsPartial: z.number().int().nonnegative(),
-  terminalRuns: z.array(z.object({
-    collectionRunId: z.uuid(),
-    organisationId: z.uuid(),
-    installationId: z.uuid(),
-    repositoryId: z.uuid(),
-    providerRepositoryId: z.number().int().positive().safe(),
-    status: z.enum(["succeeded", "partial"]),
-  }).strict()).max(10_000),
 }).strict();
 const monitorSourceSchema = z.object({
   owner: z.string().trim().min(1, "GitHub owner is required").max(120),
@@ -147,30 +120,11 @@ async function loadApprovedSlackDestination(
 export type GitHubMutationResult = {
   ok: boolean;
   message: string;
-  summary?: CollectionSummary;
-  materialisation?: ReconciliationSummary;
 };
-
-function approvedGitHubWorkflowIds(): number[] {
-  const raw = process.env.GITHUB_APPROVED_SECURITY_WORKFLOW_IDS ?? "";
-  const values = raw.split(",").map((value) => value.trim());
-  if (values.length < 1 || values.length > 20 || values.some((value) => !/^[1-9][0-9]*$/.test(value))) {
-    throw new Error("GitHub collection is not configured");
-  }
-  const ids = values.map(Number);
-  if (ids.some((value) => !Number.isSafeInteger(value)) || new Set(ids).size !== ids.length) {
-    throw new Error("GitHub collection is not configured");
-  }
-  return ids;
-}
 
 const repositorySelectionFailure = {
   ok: false,
   message: "Could not update repository scope. Please try again.",
-} as const;
-const installationRecheckFailure = {
-  ok: false,
-  message: "Could not recheck this GitHub installation. Please try again.",
 } as const;
 
 export async function setGitHubRepositorySelectedAction(formData: FormData): Promise<GitHubMutationResult> {
@@ -196,73 +150,6 @@ export async function setGitHubRepositorySelectedAction(formData: FormData): Pro
     return { ok: true, message: "Repository scope updated." };
   } catch {
     return repositorySelectionFailure;
-  }
-}
-
-export async function recheckGitHubInstallationAction(formData: FormData): Promise<GitHubMutationResult> {
-  try {
-    const { supabase, user, organisation } = await requireGitHubOwner();
-    const parsed = githubInstallationRecheckSchema.parse(Object.fromEntries(formData));
-    const { data: installation, error } = await supabase.from("github_installations")
-      .select("id,status,permissions_ok")
-      .eq("id", parsed.installationId)
-      .eq("organisation_id", organisation.id)
-      .maybeSingle();
-    if (
-      error
-      || !installation
-      || installation.id !== parsed.installationId
-      || installation.status !== "active"
-      || installation.permissions_ok !== true
-    ) return installationRecheckFailure;
-
-    await enforceRateLimit(`github-manual:${organisation.id}:${user.id}`, { limit: 5, windowMs: 60_000 });
-    const appId = process.env.GITHUB_APP_ID?.trim() ?? "";
-    const privateKey = process.env.GITHUB_APP_PRIVATE_KEY?.trim() ?? "";
-    if (!appId || !privateKey) return installationRecheckFailure;
-    const service = createSupabaseServiceClient();
-    const dependencies = buildCollectionDependencies(service, {
-      appId,
-      privateKey,
-      approvedSecurityWorkflowIds: approvedGitHubWorkflowIds(),
-    });
-    const summary = githubCollectionSummarySchema.parse(await runGitHubCollection(dependencies, {
-      trigger: "manual",
-      installationId: parsed.installationId,
-      requestKey: `manual:${randomUUID()}`,
-    }));
-    let materialisation: ReconciliationSummary;
-    try {
-      materialisation = await reconcileApprovedGitHubObservations(
-        buildMaterialisationDependencies(service),
-        {
-          limit: 100,
-          terminalRuns: summary.terminalRuns,
-        },
-      );
-    } catch {
-      materialisation = {
-        runsConsidered: 0,
-        materialised: 0,
-        unchanged: 0,
-        awaitingApproval: 0,
-        needsAttention: 1,
-      };
-    }
-    revalidatePath("/app/integrations");
-    const counts = `${summary.repositoriesChecked} checked, ${summary.repositoriesDeferred} deferred, ${summary.repositoriesFailed} failed.`;
-    return {
-      ok: true,
-      message: materialisation.needsAttention > 0
-        ? `Recheck complete, but official GitHub records need attention: ${counts}`
-        : materialisation.awaitingApproval > 0
-          ? `Recheck complete; official GitHub records await Owner approval: ${counts}`
-          : `Recheck complete: ${counts}`,
-      summary,
-      materialisation,
-    };
-  } catch {
-    return installationRecheckFailure;
   }
 }
 

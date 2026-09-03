@@ -9,7 +9,7 @@ import type { GitHubMappingReview } from "../application/github-mapping-review";
 const hoisted = vi.hoisted(() => ({
   approve: vi.fn(), revoke: vi.fn(), process: vi.fn(), retry: vi.fn(), refresh: vi.fn(),
 }));
-vi.mock("@/app/app/integrations/github-actions", () => ({
+vi.mock("@/app/app/monitoring/github-control-room-actions", () => ({
   approveGitHubMappingPackAction: hoisted.approve,
   revokeGitHubMappingApprovalAction: hoisted.revoke,
   processApprovedGitHubResultsAction: hoisted.process,
@@ -110,10 +110,11 @@ describe("GitHubComplianceControlRoomPanel", () => {
 
     const workflow = screen.getByRole("list", { name: "How GitHub compliance becomes official" });
     expect(within(workflow).getAllByRole("listitem")).toHaveLength(4);
+    expect(screen.getByText("Review all 15 mapped checks").closest("details")).not.toHaveAttribute("open");
     expect(screen.getByText(STANDARD_GITHUB_ISO_MAPPING_PACK.version)).toBeVisible();
     expect(screen.getByText(STANDARD_GITHUB_ISO_MAPPING_PACK.checksum)).toBeVisible();
     expect(screen.getAllByRole("article", { name: /mapping check$/ })).toHaveLength(15);
-    expect(screen.getByText("A.5.18 · A.8.2")).toBeVisible();
+    expect(screen.getByText("A.5.18 · A.8.2")).not.toBeVisible();
     expect(screen.getAllByText(/Verified technical pass → evidence/).length).toBeGreaterThan(0);
     expect(screen.getByText(/do not certify ISO\/IEC 27001 compliance/)).toBeVisible();
     expect(screen.getByRole("heading", { name: "Approval history" })).toBeVisible();
@@ -141,6 +142,27 @@ describe("GitHubComplianceControlRoomPanel", () => {
     );
     expect(repository).toHaveTextContent("Rule github-repository-v1 · Mapping github-iso-27001-v1");
     expect(repository).not.toHaveTextContent(/compliant|certified|secure|readiness improved/i);
+  });
+
+  it("never labels an official-mode collection without materialised results as shadow", () => {
+    const collectedRoom = room();
+    collectedRoom.repositories[0] = {
+      ...collectedRoom.repositories[0],
+      latestMaterialisationJob: null,
+      officialResults: [],
+    };
+
+    render(<GitHubComplianceControlRoomPanel
+      room={collectedRoom}
+      review={review()}
+      role="member"
+      unhealthyRepositoryIds={[]}
+    />);
+
+    const repository = screen.getByRole("article", { name: "Mukta2701/ComplianceHub official compliance" });
+    expect(within(repository).getByText("Collected, not official")).toBeVisible();
+    expect(repository).not.toHaveTextContent(/\bshadow\b/i);
+    expect(screen.getByText(/before any collected result becomes an official record/i)).toBeVisible();
   });
 
   it.each(["admin", "member"] as const)("keeps mapping and recovery controls read-only for %s", (role) => {

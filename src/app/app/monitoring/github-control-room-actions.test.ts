@@ -71,7 +71,7 @@ import {
   processApprovedGitHubResultsAction,
   retryExhaustedGitHubMaterialisationAction,
   revokeGitHubMappingApprovalAction,
-} from "./github-actions";
+} from "./github-control-room-actions";
 
 function approvalForm() {
   const form = new FormData();
@@ -182,7 +182,7 @@ describe("GitHub control-room actions", () => {
       target_checksum: STANDARD_GITHUB_ISO_MAPPING_PACK.checksum,
     });
     expect(hoisted.calls.indexOf("rate-limit")).toBeLessThan(hoisted.calls.indexOf("service-client"));
-    expect(hoisted.revalidate).toHaveBeenCalledWith("/app/integrations");
+    expect(hoisted.revalidate.mock.calls).toEqual([["/app/monitoring"]]);
   });
 
   it("revokes only the active approval in the current workspace", async () => {
@@ -198,6 +198,7 @@ describe("GitHub control-room actions", () => {
       target_actor_id: USER,
       target_approval_id: APPROVAL,
     });
+    expect(hoisted.revalidate.mock.calls).toEqual([["/app/monitoring"]]);
   });
 
   it("rejects a sibling-workspace approval before service access", async () => {
@@ -229,7 +230,11 @@ describe("GitHub control-room actions", () => {
     expect(hoisted.calls.indexOf(`github_materialisation_jobs:eq:["collection_run_id","${RUN}"]`))
       .toBeLessThan(hoisted.calls.indexOf("rate-limit"));
     expect(hoisted.calls.indexOf("rate-limit")).toBeLessThan(hoisted.calls.indexOf("service-client"));
-    expect(hoisted.revalidate).toHaveBeenCalledWith("/app/integrations");
+    expect(hoisted.revalidate.mock.calls).toEqual([
+      ["/app/monitoring"],
+      ["/app/evidence"],
+      ["/app"],
+    ]);
   });
 
   it("does not create a service client for malformed or cross-workspace processing targets", async () => {
@@ -245,6 +250,15 @@ describe("GitHub control-room actions", () => {
       ok: false, message: "Could not process these GitHub results.",
     });
     expect(hoisted.calls).not.toContain("service-client");
+    expect(hoisted.revalidate).not.toHaveBeenCalled();
+  });
+
+  it("does not invalidate operator surfaces when official processing fails", async () => {
+    hoisted.reconcile.mockRejectedValue(new Error("materialisation failed"));
+    await expect(processApprovedGitHubResultsAction(targetForm())).resolves.toEqual({
+      ok: false, message: "Could not process these GitHub results.",
+    });
+    expect(hoisted.revalidate).not.toHaveBeenCalled();
   });
 
   it("retries an exact exhausted job using only a closed reason code", async () => {
@@ -262,7 +276,7 @@ describe("GitHub control-room actions", () => {
       reasonCode: "configuration_corrected",
     });
     expect(hoisted.rateLimit.mock.invocationCallOrder[0]).toBeLessThan(hoisted.retry.mock.invocationCallOrder[0]);
-    expect(hoisted.revalidate).toHaveBeenCalledWith("/app/integrations");
+    expect(hoisted.revalidate.mock.calls).toEqual([["/app/monitoring"]]);
   });
 
   it("maps rate-limit and internal details to stable safe errors", async () => {
@@ -271,5 +285,6 @@ describe("GitHub control-room actions", () => {
     expect(result).toEqual({ ok: false, message: "Could not approve the GitHub mapping right now." });
     expect(JSON.stringify(result)).not.toContain("private limiter detail");
     expect(hoisted.calls).not.toContain("service-client");
+    expect(hoisted.revalidate).not.toHaveBeenCalled();
   });
 });

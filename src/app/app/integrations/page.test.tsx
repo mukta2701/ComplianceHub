@@ -32,12 +32,11 @@ const hoisted = vi.hoisted(() => ({
       id: "10000000-0000-4000-8000-000000000010", account_login: "Adtecher", status: "active",
       repository_selection: "selected", permissions_ok: true,
     }],
-    github_repository_shadow_summaries: [{
-      repository_id: "10000000-0000-4000-8000-000000000011",
+    github_repositories: [{
+      id: "10000000-0000-4000-8000-000000000011",
       installation_id: "10000000-0000-4000-8000-000000000010",
       full_name: "Adtecher/compliancehub", html_url: "https://github.com/Adtecher/compliancehub",
       visibility: "private", default_branch: "main", archived: false, selected: true, available: true,
-      latest_run_id: null, latest_status: null, latest_failed_count: null, last_completed_collection_at: null,
     }],
   } as Record<string, unknown[]>,
 }));
@@ -132,21 +131,24 @@ describe("Settings Connections page", () => {
     expect(within(tabs).getByRole("link", { name: "Connections" })).toHaveAttribute("aria-current", "page");
     expect(screen.queryByText("Old Jira")).not.toBeInTheDocument();
     expect(screen.queryByText("#old-alerts")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "GitHub App shadow collection" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "GitHub App connection" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "From repository facts to reviewed records" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Install GitHub App" })).not.toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: /Select Adtecher\/compliancehub/ })).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: /include Adtecher\/compliancehub in monitoring/ })).toBeDisabled();
 
     const expectedColumns: Record<string, string> = {
       integration_connections: "id,provider,label,config,connection_mode,enabled,created_at,revoked_at",
       alert_channels: "id,type,label,min_severity,enabled,daily_digest_enabled,created_at,revoked_at",
       github_installations: "id,account_login,status,repository_selection,permissions_ok",
-      github_repository_shadow_summaries: "repository_id,installation_id,full_name,html_url,visibility,default_branch,archived,selected,available,latest_run_id,latest_status,latest_failed_count,last_completed_collection_at",
+      github_repositories: "id,installation_id,full_name,html_url,visibility,default_branch,archived,selected,available",
     };
     expect(hoisted.selectCalls).toHaveLength(4);
     for (const call of hoisted.selectCalls) {
       expect(call.columns).toBe(expectedColumns[call.table]);
+      expect(call.columns).not.toMatch(/latest_|last_completed|failed_count/);
     }
+    expect(hoisted.selectCalls.map((call) => call.table)).not.toContain("github_repository_shadow_summaries");
+    expect(screen.queryByText(/collection health|freshness|recheck/i)).not.toBeInTheDocument();
     expect(hoisted.controlRoomLoads).toHaveLength(0);
     expect(hoisted.mappingReviewLoads).toHaveLength(0);
   });
@@ -158,12 +160,12 @@ describe("Settings Connections page", () => {
       { table: "integration_connections", column: "organisation_id", value: "org-1" },
       { table: "alert_channels", column: "organisation_id", value: "org-1" },
       { table: "github_installations", column: "organisation_id", value: "org-1" },
-      { table: "github_repository_shadow_summaries", column: "organisation_id", value: "org-1" },
+      { table: "github_repositories", column: "organisation_id", value: "org-1" },
     ]);
   });
 
   it.each([
-    "integration_connections", "alert_channels", "github_installations", "github_repository_shadow_summaries",
+    "integration_connections", "alert_channels", "github_installations", "github_repositories",
   ])("fails closed when %s cannot load", async (table) => {
     hoisted.errors[table] = { message: "query unavailable" };
 
@@ -193,25 +195,25 @@ describe("Settings Connections page", () => {
 
     expect(hoisted.selectCalls.map((call) => call.table)).toEqual([
       "github_installations",
-      "github_repository_shadow_summaries",
+      "github_repositories",
     ]);
-    expect(screen.getByRole("heading", { name: "GitHub App shadow collection" })).toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: /Select Adtecher\/compliancehub/ })).toBeDisabled();
+    expect(screen.getByRole("heading", { name: "GitHub App connection" })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: /include Adtecher\/compliancehub in monitoring/ })).toBeDisabled();
     expect(screen.queryByRole("article", { name: "Slack connection" })).not.toBeInTheDocument();
     expect(screen.queryByText("GitHub App connected.")).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "From repository facts to reviewed records" })).not.toBeInTheDocument();
     expect(hoisted.controlRoomLoads).toHaveLength(0);
     expect(hoisted.mappingReviewLoads).toHaveLength(0);
-    expect(screen.getByRole("link", { name: "Review GitHub compliance in Monitoring" })).toHaveAttribute("href", "/app/monitoring");
+    expect(screen.getByRole("link", { name: "Open GitHub monitoring" })).toHaveAttribute("href", "/app/monitoring");
   });
 
   it("allows only Owners to change repository scope", async () => {
     hoisted.role = "owner";
     render(await IntegrationsPage({ searchParams: Promise.resolve({}) }));
 
-    expect(screen.getByRole("checkbox", { name: /Select Adtecher\/compliancehub/ })).toBeEnabled();
+    expect(screen.getByRole("checkbox", { name: /include Adtecher\/compliancehub in monitoring/ })).toBeEnabled();
     expect(screen.queryByRole("group", { name: "Owner mapping approval" })).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Review GitHub compliance in Monitoring" })).toHaveAttribute("href", "/app/monitoring");
+    expect(screen.getByRole("link", { name: "Open GitHub monitoring" })).toHaveAttribute("href", "/app/monitoring");
   });
 
   it("shows only the whitelisted GitHub connection success state", async () => {

@@ -34,6 +34,7 @@ function reservation(item: CollectionTarget, overrides: Partial<RunReservation> 
     leaseToken: randomUUID(),
     leaseExpiresAt: "2026-08-17T05:31:00.000Z",
     attempt: 1,
+    runMode: "official",
     acquisitionState: "acquired",
     status: "running",
     organisationId: item.organisationId,
@@ -197,6 +198,22 @@ describe("runGitHubCollection", () => {
     const summary = await runGitHubCollection(deps, { trigger: "manual", requestKey: "manual:failed-duplicate" });
 
     expect(summary.terminalRuns).toEqual([]);
+  });
+
+  it("fails closed before collection when a dependency returns a different persisted run mode", async () => {
+    const item = target();
+    const deps = dependencies([item]);
+    vi.mocked(deps.reserveRun).mockResolvedValue(reservation(item, { runMode: "official" }));
+
+    const summary = await runGitHubCollection(deps, {
+      trigger: "manual",
+      requestKey: "manual:shadow",
+      runMode: "shadow",
+    });
+
+    expect(summary.repositoriesFailed).toBe(1);
+    expect(deps.collectFacts).not.toHaveBeenCalled();
+    expect(deps.finaliseRun).not.toHaveBeenCalled();
   });
 
   it("finalises a reclaimed complete set without recollecting", async () => {

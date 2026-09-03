@@ -17,10 +17,6 @@ const hoisted = vi.hoisted(() => ({
   verifyNangoConnection: vi.fn(),
   verifyGitHubOAuthTarget: vi.fn(),
   createServiceClient: vi.fn(),
-  buildCollectionDependencies: vi.fn(),
-  runGitHubCollection: vi.fn(),
-  buildMaterialisationDependencies: vi.fn(),
-  reconcileApprovedGitHubObservations: vi.fn(),
 }));
 
 vi.mock("@/lib/app-context", () => ({ requireAppContext: () => Promise.resolve(hoisted.ctx) }));
@@ -39,16 +35,6 @@ vi.mock("@/features/integrations/application/nango", () => ({
   verifyNangoConnection: hoisted.verifyNangoConnection,
   verifyGitHubOAuthTarget: hoisted.verifyGitHubOAuthTarget,
 }));
-vi.mock("@/features/github/application/collection-deps", () => ({
-  buildCollectionDependencies: hoisted.buildCollectionDependencies,
-}));
-vi.mock("@/features/github/application/run-collection", () => ({
-  runGitHubCollection: hoisted.runGitHubCollection,
-}));
-vi.mock("@/features/github/application/materialise-approved-observations", () => ({
-  buildMaterialisationDependencies: hoisted.buildMaterialisationDependencies,
-  reconcileApprovedGitHubObservations: hoisted.reconcileApprovedGitHubObservations,
-}));
 vi.mock("next/cache", () => ({ revalidatePath: hoisted.revalidatePath }));
 
 import {
@@ -64,7 +50,6 @@ import {
   setDailyDigestChannelAction,
   setMonitorSourceEnabledAction,
   startProviderAuthorizationAction,
-  recheckGitHubInstallationAction,
   setGitHubRepositorySelectedAction,
 } from "./actions";
 
@@ -784,42 +769,14 @@ describe("integration connection access", () => {
   });
 });
 
-describe("GitHub shadow collection actions", () => {
-  const INSTALLATION_ID = "20000000-0000-4000-8000-000000000010";
+describe("GitHub repository scope actions", () => {
   const REPOSITORY_ID = "20000000-0000-4000-8000-000000000011";
-  const terminalRuns = [{
-    collectionRunId: "20000000-0000-4000-8000-000000000012",
-    organisationId: ORGANISATION_ID,
-    installationId: INSTALLATION_ID,
-    repositoryId: REPOSITORY_ID,
-    providerRepositoryId: 71,
-    status: "succeeded" as const,
-  }];
-
   beforeEach(() => {
     vi.clearAllMocks();
     hoisted.enforceRateLimit.mockResolvedValue(undefined);
     process.env.GITHUB_APP_ID = "123456";
     process.env.GITHUB_APP_PRIVATE_KEY = "private-key";
     process.env.GITHUB_APPROVED_SECURITY_WORKFLOW_IDS = "101,202";
-    hoisted.buildCollectionDependencies.mockReturnValue({ dependency: "collection" });
-    hoisted.buildMaterialisationDependencies.mockReturnValue({ dependency: "materialisation" });
-    hoisted.reconcileApprovedGitHubObservations.mockResolvedValue({
-      runsConsidered: 1,
-      materialised: 1,
-      unchanged: 0,
-      awaitingApproval: 0,
-      needsAttention: 0,
-    });
-    hoisted.runGitHubCollection.mockResolvedValue({
-      installationsChecked: 1,
-      repositoriesChecked: 1,
-      observationsStored: 15,
-      repositoriesFailed: 0,
-      repositoriesDeferred: 1,
-      runsPartial: 0,
-      terminalRuns,
-    });
   });
 
   it("rejects Members before repository selection reaches Supabase", async () => {
@@ -962,191 +919,4 @@ describe("GitHub shadow collection actions", () => {
     expect(hoisted.createServiceClient).not.toHaveBeenCalled();
   });
 
-  it.each(["admin", "member"] as const)("rejects %ss before installation lookup or service collection", async (role) => {
-    const from = vi.fn();
-    hoisted.ctx = {
-      supabase: { from }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role },
-    };
-    const form = new FormData();
-    form.set("installationId", INSTALLATION_ID);
-
-    await expect(recheckGitHubInstallationAction(form)).resolves.toEqual({
-      ok: false,
-      message: "Could not recheck this GitHub installation. Please try again.",
-    });
-    expect(from).not.toHaveBeenCalled();
-    expect(hoisted.createServiceClient).not.toHaveBeenCalled();
-    expect(hoisted.runGitHubCollection).not.toHaveBeenCalled();
-  });
-
-  it("rejects client-supplied organisation and request keys rather than trusting them", async () => {
-    const from = vi.fn();
-    hoisted.ctx = {
-      supabase: { from }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
-    };
-    const form = new FormData();
-    form.set("installationId", INSTALLATION_ID);
-    form.set("organisationId", "20000000-0000-4000-8000-000000000099");
-    form.set("requestKey", "manual:client-controlled");
-
-    await expect(recheckGitHubInstallationAction(form)).resolves.toEqual({
-      ok: false,
-      message: "Could not recheck this GitHub installation. Please try again.",
-    });
-    expect(from).not.toHaveBeenCalled();
-    expect(hoisted.runGitHubCollection).not.toHaveBeenCalled();
-  });
-
-  it("looks up one active permission-verified installation through operator RLS before collection", async () => {
-    const lookup: Record<string, ReturnType<typeof vi.fn>> = {};
-    lookup.select = vi.fn(() => lookup);
-    lookup.eq = vi.fn(() => lookup);
-    lookup.maybeSingle = vi.fn().mockResolvedValue({
-      data: { id: INSTALLATION_ID, status: "active", permissions_ok: true }, error: null,
-    });
-    const sessionFrom = vi.fn(() => lookup);
-    const service = { from: vi.fn(), rpc: vi.fn() };
-    hoisted.createServiceClient.mockReturnValue(service);
-    hoisted.ctx = {
-      supabase: { from: sessionFrom }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
-    };
-    const form = new FormData();
-    form.set("installationId", INSTALLATION_ID);
-
-    const result = await recheckGitHubInstallationAction(form);
-
-    expect(lookup.select).toHaveBeenCalledWith("id,status,permissions_ok");
-    expect(lookup.eq).toHaveBeenNthCalledWith(1, "id", INSTALLATION_ID);
-    expect(lookup.eq).toHaveBeenNthCalledWith(2, "organisation_id", ORGANISATION_ID);
-    expect(hoisted.enforceRateLimit).toHaveBeenCalledWith(
-      `github-manual:${ORGANISATION_ID}:${USER_ID}`,
-      { limit: 5, windowMs: 60_000 },
-    );
-    expect(hoisted.buildCollectionDependencies).toHaveBeenCalledWith(service, {
-      appId: "123456",
-      privateKey: "private-key",
-      approvedSecurityWorkflowIds: [101, 202],
-    });
-    expect(hoisted.runGitHubCollection).toHaveBeenCalledWith(
-      { dependency: "collection" },
-      {
-        trigger: "manual",
-        installationId: INSTALLATION_ID,
-        requestKey: expect.stringMatching(/^manual:[0-9a-f-]{36}$/),
-      },
-    );
-    expect(hoisted.buildMaterialisationDependencies).toHaveBeenCalledWith(service);
-    expect(hoisted.reconcileApprovedGitHubObservations).toHaveBeenCalledWith(
-      { dependency: "materialisation" },
-      {
-        limit: 100,
-        terminalRuns,
-      },
-    );
-    expect(hoisted.runGitHubCollection.mock.invocationCallOrder[0]).toBeLessThan(
-      hoisted.reconcileApprovedGitHubObservations.mock.invocationCallOrder[0],
-    );
-    expect(result).toEqual({
-      ok: true,
-      message: "Recheck complete: 1 checked, 1 deferred, 0 failed.",
-      summary: {
-        installationsChecked: 1,
-        repositoriesChecked: 1,
-        observationsStored: 15,
-        repositoriesFailed: 0,
-        repositoriesDeferred: 1,
-        runsPartial: 0,
-        terminalRuns,
-      },
-      materialisation: {
-        runsConsidered: 1,
-        materialised: 1,
-        unchanged: 0,
-        awaitingApproval: 0,
-        needsAttention: 0,
-      },
-    });
-  });
-
-  it("surfaces post-terminal materialisation attention without changing the collection summary", async () => {
-    const lookup: Record<string, ReturnType<typeof vi.fn>> = {};
-    lookup.select = vi.fn(() => lookup);
-    lookup.eq = vi.fn(() => lookup);
-    lookup.maybeSingle = vi.fn().mockResolvedValue({
-      data: { id: INSTALLATION_ID, status: "active", permissions_ok: true }, error: null,
-    });
-    hoisted.ctx = {
-      supabase: { from: vi.fn(() => lookup) }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
-    };
-    hoisted.createServiceClient.mockReturnValue({});
-    hoisted.reconcileApprovedGitHubObservations.mockResolvedValue({
-      runsConsidered: 1,
-      materialised: 0,
-      unchanged: 0,
-      awaitingApproval: 0,
-      needsAttention: 1,
-    });
-    const form = new FormData();
-    form.set("installationId", INSTALLATION_ID);
-
-    const result = await recheckGitHubInstallationAction(form);
-
-    expect(result).toEqual(expect.objectContaining({
-      ok: true,
-      message: "Recheck complete, but official GitHub records need attention: 1 checked, 1 deferred, 0 failed.",
-      summary: expect.objectContaining({ repositoriesChecked: 1, repositoriesDeferred: 1, repositoriesFailed: 0 }),
-      materialisation: expect.objectContaining({ needsAttention: 1 }),
-    }));
-  });
-
-  it.each([
-    { data: { id: INSTALLATION_ID, status: "suspended", permissions_ok: true }, label: "suspended" },
-    { data: { id: INSTALLATION_ID, status: "active", permissions_ok: false }, label: "missing permissions" },
-    { data: null, label: "not found" },
-  ])("fails closed for an installation that is $label", async ({ data }) => {
-    const lookup: Record<string, ReturnType<typeof vi.fn>> = {};
-    lookup.select = vi.fn(() => lookup);
-    lookup.eq = vi.fn(() => lookup);
-    lookup.maybeSingle = vi.fn().mockResolvedValue({ data, error: null });
-    const from = vi.fn(() => lookup);
-    hoisted.ctx = {
-      supabase: { from }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
-    };
-    const form = new FormData();
-    form.set("installationId", INSTALLATION_ID);
-
-    await expect(recheckGitHubInstallationAction(form)).resolves.toEqual({
-      ok: false,
-      message: "Could not recheck this GitHub installation. Please try again.",
-    });
-    expect(from).toHaveBeenCalledWith("github_installations");
-    expect(hoisted.enforceRateLimit).not.toHaveBeenCalled();
-    expect(hoisted.createServiceClient).not.toHaveBeenCalled();
-    expect(hoisted.runGitHubCollection).not.toHaveBeenCalled();
-    expect(hoisted.reconcileApprovedGitHubObservations).not.toHaveBeenCalled();
-  });
-
-  it("redacts provider and persistence failures from manual action results", async () => {
-    const lookup: Record<string, ReturnType<typeof vi.fn>> = {};
-    lookup.select = vi.fn(() => lookup);
-    lookup.eq = vi.fn(() => lookup);
-    lookup.maybeSingle = vi.fn().mockResolvedValue({
-      data: { id: INSTALLATION_ID, status: "active", permissions_ok: true }, error: null,
-    });
-    hoisted.ctx = {
-      supabase: { from: vi.fn(() => lookup) }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
-    };
-    hoisted.createServiceClient.mockReturnValue({});
-    hoisted.runGitHubCollection.mockRejectedValue(new Error("provider-token-sensitive-detail"));
-    const form = new FormData();
-    form.set("installationId", INSTALLATION_ID);
-
-    const result = await recheckGitHubInstallationAction(form);
-
-    expect(result).toEqual({
-      ok: false,
-      message: "Could not recheck this GitHub installation. Please try again.",
-    });
-    expect(JSON.stringify(result)).not.toContain("provider-token-sensitive-detail");
-  });
 });

@@ -252,6 +252,7 @@ export function parseGitHubComplianceControlRoom(
     if (repository.latestCollection && Date.parse(repository.latestCollection.completedAt) > asOf) fail();
     if (repository.latestMaterialisationJob) {
       const job = repository.latestMaterialisationJob;
+      if (!repository.latestCollection || job.collectionRunId !== repository.latestCollection.id) fail();
       if (job.exhaustedAt !== null && Date.parse(job.exhaustedAt) > asOf) fail();
     }
     if (hasDuplicates(repository.officialResults.map((result) => result.checkId))) fail();

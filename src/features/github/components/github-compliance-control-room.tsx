@@ -8,7 +8,7 @@ import {
   processApprovedGitHubResultsAction,
   retryExhaustedGitHubMaterialisationAction,
   revokeGitHubMappingApprovalAction,
-} from "@/app/app/integrations/github-actions";
+} from "@/app/app/monitoring/github-control-room-actions";
 import { Pill } from "@/components/ui";
 import type { GitHubComplianceControlRoom } from "../application/github-compliance-control-room";
 import type { GitHubMappingReview } from "../application/github-mapping-review";
@@ -27,12 +27,12 @@ const STATE_PRESENTATION: Record<GitHubRepositoryComplianceState, { label: strin
   awaiting_approval: {
     label: "Awaiting approval",
     tone: "amber",
-    detail: "Shadow checks are stored, but an Owner has not approved the reviewed mapping.",
+    detail: "Collected checks are stored, but an Owner has not approved the reviewed mapping.",
   },
   shadow: {
-    label: "Shadow",
+    label: "Collected, not official",
     tone: "blue",
-    detail: "Read-only checks exist, but no official evidence or findings have been produced yet.",
+    detail: "Collected checks exist, but no official evidence or findings have been produced yet.",
   },
   official_stale: {
     label: "Official records stale",
@@ -112,7 +112,7 @@ function MappingReviewSection({
       <div>
         <p className="eyebrow">REVIEWED MAPPING</p>
         <h3 id="github-mapping-title">GitHub checks mapped to ISO/IEC 27001:2022</h3>
-        <p>Review the exact published mapping before any shadow result becomes an official record.</p>
+        <p>Review the exact published mapping before any collected result becomes an official record.</p>
       </div>
       <Pill tone={exactApprovalActive ? "green" : "amber"}>{approvalLabel}</Pill>
     </div>
@@ -151,7 +151,7 @@ function MappingReviewSection({
       Only workspace Owners can approve mappings or recover processing.
     </p>}
 
-    <details className="github-mapping-details" open>
+    <details className="github-mapping-details">
       <summary>Review all 15 mapped checks</summary>
       <div className="github-mapping-list">
         {review.entries.map((entry) => <article key={entry.id} aria-label={`${entry.checkId} mapping check`}>

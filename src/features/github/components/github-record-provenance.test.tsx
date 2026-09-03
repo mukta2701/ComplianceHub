@@ -55,6 +55,46 @@ describe("official GitHub provenance cards", () => {
     }
   });
 
+  it("leads with reviewed plain-language finding guidance and hides technical provenance by default", () => {
+    render(<OfficialGitHubFindingCard
+      record={{
+        ...common,
+        checkId: "github.branch.stale_approvals",
+        findingId: "40000000-0000-4000-8000-000000000001",
+        severity: "medium",
+        firstDetectedAt: "2026-08-24T08:00:00.000Z",
+        mostRecentDetectedAt: "2026-08-25T08:00:00.000Z",
+        allowedTransitions: ["open", "acknowledged"],
+      }}
+      status="open"
+      taskId={null}
+      role="member"
+      selected={false}
+    />);
+
+    const article = screen.getByRole("article", { name: "GitHub finding: Stale approvals are not dismissed" });
+    expect(within(article).getByRole("heading", { name: "Stale approvals are not dismissed" })).toBeVisible();
+    expect(within(article).getByText("Approvals remain valid after new commits are pushed.")).toBeVisible();
+    expect(within(article).getByText("Dismiss stale approvals when new commits are pushed.")).toBeVisible();
+    expect(within(article).getByRole("link", { name: "Open mukta2701/ComplianceHub on GitHub" })).toBeVisible();
+    expect(within(article).getByText("A.8.25 · A.8.32")).toBeVisible();
+    expect(within(article.querySelector(".github-finding-overview") as HTMLElement).getByText("25 Aug 2026, 09:00")).toBeVisible();
+    expect(within(article).getByText("medium")).toBeVisible();
+    expect(within(article).getByText("Open")).toBeVisible();
+
+    const technical = within(article).getByText("Technical evidence").closest("details");
+    expect(technical).not.toHaveAttribute("open");
+    for (const hidden of [
+      "github.branch.stale_approvals",
+      common.ruleVersion,
+      common.mappingVersion,
+      common.mappingChecksum,
+      "This technical signal does not certify ISO/IEC 27001 compliance or change readiness.",
+    ]) {
+      expect(within(technical as HTMLElement).getByText(new RegExp(hidden.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")))).not.toBeVisible();
+    }
+  });
+
   it.each(["admin", "member"] as const)("keeps official finding lifecycle read-only for %s", (role) => {
     render(<OfficialGitHubFindingCard
       record={{
@@ -71,9 +111,11 @@ describe("official GitHub provenance cards", () => {
       selected={false}
     />);
 
-    const article = screen.getByRole("article", { name: "Official GitHub finding github.branch.force_pushes" });
-    expect(within(article).getByText(/automatically resolves only after a newer fresh passing check/i)).toBeInTheDocument();
-    expect(within(article).getByText(/does not certify ISO\/IEC 27001 compliance or change readiness/i)).toBeInTheDocument();
+    const article = screen.getByRole("article", { name: "GitHub finding: Force pushes are allowed" });
+    const technical = within(article).getByText("Technical evidence").closest("details");
+    expect(technical).not.toHaveAttribute("open");
+    expect(within(technical as HTMLElement).getByText(/automatically resolves only after a newer fresh passing check/i)).not.toBeVisible();
+    expect(within(technical as HTMLElement).getByText(/does not certify ISO\/IEC 27001 compliance or change readiness/i)).not.toBeVisible();
     expect(within(article).getByText(/read-only for your role/i)).toBeInTheDocument();
     expect(within(article).queryByRole("button")).not.toBeInTheDocument();
     expect(within(article).queryByText("Resolve")).not.toBeInTheDocument();
@@ -97,7 +139,7 @@ describe("official GitHub provenance cards", () => {
       selected={false}
     />);
 
-    const article = screen.getByRole("article", { name: "Official GitHub finding github.branch.force_pushes" });
+    const article = screen.getByRole("article", { name: "GitHub finding: Force pushes are allowed" });
     const select = within(article).getByRole("combobox", { name: "Review state" });
     expect(within(select).getAllByRole("option").map((option) => option.textContent)).toEqual([
       "Acknowledged", "In progress", "Exception requested", "Risk accepted",
@@ -105,7 +147,7 @@ describe("official GitHub provenance cards", () => {
     expect(within(article).getByRole("button", { name: "Update review state" })).toBeInTheDocument();
     expect(within(article).getByRole("button", { name: "Raise remediation task" })).toBeInTheDocument();
     expect(within(article).getByRole("status")).toHaveAttribute("aria-live", "polite");
-    expect(within(article).getByText(/does not certify ISO\/IEC 27001 compliance or change readiness/i)).toBeInTheDocument();
+    expect(within(article).getByText(/does not certify ISO\/IEC 27001 compliance or change readiness/i)).not.toBeVisible();
     expect(within(article).queryByText("Resolve")).not.toBeInTheDocument();
     expect(within(article).queryByText("Reopen")).not.toBeInTheDocument();
   });

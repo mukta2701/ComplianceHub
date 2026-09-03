@@ -18,6 +18,7 @@
     "test:db": "supabase test db",
     "test:db:upgrade": "bash scripts/test-db-upgrade.sh",
     "test:e2e": "playwright test",
+    "github:shadow-proof": "node --conditions=react-server --import=tsx scripts/github-shadow-proof.ts",
     "verify": "npm run lint && npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
@@ -54,7 +55,9 @@
     "eslint": "^9",
     "eslint-config-next": "16.3.0",
     "jsdom": "^29.1.1",
+    "server-only": "0.0.1",
     "supabase": "^2.109.0",
+    "tsx": "4.23.13",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^4.1.9"

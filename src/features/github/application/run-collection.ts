@@ -2,9 +2,12 @@ import type { DiagnosticCode, GitHubFactSet, GitHubObservation } from "../domain
 import { EXPECTED_GITHUB_CHECK_IDS } from "../domain/rules";
 import { GitHubCollectionError } from "./github-collection-error";
 
+export type GitHubCollectionRunMode = "official" | "shadow";
+
 export type CollectionRequest = {
   trigger: "initial" | "scheduled" | "manual" | "webhook";
   requestKey: string;
+  runMode?: GitHubCollectionRunMode;
   installationId?: string;
   repositoryId?: string;
   signal?: AbortSignal;
@@ -25,6 +28,7 @@ export type RunReservation = {
   leaseToken: string;
   leaseExpiresAt: string;
   attempt: number;
+  runMode: GitHubCollectionRunMode;
   acquisitionState: "acquired" | "reclaimed" | "active_duplicate" | "completed_duplicate";
   status: "running" | "succeeded" | "partial" | "failed" | "rate_limited";
   organisationId: string;
@@ -91,6 +95,9 @@ function validateRequest(request: CollectionRequest): void {
     throw new GitHubCollectionTargetError();
   }
   if (request.requestKey.length < 1 || request.requestKey.length > 200) throw new GitHubCollectionTargetError();
+  if (request.runMode !== undefined && request.runMode !== "official" && request.runMode !== "shadow") {
+    throw new GitHubCollectionTargetError();
+  }
   if (request.installationId && !uuid.test(request.installationId)) throw new GitHubCollectionTargetError();
   if (request.repositoryId && !uuid.test(request.repositoryId)) throw new GitHubCollectionTargetError();
 }
@@ -227,7 +234,11 @@ export async function runGitHubCollection(deps: CollectionDependencies, request:
 
       let reservation: RunReservation | undefined;
       try {
-        reservation = await deps.reserveRun(target, request);
+        const candidate = await deps.reserveRun(target, request);
+        if (candidate.runMode !== (request.runMode ?? "official")) {
+          throw new GitHubCollectionTargetError();
+        }
+        reservation = candidate;
         if (reservation.acquisitionState === "active_duplicate") {
           summary.repositoriesDeferred += 1;
           continue;

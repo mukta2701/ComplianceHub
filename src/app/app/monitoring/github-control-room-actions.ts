@@ -125,7 +125,7 @@ export async function approveGitHubMappingPackAction(formData: FormData): Promis
       target_checksum: parsed.data.checksum,
     });
     if (error || !uuid.safeParse(data).success) throw new Error("approval failed");
-    revalidatePath("/app/integrations");
+    revalidatePath("/app/monitoring");
     return { ok: true, message: "GitHub mapping approved. Official records can now be processed." };
   } catch {
     return { ok: false, message: "Could not approve the GitHub mapping right now." };
@@ -153,7 +153,7 @@ export async function revokeGitHubMappingApprovalAction(formData: FormData): Pro
       target_approval_id: parsed.data.approvalId,
     });
     if (error || data !== true) throw new Error("revocation failed");
-    revalidatePath("/app/integrations");
+    revalidatePath("/app/monitoring");
     return { ok: true, message: "GitHub mapping approval revoked. Existing records remain historical." };
   } catch {
     return { ok: false, message: "Could not revoke this GitHub mapping approval." };
@@ -224,7 +224,9 @@ export async function processApprovedGitHubResultsAction(formData: FormData): Pr
     if (summary.runsConsidered !== 1 || summary.needsAttention > 0 || summary.awaitingApproval > 0) {
       throw new Error("materialisation incomplete");
     }
-    revalidatePath("/app/integrations");
+    revalidatePath("/app/monitoring");
+    revalidatePath("/app/evidence");
+    revalidatePath("/app");
     return { ok: true, message: `Official GitHub records processed: ${summary.materialised + summary.unchanged} run updated.` };
   } catch {
     return { ok: false, message: "Could not process these GitHub results." };
@@ -254,7 +256,7 @@ export async function retryExhaustedGitHubMaterialisationAction(formData: FormDa
       reasonCode: parsed.data.reasonCode,
     });
     if (!queued) throw new Error("retry unavailable");
-    revalidatePath("/app/integrations");
+    revalidatePath("/app/monitoring");
     return { ok: true, message: "GitHub processing retry queued." };
   } catch {
     return { ok: false, message: "Could not queue this GitHub processing retry." };

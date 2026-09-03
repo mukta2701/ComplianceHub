@@ -3,27 +3,34 @@ create extension if not exists dblink with schema extensions;
 begin;
 set local session_replication_role = replica;
 delete from public.github_materialisation_jobs where organisation_id in (
-  '72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002'
+  '72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002',
+  '72000000-0000-4000-8000-000000000004'
 );
 delete from public.github_mapping_approvals where organisation_id in (
-  '72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002'
+  '72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002',
+  '72000000-0000-4000-8000-000000000004'
 );
 delete from public.github_collection_runs where organisation_id in (
-  '72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002'
+  '72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002',
+  '72000000-0000-4000-8000-000000000004'
 );
 delete from public.github_repositories where organisation_id in (
-  '72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002'
+  '72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002',
+  '72000000-0000-4000-8000-000000000004'
 );
 delete from public.github_installations where organisation_id in (
-  '72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002'
+  '72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002',
+  '72000000-0000-4000-8000-000000000004'
 );
 delete from public.memberships where organisation_id in (
-  '72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002'
+  '72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002',
+  '72000000-0000-4000-8000-000000000004'
 );
-delete from public.asset_categories where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002');
-delete from public.risk_categories where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002');
+delete from public.asset_categories where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000004');
+delete from public.risk_categories where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000004');
 delete from public.organisations where id in (
-  '72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002'
+  '72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002',
+  '72000000-0000-4000-8000-000000000004'
 );
 delete from public.profiles where id::text like '72000000-0000-4000-8000-00000000000%';
 delete from auth.users where id::text like '72000000-0000-4000-8000-00000000000%';
@@ -56,25 +63,30 @@ begin;
 insert into auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,raw_app_meta_data,raw_user_meta_data) values
  ('72000000-0000-4000-8000-000000000001','00000000-0000-0000-0000-000000000000','authenticated','authenticated','github-job-owner-a@example.test','',now(),'{}','{}'),
  ('72000000-0000-4000-8000-000000000002','00000000-0000-0000-0000-000000000000','authenticated','authenticated','github-job-owner-b@example.test','',now(),'{}','{}'),
- ('72000000-0000-4000-8000-000000000003','00000000-0000-0000-0000-000000000000','authenticated','authenticated','github-job-outsider@example.test','',now(),'{}','{}');
+ ('72000000-0000-4000-8000-000000000003','00000000-0000-0000-0000-000000000000','authenticated','authenticated','github-job-outsider@example.test','',now(),'{}','{}'),
+ ('72000000-0000-4000-8000-000000000004','00000000-0000-0000-0000-000000000000','authenticated','authenticated','github-job-sentinel@example.test','',now(),'{}','{}');
 insert into public.organisations(id,name,slug,created_by) values
  ('72000000-0000-4000-8000-000000000001','GitHub Job Org A','github-job-org-a','72000000-0000-4000-8000-000000000001'),
- ('72000000-0000-4000-8000-000000000002','GitHub Job Org B','github-job-org-b','72000000-0000-4000-8000-000000000002');
+ ('72000000-0000-4000-8000-000000000002','GitHub Job Org B','github-job-org-b','72000000-0000-4000-8000-000000000002'),
+ ('72000000-0000-4000-8000-000000000004','GitHub Job Sentinel','github-job-sentinel','72000000-0000-4000-8000-000000000004');
 insert into public.memberships(organisation_id,user_id,role) values
  ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000001','owner'),
- ('72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000002','owner');
+ ('72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000002','owner'),
+ ('72000000-0000-4000-8000-000000000004','72000000-0000-4000-8000-000000000004','owner');
 insert into public.github_installations(
  id,organisation_id,provider_installation_id,account_id,account_login,account_type,
  repository_selection,status,connected_by,permissions,permissions_ok
 ) values
  ('72000000-0000-4000-8000-000000000101','72000000-0000-4000-8000-000000000001',72101,72201,'Job-A','Organization','selected','active','72000000-0000-4000-8000-000000000001','{}',true),
- ('72000000-0000-4000-8000-000000000102','72000000-0000-4000-8000-000000000002',72102,72202,'Job-B','Organization','selected','active','72000000-0000-4000-8000-000000000002','{}',true);
+ ('72000000-0000-4000-8000-000000000102','72000000-0000-4000-8000-000000000002',72102,72202,'Job-B','Organization','selected','active','72000000-0000-4000-8000-000000000002','{}',true),
+ ('72000000-0000-4000-8000-000000000104','72000000-0000-4000-8000-000000000004',72104,72204,'Job-Sentinel','Organization','selected','active','72000000-0000-4000-8000-000000000004','{}',true);
 insert into public.github_repositories(
  id,organisation_id,installation_id,provider_repository_id,owner_login,name,full_name,
  html_url,visibility,default_branch,archived,selected,available
 ) values
  ('72000000-0000-4000-8000-000000000201','72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000101',72301,'Job-A','portal','Job-A/portal','https://github.com/Job-A/portal','private','main',false,true,true),
- ('72000000-0000-4000-8000-000000000202','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000102',72302,'Job-B','portal','Job-B/portal','https://github.com/Job-B/portal','private','main',false,true,true);
+ ('72000000-0000-4000-8000-000000000202','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000102',72302,'Job-B','portal','Job-B/portal','https://github.com/Job-B/portal','private','main',false,true,true),
+ ('72000000-0000-4000-8000-000000000204','72000000-0000-4000-8000-000000000004','72000000-0000-4000-8000-000000000104',72304,'Job-Sentinel','portal','Job-Sentinel/portal','https://github.com/Job-Sentinel/portal','private','main',false,true,true);
 insert into public.github_collection_runs(
  id,organisation_id,installation_id,repository_id,provider_repository_id,trigger_type,request_key,
  status,started_at,observation_count,passed_count,failed_count,unknown_count,not_applicable_count,
@@ -85,7 +97,8 @@ insert into public.github_collection_runs(
  ('72000000-0000-4000-8000-000000000303','72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000101','72000000-0000-4000-8000-000000000201',72301,'manual','job-a-third','running',now()-interval '2 hours',0,0,0,0,0,extensions.gen_random_uuid(),now()-interval '30 minutes',1),
  ('72000000-0000-4000-8000-000000000304','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000102','72000000-0000-4000-8000-000000000202',72302,'manual','job-b-old','running',now()-interval '3 hours',0,0,0,0,0,extensions.gen_random_uuid(),now()-interval '30 minutes',1),
  ('72000000-0000-4000-8000-000000000305','72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000101','72000000-0000-4000-8000-000000000201',72301,'manual','job-failed','running',now()-interval '1 hour',0,0,0,0,0,extensions.gen_random_uuid(),now()-interval '30 minutes',1),
- ('72000000-0000-4000-8000-000000000306','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000102','72000000-0000-4000-8000-000000000202',72302,'manual','job-b-race','running',now()-interval '2 hours',0,0,0,0,0,extensions.gen_random_uuid(),now()-interval '30 minutes',1);
+ ('72000000-0000-4000-8000-000000000306','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000102','72000000-0000-4000-8000-000000000202',72302,'manual','job-b-race','running',now()-interval '2 hours',0,0,0,0,0,extensions.gen_random_uuid(),now()-interval '30 minutes',1),
+ ('72000000-0000-4000-8000-000000000307','72000000-0000-4000-8000-000000000004','72000000-0000-4000-8000-000000000104','72000000-0000-4000-8000-000000000204',72304,'manual','job-sentinel','running',now()-interval '5 hours',0,0,0,0,0,extensions.gen_random_uuid(),now()-interval '30 minutes',1);
 update public.github_collection_runs
 set status=case when id='72000000-0000-4000-8000-000000000302' then 'partial'::public.github_collection_status else 'succeeded'::public.github_collection_status end,
     completed_at=now(), observation_count=15,
@@ -94,12 +107,28 @@ set status=case when id='72000000-0000-4000-8000-000000000302' then 'partial'::p
 where id in (
  '72000000-0000-4000-8000-000000000301','72000000-0000-4000-8000-000000000302',
  '72000000-0000-4000-8000-000000000303','72000000-0000-4000-8000-000000000304',
- '72000000-0000-4000-8000-000000000306'
+ '72000000-0000-4000-8000-000000000306','72000000-0000-4000-8000-000000000307'
 );
+update public.github_materialisation_jobs
+set status='retryable',attempt_count=25,available_at=now()-interval '5 hours'
+where collection_run_id='72000000-0000-4000-8000-000000000307';
 update public.github_collection_runs
 set status='failed',completed_at=now(),diagnostic_code='provider_unavailable'
 where id='72000000-0000-4000-8000-000000000305';
 commit;
+
+create temporary table github_materialisation_job_sentinel_snapshot
+on commit preserve rows
+as
+select to_jsonb(job) as row_value
+from public.github_materialisation_jobs job
+where job.collection_run_id='72000000-0000-4000-8000-000000000307';
+
+select is(
+  (select count(*) from pg_temp.github_materialisation_job_sentinel_snapshot),
+  1::bigint,
+  'the unrelated committed sentinel job is captured exactly once'
+);
 
 select is((select count(*) from public.github_materialisation_jobs where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002')),5::bigint,'each succeeded or partial finalisation transactionally enqueues exactly one job');
 select is((select count(*) from public.github_materialisation_jobs where collection_run_id='72000000-0000-4000-8000-000000000305'),0::bigint,'failed collection runs never enqueue official materialisation');
@@ -113,7 +142,23 @@ select is((select count(distinct organisation_id) from public.claim_github_mater
 ])),2::bigint,'fair claiming gives old work from each tenant a turn before a tenant second job');
 reset role;
 
-update public.github_materialisation_jobs set lease_token=null,lease_expires_at=null,lease_attempt_incremented=null,attempt_count=0,available_at=now()-interval '1 hour';
+update public.github_materialisation_jobs
+set lease_token=null,
+    lease_expires_at=null,
+    lease_attempt_incremented=null,
+    attempt_count=0,
+    available_at=now()-interval '1 hour'
+where organisation_id in (
+  '72000000-0000-4000-8000-000000000001',
+  '72000000-0000-4000-8000-000000000002'
+)
+and collection_run_id in (
+  '72000000-0000-4000-8000-000000000301',
+  '72000000-0000-4000-8000-000000000302',
+  '72000000-0000-4000-8000-000000000303',
+  '72000000-0000-4000-8000-000000000304',
+  '72000000-0000-4000-8000-000000000306'
+);
 set role service_role;
 select is((select count(*) from public.claim_github_materialisation_jobs_server(1,array['72000000-0000-4000-8000-000000000301'::uuid])),1::bigint,'an exact run claim acquires its durable job');
 select is((select count(*) from public.claim_github_materialisation_jobs_server(1,array['72000000-0000-4000-8000-000000000301'::uuid])),0::bigint,'a simultaneous or repeated caller cannot acquire an active lease');
@@ -280,7 +325,14 @@ update public.github_materialisation_jobs set lease_expires_at=now()-interval '1
 set role service_role;
 select is((select count(*) from public.claim_github_materialisation_jobs_server(1,array['72000000-0000-4000-8000-000000000304'::uuid])),0::bigint,'an expired final-attempt lease is not reclaimed');
 select is((select status from public.github_materialisation_jobs where collection_run_id='72000000-0000-4000-8000-000000000304'),'exhausted','an expired final-attempt lease is promoted to dead-letter attention');
-select cmp_ok((select count(*) from public.inspect_github_materialisation_jobs_server(20,null) where status='exhausted'),'>=',2::bigint,'generic recovery inspection surfaces exhausted jobs across tenants');
+select is(
+  (select count(*) from public.inspect_github_materialisation_jobs_server(2,array[
+    '72000000-0000-4000-8000-000000000303'::uuid,
+    '72000000-0000-4000-8000-000000000304'::uuid
+  ]) where status='exhausted'),
+  2::bigint,
+  'bounded recovery inspection surfaces the exact exhausted fixture jobs across tenants'
+);
 reset role;
 
 -- An active exact lease is inspectable rather than silently treated healthy;
@@ -312,19 +364,25 @@ select set_config('request.jwt.claims','{"sub":"72000000-0000-4000-8000-00000000
 select is((select count(*) from public.github_materialisation_jobs),0::bigint,'an outsider sees no materialisation jobs');
 reset role;
 
+select is(
+  (select to_jsonb(job) from public.github_materialisation_jobs job where job.collection_run_id='72000000-0000-4000-8000-000000000307'),
+  (select row_value from pg_temp.github_materialisation_job_sentinel_snapshot),
+  'an unrelated committed sentinel job remains byte-identical across the full test body'
+);
+
 select * from finish();
 
 begin;
 set local session_replication_role = replica;
-delete from public.github_materialisation_jobs where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002');
-delete from public.github_mapping_approvals where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002');
-delete from public.github_collection_runs where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002');
-delete from public.github_repositories where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002');
-delete from public.github_installations where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002');
-delete from public.memberships where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002');
-delete from public.asset_categories where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002');
-delete from public.risk_categories where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002');
-delete from public.organisations where id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002');
+delete from public.github_materialisation_jobs where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000004');
+delete from public.github_mapping_approvals where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000004');
+delete from public.github_collection_runs where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000004');
+delete from public.github_repositories where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000004');
+delete from public.github_installations where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000004');
+delete from public.memberships where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000004');
+delete from public.asset_categories where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000004');
+delete from public.risk_categories where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000004');
+delete from public.organisations where id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000004');
 delete from public.profiles where id::text like '72000000-0000-4000-8000-00000000000%';
 delete from auth.users where id::text like '72000000-0000-4000-8000-00000000000%';
 commit;

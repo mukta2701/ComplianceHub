@@ -16,6 +16,7 @@ vi.mock("./github-app-auth", () => ({
 vi.mock("./collect-repository-facts", () => ({ collectRepositoryFacts: hoisted.collectRepositoryFacts }));
 
 import { buildCollectionDependencies } from "./collection-deps";
+import { runGitHubCollection } from "./run-collection";
 
 type Row = Record<string, unknown>;
 type Filter = { column: string; value: unknown };
@@ -116,6 +117,34 @@ describe("buildCollectionDependencies", () => {
     }));
   });
 
+  it("reuses one preloaded in-memory token for the exact scoped installation and repository", async () => {
+    const row = repository(1);
+    const service = client([row]);
+    const inMemoryCredential = "synthetic-in-memory-credential";
+    const deps = buildCollectionDependencies(service, {
+      ...configuration,
+      preloadedInstallationToken: {
+        installationId: String(row.installation_id),
+        providerInstallationId: 50_001,
+        repositoryIds: [40_001],
+        token: inMemoryCredential,
+      },
+    });
+    const [target] = await deps.listTargets({
+      trigger: "manual",
+      requestKey: "manual:preloaded-token",
+      installationId: String(row.installation_id),
+      repositoryId: String(row.id),
+    });
+
+    await deps.collectFacts(target!);
+
+    expect(hoisted.createInstallationToken).not.toHaveBeenCalled();
+    expect(hoisted.collectRepositoryFacts).toHaveBeenCalledWith(expect.objectContaining({
+      installationToken: inMemoryCredential,
+    }));
+  });
+
   it("paginates all scheduled targets and permits more than 100 across installations", async () => {
     const rows = Array.from({ length: 1_001 }, (_, index) => repository(index + 1, Math.floor(index / 100) + 1));
     const service = client(rows);
@@ -159,7 +188,7 @@ describe("buildCollectionDependencies", () => {
     const rpc = vi.fn().mockResolvedValue({ data: true, error: null });
     const deps = buildCollectionDependencies(client([], rpc), configuration);
     const target = { organisationId: uuid(1), installationId: uuid(2), repositoryId: uuid(3), providerInstallationId: 77, providerRepositoryId: 101, owner: "adtecher", name: "portal" };
-    const lease = { runId: uuid(4), leaseToken: uuid(5), leaseExpiresAt: "2026-08-17T05:31:00.000Z", attempt: 2, acquisitionState: "reclaimed" as const, status: "running" as const, organisationId: uuid(1), installationId: uuid(2), repositoryId: uuid(3), providerRepositoryId: 101 };
+    const lease = { runId: uuid(4), leaseToken: uuid(5), leaseExpiresAt: "2026-08-17T05:31:00.000Z", attempt: 2, runMode: "official" as const, acquisitionState: "reclaimed" as const, status: "running" as const, organisationId: uuid(1), installationId: uuid(2), repositoryId: uuid(3), providerRepositoryId: 101 };
     const facts = { repository: { id: 101, owner: "adtecher", name: "renamed", visibility: "private" as const, archived: false, defaultBranch: "trunk", url: "https://github.com/adtecher/renamed" } };
 
     await deps.refreshRepository(lease, target, facts as never);
@@ -167,6 +196,105 @@ describe("buildCollectionDependencies", () => {
 
     expect(rpc).toHaveBeenCalledWith("refresh_github_repository_server", expect.objectContaining({ target_run_id: uuid(4), target_organisation_id: uuid(1), target_installation_id: uuid(2), target_repository_id: uuid(3), target_provider_repository_id: 101, target_lease_token: uuid(5), target_attempt: 2 }));
     expect(rpc).toHaveBeenCalledWith("finalise_github_collection_run_server", expect.objectContaining({ target_run_id: uuid(4), target_lease_token: uuid(5), target_attempt: 2 }));
+  });
+
+  it.each([
+    { requestedMode: "official" as const, rpcName: "reserve_github_collection_run_server" },
+    { requestedMode: "shadow" as const, rpcName: "reserve_github_shadow_collection_run_server" },
+  ])("uses the $requestedMode service reservation boundary and returns that trusted mode", async ({ requestedMode, rpcName }) => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: {
+        run_id: uuid(4),
+        lease_token: uuid(5),
+        lease_expires_at: "2026-08-17T05:31:00.000Z",
+        attempt: 1,
+        acquisition_state: "acquired",
+        status: "running",
+        organisation_id: uuid(1),
+        installation_id: uuid(2),
+        repository_id: uuid(3),
+        provider_repository_id: 101,
+        run_mode: requestedMode,
+      },
+      error: null,
+    });
+    const deps = buildCollectionDependencies(client([], rpc), configuration);
+    const item = { organisationId: uuid(1), installationId: uuid(2), repositoryId: uuid(3), providerInstallationId: 77, providerRepositoryId: 101, owner: "adtecher", name: "portal" };
+
+    const lease = await deps.reserveRun(item, {
+      trigger: "manual",
+      requestKey: `manual:${requestedMode}`,
+      runMode: requestedMode,
+    });
+
+    expect(rpc).toHaveBeenCalledWith(rpcName, expect.objectContaining({
+      target_request_key: `manual:${requestedMode}`,
+    }));
+    expect(lease.runMode).toBe(requestedMode);
+  });
+
+  it("rejects a shadow reservation when the database returns authoritative official mode", async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: {
+        run_id: uuid(4),
+        lease_token: uuid(5),
+        lease_expires_at: "2026-08-17T05:31:00.000Z",
+        attempt: 1,
+        acquisition_state: "acquired",
+        status: "running",
+        organisation_id: uuid(1),
+        installation_id: uuid(2),
+        repository_id: uuid(3),
+        provider_repository_id: 101,
+        run_mode: "official",
+      },
+      error: null,
+    });
+    const deps = buildCollectionDependencies(client([], rpc), configuration);
+    const item = { organisationId: uuid(1), installationId: uuid(2), repositoryId: uuid(3), providerInstallationId: 77, providerRepositoryId: 101, owner: "adtecher", name: "portal" };
+
+    await expect(deps.reserveRun(item, {
+      trigger: "manual",
+      requestKey: "manual:shadow-mismatch",
+      runMode: "shadow",
+    })).rejects.toThrow("GitHub collection persistence failed");
+
+    expect(rpc).toHaveBeenCalledWith("reserve_github_shadow_collection_run_server", expect.anything());
+  });
+
+  it("stops the real adapter path before collection or persistence when the database mode disagrees", async () => {
+    const row = repository(1);
+    const rpc = vi.fn().mockResolvedValue({
+      data: {
+        run_id: uuid(4),
+        lease_token: uuid(5),
+        lease_expires_at: "2026-08-17T05:31:00.000Z",
+        attempt: 1,
+        acquisition_state: "acquired",
+        status: "running",
+        organisation_id: row.organisation_id,
+        installation_id: row.installation_id,
+        repository_id: row.id,
+        provider_repository_id: row.provider_repository_id,
+        run_mode: "official",
+      },
+      error: null,
+    });
+    const deps = buildCollectionDependencies(client([row], rpc), configuration);
+
+    const summary = await runGitHubCollection(deps, {
+      trigger: "manual",
+      requestKey: "manual:shadow-adapter-mismatch",
+      runMode: "shadow",
+      installationId: String(row.installation_id),
+    });
+
+    expect(summary.repositoriesFailed).toBe(1);
+    expect(summary.repositoriesChecked).toBe(0);
+    expect(hoisted.collectRepositoryFacts).not.toHaveBeenCalled();
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc).not.toHaveBeenCalledWith("save_github_observations_server", expect.anything());
+    expect(rpc).not.toHaveBeenCalledWith("finalise_github_collection_run_server", expect.anything());
   });
 
   it("fails closed when a scoped local target does not resolve", async () => {

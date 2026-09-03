@@ -34,6 +34,12 @@ type CollectionConfiguration = {
   privateKey: string;
   approvedSecurityWorkflowIds: readonly number[];
   fetchImpl?: typeof fetch;
+  preloadedInstallationToken?: {
+    installationId: string;
+    providerInstallationId: number;
+    repositoryIds: readonly number[];
+    token: string;
+  };
 };
 
 const uuidSchema = z.string().uuid();
@@ -67,6 +73,7 @@ const reservationSchema = z.object({
   installation_id: uuidSchema,
   repository_id: uuidSchema,
   provider_repository_id: safeId,
+  run_mode: z.enum(["official", "shadow"]),
 }).strict();
 const PAGE_SIZE = 1_000;
 const MAX_TARGET_PAGES = 100;
@@ -92,6 +99,7 @@ function toReservation(value: unknown): RunReservation {
     leaseToken: row.data.lease_token,
     leaseExpiresAt: row.data.lease_expires_at,
     attempt: row.data.attempt,
+    runMode: row.data.run_mode,
     acquisitionState: row.data.acquisition_state,
     status: row.data.status,
     organisationId: row.data.organisation_id,
@@ -185,6 +193,20 @@ export function buildCollectionDependencies(
     if (existing) return existing;
     const repositoryIds = repositoryIdsByInstallation.get(target.installationId);
     if (!repositoryIds?.includes(target.providerRepositoryId)) throw targetLoadingFailure();
+    const preloaded = configuration.preloadedInstallationToken;
+    if (preloaded) {
+      const expectedRepositoryIds = [...repositoryIds].sort((left, right) => left - right);
+      const suppliedRepositoryIds = [...preloaded.repositoryIds].sort((left, right) => left - right);
+      if (
+        preloaded.installationId !== target.installationId
+        || preloaded.providerInstallationId !== target.providerInstallationId
+        || !preloaded.token
+        || new Set(suppliedRepositoryIds).size !== suppliedRepositoryIds.length
+        || expectedRepositoryIds.length !== suppliedRepositoryIds.length
+        || expectedRepositoryIds.some((id, index) => id !== suppliedRepositoryIds[index])
+      ) throw targetLoadingFailure();
+      return preloaded.token;
+    }
     const pending = (async () => {
       const appJwt = await createAppJwt({ appId: configuration.appId, privateKey: configuration.privateKey }, new Date());
       const token = await createInstallationToken({ installationId: target.providerInstallationId, repositoryIds, appJwt, fetchImpl: configuration.fetchImpl });
@@ -197,7 +219,11 @@ export function buildCollectionDependencies(
   return {
     listTargets,
     async reserveRun(target, request) {
-      const { data, error } = await service.rpc("reserve_github_collection_run_server", {
+      const runMode = request.runMode ?? "official";
+      const reservationRpc = runMode === "shadow"
+        ? "reserve_github_shadow_collection_run_server"
+        : "reserve_github_collection_run_server";
+      const { data, error } = await service.rpc(reservationRpc, {
         target_organisation_id: target.organisationId,
         target_installation_id: target.installationId,
         target_repository_id: target.repositoryId,
@@ -209,7 +235,8 @@ export function buildCollectionDependencies(
       if (error) throw fail();
       const result = toReservation(data);
       if (
-        result.organisationId !== target.organisationId
+        result.runMode !== runMode
+        || result.organisationId !== target.organisationId
         || result.installationId !== target.installationId
         || result.repositoryId !== target.repositoryId
         || result.providerRepositoryId !== target.providerRepositoryId

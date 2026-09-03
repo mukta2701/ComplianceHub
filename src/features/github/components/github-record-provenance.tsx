@@ -16,6 +16,7 @@ import type {
   OfficialGitHubFindingProvenance,
   OfficialGitHubRecordProvenance,
 } from "../application/github-record-provenance";
+import { githubFindingPresentation } from "./github-check-presentation";
 
 const STATUS_LABEL: Record<GitHubFindingTransitionStatus, string> = {
   open: "Open",
@@ -188,27 +189,51 @@ export function OfficialGitHubFindingCard({
   role: "owner" | "admin" | "member";
   selected: boolean;
 }) {
+  const presentation = githubFindingPresentation(record.checkId);
+  const freshnessLabel = record.freshness === "current"
+    ? `Current through ${formatTime(record.freshUntil)}`
+    : `Stale since ${formatTime(record.freshUntil)}`;
   return <FocusedOfficialRecord
     id={`finding-${record.findingId}`}
-    label={`Official GitHub finding ${record.checkId}`}
+    label={`GitHub finding: ${presentation.title}`}
     selected={selected}
   >
     <div className="finding-head">
       <Pill tone={record.severity === "critical" || record.severity === "high" ? "red" : "amber"}>{record.severity}</Pill>
-      <h3>{record.checkId}</h3>
+      <h3>{presentation.title}</h3>
       <Pill tone={status === "risk_accepted" ? "blue" : status === "open" ? "red" : "amber"}>{STATUS_LABEL[status]}</Pill>
     </div>
-    <ProvenanceDetails record={record} />
-    <dl className="github-finding-detection">
-      <div><dt>First detected</dt><dd><time dateTime={record.firstDetectedAt}>{formatTime(record.firstDetectedAt)}</time></dd></div>
-      <div><dt>Most recent detection</dt><dd><time dateTime={record.mostRecentDetectedAt}>{formatTime(record.mostRecentDetectedAt)}</time></dd></div>
+    <div className="github-official-record-head">
+      <a href={record.repository.url} target="_blank" rel="noreferrer" aria-label={`Open ${record.repository.name} on GitHub`}>
+        {record.repository.name}
+      </a>
+      <Pill tone={record.freshness === "current" ? "green" : "amber"}>{freshnessLabel}</Pill>
+    </div>
+    <p className="github-official-record-summary">{presentation.explanation}</p>
+    <p className="github-finding-remediation"><strong>Recommended action:</strong> {presentation.remediation}</p>
+    <dl className="github-finding-overview">
+      <div><dt>ISO references</dt><dd>{record.isoControlReferences.join(" · ")}</dd></div>
+      <div><dt>Observed</dt><dd><time dateTime={record.observedAt}>{formatTime(record.observedAt)}</time></dd></div>
     </dl>
-    <p className="github-official-boundary" role="note">
-      This technical signal does not certify ISO/IEC 27001 compliance or change readiness. It automatically resolves only after a newer fresh passing check; human review, task completion, an exception request, or risk acceptance does not turn it into a passing result.
-    </p>
     {taskId && <Link href={`/app/tasks/${taskId}`}>Open remediation task</Link>}
     {role === "owner"
       ? <OfficialFindingActions findingId={record.findingId} currentStatus={status} allowedTransitions={record.allowedTransitions} canRaiseTask={!taskId} />
       : <p className="github-read-only-note" role="note">Official finding review is read-only for your role. A workspace Owner records review-state decisions.</p>}
+    <details className="github-technical-evidence">
+      <summary>Technical evidence</summary>
+      <p>{record.catalogueSummary}</p>
+      <dl className="github-official-provenance">
+        <div><dt>Check</dt><dd><code>{record.checkId}</code></dd></div>
+        <div><dt>Rule version</dt><dd><code>{record.ruleVersion}</code></dd></div>
+        <div><dt>Mapping version</dt><dd><code>{record.mappingVersion}</code></dd></div>
+        <div><dt>Materialised</dt><dd><time dateTime={record.materialisedAt}>{formatTime(record.materialisedAt)}</time></dd></div>
+        <div><dt>First detected</dt><dd><time dateTime={record.firstDetectedAt}>{formatTime(record.firstDetectedAt)}</time></dd></div>
+        <div><dt>Most recent detection</dt><dd><time dateTime={record.mostRecentDetectedAt}>{formatTime(record.mostRecentDetectedAt)}</time></dd></div>
+        <div className="github-official-provenance-wide"><dt>Mapping checksum</dt><dd><code>{record.mappingChecksum}</code></dd></div>
+      </dl>
+      <p className="github-official-boundary" role="note">
+        This technical signal does not certify ISO/IEC 27001 compliance or change readiness. It automatically resolves only after a newer fresh passing check; human review, task completion, an exception request, or risk acceptance does not turn it into a passing result.
+      </p>
+    </details>
   </FocusedOfficialRecord>;
 }

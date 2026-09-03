@@ -42,6 +42,10 @@ vi.mock("@/features/github/application/github-mapping-review", () => ({
 vi.mock("@/features/github/components/github-compliance-control-room", () => ({
   GitHubComplianceControlRoomPanel: () => <section aria-label="GitHub compliance control room" />,
 }));
+vi.mock("@/features/github/components/github-collection-health-panel", () => ({
+  GitHubCollectionHealthPanel: ({ role }: { role: string }) =>
+    <section aria-label="GitHub monitoring">{role === "owner" ? "Owner check" : "Read-only monitoring"}</section>,
+}));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 
 import MonitoringPage from "./page";
@@ -67,13 +71,19 @@ describe("MonitoringPage official GitHub findings", () => {
   it("selects exact official finding, renders safe Owner lifecycle, and preserves legacy controls", async () => {
     render(await MonitoringPage({ searchParams: Promise.resolve({ finding: OFFICIAL }) }));
 
-    const official = screen.getByRole("article", { name: "Official GitHub finding github.branch.force_pushes" });
+    const official = screen.getByRole("article", { name: "GitHub finding: Force pushes are allowed" });
     expect(official).toHaveAttribute("aria-current", "true");
     expect(within(official).getByRole("button", { name: "Update review state" })).toBeInTheDocument();
     expect(within(official).getByRole("button", { name: "Raise remediation task" })).toBeInTheDocument();
     expect(within(official).queryByRole("button", { name: "Resolve" })).not.toBeInTheDocument();
     expect(screen.queryByText("Provider title must stay hidden")).not.toBeInTheDocument();
     expect(screen.queryByText("Provider detail must stay hidden.")).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "GitHub monitoring" })).toHaveTextContent("Owner check");
+    expect(within(official).getByText("Force pushes are allowed")).toBeVisible();
+    expect(within(official).getByText("Block force pushes on the default branch.")).toBeVisible();
+    expect(within(official).getByText("Technical evidence").closest("details")).not.toHaveAttribute("open");
+    expect(within(official).getByText("github.branch.force_pushes")).not.toBeVisible();
+    expect(within(official).getByText("b".repeat(64))).not.toBeVisible();
 
     const legacy = screen.getByText("Legacy monitoring finding").closest("li");
     expect(legacy).not.toBeNull();
@@ -83,7 +93,7 @@ describe("MonitoringPage official GitHub findings", () => {
 
   it.each(["not-a-uuid", "40000000-0000-4000-8000-000000000099"])("does not select invalid or sibling query %s", async (finding) => {
     render(await MonitoringPage({ searchParams: Promise.resolve({ finding }) }));
-    expect(screen.getByRole("article", { name: "Official GitHub finding github.branch.force_pushes" }))
+    expect(screen.getByRole("article", { name: "GitHub finding: Force pushes are allowed" }))
       .not.toHaveAttribute("aria-current");
   });
 

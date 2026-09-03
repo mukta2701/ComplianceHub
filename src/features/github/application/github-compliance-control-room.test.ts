@@ -210,6 +210,18 @@ describe("GitHub compliance control-room contract", () => {
     expect(parsed.exhaustedAttention).toEqual(validPayload().exhaustedAttention);
   });
 
+  it("rejects a materialisation job that is not anchored to the displayed official collection", () => {
+    const payload = validPayload();
+    payload.repositories[0].latestMaterialisationJob.collectionRunId =
+      "a1000000-0000-4000-8000-000000000299";
+
+    expect(() => parseGitHubComplianceControlRoom(payload, {
+      organisationId: ORG,
+      offset: 0,
+      limit: 10,
+    })).toThrow("Could not load GitHub compliance control room");
+  });
+
   it("accepts a stale pass without evidence while rejecting that shape for current results", () => {
     const payload = validPayload();
     const staleResult = payload.repositories[0].officialResults[0] as Record<string, unknown>;

@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { Card, PageIntro } from "@/components/ui";
 import { SubTabs } from "@/components/sub-tabs";
 import { hasCapability } from "@/features/organisations/domain/access";
@@ -7,7 +6,7 @@ import { canShowDeveloperTools } from "@/lib/security/developer-tools";
 import {
   GitHubInstallationPanel,
   type GitHubInstallationSummary,
-  type GitHubRepositoryShadowSummary,
+  type GitHubRepositoryConfigurationSummary,
 } from "@/features/github/components/github-installation-panel";
 import {
   addConnectionAction,
@@ -94,8 +93,8 @@ export default async function IntegrationsPage({
         .select("id,account_login,status,repository_selection,permissions_ok")
         .eq("organisation_id", organisation.id)
         .order("updated_at", { ascending: false }),
-      supabase.from("github_repository_shadow_summaries")
-        .select("repository_id,installation_id,full_name,html_url,visibility,default_branch,archived,selected,available,latest_run_id,latest_status,latest_failed_count,last_completed_collection_at")
+      supabase.from("github_repositories")
+        .select("id,installation_id,full_name,html_url,visibility,default_branch,archived,selected,available")
         .eq("organisation_id", organisation.id)
         .order("full_name", { ascending: true }),
     ]);
@@ -113,14 +112,13 @@ export default async function IntegrationsPage({
       </Card>
       <GitHubInstallationPanel
         installations={(installationResult.data ?? []) as GitHubInstallationSummary[]}
-        repositories={(repositorySummaryResult.data ?? []) as GitHubRepositoryShadowSummary[]}
-        nowIso={new Date().toISOString()}
+        repositories={(repositorySummaryResult.data ?? []).map((repository) => ({
+          ...repository,
+          repository_id: repository.id,
+        })) as GitHubRepositoryConfigurationSummary[]}
         canManageInstallation={false}
         canManageRepositoryScope={false}
       />
-      <Card style={{ padding: "16px", marginTop: "16px" }}>
-        <p style={{ margin: 0 }}><Link href="/app/monitoring">Review GitHub compliance in Monitoring</Link></p>
-      </Card>
     </>;
   }
 
@@ -139,8 +137,8 @@ export default async function IntegrationsPage({
       .select("id,account_login,status,repository_selection,permissions_ok")
       .eq("organisation_id", organisation.id)
       .order("updated_at", { ascending: false }),
-    supabase.from("github_repository_shadow_summaries")
-      .select("repository_id,installation_id,full_name,html_url,visibility,default_branch,archived,selected,available,latest_run_id,latest_status,latest_failed_count,last_completed_collection_at")
+    supabase.from("github_repositories")
+      .select("id,installation_id,full_name,html_url,visibility,default_branch,archived,selected,available")
       .eq("organisation_id", organisation.id)
       .order("full_name", { ascending: true }),
     membership.role === "owner"
@@ -178,7 +176,7 @@ export default async function IntegrationsPage({
       aria-label="GitHub connection status"
       style={{ padding: "16px", background: "#eef7f0", borderColor: "#cfe6d5", margin: "0 auto 16px", maxWidth: "1100px" }}
     >
-      <b>GitHub App connected.</b> Choose the repositories to include in shadow collection below.
+      <b>GitHub App connected.</b> Choose the repositories to include in monitoring below.
     </Card>}
     <ConnectionsCatalog
       connections={connections}
@@ -192,14 +190,13 @@ export default async function IntegrationsPage({
     />
     <GitHubInstallationPanel
       installations={(installationResult.data ?? []) as GitHubInstallationSummary[]}
-      repositories={(repositorySummaryResult.data ?? []) as GitHubRepositoryShadowSummary[]}
-      nowIso={new Date().toISOString()}
+      repositories={(repositorySummaryResult.data ?? []).map((repository) => ({
+        ...repository,
+        repository_id: repository.id,
+      })) as GitHubRepositoryConfigurationSummary[]}
       canManageInstallation={membership.role === "owner"}
       canManageRepositoryScope={membership.role === "owner"}
     />
-    <Card style={{ padding: "16px", marginTop: "16px" }}>
-      <p style={{ margin: 0 }}><Link href="/app/monitoring">Review GitHub compliance in Monitoring</Link></p>
-    </Card>
     {showDeveloperTools && <DeveloperConnectionTools />}
   </>;
 }

@@ -176,8 +176,10 @@ a.heat-cell:hover{outline:2px solid var(--ink);outline-offset:-2px}
 .monitor-banner{display:flex;gap:14px;align-items:flex-start;padding:18px 20px}
 .monitor-banner strong{font-size:14px;display:block;margin-bottom:3px}
 .monitor-banner p{font-size:12px;color:#596273;margin:0;line-height:1.5;max-width:82ch}
+.monitor-banner-actions{display:flex;gap:8px;flex-wrap:wrap}
 .monitor-dot{width:12px;height:12px;border-radius:50%;flex:none;margin-top:4px}
 .monitor-dot.ok{background:var(--green);box-shadow:0 0 0 4px #d9f2e3}
+.monitor-dot.neutral{background:#7b8798;box-shadow:0 0 0 4px #e8ebef}
 .monitor-dot.watch{background:var(--amber);box-shadow:0 0 0 4px #fbeecb}
 .monitor-signals{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
 .monitor-signal{background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 1px 2px #1c27370a;padding:16px 18px;display:flex;flex-direction:column;gap:6px;text-decoration:none}
@@ -415,21 +417,24 @@ a.heat-cell:hover{outline:2px solid var(--ink);outline-offset:-2px}
 @media(max-width:920px){.connections-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:640px){.connections-catalog-head h2{font-size:28px}.connections-grid{grid-template-columns:1fr}.connection-card{min-height:190px}.connection-card>p{min-height:0}.connections-panel-head,.connections-account,.connections-slack-form{padding:var(--ch-space-4)}.connections-panel-empty{align-items:stretch;flex-direction:column;padding:var(--ch-space-4)}.connections-panel-empty .button{width:100%}.connections-account-summary{align-items:flex-start;flex-direction:column}.connections-account-actions{align-items:stretch;flex-direction:column}.connections-account-actions form,.connections-account-actions .button{width:100%}.connections-target-form .button,.connections-slack-form .button{width:100%}}
 
-/* Private GitHub App shadow collection */
+/* Private GitHub App configuration and official collection health */
 .github-shadow-panel{width:100%;max-width:1100px;margin:var(--ch-space-6) auto 0;overflow:hidden;border:1px solid var(--ch-border);border-radius:12px;background:var(--ch-surface);box-shadow:0 8px 28px -24px color-mix(in srgb,var(--ch-ink) 60%,transparent)}
 .github-shadow-panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--ch-space-6);padding:var(--ch-space-6);border-bottom:1px solid var(--ch-border)}
 .github-shadow-panel-head .eyebrow{margin:0 0 var(--ch-space-1);color:var(--ch-text-muted);font-size:11px}
 .github-shadow-panel-head h2{margin:0;font-size:20px;letter-spacing:-.015em}
 .github-shadow-panel-head p:last-child{max-width:680px;margin:var(--ch-space-2) 0 0;color:var(--ch-text-muted);font-size:12.5px;line-height:1.55}
 .github-shadow-panel-head .button{min-height:42px;flex:none}
+.github-connection-actions{display:flex;align-items:flex-start;justify-content:flex-end;gap:var(--ch-space-2);flex-wrap:wrap;min-width:0}
+.github-configuration-note,.github-collection-disclosure{margin:var(--ch-space-4) var(--ch-space-6) 0;padding:var(--ch-space-3) var(--ch-space-4);border:1px solid var(--ch-border);border-radius:9px;background:var(--ch-primary-soft);color:var(--ch-text-muted);font-size:11.5px;line-height:1.5;overflow-wrap:anywhere}
+.github-collection-disclosure p{margin:0}.github-collection-disclosure p+p{margin-top:var(--ch-space-2)}
 .github-shadow-empty,.github-repositories-empty{padding:var(--ch-space-6);color:var(--ch-text);font-size:13px}
 .github-shadow-empty p,.github-repositories-empty{margin:var(--ch-space-2) 0 0;color:var(--ch-text-muted)}
 .github-installation{border-top:1px solid var(--ch-border)}
 .github-installation:first-child{border-top:0}
-.github-installation-head{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:var(--ch-space-5);padding:var(--ch-space-5) var(--ch-space-6);background:var(--ch-canvas)}
+.github-installation-head{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:var(--ch-space-5);padding:var(--ch-space-5) var(--ch-space-6);background:var(--ch-canvas)}
 .github-installation-head h3{margin:0;font-size:15px}
 .github-installation-head p{margin:4px 0 0;color:var(--ch-text-muted);font-size:12px}
-.github-installation-head .button{min-height:40px}
+.github-installation-head .button{min-height:44px}
 .github-health-facts{display:flex;align-items:center;gap:var(--ch-space-4);margin:0}
 .github-health-facts>div{display:grid;gap:5px}
 .github-health-facts dt{color:var(--ch-text-muted);font-size:10px;font-weight:750;text-transform:uppercase;letter-spacing:.04em}
@@ -443,9 +448,22 @@ a.heat-cell:hover{outline:2px solid var(--ink);outline-offset:-2px}
 .github-repository-scope a:hover{text-decoration:underline}
 .github-repository-scope p{margin:4px 0 0;color:var(--ch-text-muted);font-size:11.5px;line-height:1.45}
 .github-repository-health{justify-content:flex-end;min-width:250px}
+.github-repository-health-main{min-width:0}.github-repository-health-main a{color:var(--ch-ink);font-size:13px;font-weight:750;text-decoration:none;overflow-wrap:anywhere}.github-repository-health-main a:hover{text-decoration:underline}.github-repository-health-main p{margin:4px 0 0;color:var(--ch-text-muted);font-size:11.5px;line-height:1.45}
+.github-last-checked time{overflow-wrap:anywhere}
 .github-shadow-status{min-height:20px;margin:0;padding:0 var(--ch-space-6) var(--ch-space-4);color:var(--ch-text-muted);font-size:12px}
 .github-shadow-panel button:focus-visible,.github-shadow-panel input:focus-visible,.github-shadow-panel a:focus-visible{outline:none;box-shadow:var(--ch-focus-ring)}
 @media(max-width:760px){.github-shadow-panel-head{align-items:stretch;flex-direction:column}.github-shadow-panel-head .button{width:100%}.github-installation-head{grid-template-columns:1fr}.github-installation-head .button{width:100%}.github-repository{grid-template-columns:1fr}.github-repository-health{justify-content:flex-start;min-width:0}}
+@media(max-width:900px){.github-shadow-panel-head{align-items:stretch;flex-direction:column}.github-connection-actions{justify-content:flex-start}.github-installation-head,.github-repository{grid-template-columns:1fr}.github-repository-health{justify-content:flex-start;min-width:0}}
+.monitor-technical-review{width:100%;max-width:1100px;margin:var(--ch-space-6) auto 0;border:1px solid var(--ch-border);border-radius:12px;background:var(--ch-surface);overflow:hidden}
+.monitor-technical-review>summary{min-height:48px;padding:var(--ch-space-4) var(--ch-space-6);font-size:13px;font-weight:800;cursor:pointer}
+.monitor-technical-review>summary:focus-visible{outline:none;box-shadow:var(--ch-focus-ring)}
+.monitor-technical-review>p{margin:0;padding:0 var(--ch-space-6) var(--ch-space-4);color:var(--ch-text-muted);font-size:12px;line-height:1.5}
+.monitor-technical-review>.github-control-room{margin:0;border-right:0;border-bottom:0;border-left:0;border-radius:0;box-shadow:none}
+.monitor-route-state{max-width:620px;margin:var(--ch-space-6) auto;padding:var(--ch-space-6)}
+.monitor-route-state h2{margin:0;font-size:20px}.monitor-route-state p{margin:var(--ch-space-2) 0 var(--ch-space-5);color:var(--ch-text-muted);font-size:13px;line-height:1.5}
+.monitoring-page>.monitor-github-section,.monitoring-page>.monitor-findings-card,.monitoring-page>.monitor-other-systems-card,.monitoring-page>.monitor-technical-review{margin-top:var(--ch-space-4)}
+.monitoring-page>.monitor-github-section .github-collection-health-panel{margin-top:0}
+@media(max-width:640px){.monitor-banner{align-items:stretch;flex-direction:column}.monitor-banner-actions,.monitor-banner-actions form,.monitor-banner-actions .button{width:100%}.github-installation-head,.github-repository{padding:var(--ch-space-4)}.github-installation-head .button,.github-repositories-empty .button{width:100%;min-height:44px}.github-repository>.pill{justify-self:start;white-space:normal}.monitor-technical-review>summary{padding:var(--ch-space-4)}.monitor-technical-review>p{padding:0 var(--ch-space-4) var(--ch-space-4)}}
 .github-control-room{width:100%;max-width:1100px;margin:var(--ch-space-6) auto 0;overflow:hidden;border:1px solid var(--ch-border);border-radius:14px;background:var(--ch-surface);box-shadow:0 10px 32px -26px color-mix(in srgb,var(--ch-ink) 65%,transparent)}
 .github-control-room-hero{padding:var(--ch-space-6);background:linear-gradient(135deg,var(--ch-primary-soft),var(--ch-surface));border-bottom:1px solid var(--ch-border)}
 .github-control-room-hero .eyebrow,.github-control-room-heading .eyebrow{margin:0 0 var(--ch-space-1);color:var(--ch-primary);font-size:11px}
@@ -465,6 +483,9 @@ a.heat-cell:hover{outline:2px solid var(--ink);outline-offset:-2px}
 .github-queue-note{margin:var(--ch-space-3) 0 0;color:var(--ch-text-muted);font-size:11px}.github-exhausted-list{display:grid;gap:var(--ch-space-3);margin:var(--ch-space-4) 0 0;padding:0;list-style:none}.github-exhausted-list>li{min-width:0;padding:var(--ch-space-4);border:1px solid var(--ch-border);border-radius:9px;background:var(--ch-canvas)}.github-exhausted-list>li>div>strong,.github-exhausted-list>li>div>small{display:block;overflow-wrap:anywhere}.github-exhausted-list>li>div>small{margin-top:4px;color:var(--ch-text-muted);font-size:10px}.github-control-room-pagination{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:var(--ch-space-3);margin-top:var(--ch-space-4)}.github-control-room-pagination>:last-child{justify-self:end}.github-control-room-pagination>span{color:var(--ch-text-muted);font-size:11px}
 .github-control-room button:focus-visible,.github-control-room input:focus-visible,.github-control-room select:focus-visible,.github-control-room a:focus-visible,.github-control-room summary:focus-visible{outline:none;box-shadow:var(--ch-focus-ring)}
 @media(max-width:760px){.github-control-room-steps{grid-template-columns:1fr 1fr}.github-control-room-section,.github-control-room-hero{padding:var(--ch-space-4)}.github-control-room-heading,.github-official-repository>header,.github-owner-decision{align-items:stretch;flex-direction:column}.github-mapping-identity,.github-mapping-list,.github-outcome-counts,.github-approval-history li{grid-template-columns:1fr}.github-owner-decision .button,.github-recovery-actions .button{width:100%}.github-recovery-actions{align-items:stretch;flex-direction:column}.github-control-room-pagination{grid-template-columns:1fr 1fr}.github-control-room-pagination>span{grid-column:1/-1;grid-row:1;text-align:center}.github-control-room-pagination>a{grid-row:2}.github-control-room-status{padding-left:var(--ch-space-4);padding-right:var(--ch-space-4)}}
+@media(max-width:640px){.github-control-room .github-control-room-steps{grid-template-columns:minmax(0,1fr)}.github-collection-health-panel .github-installation-head .button{width:100%;min-height:44px}}
+/* Repository pagination becomes a single touch-target column on phones. */
+@media(max-width:640px){.monitoring-page .github-control-room-pagination{grid-template-columns:minmax(0,1fr)}.monitoring-page .github-control-room-pagination>span{grid-column:1;grid-row:1}.monitoring-page .github-control-room-pagination>a{grid-column:1;grid-row:auto;width:100%;min-height:44px;justify-self:stretch}}
 
 .github-official-record{min-width:0;padding:var(--ch-space-5);border:1px solid var(--ch-border);border-radius:12px;background:var(--ch-surface);scroll-margin-top:var(--ch-space-6)}
 .github-official-record[data-selected="true"]{border-color:var(--ch-primary);box-shadow:0 0 0 3px color-mix(in srgb,var(--ch-primary) 18%,transparent)}
@@ -473,18 +494,23 @@ a.heat-cell:hover{outline:2px solid var(--ink);outline-offset:-2px}
 .github-official-record-head{display:flex;align-items:center;justify-content:space-between;gap:var(--ch-space-3);margin-top:var(--ch-space-3)}
 .github-official-record-head>a{min-width:0;color:var(--ch-primary);font-size:12px;font-weight:800;overflow-wrap:anywhere}
 .github-official-record-summary{margin:var(--ch-space-3) 0;color:var(--ch-text);font-size:12px;line-height:1.55}
-.github-official-provenance,.github-finding-detection{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;margin:0;background:var(--ch-border);border:1px solid var(--ch-border);border-radius:9px;overflow:hidden}
-.github-official-provenance>div,.github-finding-detection>div{min-width:0;padding:10px;background:var(--ch-canvas)}
-.github-official-provenance dt,.github-finding-detection dt{color:var(--ch-text-muted);font-size:9.5px;font-weight:750;letter-spacing:.03em;text-transform:uppercase}
-.github-official-provenance dd,.github-finding-detection dd{min-width:0;margin:4px 0 0;font-size:10.5px;line-height:1.45;overflow-wrap:anywhere}
+.github-official-provenance,.github-finding-detection,.github-finding-overview{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;margin:0;background:var(--ch-border);border:1px solid var(--ch-border);border-radius:9px;overflow:hidden}
+.github-official-provenance>div,.github-finding-detection>div,.github-finding-overview>div{min-width:0;padding:10px;background:var(--ch-canvas)}
+.github-official-provenance dt,.github-finding-detection dt,.github-finding-overview dt{color:var(--ch-text-muted);font-size:9.5px;font-weight:750;letter-spacing:.03em;text-transform:uppercase}
+.github-official-provenance dd,.github-finding-detection dd,.github-finding-overview dd{min-width:0;margin:4px 0 0;font-size:10.5px;line-height:1.45;overflow-wrap:anywhere}
 .github-official-provenance code{font-size:10px;word-break:break-word}
 .github-official-provenance-wide{grid-column:1/-1}
 .github-finding-detection{grid-template-columns:repeat(2,minmax(0,1fr));margin-top:var(--ch-space-3)}
+.github-finding-overview{grid-template-columns:repeat(2,minmax(0,1fr));margin-top:var(--ch-space-3)}
+.github-finding-remediation{margin:var(--ch-space-3) 0;color:var(--ch-text-muted);font-size:11.5px;line-height:1.5}.github-finding-remediation strong{color:var(--ch-text)}
+.github-technical-evidence{margin-top:var(--ch-space-4);border:1px solid var(--ch-border);border-radius:9px;overflow:hidden}.github-technical-evidence>summary{min-height:44px;padding:var(--ch-space-3) var(--ch-space-4);background:var(--ch-canvas);font-size:12px;font-weight:800;cursor:pointer}.github-technical-evidence>summary:focus-visible{outline:none;box-shadow:var(--ch-focus-ring)}.github-technical-evidence>p:not(.github-official-boundary){margin:0;padding:var(--ch-space-3) var(--ch-space-4);color:var(--ch-text-muted);font-size:11px;line-height:1.5}.github-technical-evidence>.github-official-provenance{margin:0 var(--ch-space-4) var(--ch-space-4)}.github-technical-evidence>.github-official-boundary{margin:0 var(--ch-space-4) var(--ch-space-4)}
 .github-official-boundary{margin:var(--ch-space-3) 0 0;padding:10px 12px;border-left:3px solid var(--ch-attention);background:var(--ch-attention-soft);color:var(--ch-text-muted);font-size:11px;line-height:1.5}
 .github-finding-review{display:flex;align-items:end;gap:var(--ch-space-3);flex-wrap:wrap;margin-top:var(--ch-space-3)}
 .github-finding-review-controls{display:flex;align-items:end;gap:var(--ch-space-3);flex:1 1 360px}.github-finding-review-controls label{display:grid;gap:5px;flex:1;color:var(--ch-text-muted);font-size:10.5px;font-weight:750}.github-finding-review-controls select{min-width:0;min-height:40px;padding:8px 10px;border:1px solid var(--ch-border);border-radius:8px;background:var(--ch-surface);color:var(--ch-text)}
 .github-finding-review>p[role="status"]{flex-basis:100%;min-height:18px;margin:0;color:var(--ch-text-muted);font-size:10.5px}
 @media(max-width:760px){.github-official-record{padding:var(--ch-space-4)}.github-official-record-head,.github-finding-review,.github-finding-review-controls{align-items:stretch;flex-direction:column}.github-official-provenance,.github-finding-detection{grid-template-columns:1fr}.github-official-provenance-wide{grid-column:auto}.github-finding-review .button,.github-finding-review-controls select{width:100%}}
+/* Monitoring phone actions stay scoped to the Monitoring route. */
+@media(max-width:640px){.monitoring-page .monitor-banner-actions,.monitoring-page .finding-actions,.monitoring-page .github-finding-review,.monitoring-page .github-collection-health-panel .github-installation-head,.monitoring-page .monitor-technical-review .github-owner-decision,.monitoring-page .monitor-technical-review .github-recovery-actions{align-items:stretch;flex-direction:column;width:100%}.monitoring-page form{width:100%}.monitoring-page .button{width:100%;min-height:44px}}
 
 /* Automation inbox — review-first presentation */
 .automation-inbox{display:grid;gap:var(--ch-space-4)}

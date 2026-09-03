@@ -31,8 +31,11 @@ import { loadGitHubMappingReview, type GitHubMappingReview } from "@/features/gi
 import { GitHubComplianceControlRoomPanel } from "@/features/github/components/github-compliance-control-room";
 import type {
   GitHubInstallationSummary,
-  GitHubRepositoryShadowSummary,
 } from "@/features/github/components/github-installation-panel";
+import {
+  GitHubCollectionHealthPanel,
+  type GitHubRepositoryMonitoringSummary,
+} from "@/features/github/components/github-collection-health-panel";
 
 const SEVERITY_TONE: Record<CheckSeverity, StatusTone> = { critical: "risk", high: "risk", medium: "attention", low: "neutral" };
 const SEVERITY_PILL: Record<CheckSeverity, string> = { critical: "red", high: "red", medium: "amber", low: "blue" };
@@ -57,7 +60,7 @@ const findingRowsSchema = z.array(z.object({
   finding_origin: z.enum(["legacy", "github"]),
 }).strict()).max(100);
 const sourceRowsSchema = z.array(z.object({
-  id: z.uuid(), provider: z.literal("github"), label: z.string().max(160),
+  id: z.uuid(), provider: z.string().min(1).max(40), label: z.string().max(160),
   created_at: z.string().datetime({ offset: true }),
 }).strict()).max(100);
 type ParsedFinding = z.infer<typeof findingRowsSchema>[number];
@@ -75,18 +78,39 @@ function providerLabel(provider: string): string {
 function unhealthyGitHubRepositoryIds(
   room: GitHubComplianceControlRoom,
   installations: GitHubInstallationSummary[],
-  repositories: GitHubRepositoryShadowSummary[],
+  repositories: GitHubRepositoryMonitoringSummary[],
 ): string[] {
   return room.repositories
     .filter((repository) => {
-      const shadow = repositories.find((candidate) => candidate.repository_id === repository.id);
-      const installation = installations.find((candidate) => candidate.id === shadow?.installation_id);
+      const summary = repositories.find((candidate) => candidate.repository_id === repository.id);
+      const installation = installations.find((candidate) => candidate.id === summary?.installation_id);
       return !repository.available || !installation || installation.status !== "active" || installation.permissions_ok !== true;
     })
     .map((repository) => repository.id);
 }
 
-function GitHubComplianceSection({
+function GitHubMonitoringSection({
+  role,
+  installations,
+  repositories,
+  nowIso,
+}: {
+  role: "owner" | "admin" | "member";
+  installations: GitHubInstallationSummary[];
+  repositories: GitHubRepositoryMonitoringSummary[];
+  nowIso: string;
+}) {
+  return <section className="monitor-github-section" aria-label="GitHub repository monitoring">
+    <GitHubCollectionHealthPanel
+      installations={installations}
+      repositories={repositories}
+      nowIso={nowIso}
+      role={role}
+    />
+  </section>;
+}
+
+function GitHubTechnicalReview({
   room,
   review,
   role,
@@ -97,20 +121,16 @@ function GitHubComplianceSection({
   role: "owner" | "admin" | "member";
   unhealthyRepositoryIds: string[];
 }) {
-  return <section aria-labelledby="github-compliance-section-title">
-    <Card style={{ marginBottom: "16px", padding: "16px" }}>
-      <div className="card-head"><div>
-        <h2 id="github-compliance-section-title">GitHub compliance</h2>
-        <p>Read-only repository signals for review. They do not certify compliance or change readiness.</p>
-      </div></div>
-    </Card>
+  return <details className="monitor-technical-review">
+    <summary>Technical review and recovery</summary>
+    <p>Review how repository checks become governed ISO evidence or findings, and use authorised recovery controls.</p>
     <GitHubComplianceControlRoomPanel
       room={room}
       review={review}
       role={role}
       unhealthyRepositoryIds={unhealthyRepositoryIds}
     />
-  </section>;
+  </details>;
 }
 
 export default async function MonitoringPage({
@@ -131,7 +151,7 @@ export default async function MonitoringPage({
         .select("id,account_login,status,repository_selection,permissions_ok")
         .eq("organisation_id", organisation.id)
         .order("updated_at", { ascending: false }),
-      supabase.from("github_repository_shadow_summaries")
+      supabase.from("github_repository_monitoring_summaries")
         .select("repository_id,installation_id,full_name,html_url,visibility,default_branch,archived,selected,available,latest_run_id,latest_status,latest_failed_count,last_completed_collection_at")
         .eq("organisation_id", organisation.id)
         .order("full_name", { ascending: true }),
@@ -142,18 +162,26 @@ export default async function MonitoringPage({
     const selectedFinding = requestedFinding && data.officialGitHubFindings.some((record) => record.findingId === requestedFinding)
       ? requestedFinding
       : null;
+    const installations = (installationResult.data ?? []) as GitHubInstallationSummary[];
+    const repositories = (repositorySummaryResult.data ?? []) as GitHubRepositoryMonitoringSummary[];
+    const hasActiveGitHubInstallation = installations.some(
+      (installation) => installation.status === "active",
+    );
     return <MemberMonitoring
       data={data}
       selectedFinding={selectedFinding}
-      githubCompliance={<GitHubComplianceSection
+      hasActiveGitHubInstallation={hasActiveGitHubInstallation}
+      githubMonitoring={<GitHubMonitoringSection
+        role={membership.role}
+        installations={installations}
+        repositories={repositories}
+        nowIso={new Date().toISOString()}
+      />}
+      githubTechnicalReview={<GitHubTechnicalReview
         room={controlRoom}
         review={mappingReview}
         role={membership.role}
-        unhealthyRepositoryIds={unhealthyGitHubRepositoryIds(
-          controlRoom,
-          (installationResult.data ?? []) as GitHubInstallationSummary[],
-          (repositorySummaryResult.data ?? []) as GitHubRepositoryShadowSummary[],
-        )}
+        unhealthyRepositoryIds={unhealthyGitHubRepositoryIds(controlRoom, installations, repositories)}
       />}
     />;
   }
@@ -178,7 +206,7 @@ export default async function MonitoringPage({
       .select("id,account_login,status,repository_selection,permissions_ok")
       .eq("organisation_id", organisation.id)
       .order("updated_at", { ascending: false }),
-    supabase.from("github_repository_shadow_summaries")
+    supabase.from("github_repository_monitoring_summaries")
       .select("repository_id,installation_id,full_name,html_url,visibility,default_branch,archived,selected,available,latest_run_id,latest_status,latest_failed_count,last_completed_collection_at")
       .eq("organisation_id", organisation.id)
       .order("full_name", { ascending: true }),
@@ -208,9 +236,16 @@ export default async function MonitoringPage({
   const officialByFinding = new Map(officialGitHubFindings.map((record) => [record.findingId, record]));
   const selectedFinding = requestedFinding && officialByFinding.has(requestedFinding) ? requestedFinding : null;
   const sources = parsedSources.data;
+  const installations = (installationResult.data ?? []) as GitHubInstallationSummary[];
+  const repositories = (repositorySummaryResult.data ?? []) as GitHubRepositoryMonitoringSummary[];
+  const hasActiveGitHubInstallation = installations.some(
+    (installation) => installation.status === "active",
+  );
+  const otherSources = sources.filter((source) => source.provider !== "github");
+  const monitoredSystemCount = otherSources.length + (hasActiveGitHubInstallation ? 1 : 0);
   const highOrCritical = findings.filter((finding) => finding.severity === "high" || finding.severity === "critical").length;
 
-  return <>
+  return <div className="monitoring-page">
     <PageIntro
       eyebrow="MONITORING"
       title="Continuous monitoring"
@@ -218,41 +253,25 @@ export default async function MonitoringPage({
     />
 
     <Card className="monitor-banner" style={{ marginBottom: "16px" }}>
-      <span className={`monitor-dot ${findings.length === 0 ? "ok" : "watch"}`} aria-hidden="true" />
+      <span className={`monitor-dot ${findings.length === 0 ? "neutral" : "watch"}`} aria-hidden="true" />
       <div style={{ flex: 1 }}>
-        <strong>{findings.length === 0 ? "No active findings" : `${findings.length} active finding${findings.length === 1 ? "" : "s"}`}</strong>
-        <p>{highOrCritical} high or critical · {sources.length} enabled system{sources.length === 1 ? "" : "s"} monitored</p>
+        <strong>{findings.length === 0 ? "No recorded active findings" : `${findings.length} active finding${findings.length === 1 ? "" : "s"}`}</strong>
+        <p>{highOrCritical} high or critical · {monitoredSystemCount} system{monitoredSystemCount === 1 ? "" : "s"} monitored{findings.length === 0 ? ". Monitoring status is not yet confirmed." : ""}</p>
       </div>
-      <span style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-        {shouldShowRunMonitoring(membership.role, sources.length) && <form action={runMonitoringNowAction}><button className="button">Run checks now</button></form>}
+      <span className="monitor-banner-actions">
+        {shouldShowRunMonitoring(membership.role, otherSources.length) && <form action={runMonitoringNowAction}><button className="button">Run checks now</button></form>}
         <Link className="button secondary" href="/app/integrations">Manage connections and alerts</Link>
       </span>
     </Card>
 
-    <GitHubComplianceSection
-      room={controlRoom}
-      review={mappingReview}
+    <GitHubMonitoringSection
       role={membership.role}
-      unhealthyRepositoryIds={unhealthyGitHubRepositoryIds(
-        controlRoom,
-        (installationResult.data ?? []) as GitHubInstallationSummary[],
-        (repositorySummaryResult.data ?? []) as GitHubRepositoryShadowSummary[],
-      )}
+      installations={installations}
+      repositories={repositories}
+      nowIso={new Date().toISOString()}
     />
 
-    <Card style={{ marginBottom: "16px" }}>
-      <div className="card-head"><div><h3>Connected systems</h3><p>Enabled systems included in monitoring</p></div></div>
-      {sources.length > 0 ? <ul className="monitor-list">
-        {sources.map((source) => <li key={source.id}>
-          <span className="ml-body"><strong>{source.label || providerLabel(source.provider)}</strong><span className="ml-meta">
-            <Pill tone="neutral">{providerLabel(source.provider)}</Pill>
-            <StatusLabel tone="confirmed">Connected {new Date(source.created_at).toLocaleDateString("en-GB")}</StatusLabel>
-          </span></span>
-        </li>)}
-      </ul> : <p className="empty-note">No enabled systems are currently being monitored. An Owner or Admin can manage connections in Settings.</p>}
-    </Card>
-
-    <Card>
+    <Card className="monitor-findings-card">
       <div className="card-head"><div><h3>Active findings</h3><p>Current violations and drift, newest first</p></div></div>
       {findings.length > 0 ? <ul className="finding-list">
         {findings.map((finding) => {
@@ -291,5 +310,24 @@ export default async function MonitoringPage({
         })}
       </ul> : <p className="empty-note">No active findings are currently visible.</p>}
     </Card>
-  </>;
+
+    {otherSources.length > 0 && <Card className="monitor-other-systems-card">
+      <div className="card-head"><div><h3>Other monitored systems</h3><p>Other enabled systems included in monitoring</p></div></div>
+      <ul className="monitor-list">
+        {otherSources.map((source) => <li key={source.id}>
+          <span className="ml-body"><strong>{source.label || providerLabel(source.provider)}</strong><span className="ml-meta">
+            <Pill tone="neutral">{providerLabel(source.provider)}</Pill>
+            <StatusLabel tone="confirmed">Connected {new Date(source.created_at).toLocaleDateString("en-GB")}</StatusLabel>
+          </span></span>
+        </li>)}
+      </ul>
+    </Card>}
+
+    <GitHubTechnicalReview
+      room={controlRoom}
+      review={mappingReview}
+      role={membership.role}
+      unhealthyRepositoryIds={unhealthyGitHubRepositoryIds(controlRoom, installations, repositories)}
+    />
+  </div>;
 }
