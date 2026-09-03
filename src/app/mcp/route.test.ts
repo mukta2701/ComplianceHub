@@ -4,6 +4,14 @@ import { createComplianceMcpServer } from "@/features/mcp/server/server";
 import { parseBearerToken } from "@/features/mcp/auth/request-auth";
 import { DELETE, GET, handleMcpPost, MCP_MAX_BODY_BYTES } from "./route";
 
+const createMcpHandlerMock = vi.hoisted(() => vi.fn());
+
+vi.mock("@modelcontextprotocol/server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@modelcontextprotocol/server")>();
+  createMcpHandlerMock.mockImplementation(actual.createMcpHandler);
+  return { ...actual, createMcpHandler: createMcpHandlerMock };
+});
+
 const USER_ID = "10000000-0000-4000-8000-000000000001";
 const RESOURCE = "https://compliance.example/mcp";
 const initialize = JSON.stringify({
@@ -79,6 +87,49 @@ describe("POST /mcp", () => {
     });
   });
 
+  it("serves a current protocol tools/call with its required Mcp-Name header", async () => {
+    const listWorkspaces = vi.fn(async () => []);
+    const deps = dependencies({
+      createServer: vi.fn((context: Parameters<typeof createComplianceMcpServer>[0]) => createComplianceMcpServer(context, {
+        listWorkspaces,
+        getComplianceOverview: vi.fn(), listAttentionItems: vi.fn(), listMonitoringFindings: vi.fn(),
+        listGitHubComplianceResults: vi.fn(), getLatestLeadershipReport: vi.fn(), prepareDailyDigest: vi.fn(), postDailyDigest: vi.fn(),
+      })),
+    });
+    const response = await handleMcpPost(new Request("http://127.0.0.1:3100/mcp", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer a.b.c",
+        "content-type": "application/json",
+        "MCP-Protocol-Version": "2026-07-28",
+        "Mcp-Method": "tools/call",
+        "Mcp-Name": "list_workspaces",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: {
+          name: "list_workspaces",
+          arguments: {},
+          _meta: {
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientInfo": { name: "route-test", version: "1.0.0" },
+            "io.modelcontextprotocol/clientCapabilities": {},
+          },
+        },
+      }),
+    }), deps as never);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      jsonrpc: "2.0",
+      id: 2,
+      result: { structuredContent: { ok: true, data: { workspaces: [] } } },
+    });
+    expect(listWorkspaces).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects a current protocol method-header mismatch before application dispatch", async () => {
     const deps = dependencies();
     const response = await handleMcpPost(new Request("http://127.0.0.1:3100/mcp", {
@@ -88,12 +139,21 @@ describe("POST /mcp", () => {
         "content-type": "application/json",
         "MCP-Protocol-Version": "2026-07-28",
         "Mcp-Method": "tools/list",
+        "Mcp-Name": "list_workspaces",
       },
       body: JSON.stringify({
         jsonrpc: "2.0",
         id: 1,
         method: "tools/call",
-        params: { name: "list_workspaces", arguments: {} },
+        params: {
+          name: "list_workspaces",
+          arguments: {},
+          _meta: {
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientInfo": { name: "route-test", version: "1.0.0" },
+            "io.modelcontextprotocol/clientCapabilities": {},
+          },
+        },
       }),
     }), deps as never);
 
@@ -101,9 +161,52 @@ describe("POST /mcp", () => {
     await expect(response.json()).resolves.toMatchObject({
       jsonrpc: "2.0",
       id: 1,
-      error: { code: expect.any(Number), message: expect.any(String) },
+      error: {
+        code: -32020,
+        message: "Bad Request: the request headers and body disagree: the body names method tools/call but the Mcp-Method header names tools/list",
+      },
     });
     expect(deps.createServer).not.toHaveBeenCalled();
+  });
+
+  it("buffers an SDK response before closing its handler", async () => {
+    const events: string[] = [];
+    const encoder = new TextEncoder();
+    createMcpHandlerMock.mockImplementationOnce(() => ({
+      fetch: vi.fn(async () => new Response(new ReadableStream({
+        start(controller) {
+          events.push("stream-start");
+          controller.enqueue(encoder.encode("partial"));
+          setTimeout(() => {
+            events.push("stream-complete");
+            controller.enqueue(encoder.encode("-complete"));
+            controller.close();
+          }, 0);
+        },
+      }), { headers: { "content-type": "application/json" } })),
+      close: vi.fn(async () => { events.push("handler-close"); }),
+    }));
+
+    const response = await handleMcpPost(request(), dependencies() as never);
+
+    expect(events).toEqual(["stream-start", "stream-complete", "handler-close"]);
+    expect(await response.text()).toBe("partial-complete");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("disables SDK subscription streams for the bounded stateless route", async () => {
+    let handlerOptions: unknown;
+    createMcpHandlerMock.mockImplementationOnce((_server, options) => {
+      handlerOptions = options;
+      return {
+        fetch: vi.fn(async () => new Response("{}", { headers: { "content-type": "application/json" } })),
+        close: vi.fn(async () => {}),
+      } as never;
+    });
+
+    await handleMcpPost(request(), dependencies() as never);
+
+    expect(handlerOptions).toEqual({ legacy: "stateless", maxSubscriptions: 0 });
   });
 
   it("authenticates, rate limits by user and client, and completes a stateless initialize without caching", async () => {

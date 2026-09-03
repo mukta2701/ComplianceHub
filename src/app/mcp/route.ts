@@ -48,6 +48,15 @@ function securedResponse(response: Response) {
   });
 }
 
+async function materializedSecuredResponse(response: Response) {
+  const body = await response.arrayBuffer();
+  return new Response(body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: responseHeaders(response.headers),
+  });
+}
+
 function jsonRpcError(status: number, code: number, message: string, data?: Record<string, unknown>) {
   return new Response(JSON.stringify({
     jsonrpc: "2.0", id: null,
@@ -123,7 +132,7 @@ function defaultRouteDependencies(): McpRouteDependencies {
 
 function forwardedMcpHeaders(headers: Headers) {
   const result = new Headers();
-  for (const name of ["accept", "authorization", "content-type", "mcp-method", "mcp-protocol-version"]) {
+  for (const name of ["accept", "authorization", "content-type", "mcp-method", "mcp-name", "mcp-protocol-version"]) {
     const value = headers.get(name);
     if (value !== null) result.set(name, value);
   }
@@ -171,7 +180,9 @@ export async function handleMcpPost(
       supabase: authenticated.supabase,
       resource: dependencies.resource,
     }),
-    { legacy: "stateless" },
+    // This endpoint materializes each finite response before closing the handler;
+    // disable SDK subscription SSE streams, which cannot safely use that lifecycle.
+    { legacy: "stateless", maxSubscriptions: 0 },
   );
   const validatedBytes = new Uint8Array(body.bytes.byteLength);
   validatedBytes.set(body.bytes);
@@ -192,7 +203,7 @@ export async function handleMcpPost(
         extra: { userId: authenticated.user.id, sessionId: authenticated.claims.session_id },
       },
     });
-    return securedResponse(response);
+    return await materializedSecuredResponse(response);
   } catch {
     return jsonRpcError(500, -32603, "Internal server error.");
   } finally {
