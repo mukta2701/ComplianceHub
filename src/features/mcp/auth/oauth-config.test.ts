@@ -46,8 +46,17 @@ describe("parseMcpOAuthEnvironment", () => {
   it.each([
     ["TLS resource", "https://attacker.example/mcp"],
     ["non-loopback HTTP resource", "http://attacker.example/mcp"],
+    ["alternate 127/8 resource", "http://127.0.0.2:3100/mcp"],
   ])("fails closed when a %s derives the local browser-origin default", (_label, MCP_RESOURCE_URL) => {
     expect(() => parseMcpOAuthEnvironment({ NODE_ENV: "test", MCP_RESOURCE_URL })).toThrow("MCP OAuth environment is invalid");
+  });
+
+  it("allows literal IPv4 and IPv6 loopback origins outside production", () => {
+    const explicitIpv6 = parseMcpOAuthEnvironment({ NODE_ENV: "test", MCP_ALLOWED_ORIGINS: "http://[::1]:3100" });
+    const resourceDerivedIpv6 = parseMcpOAuthEnvironment({ NODE_ENV: "test", MCP_RESOURCE_URL: "http://[::1]:3100/mcp" });
+
+    expect(explicitIpv6.allowedOrigins).toEqual(["http://[::1]:3100"]);
+    expect(resourceDerivedIpv6.allowedOrigins).toEqual(["http://[::1]:3100"]);
   });
 
   it("allows an explicitly configured exact browser origin", () => {
@@ -74,6 +83,7 @@ describe("parseMcpOAuthEnvironment", () => {
 
   it.each([
     ["non-loopback host", "http://localhost:3100"],
+    ["alternate 127/8 address", "http://127.0.0.2:3100"],
     ["TLS local origin", "https://127.0.0.1:3100"],
     ["deceptive loopback suffix", "http://127.0.0.1:3100.attacker.example"],
   ])("fails closed for a %s configured local browser origin", (_label, MCP_ALLOWED_ORIGINS) => {
@@ -82,6 +92,8 @@ describe("parseMcpOAuthEnvironment", () => {
 
   it.each([
     ["non-canonical scheme separator", "http:127.0.0.1:3100"],
+    ["trailing backslash", "http://127.0.0.1:3100\\"],
+    ["backslash dot path", "http://127.0.0.1:3100\\..\\"],
     ["encoded dot path", "http://127.0.0.1:3100/%2e"],
     ["normalized dot-segment path", "http://127.0.0.1:3100/a/.."],
     ["empty query marker", "http://127.0.0.1:3100?"],
@@ -93,6 +105,8 @@ describe("parseMcpOAuthEnvironment", () => {
 
   it.each([
     ["non-canonical scheme separator", "https:compliance.example"],
+    ["trailing backslash", "https://compliance.example\\"],
+    ["backslash encoded dot path", "https://compliance.example\\%2e"],
     ["encoded dot path", "https://compliance.example/%2e"],
     ["normalized dot-segment path", "https://compliance.example/a/.."],
     ["empty query marker", "https://compliance.example?"],

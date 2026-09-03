@@ -29,7 +29,7 @@ function canonicalUrl(value: string, options: { production: boolean; path?: stri
 }
 
 function hasForbiddenOriginSyntax(value: string) {
-  if (value === "null" || value.includes("*") || value.includes("@") || value.includes("?") || value.includes("#")) return true;
+  if (value === "null" || value.includes("*") || value.includes("@") || value.includes("?") || value.includes("#") || value.includes("\\")) return true;
   const schemeEnd = value.indexOf("://");
   if (schemeEnd === -1) return true;
   const authorityAndPath = value.slice(schemeEnd + 3);
@@ -42,7 +42,7 @@ function canonicalAllowedOrigin(origin: string, production: boolean) {
   const url = new URL(origin);
   if (url.username || url.password || url.pathname !== "/" || url.search || url.hash) throw new Error("invalid origin");
   if (production ? url.protocol !== "https:" : url.protocol !== "http:") throw new Error("invalid origin protocol");
-  if (!production && url.hostname !== "127.0.0.1") throw new Error("invalid local origin");
+  if (!production && !["127.0.0.1", "[::1]"].includes(url.hostname)) throw new Error("invalid local origin");
   return url.origin;
 }
 
