@@ -1,11 +1,15 @@
+import { execFile } from "node:child_process";
 import { mkdtemp, readFile, stat } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import {
   buildPhase3Proof,
   buildProtectedDomainSnapshotQuery,
   buildReconciliationQuery,
+  buildWorkspaceSelectionQuery,
   buildProtectedDomainSnapshot,
   PROTECTED_DOMAIN_TABLES,
   createAcceptanceAnswers,
@@ -13,16 +17,18 @@ import {
   assertLocalAuthorizationUrl,
   inspectStaticServerCallPath,
   reconcileOfficialResults,
-  redactCursor,
   selectProofProtocol,
   requireLocalPostgresSettings,
   parseProtectedDomainDigest,
+  parseWorkspaceSelection,
   validateDockerIdentity,
   validateLocalDockerContext,
   validateProofForPersistence,
   writeProofArtifact,
   type GitHubProofResult,
 } from "../../../../scripts/mcp-github-read-proof";
+
+const execFileAsync = promisify(execFile);
 
 function result(index: number, override: Partial<GitHubProofResult>): GitHubProofResult {
   const suffix = String(index).padStart(12, "0");
@@ -95,17 +101,25 @@ function validProof() {
       readOnly: true,
       destructive: false,
       openWorld: false,
-      initialRequestHadCursor: false,
       limit: 1,
       pages: [
-        { pageKind: "initial", resultCount: 1, nextCursor: redactCursor("ch4.first-secret-cursor") },
-        { pageKind: "continuation", resultCount: 1, nextCursor: redactCursor("ch4.second-secret-cursor") },
-        { pageKind: "continuation", resultCount: 1, nextCursor: null },
+        { pageKind: "initial", resultCount: 1, hasNextPage: true },
+        { pageKind: "continuation", resultCount: 1, hasNextPage: true },
+        { pageKind: "continuation", resultCount: 1, hasNextPage: false },
       ],
       traversedToNull: true,
       totalResults: results.length,
     },
     databaseUnchanged: true,
+    protectedStateBracket: {
+      workspaceSelectedAt: "2026-09-03T15:59:58.000Z",
+      baselineCapturedAt: "2026-09-03T15:59:59.000Z",
+      workflowStartedAt: "2026-09-03T16:00:00.000Z",
+      workflowCompletedAt: "2026-09-03T16:00:01.000Z",
+      afterCapturedAt: "2026-09-03T16:00:02.000Z",
+      baselineBeforeWorkflow: true,
+      afterAfterWorkflow: true,
+    },
     database: {
       scope: "tenant-compliance-state-plus-global-github-mapping-catalogue",
       before: domainSnapshot,
@@ -120,6 +134,7 @@ function validProof() {
     },
     observations: {
       clientNetwork: { scope: "proof-client-process", loopbackOnly: true, githubCalls: 0, slackCalls: 0 },
+      serverNetwork: { scope: "dedicated-server-process", guardActive: true, githubAttempts: 0, slackAttempts: 0 },
       invokedTools: { listWorkspaces: 1, githubReadPages: 3, writeTools: [] },
       staticServerCallPath: { scope: "reviewed-source", databaseReadOnly: true, githubProviderReachable: false, slackWriteReachable: false },
     },
@@ -139,8 +154,7 @@ describe("Phase 3 local MCP foundation proof", () => {
     expect(proof.oauth.pkce).toBe("S256");
     expect(proof.oauth.audienceMatched).toBe(true);
     expect(proof.githubRead.readOnly).toBe(true);
-    expect(proof.githubRead.initialRequestHadCursor).toBe(false);
-    expect(proof.githubRead.pages.at(-1)?.nextCursor).toBeNull();
+    expect(proof.githubRead.pages.map((page) => page.hasNextPage)).toEqual([true, true, false]);
     expect(proof.githubRead.traversedToNull).toBe(true);
     expect(proof.database.reconciliation.matched).toBe(true);
     expect(proof.database.scope).toBe("tenant-compliance-state-plus-global-github-mapping-catalogue");
@@ -162,7 +176,13 @@ describe("Phase 3 local MCP foundation proof", () => {
       githubProviderReachable: false,
       slackWriteReachable: false,
     });
-    expect(JSON.stringify(proof)).not.toContain("ch4.first-secret-cursor");
+    expect(JSON.stringify(proof)).not.toMatch(/cursor/i);
+    expect(proof.protectedStateBracket).toMatchObject({ baselineBeforeWorkflow: true, afterAfterWorkflow: true });
+    expect(Date.parse(proof.protectedStateBracket.baselineCapturedAt)).toBeLessThanOrEqual(Date.parse(proof.protectedStateBracket.workflowStartedAt));
+    expect(Date.parse(proof.protectedStateBracket.workflowCompletedAt)).toBeLessThanOrEqual(Date.parse(proof.protectedStateBracket.afterCapturedAt));
+    expect(proof.observations.serverNetwork).toEqual({
+      scope: "dedicated-server-process", guardActive: true, githubAttempts: 0, slackAttempts: 0,
+    });
     expect(() => validateProofForPersistence(proof)).not.toThrow();
   });
 
@@ -198,6 +218,8 @@ describe("Phase 3 local MCP foundation proof", () => {
     const prohibitedValue = ["not", "persistable"].join("-");
     expect(() => validateProofForPersistence({ ...proof, leaked: `Bearer ${prohibitedValue}` })).toThrow(/sensitive/i);
     expect(() => validateProofForPersistence({ ...proof, cursor: "ch4.full-opaque-cursor" })).toThrow(/sensitive/i);
+    expect(() => validateProofForPersistence({ ...proof, nextCursorHash: "a".repeat(12) })).toThrow(/sensitive/i);
+    expect(() => validateProofForPersistence({ ...proof, nested: { cursorDerived: false } })).toThrow(/sensitive/i);
     expect(() => validateProofForPersistence({ ...proof, [prohibitedAccessField]: prohibitedValue })).toThrow(/sensitive/i);
     expect(() => validateProofForPersistence({ ...proof, [prohibitedServiceField]: prohibitedValue })).toThrow(/sensitive/i);
     expect(() => validateProofForPersistence({ ...proof, [prohibitedEmailField]: ["person", "example.test"].join("@") })).toThrow(/sensitive/i);
@@ -220,7 +242,7 @@ describe("Phase 3 local MCP foundation proof", () => {
       ...proof,
       githubRead: {
         ...proof.githubRead,
-        pages: [{ pageKind: "initial" as const, resultCount: 0, nextCursor: null }],
+        pages: [{ pageKind: "initial" as const, resultCount: 0, hasNextPage: false }],
         totalResults: 0,
       },
       database: {
@@ -353,6 +375,9 @@ describe("Phase 3 local MCP foundation proof", () => {
       { ...proof, tools: proof.tools.slice(0, -1) },
       { ...proof, tools: proof.tools.map((tool, index) => index === 0 ? { ...tool, readOnly: false } : tool) },
       { ...proof, databaseUnchanged: false },
+      { ...proof, protectedStateBracket: { ...proof.protectedStateBracket, baselineCapturedAt: "2026-09-03T16:00:01.000Z" } },
+      { ...proof, protectedStateBracket: { ...proof.protectedStateBracket, afterCapturedAt: "2026-09-03T16:00:00.000Z" } },
+      { ...proof, observations: { ...proof.observations, serverNetwork: { ...proof.observations.serverNetwork, githubAttempts: 1 } } },
       { ...proof, githubRead: { ...proof.githubRead, totalResults: 2 } },
       { ...proof, githubRead: { ...proof.githubRead, pages: [
         proof.githubRead.pages[0],
@@ -363,7 +388,7 @@ describe("Phase 3 local MCP foundation proof", () => {
       { ...proof, database: { ...proof.database, reconciliation: { ...proof.database.reconciliation, matched: false } } },
       { ...proof, database: { ...proof.database, after: buildProtectedDomainSnapshot(protectedRows({ evidence: [{ id: "changed" }] })) } },
       { ...proof, observations: { ...proof.observations, invokedTools: { ...proof.observations.invokedTools, githubReadPages: 2 } } },
-      { ...proof, githubRead: { ...proof.githubRead, pages: proof.githubRead.pages.map((page, index) => index === 0 ? { ...page, nextCursor: null } : page) } },
+      { ...proof, githubRead: { ...proof.githubRead, pages: proof.githubRead.pages.map((page, index) => index === 0 ? { ...page, hasNextPage: false } : page) } },
       { ...proof, answers: proof.answers.map((answer, index) => index === 4 ? { ...answer, answer: "Yes, certified." } : answer) },
     ];
 
@@ -393,6 +418,37 @@ describe("Phase 3 local MCP foundation proof", () => {
       githubProviderReachable: false,
       slackWriteReachable: false,
     });
+  });
+
+  it("blocks and counts provider fetch attempts in the dedicated server process while allowing loopback", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "compliancehub-mcp-server-network-"));
+    const ledger = join(directory, "ledger.json");
+    const guard = join(process.cwd(), "scripts/mcp-proof-server-network-guard.cjs");
+    const server = createServer((_request, response) => { response.writeHead(204); response.end(); });
+    await new Promise<void>((resolvePromise) => server.listen(0, "127.0.0.1", resolvePromise));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Loopback test server did not bind.");
+    try {
+      const child = [
+        "await fetch(process.argv[1])",
+        "for (const target of [\"https://api.github.com/user\", \"https://hooks.slack.com/services/test\"]) {",
+        "  try { await fetch(target) } catch {}",
+        "}",
+      ].join(";");
+      await execFileAsync(process.execPath, [
+        "--require", guard, "--input-type=module", "--eval", child, `http://127.0.0.1:${address.port}/health`,
+      ], {
+        env: { ...process.env, MCP_PROOF_SERVER_NETWORK_LEDGER: ledger },
+      });
+    } finally {
+      await new Promise<void>((resolvePromise, rejectPromise) => server.close((error) => error ? rejectPromise(error) : resolvePromise()));
+    }
+    expect(JSON.parse(await readFile(ledger, "utf8"))).toEqual({
+      guardActive: true,
+      githubAttempts: 1,
+      slackAttempts: 1,
+    });
+    expect((await stat(ledger)).mode & 0o777).toBe(0o600);
   });
 
   it("requires an exact local Docker/PostgreSQL boundary and never reconciles through REST or the v2 RPC", async () => {
@@ -457,5 +513,22 @@ describe("Phase 3 local MCP foundation proof", () => {
     ]));
     expect(parseProtectedDomainDigest(JSON.stringify({ readOnly: true, scope: "tenant-compliance-state-plus-global-github-mapping-catalogue", tables: digest }))).toEqual(digest);
     expect(() => parseProtectedDomainDigest(JSON.stringify({ readOnly: true, tables: { evidence: { rows: [{ access_token: "secret" }] } } }))).toThrow(/digest/i);
+  });
+
+  it("selects one proof workspace by direct read-only local database lookup before the protected baseline", () => {
+    const workspaceId = "20000000-0000-4000-8000-000000000001";
+    const unrestricted = buildWorkspaceSelectionQuery();
+    const requested = buildWorkspaceSelectionQuery(workspaceId);
+    for (const query of [unrestricted, requested]) {
+      expect(query).toMatch(/begin transaction read only/i);
+      expect(query).toMatch(/github_official_compliance_results/i);
+      expect(query).not.toMatch(/select\s+\*/i);
+      expect(query).toMatch(/commit/i);
+    }
+    expect(requested).toContain(`'${workspaceId}'::uuid`);
+    expect(parseWorkspaceSelection({ readOnly: true, workspaceIds: [workspaceId] })).toBe(workspaceId);
+    expect(() => parseWorkspaceSelection({ readOnly: true, workspaceIds: [] })).toThrow(/exactly one/i);
+    expect(() => parseWorkspaceSelection({ readOnly: true, workspaceIds: [workspaceId, "20000000-0000-4000-8000-000000000002"] })).toThrow(/exactly one/i);
+    expect(() => buildWorkspaceSelectionQuery("' OR true; --")).toThrow();
   });
 });

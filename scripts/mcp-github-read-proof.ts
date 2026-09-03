@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,6 +27,7 @@ const REQUIRED_SCOPES = "openid email profile";
 const MAX_PAGES = 500;
 const DOCKER_BIN = "/opt/homebrew/bin/docker";
 const DEFAULT_DATABASE_CONTAINER = "supabase_db_compliancehub";
+let liveProofStage = "startup";
 const PROTECTED_STATE_SCOPE = "tenant-compliance-state-plus-global-github-mapping-catalogue" as const;
 const REQUIRED_TOOL_NAMES = Object.freeze([
   "list_workspaces",
@@ -153,7 +154,6 @@ type StoredOfficialResult = z.infer<typeof storedOfficialResultSchema>;
 type StoredObservation = z.infer<typeof storedObservationSchema>;
 type StoredRun = z.infer<typeof storedRunSchema>;
 
-type CursorRedaction = { present: true; sha256Prefix: string };
 type ProtectedDomainSnapshot = Record<string, { rowCount: number; sha256: string }>;
 type ExpectedOfficialResult = Omit<GitHubProofResult, "recordHash">;
 
@@ -193,13 +193,21 @@ export type Phase3Proof = {
     readOnly: boolean;
     destructive: boolean;
     openWorld: boolean;
-    initialRequestHadCursor: false;
     limit: 1;
-    pages: Array<{ pageKind: "initial" | "continuation"; resultCount: number; nextCursor: CursorRedaction | null }>;
+    pages: Array<{ pageKind: "initial" | "continuation"; resultCount: number; hasNextPage: boolean }>;
     traversedToNull: boolean;
     totalResults: number;
   };
   databaseUnchanged: true;
+  protectedStateBracket: {
+    workspaceSelectedAt: string;
+    baselineCapturedAt: string;
+    workflowStartedAt: string;
+    workflowCompletedAt: string;
+    afterCapturedAt: string;
+    baselineBeforeWorkflow: true;
+    afterAfterWorkflow: true;
+  };
   database: {
     scope: typeof PROTECTED_STATE_SCOPE;
     before: ProtectedDomainSnapshot;
@@ -214,6 +222,7 @@ export type Phase3Proof = {
   };
   observations: {
     clientNetwork: { scope: "proof-client-process"; loopbackOnly: boolean; githubCalls: number; slackCalls: number };
+    serverNetwork: { scope: "dedicated-server-process"; guardActive: true; githubAttempts: 0; slackAttempts: 0 };
     invokedTools: { listWorkspaces: number; githubReadPages: number; writeTools: string[] };
     staticServerCallPath: {
       scope: "reviewed-source";
@@ -256,14 +265,19 @@ const proofSchema: z.ZodType<Phase3Proof> = z.object({
   workspaceRead: z.literal(true),
   githubRead: z.object({
     readOnly: z.literal(true), destructive: z.literal(false), openWorld: z.literal(false),
-    initialRequestHadCursor: z.literal(false), limit: z.literal(1),
+    limit: z.literal(1),
     pages: z.array(z.object({
       pageKind: z.enum(["initial", "continuation"]), resultCount: z.number().int().nonnegative(),
-      nextCursor: z.object({ present: z.literal(true), sha256Prefix: z.string().regex(/^[0-9a-f]{12}$/) }).strict().nullable(),
+      hasNextPage: z.boolean(),
     }).strict()).min(1),
     traversedToNull: z.literal(true), totalResults: z.number().int().nonnegative(),
   }).strict(),
   databaseUnchanged: z.literal(true),
+  protectedStateBracket: z.object({
+    workspaceSelectedAt: z.string().datetime({ offset: true }), baselineCapturedAt: z.string().datetime({ offset: true }),
+    workflowStartedAt: z.string().datetime({ offset: true }), workflowCompletedAt: z.string().datetime({ offset: true }),
+    afterCapturedAt: z.string().datetime({ offset: true }), baselineBeforeWorkflow: z.literal(true), afterAfterWorkflow: z.literal(true),
+  }).strict(),
   database: z.object({
     scope: z.literal(PROTECTED_STATE_SCOPE),
     before: protectedSnapshotSchema,
@@ -277,6 +291,10 @@ const proofSchema: z.ZodType<Phase3Proof> = z.object({
   observations: z.object({
     clientNetwork: z.object({
       scope: z.literal("proof-client-process"), loopbackOnly: z.literal(true), githubCalls: z.literal(0), slackCalls: z.literal(0),
+    }).strict(),
+    serverNetwork: z.object({
+      scope: z.literal("dedicated-server-process"), guardActive: z.literal(true),
+      githubAttempts: z.literal(0), slackAttempts: z.literal(0),
     }).strict(),
     invokedTools: z.object({
       listWorkspaces: z.literal(1), githubReadPages: z.number().int().positive(), writeTools: z.array(z.string()).length(0),
@@ -435,11 +453,6 @@ export function reconcileOfficialResults(mcpRows: GitHubProofResult[], databaseR
   };
 }
 
-export function redactCursor(cursor: string | null): CursorRedaction | null {
-  if (cursor === null) return null;
-  return { present: true, sha256Prefix: createHash("sha256").update(cursor, "utf8").digest("hex").slice(0, 12) };
-}
-
 function factList(rows: GitHubProofResult[]) {
   if (!rows.length) return "None were returned by the exhaustive MCP read.";
   return rows.map((row) => `${row.checkId}: ${row.summary}`).join(" ");
@@ -509,8 +522,17 @@ function containsSensitiveData(value: unknown): boolean {
   return secretKey.test(serialized) || secretValue.test(serialized);
 }
 
+function containsCursorNamedField(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(containsCursorNamedField);
+  if (value === null || typeof value !== "object") return false;
+  return Object.entries(value as Record<string, unknown>)
+    .some(([key, entry]) => /cursor/i.test(key) || containsCursorNamedField(entry));
+}
+
 export function validateProofForPersistence(value: unknown): asserts value is Phase3Proof {
-  if (containsSensitiveData(value)) throw new Error("Phase 3 proof contains sensitive data.");
+  if (containsSensitiveData(value) || containsCursorNamedField(value)) {
+    throw new Error("Phase 3 proof contains sensitive data.");
+  }
   const parsed = proofSchema.safeParse(value);
   if (!parsed.success) throw new Error("Phase 3 proof does not satisfy the completed read-only contract.");
   if (canonicalJson(parsed.data.tools.map((tool) => tool.name)) !== canonicalJson(REQUIRED_TOOL_NAMES)) {
@@ -523,8 +545,8 @@ export function validateProofForPersistence(value: unknown): asserts value is Ph
   if (pages[0]?.pageKind !== "initial" || pages.slice(1).some((page) => page.pageKind !== "continuation")) {
     throw new Error("Phase 3 proof pagination sequence is invalid.");
   }
-  if (pages.some((page, index) => index < pages.length - 1 ? page.nextCursor === null : page.nextCursor !== null)) {
-    throw new Error("Phase 3 proof must use continuation cursors until one final null cursor.");
+  if (pages.some((page, index) => index < pages.length - 1 ? !page.hasNextPage : page.hasNextPage)) {
+    throw new Error("Phase 3 proof must report further pages until one final terminal page.");
   }
   if (pages.some((page) => page.resultCount !== 1) || pages.reduce((sum, page) => sum + page.resultCount, 0) !== totalResults) {
     throw new Error("Phase 3 proof page counts do not match the exhaustive result count.");
@@ -540,6 +562,18 @@ export function validateProofForPersistence(value: unknown): asserts value is Ph
   }
   if (!parsed.data.databaseUnchanged || canonicalJson(parsed.data.database.before) !== canonicalJson(parsed.data.database.after)) {
     throw new Error("Phase 3 proof protected-domain snapshots changed during the read.");
+  }
+  const bracket = parsed.data.protectedStateBracket;
+  const workspaceSelectedAt = Date.parse(bracket.workspaceSelectedAt);
+  const baselineCapturedAt = Date.parse(bracket.baselineCapturedAt);
+  const workflowStartedAt = Date.parse(bracket.workflowStartedAt);
+  const workflowCompletedAt = Date.parse(bracket.workflowCompletedAt);
+  const afterCapturedAt = Date.parse(bracket.afterCapturedAt);
+  if (workspaceSelectedAt > baselineCapturedAt
+    || baselineCapturedAt > workflowStartedAt
+    || workflowStartedAt > workflowCompletedAt
+    || workflowCompletedAt > afterCapturedAt) {
+    throw new Error("Phase 3 proof protected-state bracketing sequence is invalid.");
   }
   const expectedAnswers = [
     "Which GitHub checks currently fail?",
@@ -708,6 +742,32 @@ function readOnlyEnvelope(body: string) {
   return `begin transaction read only;\nselect (${body})::text;\ncommit;`;
 }
 
+export function buildWorkspaceSelectionQuery(workspaceId?: string) {
+  const filter = workspaceId === undefined
+    ? ""
+    : ` where organisation_id = '${checkedWorkspaceId(workspaceId)}'::uuid`;
+  return readOnlyEnvelope(`jsonb_build_object(
+    'readOnly', current_setting('transaction_read_only') = 'on',
+    'workspaceIds', (select coalesce(jsonb_agg(selected.organisation_id order by selected.organisation_id), '[]'::jsonb)
+      from (select distinct organisation_id from public.github_official_compliance_results${filter}) as selected)
+  )`);
+}
+
+export function parseWorkspaceSelection(value: unknown) {
+  let decoded: unknown = value;
+  if (typeof value === "string") {
+    try { decoded = JSON.parse(value); } catch { throw new Error("Workspace selection response was not valid JSON."); }
+  }
+  const parsed = z.object({
+    readOnly: z.literal(true),
+    workspaceIds: z.array(z.string().uuid()),
+  }).strict().safeParse(decoded);
+  if (!parsed.success || parsed.data.workspaceIds.length !== 1) {
+    throw new Error("The direct local database selector must return exactly one proof workspace.");
+  }
+  return parsed.data.workspaceIds[0]!;
+}
+
 export function buildProtectedDomainSnapshotQuery(workspaceId: string) {
   const workspace = checkedWorkspaceId(workspaceId);
   const tableDigests = Object.entries(PROTECTED_DOMAIN_TABLES).map(([label, table]) => {
@@ -828,8 +888,33 @@ async function createLocalPostgresReader(databaseContainer: string) {
 
 type LocalPostgresReader = Awaited<ReturnType<typeof createLocalPostgresReader>>;
 
+const serverNetworkLedgerSchema = z.object({
+  guardActive: z.literal(true),
+  githubAttempts: z.number().int().nonnegative(),
+  slackAttempts: z.number().int().nonnegative(),
+}).strict();
+
+async function readServerNetworkLedger(environment: NodeJS.ProcessEnv) {
+  const configuredPath = environment.MCP_PROOF_SERVER_NETWORK_LEDGER?.trim();
+  if (!configuredPath) throw new Error("The dedicated server-process network ledger is required.");
+  const ledgerPath = resolve(configuredPath);
+  const info = await stat(ledgerPath);
+  if ((info.mode & 0o777) !== 0o600) throw new Error("The server-process network ledger must be owner-only.");
+  let decoded: unknown;
+  try { decoded = JSON.parse(await readFile(ledgerPath, "utf8")); } catch {
+    throw new Error("The server-process network ledger is invalid.");
+  }
+  const ledger = serverNetworkLedgerSchema.safeParse(decoded);
+  if (!ledger.success) throw new Error("The server-process network ledger is invalid.");
+  return ledger.data;
+}
+
 async function protectedDomainSnapshot(database: LocalPostgresReader, workspaceId: string): Promise<ProtectedDomainSnapshot> {
   return parseProtectedDomainDigest(await database.readJson(buildProtectedDomainSnapshotQuery(workspaceId)));
+}
+
+async function selectProofWorkspace(database: LocalPostgresReader, requestedWorkspaceId?: string) {
+  return parseWorkspaceSelection(await database.readJson(buildWorkspaceSelectionQuery(requestedWorkspaceId)));
 }
 
 async function directStoredOfficialResults(database: LocalPostgresReader, workspaceId: string, snapshotAt: string) {
@@ -908,6 +993,7 @@ function tokenAudienceMatches(token: string, endpoint: string) {
 }
 
 export async function runLivePhase3Proof(environment: NodeJS.ProcessEnv = process.env): Promise<{ proof: Phase3Proof; outputPath: string }> {
+  liveProofStage = "local-boundary-setup";
   const endpoint = environment.MCP_PROOF_ENDPOINT?.trim() || DEFAULT_ENDPOINT;
   if (endpoint !== DEFAULT_ENDPOINT) throw new Error(`Phase 3 proof endpoint must be ${DEFAULT_ENDPOINT}.`);
   const callbackPort = Number(environment.MCP_PROOF_CALLBACK_PORT || DEFAULT_CALLBACK_PORT);
@@ -915,7 +1001,21 @@ export async function runLivePhase3Proof(environment: NodeJS.ProcessEnv = proces
   const { supabaseUrl, databaseContainer } = requireLocalPostgresSettings(environment);
   const selectedProtocol = selectProofProtocol(environment);
   const clientOptions = proofClientOptions(selectedProtocol);
+  const database = await createLocalPostgresReader(databaseContainer);
+  liveProofStage = "workspace-selection";
+  const requestedWorkspace = environment.MCP_PROOF_WORKSPACE_ID?.trim() || undefined;
+  const workspaceId = await selectProofWorkspace(database, requestedWorkspace);
+  const workspaceSelectedAt = new Date().toISOString();
+  const initialServerNetwork = await readServerNetworkLedger(environment);
+  if (initialServerNetwork.githubAttempts !== 0 || initialServerNetwork.slackAttempts !== 0) {
+    throw new Error("The dedicated server-process network ledger was not clean before the proof.");
+  }
+  liveProofStage = "protected-baseline";
+  const before = await protectedDomainSnapshot(database, workspaceId);
+  const baselineCapturedAt = new Date().toISOString();
+  const workflowStartedAt = new Date().toISOString();
 
+  liveProofStage = "oauth";
   const state = randomBytes(32).toString("base64url");
   const callback = await createCallbackReceiver(callbackPort, state);
   const network = { githubCalls: 0, slackCalls: 0, nonLocalCalls: 0 };
@@ -938,20 +1038,19 @@ export async function runLivePhase3Proof(environment: NodeJS.ProcessEnv = proces
   const firstTransport = new StreamableHTTPClientTransport(new URL(endpoint), { authProvider: provider, fetch: proofFetch });
   const firstClient = new Client({ name: "compliancehub-phase3-proof", version: "1.0.0" }, clientOptions);
   try {
-    await firstClient.connect(firstTransport);
-    throw new Error("The MCP endpoint unexpectedly allowed an unauthenticated connection.");
-  } catch (error) {
-    if (!(error instanceof UnauthorizedError)) throw error;
-  }
-  if (!authorizationUrl) throw new Error("OAuth did not produce an authorization URL.");
-  assertLocalAuthorizationUrl(authorizationUrl, new URL(supabaseUrl));
-  if (authorizationUrl.searchParams.get("code_challenge_method") !== "S256") throw new Error("OAuth did not negotiate S256 PKCE.");
-  if (authorizationUrl.searchParams.get("state") !== state) throw new Error("OAuth state was not bound to this proof session.");
-  if (authorizationUrl.searchParams.get("redirect_uri") !== callback.callbackUrl.toString()) throw new Error("OAuth redirect URI mismatch.");
-  callback.setAuthorizationUrl(authorizationUrl);
-  process.stdout.write(`OAuth is ready. Open the one-time loopback handoff: ${callback.authorizationHandoffUrl.toString()}\n`);
-
-  try {
+    try {
+      await firstClient.connect(firstTransport);
+      throw new Error("The MCP endpoint unexpectedly allowed an unauthenticated connection.");
+    } catch (error) {
+      if (!(error instanceof UnauthorizedError)) throw error;
+    }
+    if (!authorizationUrl) throw new Error("OAuth did not produce an authorization URL.");
+    assertLocalAuthorizationUrl(authorizationUrl, new URL(supabaseUrl));
+    if (authorizationUrl.searchParams.get("code_challenge_method") !== "S256") throw new Error("OAuth did not negotiate S256 PKCE.");
+    if (authorizationUrl.searchParams.get("state") !== state) throw new Error("OAuth state was not bound to this proof session.");
+    if (authorizationUrl.searchParams.get("redirect_uri") !== callback.callbackUrl.toString()) throw new Error("OAuth redirect URI mismatch.");
+    callback.setAuthorizationUrl(authorizationUrl);
+    process.stdout.write(`OAuth is ready. Open the one-time loopback handoff: ${callback.authorizationHandoffUrl.toString()}\n`);
     const authorizationCode = await callback.code;
     await firstTransport.finishAuth(authorizationCode);
   } finally {
@@ -964,11 +1063,14 @@ export async function runLivePhase3Proof(environment: NodeJS.ProcessEnv = proces
   const audienceMatched = tokenAudienceMatches(accessToken, endpoint);
   if (!audienceMatched) throw new Error("OAuth access-token audience does not match the MCP resource.");
 
+  liveProofStage = "authenticated-connect";
   const transport = new StreamableHTTPClientTransport(new URL(endpoint), { authProvider: provider, fetch: proofFetch });
   const client = new Client({ name: "compliancehub-phase3-proof", version: "1.0.0" }, clientOptions);
-  await client.connect(transport);
+  let transportClosed = false;
   try {
+    await client.connect(transport);
     const negotiatedProtocol = client.getNegotiatedProtocolVersion();
+    liveProofStage = "tool-discovery";
     if (negotiatedProtocol !== selectedProtocol) throw new Error("MCP client did not negotiate the explicitly selected protocol.");
     const server = client.getServerVersion();
     if (server?.name !== "compliancehub-internal") throw new Error("Unexpected MCP server identity.");
@@ -989,47 +1091,65 @@ export async function runLivePhase3Proof(environment: NodeJS.ProcessEnv = proces
     if (!githubTool || githubTool.annotations?.readOnlyHint !== true || githubTool.annotations.destructiveHint !== false || githubTool.annotations.openWorldHint !== false) {
       throw new Error("The GitHub MCP tool is not declared as a closed-world read-only tool.");
     }
+    liveProofStage = "workspace-read";
     const workspaceResult = workspaceResponseSchema.parse(await callStructured(client, "list_workspaces", {}));
-    const requestedWorkspace = environment.MCP_PROOF_WORKSPACE_ID?.trim();
-    const workspace = requestedWorkspace
-      ? workspaceResult.data.workspaces.find((candidate) => candidate.id === requestedWorkspace)
-      : workspaceResult.data.workspaces.length === 1 ? workspaceResult.data.workspaces[0] : undefined;
-    if (!workspace) throw new Error("Set MCP_PROOF_WORKSPACE_ID to one accessible workspace.");
-
-    const database = await createLocalPostgresReader(databaseContainer);
-    const before = await protectedDomainSnapshot(database, workspace.id);
+    if (!workspaceResult.data.workspaces.some((workspace) => workspace.id === workspaceId)) {
+      throw new Error("The directly selected proof workspace is not accessible through MCP.");
+    }
+    liveProofStage = "github-pagination";
     const pages: Phase3Proof["githubRead"]["pages"] = [];
     const results: GitHubProofResult[] = [];
     const seenCursorHashes = new Set<string>();
     let snapshotAt: string | null = null;
     let cursor: string | null = null;
     for (let page = 0; page < MAX_PAGES; page += 1) {
-      const args: Record<string, unknown> = { workspaceId: workspace.id, limit: 1 };
+      const args: Record<string, unknown> = { workspaceId, limit: 1 };
       if (cursor !== null) args.cursor = cursor;
-      const response = githubResponseSchema.parse(await callStructured(client, "list_github_compliance_results", args));
+      liveProofStage = `github-page-${page + 1}-call`;
+      const structured = await callStructured(client, "list_github_compliance_results", args);
+      liveProofStage = `github-page-${page + 1}-contract`;
+      const response = githubResponseSchema.parse(structured);
+      liveProofStage = `github-page-${page + 1}-sequence`;
       if (response.data.pageKind !== (page === 0 ? "initial" : "continuation")) throw new Error("MCP pagination kind was inconsistent.");
       if (snapshotAt === null) snapshotAt = response.data.snapshotAt;
       else if (response.data.snapshotAt !== snapshotAt) throw new Error("MCP pagination changed its snapshot boundary.");
       results.push(...response.data.results);
-      pages.push({ pageKind: response.data.pageKind, resultCount: response.data.results.length, nextCursor: redactCursor(response.data.nextCursor) });
+      pages.push({
+        pageKind: response.data.pageKind,
+        resultCount: response.data.results.length,
+        hasNextPage: response.data.nextCursor !== null,
+      });
       cursor = response.data.nextCursor;
       if (cursor === null) break;
       const cursorHash = createHash("sha256").update(cursor, "utf8").digest("hex");
       if (seenCursorHashes.has(cursorHash)) throw new Error("MCP pagination repeated a continuation cursor.");
       seenCursorHashes.add(cursorHash);
     }
+    liveProofStage = "github-pagination-completion";
     if (cursor !== null) throw new Error("MCP pagination did not reach a null cursor within the bounded page limit.");
     if (results.length === 0) throw new Error("The local workspace has no stored official Phase 1 result to prove.");
     if (snapshotAt === null) throw new Error("The MCP read did not establish a snapshot boundary.");
 
-    const databaseResults = await directStoredOfficialResults(database, workspace.id, snapshotAt);
+    liveProofStage = "database-reconciliation";
+    const databaseResults = await directStoredOfficialResults(database, workspaceId, snapshotAt);
     const reconciliation = reconcileOfficialResults(results, databaseResults);
     if (!reconciliation.matched) throw new Error("MCP results did not reconcile with the independent official-result table read.");
-    const after = await protectedDomainSnapshot(database, workspace.id);
-    const databaseUnchanged = canonicalJson(before) === canonicalJson(after);
-    if (!databaseUnchanged) throw new Error("A protected domain state snapshot changed during the read proof.");
     if (network.githubCalls !== 0 || network.slackCalls !== 0 || network.nonLocalCalls !== 0) throw new Error("The local proof observed a disallowed network call.");
     const staticServerCallPath = await inspectStaticServerCallPath();
+    liveProofStage = "client-close";
+    await transport.close().catch(() => undefined);
+    transportClosed = true;
+    liveProofStage = "server-network-ledger";
+    const finalServerNetwork = await readServerNetworkLedger(environment);
+    if (finalServerNetwork.githubAttempts !== 0 || finalServerNetwork.slackAttempts !== 0) {
+      throw new Error("The dedicated server process attempted provider network access during the proof.");
+    }
+    const workflowCompletedAt = new Date().toISOString();
+    liveProofStage = "protected-after-snapshot";
+    const after = await protectedDomainSnapshot(database, workspaceId);
+    const afterCapturedAt = new Date().toISOString();
+    const databaseUnchanged = canonicalJson(before) === canonicalJson(after);
+    if (!databaseUnchanged) throw new Error("A protected domain state snapshot changed during the read proof.");
 
     const proof = buildPhase3Proof({
       generatedAt: new Date().toISOString(), endpoint, negotiatedProtocol,
@@ -1043,10 +1163,14 @@ export async function runLivePhase3Proof(environment: NodeJS.ProcessEnv = proces
       tools: tools as Phase3ProofTool[],
       workspaceRead: true,
       githubRead: {
-        readOnly: true, destructive: false, openWorld: false, initialRequestHadCursor: false,
+        readOnly: true, destructive: false, openWorld: false,
         limit: 1, pages, traversedToNull: cursor === null, totalResults: results.length,
       },
       databaseUnchanged: true,
+      protectedStateBracket: {
+        workspaceSelectedAt, baselineCapturedAt, workflowStartedAt, workflowCompletedAt, afterCapturedAt,
+        baselineBeforeWorkflow: true, afterAfterWorkflow: true,
+      },
       database: {
         scope: PROTECTED_STATE_SCOPE,
         before, after, unchanged: databaseUnchanged,
@@ -1057,16 +1181,20 @@ export async function runLivePhase3Proof(environment: NodeJS.ProcessEnv = proces
           scope: "proof-client-process", loopbackOnly: network.nonLocalCalls === 0,
           githubCalls: network.githubCalls, slackCalls: network.slackCalls,
         },
+        serverNetwork: {
+          scope: "dedicated-server-process", guardActive: true, githubAttempts: 0, slackAttempts: 0,
+        },
         invokedTools: { listWorkspaces: 1, githubReadPages: pages.length, writeTools: [] },
         staticServerCallPath,
       },
       answers: createAcceptanceAnswers(results),
     });
+    liveProofStage = "artifact-persistence";
     const outputPath = resolve(environment.MCP_PROOF_OUTPUT?.trim() || DEFAULT_OUTPUT);
     await writeProofArtifact(outputPath, proof);
     return { proof, outputPath };
   } finally {
-    await transport.close().catch(() => undefined);
+    if (!transportClosed) await transport.close().catch(() => undefined);
   }
 }
 
@@ -1084,7 +1212,7 @@ async function main() {
       clientObservedSlackCalls: proof.observations.clientNetwork.slackCalls,
     })}\n`);
   } catch {
-    process.stderr.write("Phase 3 local MCP proof did not complete. No proof artifact was accepted.\n");
+    process.stderr.write(`Phase 3 local MCP proof did not complete during ${liveProofStage}. No proof artifact was accepted.\n`);
     process.exitCode = 1;
   }
 }

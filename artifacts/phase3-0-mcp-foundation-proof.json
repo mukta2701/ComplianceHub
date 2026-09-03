@@ -4,7 +4,7 @@
     "current": "2026-07-28",
     "legacy": "2025-11-25"
   },
-  "generatedAt": "2026-09-03T23:01:12.014Z",
+  "generatedAt": "2026-09-03T23:29:51.758Z",
   "endpoint": "http://127.0.0.1:3100/mcp",
   "negotiatedProtocol": "2025-11-25",
   "oauth": {
@@ -77,131 +77,97 @@
     "readOnly": true,
     "destructive": false,
     "openWorld": false,
-    "initialRequestHadCursor": false,
     "limit": 1,
     "pages": [
       {
         "pageKind": "initial",
         "resultCount": 1,
-        "nextCursor": {
-          "present": true,
-          "sha256Prefix": "9f76d6d5b36c"
-        }
+        "hasNextPage": true
       },
       {
         "pageKind": "continuation",
         "resultCount": 1,
-        "nextCursor": {
-          "present": true,
-          "sha256Prefix": "f17079499171"
-        }
+        "hasNextPage": true
       },
       {
         "pageKind": "continuation",
         "resultCount": 1,
-        "nextCursor": {
-          "present": true,
-          "sha256Prefix": "ba0434f5e974"
-        }
+        "hasNextPage": true
       },
       {
         "pageKind": "continuation",
         "resultCount": 1,
-        "nextCursor": {
-          "present": true,
-          "sha256Prefix": "10b17415f2d1"
-        }
+        "hasNextPage": true
       },
       {
         "pageKind": "continuation",
         "resultCount": 1,
-        "nextCursor": {
-          "present": true,
-          "sha256Prefix": "fbc9b5d6e86e"
-        }
+        "hasNextPage": true
       },
       {
         "pageKind": "continuation",
         "resultCount": 1,
-        "nextCursor": {
-          "present": true,
-          "sha256Prefix": "8590c27aac3b"
-        }
+        "hasNextPage": true
       },
       {
         "pageKind": "continuation",
         "resultCount": 1,
-        "nextCursor": {
-          "present": true,
-          "sha256Prefix": "c035e508585f"
-        }
+        "hasNextPage": true
       },
       {
         "pageKind": "continuation",
         "resultCount": 1,
-        "nextCursor": {
-          "present": true,
-          "sha256Prefix": "d5625338b32c"
-        }
+        "hasNextPage": true
       },
       {
         "pageKind": "continuation",
         "resultCount": 1,
-        "nextCursor": {
-          "present": true,
-          "sha256Prefix": "d8c9d257d9f5"
-        }
+        "hasNextPage": true
       },
       {
         "pageKind": "continuation",
         "resultCount": 1,
-        "nextCursor": {
-          "present": true,
-          "sha256Prefix": "6cc83c850442"
-        }
+        "hasNextPage": true
       },
       {
         "pageKind": "continuation",
         "resultCount": 1,
-        "nextCursor": {
-          "present": true,
-          "sha256Prefix": "7613595a7424"
-        }
+        "hasNextPage": true
       },
       {
         "pageKind": "continuation",
         "resultCount": 1,
-        "nextCursor": {
-          "present": true,
-          "sha256Prefix": "f1ac866df05f"
-        }
+        "hasNextPage": true
       },
       {
         "pageKind": "continuation",
         "resultCount": 1,
-        "nextCursor": {
-          "present": true,
-          "sha256Prefix": "6b0e78015452"
-        }
+        "hasNextPage": true
       },
       {
         "pageKind": "continuation",
         "resultCount": 1,
-        "nextCursor": {
-          "present": true,
-          "sha256Prefix": "2af4b11a83df"
-        }
+        "hasNextPage": true
       },
       {
         "pageKind": "continuation",
         "resultCount": 1,
-        "nextCursor": null
+        "hasNextPage": false
       }
     ],
     "traversedToNull": true,
     "totalResults": 15
   },
   "databaseUnchanged": true,
+  "protectedStateBracket": {
+    "workspaceSelectedAt": "2026-09-03T23:29:28.352Z",
+    "baselineCapturedAt": "2026-09-03T23:29:28.446Z",
+    "workflowStartedAt": "2026-09-03T23:29:28.446Z",
+    "workflowCompletedAt": "2026-09-03T23:29:51.696Z",
+    "afterCapturedAt": "2026-09-03T23:29:51.758Z",
+    "baselineBeforeWorkflow": true,
+    "afterAfterWorkflow": true
+  },
   "database": {
     "scope": "tenant-compliance-state-plus-global-github-mapping-catalogue",
     "before": {
@@ -390,6 +356,12 @@
       "loopbackOnly": true,
       "githubCalls": 0,
       "slackCalls": 0
+    },
+    "serverNetwork": {
+      "scope": "dedicated-server-process",
+      "guardActive": true,
+      "githubAttempts": 0,
+      "slackAttempts": 0
     },
     "invokedTools": {
       "listWorkspaces": 1,
