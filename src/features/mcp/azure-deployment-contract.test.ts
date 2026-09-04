@@ -376,14 +376,24 @@ describe("Azure staging deployment contract", () => {
       workflow.indexOf("- name: Create rollout revision"),
       workflow.indexOf("- name: Verify deployed health"),
     );
-    const revisionGate = rolloutRevision.indexOf("revision_provisioning_state");
+    const revisionGate = rolloutRevision.indexOf('test "$revision_provisioning_state" = "Provisioned"');
     const ingressUpdate = rolloutRevision.indexOf("az containerapp ingress update");
-    expect(rolloutRevision).toMatch(/containerapp revision show[\s\S]*--revision "\$new_revision"[\s\S]*properties\.provisioningState/);
+    expect(rolloutRevision).toMatch(
+      /containerapp revision show[\s\S]*--revision "\$new_revision"[\s\S]*properties\.provisioningState, properties\.runningState/,
+    );
     expect(rolloutRevision).toContain('test "$revision_provisioning_state" = "Provisioned"');
     expect(rolloutRevision).toMatch(/Failed\|Deprovisioned\)[\s\S]*exit 1/);
-    expect(rolloutRevision).toMatch(/revision_health_state[\s\S]*Degraded[\s\S]*exit 1/);
+    expect(rolloutRevision).toMatch(
+      /case "\$revision_running_state" in[\s\S]*Degraded\|Failed\)[\s\S]*exit 1/,
+    );
+    expect(rolloutRevision).not.toMatch(/revision_health_state[\s\S]*Degraded/);
     expect(rolloutRevision).toMatch(/for _ in \$\(seq 1 60\)[\s\S]*sleep 5/);
+    const runningStateGate = rolloutRevision.indexOf('case "$revision_running_state" in');
+    const provisionedBreak = rolloutRevision.indexOf("Provisioned) break");
+    expect(runningStateGate).toBeGreaterThan(0);
+    expect(provisionedBreak).toBeGreaterThan(runningStateGate);
     expect(revisionGate).toBeGreaterThan(0);
+    expect(revisionGate).toBeGreaterThan(provisionedBreak);
     expect(ingressUpdate).toBeGreaterThan(revisionGate);
   });
 

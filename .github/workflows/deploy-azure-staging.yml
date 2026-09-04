@@ -590,17 +590,17 @@ jobs:
           test "$provisioning_state" = "Succeeded"
 
           revision_provisioning_state=""
-          revision_health_state=""
+          revision_running_state=""
           for _ in $(seq 1 60); do
-            read -r revision_provisioning_state revision_health_state < <(az containerapp revision show \
+            read -r revision_provisioning_state revision_running_state < <(az containerapp revision show \
               --resource-group "$AZURE_RESOURCE_GROUP" \
               --name "$AZURE_CONTAINER_APP" \
               --revision "$new_revision" \
-              --query '[properties.provisioningState, properties.healthState]' \
+              --query '[properties.provisioningState, properties.runningState]' \
               --output tsv)
-            if [ "$revision_health_state" = "Degraded" ]; then
-              exit 1
-            fi
+            case "$revision_running_state" in
+              Degraded|Failed) exit 1 ;;
+            esac
             case "$revision_provisioning_state" in
               Provisioned) break ;;
               Failed|Deprovisioned) exit 1 ;;
