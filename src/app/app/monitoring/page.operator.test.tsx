@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const hoisted = vi.hoisted(() => ({
@@ -60,7 +60,16 @@ vi.mock("@/features/github/application/github-compliance-control-room", () => ({
     hoisted.controlRoomLoads.push(args);
     return Promise.resolve({
       schemaVersion: 1, workspaceId: "org-1", asOf: "2026-08-25T12:00:00.000Z", approval: null,
-      pagination: { offset: 0, limit: 20, total: 0, truncated: false }, repositories: [],
+      pagination: { offset: 0, limit: 20, total: 1, truncated: false },
+      repositories: [{
+        id: "43000000-0000-4000-8000-000000000002",
+        available: true,
+        officialResults: [
+          "pass", "pass", "pass", "pass", "pass", "pass", "pass", "pass",
+          "fail", "fail", "fail", "fail", "fail",
+          "unknown", "unknown",
+        ].map((outcome, index) => ({ id: `result-${index}`, outcome })),
+      }],
       exhaustedAttention: { total: 0, truncated: false, items: [] },
     });
   },
@@ -151,6 +160,17 @@ describe("operator monitoring page", () => {
     expect(summary!.compareDocumentPosition(github) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(github.compareDocumentPosition(findings!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(findings!.compareDocumentPosition(technicalDetails!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("summarises official GitHub checks and links only failed outcomes to Active findings", async () => {
+    render(await MonitoringPage());
+
+    const summary = screen.getByRole("note", { name: "GitHub check summary" });
+    expect(summary).toHaveTextContent("15 checks · 8 verified · 5 need action · 2 could not be verified");
+    expect(within(summary).getByRole("link", { name: "5 need action" })).toHaveAttribute("href", "#active-findings");
+    expect(screen.getByRole("heading", { name: "Active findings" }).closest(".monitor-findings-card"))
+      .toHaveAttribute("id", "active-findings");
+    expect(summary).not.toHaveTextContent(/some checks could not be completed/i);
   });
 
   it("uses neutral zero-findings wording even when GitHub is connected", async () => {

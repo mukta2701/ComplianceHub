@@ -94,12 +94,18 @@ function GitHubMonitoringSection({
   installations,
   repositories,
   nowIso,
+  room,
 }: {
   role: "owner" | "admin" | "member";
   installations: GitHubInstallationSummary[];
   repositories: GitHubRepositoryMonitoringSummary[];
   nowIso: string;
+  room: GitHubComplianceControlRoom;
 }) {
+  const officialResults = room.repositories.flatMap((repository) => repository.officialResults);
+  const verified = officialResults.filter((result) => result.outcome === "pass").length;
+  const needAction = officialResults.filter((result) => result.outcome === "fail").length;
+  const unknown = officialResults.filter((result) => result.outcome === "unknown").length;
   return <section className="monitor-github-section" aria-label="GitHub repository monitoring">
     <GitHubCollectionHealthPanel
       installations={installations}
@@ -107,6 +113,14 @@ function GitHubMonitoringSection({
       nowIso={nowIso}
       role={role}
     />
+    {officialResults.length > 0 && <Card
+      className="github-check-summary"
+      role="note"
+      aria-label="GitHub check summary"
+      style={{ marginTop: "12px", padding: "14px 18px", fontSize: "13px", fontWeight: 700 }}
+    >
+      {officialResults.length} checks · {verified} verified · <Link href="#active-findings">{needAction} need action</Link> · {unknown} could not be verified
+    </Card>}
   </section>;
 }
 
@@ -176,6 +190,7 @@ export default async function MonitoringPage({
         installations={installations}
         repositories={repositories}
         nowIso={new Date().toISOString()}
+        room={controlRoom}
       />}
       githubTechnicalReview={<GitHubTechnicalReview
         room={controlRoom}
@@ -269,9 +284,10 @@ export default async function MonitoringPage({
       installations={installations}
       repositories={repositories}
       nowIso={new Date().toISOString()}
+      room={controlRoom}
     />
 
-    <Card className="monitor-findings-card">
+    <Card className="monitor-findings-card" id="active-findings">
       <div className="card-head"><div><h3>Active findings</h3><p>Current violations and drift, newest first</p></div></div>
       {findings.length > 0 ? <ul className="finding-list">
         {findings.map((finding) => {

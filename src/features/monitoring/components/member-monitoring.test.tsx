@@ -17,6 +17,8 @@ describe("MemberMonitoring", () => {
     expect(screen.getByText("Production Slack")).toBeInTheDocument();
     expect(screen.getByText("Branch protection disabled")).toBeInTheDocument();
     expect(screen.getByText("The default branch is not protected.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Active findings" }).closest(".monitor-findings-card"))
+      .toHaveAttribute("id", "active-findings");
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
     expect(container.querySelector("form")).toBeNull();
     for (const forbidden of ["Connect source", "Run checks now", "Disconnect", "Acknowledge", "Resolve", "Raise task", "Alert channels", "Add Slack channel"]) {

@@ -58,7 +58,7 @@ export function MemberMonitoring({
 
     {githubMonitoring}
 
-    <Card className="monitor-findings-card">
+    <Card className="monitor-findings-card" id="active-findings">
       <div className="card-head"><div><h3>Active findings</h3><p>Current violations and drift, newest first</p></div></div>
       {data.findings.length > 0
         ? <ul className="finding-list">
