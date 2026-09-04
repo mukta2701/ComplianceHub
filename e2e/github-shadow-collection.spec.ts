@@ -57,7 +57,7 @@ function assertLocalTestEnvironment(): void {
   }
   requiredEnvironment("NEXT_PUBLIC_SUPABASE_ANON_KEY");
   requiredEnvironment("SUPABASE_SERVICE_ROLE_KEY");
-  const port = process.env.PLAYWRIGHT_PORT ?? "3000";
+  const port = process.env.PLAYWRIGHT_PORT ?? "3100";
   if (!/^\d+$/.test(port) || requiredEnvironment("NEXT_PUBLIC_SITE_URL") !== `http://127.0.0.1:${port}`) {
     throw new Error("NEXT_PUBLIC_SITE_URL must match the local Playwright origin");
   }

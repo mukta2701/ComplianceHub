@@ -7,9 +7,9 @@
   },
   "packageManager": "npm@11.9.0",
   "scripts": {
-    "dev": "next dev",
+    "dev": "PORT=3100 next dev",
     "build": "next build",
-    "start": "next start",
+    "start": "PORT=3100 next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

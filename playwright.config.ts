@@ -1,10 +1,11 @@
 import { defineConfig, devices } from "@playwright/test";
 import {
+  playwrightPort,
   playwrightWebServerCommand,
   playwrightWorkerCount,
 } from "./src/test/playwright-web-server";
 
-const port = Number(process.env.PLAYWRIGHT_PORT ?? 3000);
+const port = playwrightPort(process.env);
 const baseURL = `http://127.0.0.1:${port}`;
 const isCi = Boolean(process.env.CI);
 

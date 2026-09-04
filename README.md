@@ -39,13 +39,18 @@ eval "$(npx supabase status -o env)"
 NEXT_PUBLIC_SUPABASE_URL="$API_URL" \
 NEXT_PUBLIC_SUPABASE_ANON_KEY="$ANON_KEY" \
 SUPABASE_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY" \
-MCP_RESOURCE_URL="http://127.0.0.1:3000/mcp" \
+MCP_RESOURCE_URL="http://127.0.0.1:3100/mcp" \
 npm run dev
 ```
 
 Alternatively, copy the values into `.env.local`; do not commit that file.
 Never expose `SUPABASE_SERVICE_ROLE_KEY` to browser code.
-For local verification, set `MCP_RESOURCE_URL` to the exact `NEXT_PUBLIC_SITE_URL` origin plus `/mcp` (for example `http://127.0.0.1:3000/mcp`; use port `3100` when the app runs on `3100`). `SUPABASE_OAUTH_ISSUER` and `SUPABASE_OAUTH_JWKS_URL` may stay blank locally because they use fixed loopback defaults. Set all three to exact hosted values for staging or production.
+The ordinary development command serves the app at `http://127.0.0.1:3100`.
+For local verification, set `MCP_RESOURCE_URL` to the exact `NEXT_PUBLIC_SITE_URL`
+origin plus `/mcp` (`http://127.0.0.1:3100/mcp` for the canonical local runtime).
+`SUPABASE_OAUTH_ISSUER` and `SUPABASE_OAUTH_JWKS_URL` may stay blank locally
+because they use fixed loopback defaults. Set all three to exact hosted values
+for staging or production.
 
 ## Verification
 

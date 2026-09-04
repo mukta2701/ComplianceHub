@@ -49,12 +49,12 @@ function invoke(environment: Record<string, string>) {
 function validEnvironment(overrides: Record<string, string> = {}) {
   return {
     NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:54321",
-    NEXT_PUBLIC_SITE_URL: "http://127.0.0.1:3000",
+    NEXT_PUBLIC_SITE_URL: "http://127.0.0.1:3100",
     NEXT_PUBLIC_SUPABASE_ANON_KEY: localSupabaseKey("anon"),
     SUPABASE_SERVICE_ROLE_KEY: localSupabaseKey("service_role"),
     APP_ENCRYPTION_KEY: localAppEncryptionKey,
     COMPLIANCEHUB_RELEASE_SHA: currentSha,
-    MCP_RESOURCE_URL: "http://127.0.0.1:3000/mcp",
+    MCP_RESOURCE_URL: "http://127.0.0.1:3100/mcp",
     ...overrides,
   };
 }
@@ -93,11 +93,11 @@ describe("local runtime preflight", () => {
   });
 
   it("rejects a hosted or mismatched local site origin without printing it", () => {
-    const result = invoke(validEnvironment({ NEXT_PUBLIC_SITE_URL: "http://localhost:3000" }));
+    const result = invoke(validEnvironment({ NEXT_PUBLIC_SITE_URL: "http://localhost:3100" }));
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("matching local site URL");
-    expect(result.stderr).not.toContain("localhost:3000");
+    expect(result.stderr).not.toContain("localhost:3100");
   });
 
   it("rejects missing or mixed Supabase keys without printing them", () => {

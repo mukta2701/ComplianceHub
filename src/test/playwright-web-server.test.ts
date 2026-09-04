@@ -1,8 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  playwrightPort,
   playwrightWebServerCommand,
   playwrightWorkerCount,
 } from "./playwright-web-server";
+
+describe("Playwright port", () => {
+  it("uses the canonical app port unless a caller isolates the run", () => {
+    expect(playwrightPort({})).toBe(3100);
+    expect(playwrightPort({ PLAYWRIGHT_PORT: "3210" })).toBe(3210);
+  });
+});
 
 describe("Playwright web server mode", () => {
   it("runs the built production artifact in CI", () => {

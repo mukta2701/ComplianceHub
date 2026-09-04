@@ -333,10 +333,10 @@ Integration sync is folded into the 06:07 UTC daily pipeline. The compatibility 
 The workflow sends `Authorization: Bearer <CRON_SECRET>`; each route rejects any request whose bearer token does not match. Manual invocation in development:
 
 ```bash
-curl -i -X POST http://localhost:3000/api/cron/github-collect -H "Authorization: Bearer $CRON_SECRET"
-curl -i -X POST http://localhost:3000/api/cron/daily   -H "Authorization: Bearer $CRON_SECRET"
-curl -i -X POST http://localhost:3000/api/cron/monitor -H "Authorization: Bearer $CRON_SECRET"
-curl -i -X POST http://localhost:3000/api/cron/automation-purge -H "Authorization: Bearer $CRON_SECRET"
+curl -i -X POST http://localhost:3100/api/cron/github-collect -H "Authorization: Bearer $CRON_SECRET"
+curl -i -X POST http://localhost:3100/api/cron/daily   -H "Authorization: Bearer $CRON_SECRET"
+curl -i -X POST http://localhost:3100/api/cron/monitor -H "Authorization: Bearer $CRON_SECRET"
+curl -i -X POST http://localhost:3100/api/cron/automation-purge -H "Authorization: Bearer $CRON_SECRET"
 ```
 
 The MCP daily-digest write also requires `SUPABASE_SERVICE_ROLE_KEY`. The OAuth

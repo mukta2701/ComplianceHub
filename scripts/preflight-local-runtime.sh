@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-local_site_port="${PLAYWRIGHT_PORT:-3000}"
+local_site_port="${PLAYWRIGHT_PORT:-3100}"
 if ! [[ "$local_site_port" =~ ^[1-9][0-9]{0,4}$ ]] || (( 10#$local_site_port > 65535 )); then
   printf '%s\n' "Local verification requires a valid numeric PLAYWRIGHT_PORT." >&2
   exit 1

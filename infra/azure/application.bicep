@@ -49,7 +49,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
       ingress: {
         external: true
         allowInsecure: false
-        targetPort: 3000
+        targetPort: 3100
         transport: 'auto'
         traffic: [
           {
@@ -96,7 +96,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
           probes: [
             {
               type: 'Startup'
-              httpGet: { path: '/api/health/live', port: 3000 }
+              httpGet: { path: '/api/health/live', port: 3100 }
               initialDelaySeconds: 1
               periodSeconds: 2
               timeoutSeconds: 2
@@ -105,7 +105,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
             }
             {
               type: 'Liveness'
-              httpGet: { path: '/api/health/live', port: 3000 }
+              httpGet: { path: '/api/health/live', port: 3100 }
               initialDelaySeconds: 5
               periodSeconds: 30
               timeoutSeconds: 3
@@ -114,7 +114,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
             }
             {
               type: 'Readiness'
-              httpGet: { path: '/api/health', port: 3000 }
+              httpGet: { path: '/api/health', port: 3100 }
               initialDelaySeconds: 5
               periodSeconds: 10
               timeoutSeconds: 5
