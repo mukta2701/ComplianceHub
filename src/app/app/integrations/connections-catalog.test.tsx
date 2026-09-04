@@ -58,7 +58,7 @@ describe("ConnectionsCatalog", () => {
     expect(navigation.compareDocumentPosition(grid) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("presents GitHub, Jira, and Slack as a clean provider catalogue", () => {
+  it("distinguishes optional GitHub Issues remediation from repository monitoring", () => {
     render(<ConnectionsCatalog connections={connections} alertChannels={alertChannels} />);
 
     expect(screen.getByRole("heading", { name: "Connections" })).toBeVisible();
@@ -67,12 +67,12 @@ describe("ConnectionsCatalog", () => {
     expect(screen.queryByRole("button", { name: "Development" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Alerts" })).not.toBeInTheDocument();
     expect(screen.getByTestId("connections-grid")).toHaveClass("connections-grid");
-    const githubCard = screen.getByRole("article", { name: "GitHub connection" });
+    const githubCard = screen.getByRole("article", { name: "GitHub Issues connection" });
     const jiraCard = screen.getByRole("article", { name: "Jira connection" });
     const slackCard = screen.getByRole("article", { name: "Slack connection" });
     expect(githubCard).toHaveClass("connection-card");
     expect(githubCard).toHaveTextContent("Connected");
-    expect(githubCard).toHaveTextContent("Create and track remediation work in GitHub Issues.");
+    expect(githubCard).toHaveTextContent("Optional: create and track remediation issues in GitHub.");
     expect(githubCard).not.toHaveTextContent("Monitor repositories and security controls.");
     expect(githubCard).toHaveTextContent("acme/isms");
     expect(within(githubCard).getByText("acme/isms")).toHaveClass("connection-card-target");
@@ -109,7 +109,7 @@ describe("ConnectionsCatalog", () => {
       }]}
     />);
 
-    expect(screen.getByRole("article", { name: "GitHub connection" })).toHaveTextContent("2 connections");
+    expect(screen.getByRole("article", { name: "GitHub Issues connection" })).toHaveTextContent("2 connections");
     expect(screen.getByRole("article", { name: "Slack connection" })).toHaveTextContent("2 channels");
     expect(screen.queryByRole("searchbox", { name: "Search connections" })).not.toBeInTheDocument();
   });
@@ -141,7 +141,7 @@ describe("ConnectionsCatalog", () => {
       }]}
     />);
 
-    const githubCard = screen.getByRole("article", { name: "GitHub connection" });
+    const githubCard = screen.getByRole("article", { name: "GitHub Issues connection" });
     expect(within(githubCard).getByText("Paused")).toBeVisible();
     expect(within(githubCard).getByRole("button", { name: "Manage" })).toHaveClass("secondary");
 
@@ -178,7 +178,7 @@ describe("ConnectionsCatalog", () => {
     expect(within(slackCard).getByText("Connected")).toBeVisible();
     expect(within(slackCard).getByRole("button", { name: "Manage" })).toHaveClass("secondary");
 
-    const githubCard = screen.getByRole("article", { name: "GitHub connection" });
+    const githubCard = screen.getByRole("article", { name: "GitHub Issues connection" });
     expect(within(githubCard).getByText("Not connected")).toBeVisible();
     expect(within(githubCard).getByRole("button", { name: "Connect" })).toHaveClass("primary");
   });
@@ -187,13 +187,13 @@ describe("ConnectionsCatalog", () => {
     const user = userEvent.setup();
     render(<ConnectionsCatalog connections={connections} alertChannels={alertChannels} />);
 
-    const githubCard = screen.getByRole("article", { name: "GitHub connection" });
+    const githubCard = screen.getByRole("article", { name: "GitHub Issues connection" });
     const githubManage = within(githubCard).getByRole("button", { name: "Manage" });
     expect(githubManage).toHaveAttribute("aria-expanded", "false");
     expect(githubManage).toHaveAttribute("aria-controls", "connection-management-panel");
     await user.click(githubManage);
     expect(githubManage).toHaveAttribute("aria-expanded", "true");
-    const githubPanel = screen.getByRole("region", { name: "Manage GitHub" });
+    const githubPanel = screen.getByRole("region", { name: "Manage GitHub Issues" });
     expect(githubPanel).toHaveFocus();
     expect(within(githubPanel).getByText("acme/isms")).toBeVisible();
 
@@ -202,7 +202,7 @@ describe("ConnectionsCatalog", () => {
     await user.click(slackManage);
     expect(githubManage).toHaveAttribute("aria-expanded", "false");
     expect(slackManage).toHaveAttribute("aria-expanded", "true");
-    expect(screen.queryByRole("region", { name: "Manage GitHub" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Manage GitHub Issues" })).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Manage Slack" })).toHaveFocus();
     expect(screen.getByRole("button", { name: "Add Slack channel" })).toBeVisible();
 
@@ -216,11 +216,11 @@ describe("ConnectionsCatalog", () => {
     const user = userEvent.setup();
     render(<ConnectionsCatalog connections={[]} alertChannels={[]} />);
 
-    const githubCard = screen.getByRole("article", { name: "GitHub connection" });
+    const githubCard = screen.getByRole("article", { name: "GitHub Issues connection" });
     expect(githubCard).toHaveTextContent("Not connected");
     await user.click(within(githubCard).getByRole("button", { name: "Connect" }));
 
-    const panel = screen.getByRole("region", { name: "Connect GitHub" });
+    const panel = screen.getByRole("region", { name: "Connect GitHub Issues" });
     expect(within(panel).getByRole("button", { name: "Connect GitHub" })).toBeVisible();
   });
 

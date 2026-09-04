@@ -118,7 +118,7 @@ describe("Settings Connections page", () => {
     render(await IntegrationsPage({ searchParams: Promise.resolve({}) }));
 
     expect(screen.getByRole("heading", { name: "Connections" })).toBeInTheDocument();
-    expect(screen.getByRole("article", { name: "GitHub connection" })).toHaveTextContent("Connected");
+    expect(screen.getByRole("article", { name: "GitHub Issues connection" })).toHaveTextContent("Connected");
     expect(screen.getByRole("article", { name: "Jira connection" })).toHaveTextContent("Not connected");
     expect(screen.getByRole("article", { name: "Slack connection" })).toHaveTextContent("Connected");
     expect(screen.queryByRole("heading", { name: "Monitoring sources" })).not.toBeInTheDocument();
@@ -131,9 +131,9 @@ describe("Settings Connections page", () => {
     expect(within(tabs).getByRole("link", { name: "Connections" })).toHaveAttribute("aria-current", "page");
     expect(screen.queryByText("Old Jira")).not.toBeInTheDocument();
     expect(screen.queryByText("#old-alerts")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "GitHub App connection" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "GitHub repository access" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "From repository facts to reviewed records" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Install GitHub App" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Set up repository access" })).not.toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: /include Adtecher\/compliancehub in monitoring/ })).toBeDisabled();
 
     const expectedColumns: Record<string, string> = {
@@ -197,10 +197,10 @@ describe("Settings Connections page", () => {
       "github_installations",
       "github_repositories",
     ]);
-    expect(screen.getByRole("heading", { name: "GitHub App connection" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "GitHub repository access" })).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: /include Adtecher\/compliancehub in monitoring/ })).toBeDisabled();
     expect(screen.queryByRole("article", { name: "Slack connection" })).not.toBeInTheDocument();
-    expect(screen.queryByText("GitHub App connected.")).not.toBeInTheDocument();
+    expect(screen.queryByText("GitHub repository access connected.")).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "From repository facts to reviewed records" })).not.toBeInTheDocument();
     expect(hoisted.controlRoomLoads).toHaveLength(0);
     expect(hoisted.mappingReviewLoads).toHaveLength(0);
@@ -218,10 +218,10 @@ describe("Settings Connections page", () => {
 
   it("shows only the whitelisted GitHub connection success state", async () => {
     const { unmount } = render(await IntegrationsPage({ searchParams: Promise.resolve({ github: "connected" }) }));
-    expect(screen.getByRole("status", { name: "GitHub connection status" })).toHaveTextContent("GitHub App connected");
+    expect(screen.getByRole("status", { name: "GitHub connection status" })).toHaveTextContent("GitHub repository access connected");
     unmount();
 
     render(await IntegrationsPage({ searchParams: Promise.resolve({ github: "not_authorized" }) }));
-    expect(screen.queryByText("GitHub App connected")).not.toBeInTheDocument();
+    expect(screen.queryByText("GitHub repository access connected")).not.toBeInTheDocument();
   });
 });

@@ -158,23 +158,23 @@ export function GitHubInstallationPanel({
   return <section className="github-shadow-panel" aria-labelledby="github-connection-title">
     <header className="github-shadow-panel-head">
       <div>
-        <p className="eyebrow">PRIVATE GITHUB APP</p>
-        <h2 id="github-connection-title">GitHub App connection</h2>
-        <p>Connect the GitHub App and choose which repositories ComplianceHub may read and include in monitoring.</p>
+        <p className="eyebrow">READ-ONLY GITHUB MONITORING</p>
+        <h2 id="github-connection-title">GitHub repository access</h2>
+        <p>ComplianceHub reads selected repositories for monitoring and never changes GitHub.</p>
       </div>
       <div className="github-connection-actions">
         <Link className="button secondary" href="/app/monitoring">Open GitHub monitoring</Link>
         {canManageInstallation
           ? <a className="button primary" href="/api/github/setup">
-            {installations.length > 0 ? "Manage GitHub App" : "Install GitHub App"}
+            {installations.length > 0 ? "Manage repository access" : "Set up repository access"}
           </a>
-          : <span className="field-hint">Only workspace Owners can install or manage the GitHub App.</span>}
+          : <span className="field-hint">Only workspace Owners can set up or manage repository access.</span>}
       </div>
     </header>
 
     {installations.length === 0 ? <div className="github-shadow-empty">
-      <strong>No GitHub App installation connected</strong>
-      <p>Install the private app to choose which repositories ComplianceHub may include in monitoring.</p>
+      <strong>No GitHub repository access connected</strong>
+      <p>Set up read-only access to choose which repositories ComplianceHub may include in monitoring.</p>
     </div> : <div className="github-installation-list">
       {installations.map((installation) => {
         const health = installationHealth(installation);

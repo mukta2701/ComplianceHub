@@ -58,13 +58,15 @@ describe("GitHubInstallationPanel configuration boundary", () => {
       canManageRepositoryScope={true}
     />);
 
-    const region = screen.getByRole("region", { name: "GitHub App connection" });
+    const region = screen.getByRole("region", { name: "GitHub repository access" });
+    expect(within(region).getByText("READ-ONLY GITHUB MONITORING")).toBeVisible();
+    expect(region).toHaveTextContent("ComplianceHub reads selected repositories for monitoring and never changes GitHub.");
     expect(within(region).getByRole("article", { name: "Adtecher GitHub installation" })).toHaveTextContent("Active");
     expect(within(region).getByRole("checkbox", {
       name: "Allow ComplianceHub to read and include Adtecher/compliancehub in monitoring",
     })).toBeEnabled();
     expect(within(region).getByRole("link", { name: "Open GitHub monitoring" })).toHaveAttribute("href", "/app/monitoring");
-    expect(within(region).getByRole("link", { name: "Manage GitHub App" })).toHaveAttribute("href", "/api/github/setup");
+    expect(within(region).getByRole("link", { name: "Manage repository access" })).toHaveAttribute("href", "/api/github/setup");
     expect(within(region).getByRole("link", { name: "Open Adtecher/compliancehub on GitHub" })).toHaveAttribute(
       "href", "https://github.com/Adtecher/compliancehub",
     );
@@ -104,9 +106,21 @@ describe("GitHubInstallationPanel configuration boundary", () => {
     });
     expect(checkbox).toBeDisabled();
     expect(screen.getByText("Only workspace Owners can change repository scope.")).toBeVisible();
-    expect(screen.getByText("Only workspace Owners can install or manage the GitHub App.")).toBeVisible();
+    expect(screen.getByText("Only workspace Owners can set up or manage repository access.")).toBeVisible();
     await user.click(checkbox);
     expect(hoisted.selectRepository).not.toHaveBeenCalled();
+  });
+
+  it("offers plain-language setup when repository access is not connected", () => {
+    render(<GitHubInstallationPanel
+      installations={[]}
+      repositories={[]}
+      canManageInstallation={true}
+      canManageRepositoryScope={true}
+    />);
+
+    expect(screen.getByText("No GitHub repository access connected")).toBeVisible();
+    expect(screen.getByRole("link", { name: "Set up repository access" })).toHaveAttribute("href", "/api/github/setup");
   });
 
   it("optimistically changes one repository and rolls only that repository back on failure", async () => {

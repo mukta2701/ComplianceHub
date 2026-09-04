@@ -52,9 +52,9 @@ const PROVIDERS: Array<{
 }> = [
   {
     id: "github",
-    label: "GitHub",
+    label: "GitHub Issues",
     mark: "GH",
-    description: "Create and track remediation work in GitHub Issues.",
+    description: "Optional: create and track remediation issues in GitHub.",
   },
   {
     id: "jira",
@@ -127,7 +127,7 @@ function ToggleForm({
 }
 
 function ProviderTargetForm({ connection }: { connection: ConnectionSummary }) {
-  const label = connection.provider === "github" ? "GitHub" : "Jira";
+  const label = connection.provider === "github" ? "GitHub Issues" : "Jira";
   return <form action={configureOAuthConnectionAction} className="app-form connections-target-form">
     <input type="hidden" name="id" value={connection.id} />
     <input type="hidden" name="provider" value={connection.provider} />
@@ -208,11 +208,13 @@ function SystemPanel({
   provider: "github" | "jira";
   connections: ConnectionSummary[];
 }) {
-  const label = provider === "github" ? "GitHub" : "Jira";
+  const label = provider === "github" ? "GitHub Issues" : "Jira";
 
   if (connections.length === 0) {
     return <div className="connections-panel-empty">
-      <p>Connect your {label} workspace, then choose exactly what ComplianceHub may monitor.</p>
+      <p>{provider === "github"
+        ? "Connect GitHub, then choose the repository where ComplianceHub may create remediation issues."
+        : "Connect your Jira workspace, then choose exactly what ComplianceHub may use."}</p>
       <OAuthConnectButton provider={provider} />
     </div>;
   }

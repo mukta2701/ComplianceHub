@@ -176,7 +176,7 @@ export default async function IntegrationsPage({
       aria-label="GitHub connection status"
       style={{ padding: "16px", background: "#eef7f0", borderColor: "#cfe6d5", margin: "0 auto 16px", maxWidth: "1100px" }}
     >
-      <b>GitHub App connected.</b> Choose the repositories to include in monitoring below.
+      <b>GitHub repository access connected.</b> Choose the repositories to include in monitoring below.
     </Card>}
     <ConnectionsCatalog
       connections={connections}
