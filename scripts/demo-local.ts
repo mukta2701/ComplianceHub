@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 
-export type LauncherCommand = "build" | "start" | "test-e2e" | "setup";
+export type LauncherCommand = "build" | "start" | "test-e2e" | "setup" | "member";
 export type LocalStatus = {
   API_URL?: string;
   ANON_KEY?: string;
@@ -50,7 +50,7 @@ const failure = (message: string): Error => new Error(`demo-local: ${message}`);
 
 export function parseLauncherArgs(args: string[]): { command: LauncherCommand; args: string[] } {
   const command = args[0] as LauncherCommand | undefined;
-  if (!command || !["build", "start", "test-e2e", "setup"].includes(command)) throw failure("Unsupported command");
+  if (!command || !["build", "start", "test-e2e", "setup", "member"].includes(command)) throw failure("Unsupported command");
   const rest = args.slice(1);
   if (rest.length && rest[0] !== "--") throw failure("Arguments must follow --");
   return { command, args: rest.slice(1) };
@@ -151,8 +151,8 @@ async function main(): Promise<void> {
   dockerGuard();
   const sha = run("git", ["rev-parse", "HEAD"]).trim();
   const env = buildLocalEnvironment(process.env, status, sha);
-  if (parsed.command === "setup") {
-    const code = await runInteractive("node", ["--conditions=react-server", "--import=tsx", "scripts/showcase-setup.ts", ...parsed.args], env);
+  if (parsed.command === "setup" || parsed.command === "member") {
+    const code = await runInteractive("node", ["--conditions=react-server", "--import=tsx", parsed.command === "member" ? "scripts/showcase-member.ts" : "scripts/showcase-setup.ts", ...parsed.args], env);
     if (code !== 0) process.exitCode = code;
     return;
   }

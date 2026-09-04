@@ -24,7 +24,8 @@
     "demo:build": "node --import=tsx scripts/demo-local.ts build",
     "demo:start": "node --import=tsx scripts/demo-local.ts start",
     "demo:setup": "node --import=tsx scripts/demo-local.ts setup",
-    "demo:verify": "node --import=tsx scripts/demo-local.ts setup -- --verify-only"
+    "demo:verify": "node --import=tsx scripts/demo-local.ts setup -- --verify-only",
+    "demo:member": "node --import=tsx scripts/demo-local.ts member"
   },
   "dependencies": {
     "@modelcontextprotocol/core": "2.0.0",
