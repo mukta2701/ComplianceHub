@@ -101,17 +101,63 @@ describe("local CEO demo fixture guards", () => {
     expect(fixtureVerifySql).toContain("COMMIT;");
   });
 
-  it("accepts only eight unexpired current-or-expiring Phase 2 evidence rows", () => {
+  it("validates the newest terminal official GitHub generation instead of global history cardinality", () => {
     for (const sql of [fixtureApplySql, fixtureVerifySql]) {
-      expect(sql).toContain(
-        "(SELECT count(*) FROM public.evidence WHERE organisation_id=org_id AND status IN ('current','expiring') AND valid_until >= current_date) <> 8",
-      );
-      expect(sql).toContain(
-        "(SELECT count(*) FROM public.evidence WHERE organisation_id=org_id) <> 8",
-      );
-      expect(sql).not.toContain(
-        "(SELECT count(*) FROM public.evidence WHERE organisation_id=org_id AND status='current') <> 8",
-      );
+      expect(sql).toMatch(/github_installations[\s\S]*status='active'[\s\S]*permissions_ok[\s\S]*revoked_at IS NULL/);
+      expect(sql).toMatch(/github_repositories[\s\S]*selected[\s\S]*available[\s\S]*NOT repository\.archived[\s\S]*removed_at IS NULL/);
+      expect(sql).toMatch(/github_collection_runs[\s\S]*run_mode='official'[\s\S]*status IN \('succeeded','partial','failed','rate_limited'\)[\s\S]*ORDER BY completed_at DESC, id DESC[\s\S]*LIMIT 1/);
+      expect(sql).not.toContain("(SELECT count(*) FROM public.github_collection_runs WHERE organisation_id=org_id) <> 1");
+      expect(sql).not.toContain("(SELECT count(*) FROM public.github_observations WHERE organisation_id=org_id) <> 15");
+      expect(sql).not.toContain("(SELECT count(*) FROM public.github_official_compliance_results WHERE organisation_id=org_id) <> 15");
+    }
+  });
+
+  it("rejects an incomplete, stale, or incorrectly mapped newest GitHub snapshot", () => {
+    for (const sql of [fixtureApplySql, fixtureVerifySql]) {
+      expect(sql).toContain("latest_run_status IS DISTINCT FROM 'partial'");
+      expect(sql).toContain("latest_run_observation_count <> 15");
+      expect(sql).toContain("latest_run_passed_count <> 8");
+      expect(sql).toContain("latest_run_failed_count <> 5");
+      expect(sql).toContain("latest_run_unknown_count <> 2");
+      expect(sql).toContain("latest_run_not_applicable_count <> 0");
+      expect(sql).toMatch(/count\(DISTINCT result\.check_id\)[\s\S]*github_official_compliance_results result[\s\S]*result\.collection_run_id=latest_run_id[\s\S]*<> 15/);
+      expect(sql).toContain("result.fresh_until <= statement_timestamp()");
+      expect(sql).toContain("result.approval_id IS DISTINCT FROM active_approval_id");
+      expect(sql).toContain("result.mapping_pack_id IS DISTINCT FROM active_mapping_pack_id");
+      expect(sql).toContain("entry.check_id IS NULL");
+      expect(sql).toContain("result.outcome='pass' AND result.evidence_id IS NULL");
+      expect(sql).toContain("result.outcome='fail' AND (result.evidence_id IS NOT NULL OR result.finding_id IS NULL)");
+      expect(sql).toMatch(/result\.outcome IN \('unknown','not_applicable'\)[\s\S]*result\.evidence_id IS NOT NULL OR result\.finding_id IS NOT NULL/);
+    }
+  });
+
+  it("requires exactly the latest pass-derived live evidence and latest fail-derived open findings", () => {
+    for (const sql of [fixtureApplySql, fixtureVerifySql]) {
+      expect(sql).toMatch(/count\(\*\) FROM public\.evidence evidence[\s\S]*status IN \('current','expiring'\)[\s\S]*valid_until >= current_date\) <> 8/);
+      expect(sql).toMatch(/NOT EXISTS \([\s\S]*public\.evidence live_evidence[\s\S]*NOT EXISTS \([\s\S]*latest_result\.evidence_id=live_evidence\.id/);
+      expect(sql).toContain("provenance.observation_id IS DISTINCT FROM result.observation_id");
+      expect(sql).toContain("provenance.collection_run_id IS DISTINCT FROM latest_run_id");
+      expect(sql).toMatch(/count\(\*\) FROM public\.monitoring_findings finding[\s\S]*finding\.status='open'\) <> 5/);
+      expect(sql).toContain("finding_provenance.latest_observation_id IS DISTINCT FROM result.observation_id");
+      expect(sql).toContain("finding_provenance.latest_collection_run_id IS DISTINCT FROM latest_run_id");
+      expect(sql).not.toContain("(SELECT count(*) FROM public.evidence WHERE organisation_id=org_id) <> 8");
+      expect(sql).not.toContain("(SELECT count(*) FROM public.monitoring_findings WHERE organisation_id=org_id) <> 5");
+    }
+  });
+
+  it("allows prior immutable generations only when their run, observation, mapping, and supersession lineage is valid", () => {
+    for (const sql of [fixtureApplySql, fixtureVerifySql]) {
+      expect(sql).toMatch(/FROM public\.github_official_compliance_results historical_result[\s\S]*historical_run\.run_mode IS DISTINCT FROM 'official'/);
+      expect(sql).toContain("historical_run.status NOT IN ('succeeded','partial')");
+      expect(sql).toContain("historical_observation.id IS NULL");
+      expect(sql).toContain("historical_pack.id IS NULL");
+      expect(sql).toContain("historical_entry.id IS NULL");
+      expect(sql).toMatch(/public\.github_evidence_provenance historical_provenance[\s\S]*historical_evidence\.replaces_evidence_id IS DISTINCT FROM historical_provenance\.supersedes_evidence_id/);
+      expect(sql).toMatch(/historical_provenance\.supersedes_evidence_id IS NOT NULL[\s\S]*superseded_provenance\.identity_key IS DISTINCT FROM historical_provenance\.identity_key/);
+      expect(sql).toContain("historical_evidence.status='superseded'");
+      expect(sql).toContain("successor_provenance.supersedes_evidence_id=historical_provenance.evidence_id");
+      expect(sql).not.toContain("(SELECT count(*) FROM public.github_evidence_provenance WHERE organisation_id=org_id) <> 8");
+      expect(sql).not.toContain("(SELECT count(*) FROM public.evidence_links WHERE organisation_id=org_id) <> 15");
     }
   });
 

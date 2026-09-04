@@ -175,6 +175,22 @@ DECLARE
   audit_before_count bigint;
   audit_before_hash text;
   audit_added bigint;
+  active_installation_id uuid;
+  active_repository_id uuid;
+  active_provider_repository_id bigint;
+  active_approval_id uuid;
+  active_mapping_pack_id uuid;
+  active_mapping_version text;
+  active_mapping_checksum text;
+  latest_run_id uuid;
+  latest_run_status text;
+  latest_run_observation_count integer;
+  latest_run_passed_count integer;
+  latest_run_failed_count integer;
+  latest_run_unknown_count integer;
+  latest_run_not_applicable_count integer;
+  latest_run_started_at timestamptz;
+  latest_run_completed_at timestamptz;
   created_fixture boolean := false;
   target_tables constant text[] := ARRAY[${fixtureTargetTableNames.map((name) => `'${name}'`).join(",")}];
   insert_order constant text[] := ARRAY['assessment_sessions','assessment_responses','soa_registers','soa_items','risks','policies','policy_acceptances','tasks','audits','audit_findings','kpis','kpi_measurements','notifications','leadership_report_snapshots'];
@@ -215,19 +231,534 @@ BEGIN
     RAISE EXCEPTION 'Catalogue precondition failed';
   END IF;
 
-  IF (SELECT count(*) FROM public.github_installations WHERE organisation_id=org_id) <> 1
-    OR (SELECT count(*) FROM public.github_repositories WHERE organisation_id=org_id AND selected AND available) <> 1
-    OR (SELECT count(*) FROM public.github_collection_runs WHERE organisation_id=org_id AND status='partial') <> 1
-    OR (SELECT count(*) FROM public.github_collection_runs WHERE organisation_id=org_id) <> 1
-    OR (SELECT count(*) FROM public.github_observations WHERE organisation_id=org_id) <> 15
-    OR (SELECT count(*) FROM public.github_official_compliance_results WHERE organisation_id=org_id) <> 15
-    OR (SELECT count(*) FROM public.monitoring_findings WHERE organisation_id=org_id AND status='open') <> 5
-    OR (SELECT count(*) FROM public.monitoring_findings WHERE organisation_id=org_id) <> 5
-    OR (SELECT count(*) FROM public.evidence WHERE organisation_id=org_id AND status IN ('current','expiring') AND valid_until >= current_date) <> 8
-    OR (SELECT count(*) FROM public.evidence WHERE organisation_id=org_id) <> 8
-    OR (SELECT count(*) FROM public.github_evidence_provenance WHERE organisation_id=org_id) <> 8
-    OR (SELECT count(*) FROM public.evidence_links WHERE organisation_id=org_id) <> 15
+  -- The GitHub ledger is intentionally append-only. Validate the one active
+  -- connection and the newest completed official generation, while retaining
+  -- strict ancestry checks across every earlier immutable generation.
+  IF (SELECT count(*)
+      FROM public.github_installations installation
+      JOIN public.github_repositories repository
+        ON repository.installation_id=installation.id
+       AND repository.organisation_id=installation.organisation_id
+      WHERE installation.organisation_id=org_id
+        AND installation.status='active'
+        AND installation.permissions_ok
+        AND installation.revoked_at IS NULL
+        AND installation.repository_selection='selected'
+        AND repository.selected
+        AND repository.available
+        AND NOT repository.archived
+        AND repository.removed_at IS NULL) <> 1
+    OR (SELECT count(*) FROM public.github_installations installation
+        WHERE installation.organisation_id=org_id
+          AND installation.status='active'
+          AND installation.revoked_at IS NULL) <> 1
+    OR (SELECT count(*) FROM public.github_repositories repository
+        WHERE repository.organisation_id=org_id AND repository.selected) <> 1
   THEN RAISE EXCEPTION 'Phase 2 pilot baseline precondition failed'; END IF;
+
+  SELECT installation.id, repository.id, repository.provider_repository_id
+  INTO active_installation_id, active_repository_id, active_provider_repository_id
+  FROM public.github_installations installation
+  JOIN public.github_repositories repository
+    ON repository.installation_id=installation.id
+   AND repository.organisation_id=installation.organisation_id
+  WHERE installation.organisation_id=org_id
+    AND installation.status='active'
+    AND installation.permissions_ok
+    AND installation.revoked_at IS NULL
+    AND installation.repository_selection='selected'
+    AND repository.selected
+    AND repository.available
+    AND NOT repository.archived
+    AND repository.removed_at IS NULL;
+
+  IF (SELECT count(*)
+      FROM public.github_mapping_approvals approval
+      JOIN public.github_mapping_packs pack ON pack.id=approval.mapping_pack_id
+      WHERE approval.organisation_id=org_id
+        AND approval.revoked_at IS NULL
+        AND pack.published_at IS NOT NULL
+        AND (SELECT count(*) FROM public.github_mapping_entries entry
+             WHERE entry.mapping_pack_id=pack.id) = 15) <> 1
+  THEN RAISE EXCEPTION 'Phase 2 pilot baseline precondition failed'; END IF;
+
+  SELECT approval.id, pack.id, pack.version, pack.checksum
+  INTO active_approval_id, active_mapping_pack_id, active_mapping_version, active_mapping_checksum
+  FROM public.github_mapping_approvals approval
+  JOIN public.github_mapping_packs pack ON pack.id=approval.mapping_pack_id
+  WHERE approval.organisation_id=org_id
+    AND approval.revoked_at IS NULL
+    AND pack.published_at IS NOT NULL;
+
+  SELECT id, status::text, observation_count, passed_count, failed_count,
+         unknown_count, not_applicable_count, started_at, completed_at
+  INTO latest_run_id, latest_run_status, latest_run_observation_count,
+       latest_run_passed_count, latest_run_failed_count,
+       latest_run_unknown_count, latest_run_not_applicable_count,
+       latest_run_started_at, latest_run_completed_at
+  FROM public.github_collection_runs
+  WHERE organisation_id=org_id
+    AND installation_id=active_installation_id
+    AND repository_id=active_repository_id
+    AND provider_repository_id=active_provider_repository_id
+    AND run_mode='official'
+    AND status IN ('succeeded','partial','failed','rate_limited')
+  ORDER BY completed_at DESC, id DESC
+  LIMIT 1;
+
+  IF latest_run_id IS NULL
+    OR latest_run_status IS DISTINCT FROM 'partial'
+    OR latest_run_observation_count <> 15
+    OR latest_run_passed_count <> 8
+    OR latest_run_failed_count <> 5
+    OR latest_run_unknown_count <> 2
+    OR latest_run_not_applicable_count <> 0
+    OR latest_run_started_at IS NULL
+    OR latest_run_completed_at IS NULL
+    OR latest_run_completed_at < latest_run_started_at
+    OR (SELECT count(*) FROM public.github_observations observation
+        WHERE observation.organisation_id=org_id
+          AND observation.collection_run_id=latest_run_id) <> 15
+    OR (SELECT count(DISTINCT observation.check_id) FROM public.github_observations observation
+        WHERE observation.organisation_id=org_id
+          AND observation.collection_run_id=latest_run_id) <> 15
+    OR (SELECT count(*) FROM public.github_official_compliance_results result
+        WHERE result.organisation_id=org_id
+          AND result.collection_run_id=latest_run_id) <> 15
+    OR (SELECT count(DISTINCT result.check_id) FROM public.github_official_compliance_results result
+        WHERE result.organisation_id=org_id
+          AND result.collection_run_id=latest_run_id) <> 15
+  THEN RAISE EXCEPTION 'Phase 2 pilot baseline precondition failed'; END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM public.github_official_compliance_results result
+    LEFT JOIN public.github_observations observation
+      ON observation.id=result.observation_id
+     AND observation.organisation_id=result.organisation_id
+     AND observation.installation_id=result.installation_id
+     AND observation.repository_id=result.repository_id
+     AND observation.collection_run_id=result.collection_run_id
+    LEFT JOIN public.github_mapping_entries entry
+      ON entry.mapping_pack_id=active_mapping_pack_id
+     AND entry.check_id=result.check_id
+     AND entry.rule_version=result.rule_version
+    WHERE result.organisation_id=org_id
+      AND result.collection_run_id=latest_run_id
+      AND (
+        observation.id IS NULL
+        OR result.installation_id IS DISTINCT FROM active_installation_id
+        OR result.repository_id IS DISTINCT FROM active_repository_id
+        OR result.provider_repository_id IS DISTINCT FROM active_provider_repository_id
+        OR result.approval_id IS DISTINCT FROM active_approval_id
+        OR result.mapping_pack_id IS DISTINCT FROM active_mapping_pack_id
+        OR result.mapping_version IS DISTINCT FROM active_mapping_version
+        OR result.mapping_checksum IS DISTINCT FROM active_mapping_checksum
+        OR entry.check_id IS NULL
+        OR result.check_id IS DISTINCT FROM observation.check_id
+        OR result.rule_version IS DISTINCT FROM observation.rule_version
+        OR result.outcome IS DISTINCT FROM observation.result
+        OR result.observed_at IS DISTINCT FROM observation.observed_at
+        OR result.fresh_until IS DISTINCT FROM observation.fresh_until
+        OR result.observed_at < latest_run_started_at
+        OR result.observed_at > latest_run_completed_at
+        OR result.fresh_until <= statement_timestamp()
+        OR result.failure_severity IS DISTINCT FROM
+          CASE WHEN result.outcome='fail' THEN entry.failure_severity ELSE NULL END
+        OR result.catalogue_summary IS DISTINCT FROM
+          (entry.treatments #>> ARRAY[result.outcome::text,'summary'])
+        OR (result.outcome='pass' AND result.evidence_id IS NULL)
+        OR (result.outcome='fail' AND (result.evidence_id IS NOT NULL OR result.finding_id IS NULL))
+        OR (result.outcome IN ('unknown','not_applicable')
+            AND (result.evidence_id IS NOT NULL OR result.finding_id IS NOT NULL))
+      )
+  ) THEN RAISE EXCEPTION 'Phase 2 pilot baseline precondition failed'; END IF;
+
+  IF (SELECT count(*) FROM public.evidence evidence
+      WHERE evidence.organisation_id=org_id
+        AND evidence.status IN ('current','expiring')
+        AND evidence.valid_until >= current_date) <> 8
+    OR EXISTS (
+      SELECT 1
+      FROM public.github_official_compliance_results latest_result
+      WHERE latest_result.organisation_id=org_id
+        AND latest_result.collection_run_id=latest_run_id
+        AND latest_result.outcome='pass'
+        AND NOT EXISTS (
+          SELECT 1 FROM public.evidence live_evidence
+          WHERE live_evidence.id=latest_result.evidence_id
+            AND live_evidence.organisation_id=org_id
+            AND live_evidence.status IN ('current','expiring')
+            AND live_evidence.valid_until >= current_date
+        )
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM public.evidence live_evidence
+      WHERE live_evidence.organisation_id=org_id
+        AND live_evidence.status IN ('current','expiring')
+        AND live_evidence.valid_until >= current_date
+        AND NOT EXISTS (
+          SELECT 1
+          FROM public.github_official_compliance_results latest_result
+          WHERE latest_result.organisation_id=org_id
+            AND latest_result.collection_run_id=latest_run_id
+            AND latest_result.outcome='pass'
+            AND latest_result.evidence_id=live_evidence.id
+        )
+    )
+  THEN RAISE EXCEPTION 'Phase 2 pilot baseline precondition failed'; END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM public.github_official_compliance_results result
+    LEFT JOIN public.github_evidence_provenance provenance
+      ON provenance.evidence_id=result.evidence_id
+     AND provenance.organisation_id=result.organisation_id
+    LEFT JOIN public.evidence evidence
+      ON evidence.id=result.evidence_id
+     AND evidence.organisation_id=result.organisation_id
+    WHERE result.organisation_id=org_id
+      AND result.collection_run_id=latest_run_id
+      AND result.outcome='pass'
+      AND (
+        provenance.id IS NULL
+        OR evidence.id IS NULL
+        OR provenance.observation_id IS DISTINCT FROM result.observation_id
+        OR provenance.collection_run_id IS DISTINCT FROM latest_run_id
+        OR provenance.installation_id IS DISTINCT FROM active_installation_id
+        OR provenance.repository_id IS DISTINCT FROM active_repository_id
+        OR provenance.approval_id IS DISTINCT FROM active_approval_id
+        OR provenance.mapping_pack_id IS DISTINCT FROM active_mapping_pack_id
+        OR provenance.check_id IS DISTINCT FROM result.check_id
+        OR provenance.rule_version IS DISTINCT FROM result.rule_version
+        OR provenance.mapping_version IS DISTINCT FROM result.mapping_version
+        OR provenance.observed_at IS DISTINCT FROM result.observed_at
+        OR provenance.fresh_until IS DISTINCT FROM result.fresh_until
+        OR evidence.replaces_evidence_id IS DISTINCT FROM provenance.supersedes_evidence_id
+        OR evidence.collected_on IS DISTINCT FROM result.observed_at::date
+        OR evidence.valid_until IS DISTINCT FROM result.fresh_until::date
+        OR evidence.status NOT IN ('current','expiring')
+      )
+  ) THEN RAISE EXCEPTION 'Phase 2 pilot baseline precondition failed'; END IF;
+
+  IF (SELECT count(*) FROM public.monitoring_findings finding
+      WHERE finding.organisation_id=org_id AND finding.status='open') <> 5
+    OR EXISTS (
+      SELECT 1
+      FROM public.github_official_compliance_results latest_result
+      WHERE latest_result.organisation_id=org_id
+        AND latest_result.collection_run_id=latest_run_id
+        AND latest_result.outcome='fail'
+        AND NOT EXISTS (
+          SELECT 1 FROM public.monitoring_findings open_finding
+          WHERE open_finding.id=latest_result.finding_id
+            AND open_finding.organisation_id=org_id
+            AND open_finding.status='open'
+        )
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM public.monitoring_findings open_finding
+      WHERE open_finding.organisation_id=org_id
+        AND open_finding.status='open'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM public.github_official_compliance_results latest_result
+          WHERE latest_result.organisation_id=org_id
+            AND latest_result.collection_run_id=latest_run_id
+            AND latest_result.outcome='fail'
+            AND latest_result.finding_id=open_finding.id
+        )
+    )
+  THEN RAISE EXCEPTION 'Phase 2 pilot baseline precondition failed'; END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM public.github_official_compliance_results result
+    LEFT JOIN public.monitoring_findings finding
+      ON finding.id=result.finding_id
+     AND finding.organisation_id=result.organisation_id
+    LEFT JOIN public.github_finding_provenance finding_provenance
+      ON finding_provenance.finding_id=result.finding_id
+     AND finding_provenance.organisation_id=result.organisation_id
+    WHERE result.organisation_id=org_id
+      AND result.collection_run_id=latest_run_id
+      AND result.outcome='fail'
+      AND (
+        finding.id IS NULL
+        OR finding_provenance.id IS NULL
+        OR finding.finding_origin IS DISTINCT FROM 'github'
+        OR finding.provider_repository_id IS DISTINCT FROM active_provider_repository_id
+        OR finding.check_id IS DISTINCT FROM result.check_id
+        OR finding.mapping_version IS DISTINCT FROM result.mapping_version
+        OR finding.severity IS DISTINCT FROM result.failure_severity
+        OR finding.status IS DISTINCT FROM 'open'
+        OR finding.resolved_at IS NOT NULL
+        OR finding_provenance.latest_observation_id IS DISTINCT FROM result.observation_id
+        OR finding_provenance.latest_collection_run_id IS DISTINCT FROM latest_run_id
+        OR finding_provenance.latest_installation_id IS DISTINCT FROM active_installation_id
+        OR finding_provenance.latest_repository_id IS DISTINCT FROM active_repository_id
+        OR finding_provenance.latest_approval_id IS DISTINCT FROM active_approval_id
+        OR finding_provenance.latest_mapping_pack_id IS DISTINCT FROM active_mapping_pack_id
+        OR finding_provenance.latest_failed_observation_id IS DISTINCT FROM result.observation_id
+        OR finding_provenance.latest_failed_collection_run_id IS DISTINCT FROM latest_run_id
+        OR finding_provenance.most_recent_detected_at IS DISTINCT FROM result.observed_at
+        OR finding_provenance.resolved_at IS NOT NULL
+        OR NOT EXISTS (
+          SELECT 1 FROM public.github_finding_transitions transition
+          WHERE transition.organisation_id=org_id
+            AND transition.finding_id=result.finding_id
+            AND transition.observation_id=result.observation_id
+            AND transition.approval_id=active_approval_id
+            AND transition.mapping_pack_id=active_mapping_pack_id
+            AND transition.mapping_version=active_mapping_version
+            AND transition.to_status='open'
+        )
+      )
+  ) THEN RAISE EXCEPTION 'Phase 2 pilot baseline precondition failed'; END IF;
+
+  -- Every result-bearing official generation remains internally complete.
+  -- Failed/rate-limited attempts may exist but cannot have official results.
+  IF EXISTS (
+    SELECT 1
+    FROM public.github_collection_runs historical_run
+    WHERE historical_run.organisation_id=org_id
+      AND historical_run.run_mode='official'
+      AND historical_run.status IN ('succeeded','partial')
+      AND (
+        (SELECT count(*) FROM public.github_observations historical_observation
+         WHERE historical_observation.organisation_id=org_id
+           AND historical_observation.collection_run_id=historical_run.id)
+          <> historical_run.observation_count
+        OR (SELECT count(*) FROM public.github_official_compliance_results historical_result
+            WHERE historical_result.organisation_id=org_id
+              AND historical_result.collection_run_id=historical_run.id)
+          <> historical_run.observation_count
+        OR (SELECT count(DISTINCT historical_result.observation_id)
+            FROM public.github_official_compliance_results historical_result
+            WHERE historical_result.organisation_id=org_id
+              AND historical_result.collection_run_id=historical_run.id)
+          <> historical_run.observation_count
+      )
+  ) OR EXISTS (
+    SELECT 1
+    FROM public.github_collection_runs historical_run
+    JOIN public.github_official_compliance_results historical_result
+      ON historical_result.collection_run_id=historical_run.id
+     AND historical_result.organisation_id=historical_run.organisation_id
+    WHERE historical_run.organisation_id=org_id
+      AND historical_run.status IN ('failed','rate_limited')
+  ) THEN RAISE EXCEPTION 'Phase 2 pilot baseline precondition failed'; END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM public.github_official_compliance_results historical_result
+    LEFT JOIN public.github_collection_runs historical_run
+      ON historical_run.id=historical_result.collection_run_id
+     AND historical_run.organisation_id=historical_result.organisation_id
+     AND historical_run.installation_id=historical_result.installation_id
+     AND historical_run.repository_id=historical_result.repository_id
+     AND historical_run.provider_repository_id=historical_result.provider_repository_id
+    LEFT JOIN public.github_observations historical_observation
+      ON historical_observation.id=historical_result.observation_id
+     AND historical_observation.organisation_id=historical_result.organisation_id
+     AND historical_observation.installation_id=historical_result.installation_id
+     AND historical_observation.repository_id=historical_result.repository_id
+     AND historical_observation.collection_run_id=historical_result.collection_run_id
+    LEFT JOIN public.github_mapping_approvals historical_approval
+      ON historical_approval.id=historical_result.approval_id
+     AND historical_approval.organisation_id=historical_result.organisation_id
+     AND historical_approval.mapping_pack_id=historical_result.mapping_pack_id
+    LEFT JOIN public.github_mapping_packs historical_pack
+      ON historical_pack.id=historical_result.mapping_pack_id
+     AND historical_pack.version=historical_result.mapping_version
+     AND historical_pack.checksum=historical_result.mapping_checksum
+    LEFT JOIN public.github_mapping_entries historical_entry
+      ON historical_entry.mapping_pack_id=historical_result.mapping_pack_id
+     AND historical_entry.check_id=historical_result.check_id
+     AND historical_entry.rule_version=historical_result.rule_version
+    WHERE historical_result.organisation_id=org_id
+      AND (
+        historical_run.id IS NULL
+        OR historical_run.run_mode IS DISTINCT FROM 'official'
+        OR historical_run.status NOT IN ('succeeded','partial')
+        OR historical_observation.id IS NULL
+        OR historical_approval.id IS NULL
+        OR historical_pack.id IS NULL
+        OR historical_pack.published_at IS NULL
+        OR historical_entry.id IS NULL
+        OR historical_result.check_id IS DISTINCT FROM historical_observation.check_id
+        OR historical_result.rule_version IS DISTINCT FROM historical_observation.rule_version
+        OR historical_result.outcome IS DISTINCT FROM historical_observation.result
+        OR historical_result.observed_at IS DISTINCT FROM historical_observation.observed_at
+        OR historical_result.fresh_until IS DISTINCT FROM historical_observation.fresh_until
+        OR historical_result.failure_severity IS DISTINCT FROM
+          CASE WHEN historical_result.outcome='fail' THEN historical_entry.failure_severity ELSE NULL END
+        OR historical_result.catalogue_summary IS DISTINCT FROM
+          (historical_entry.treatments #>> ARRAY[historical_result.outcome::text,'summary'])
+        OR (historical_result.outcome='pass' AND historical_result.evidence_id IS NULL)
+        OR (historical_result.outcome='fail'
+            AND (historical_result.evidence_id IS NOT NULL OR historical_result.finding_id IS NULL))
+        OR (historical_result.outcome IN ('unknown','not_applicable')
+            AND (historical_result.evidence_id IS NOT NULL OR historical_result.finding_id IS NOT NULL))
+      )
+  ) THEN RAISE EXCEPTION 'Phase 2 pilot baseline precondition failed'; END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM public.github_evidence_provenance historical_provenance
+    LEFT JOIN public.evidence historical_evidence
+      ON historical_evidence.id=historical_provenance.evidence_id
+     AND historical_evidence.organisation_id=historical_provenance.organisation_id
+    LEFT JOIN public.github_official_compliance_results historical_result
+      ON historical_result.observation_id=historical_provenance.observation_id
+     AND historical_result.organisation_id=historical_provenance.organisation_id
+    LEFT JOIN public.github_evidence_provenance superseded_provenance
+      ON superseded_provenance.evidence_id=historical_provenance.supersedes_evidence_id
+     AND superseded_provenance.organisation_id=historical_provenance.organisation_id
+    LEFT JOIN public.evidence superseded_evidence
+      ON superseded_evidence.id=historical_provenance.supersedes_evidence_id
+     AND superseded_evidence.organisation_id=historical_provenance.organisation_id
+    LEFT JOIN public.github_evidence_provenance successor_provenance
+      ON successor_provenance.supersedes_evidence_id=historical_provenance.evidence_id
+     AND successor_provenance.organisation_id=historical_provenance.organisation_id
+    WHERE historical_provenance.organisation_id=org_id
+      AND (
+        historical_evidence.id IS NULL
+        OR historical_result.id IS NULL
+        OR historical_result.outcome IS DISTINCT FROM 'pass'
+        OR historical_result.evidence_id IS DISTINCT FROM historical_provenance.evidence_id
+        OR historical_provenance.collection_run_id IS DISTINCT FROM historical_result.collection_run_id
+        OR historical_provenance.approval_id IS DISTINCT FROM historical_result.approval_id
+        OR historical_provenance.mapping_pack_id IS DISTINCT FROM historical_result.mapping_pack_id
+        OR historical_provenance.check_id IS DISTINCT FROM historical_result.check_id
+        OR historical_provenance.rule_version IS DISTINCT FROM historical_result.rule_version
+        OR historical_provenance.mapping_version IS DISTINCT FROM historical_result.mapping_version
+        OR historical_provenance.observed_at IS DISTINCT FROM historical_result.observed_at
+        OR historical_provenance.fresh_until IS DISTINCT FROM historical_result.fresh_until
+        OR historical_evidence.replaces_evidence_id IS DISTINCT FROM historical_provenance.supersedes_evidence_id
+        OR (historical_evidence.status='superseded' AND successor_provenance.id IS NULL)
+        OR (successor_provenance.id IS NOT NULL AND historical_evidence.status IS DISTINCT FROM 'superseded')
+        OR (historical_provenance.supersedes_evidence_id IS NOT NULL AND (
+          superseded_provenance.id IS NULL
+          OR superseded_provenance.identity_key IS DISTINCT FROM historical_provenance.identity_key
+          OR superseded_provenance.observed_at >= historical_provenance.observed_at
+          OR superseded_evidence.status IS DISTINCT FROM 'superseded'
+        ))
+      )
+  )
+    OR EXISTS (
+      SELECT 1 FROM public.evidence historical_evidence
+      WHERE historical_evidence.organisation_id=org_id
+        AND NOT EXISTS (
+          SELECT 1 FROM public.github_evidence_provenance historical_provenance
+          WHERE historical_provenance.organisation_id=org_id
+            AND historical_provenance.evidence_id=historical_evidence.id
+        )
+    )
+  THEN RAISE EXCEPTION 'Phase 2 pilot baseline precondition failed'; END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM public.github_evidence_provenance historical_provenance
+    JOIN public.github_mapping_entries historical_entry
+      ON historical_entry.mapping_pack_id=historical_provenance.mapping_pack_id
+     AND historical_entry.check_id=historical_provenance.check_id
+     AND historical_entry.rule_version=historical_provenance.rule_version
+    WHERE historical_provenance.organisation_id=org_id
+      AND (
+        (SELECT count(*) FROM public.evidence_links historical_link
+         WHERE historical_link.organisation_id=org_id
+           AND historical_link.evidence_id=historical_provenance.evidence_id)
+        IS DISTINCT FROM (
+          SELECT count(DISTINCT control.id)
+          FROM unnest(historical_entry.iso_control_references) reference(reference_value)
+          JOIN public.frameworks framework
+            ON framework.slug='iso-27001' AND framework.version='2022'
+           AND framework.published_at IS NOT NULL
+          JOIN public.requirements requirement
+            ON requirement.framework_id=framework.id
+           AND requirement.code=regexp_replace(reference.reference_value,'^A[.]','')
+          JOIN public.requirement_control_mappings requirement_mapping
+            ON requirement_mapping.requirement_id=requirement.id
+          JOIN public.controls control ON control.id=requirement_mapping.control_id
+        )
+      )
+  ) OR EXISTS (
+    SELECT 1
+    FROM public.evidence_links historical_link
+    JOIN public.github_evidence_provenance historical_provenance
+      ON historical_provenance.evidence_id=historical_link.evidence_id
+     AND historical_provenance.organisation_id=historical_link.organisation_id
+    JOIN public.github_mapping_entries historical_entry
+      ON historical_entry.mapping_pack_id=historical_provenance.mapping_pack_id
+     AND historical_entry.check_id=historical_provenance.check_id
+     AND historical_entry.rule_version=historical_provenance.rule_version
+    WHERE historical_link.organisation_id=org_id
+      AND (historical_link.control_id IS NULL
+        OR historical_link.risk_id IS NOT NULL
+        OR historical_link.task_id IS NOT NULL
+        OR historical_link.policy_id IS NOT NULL
+        OR NOT EXISTS (
+          SELECT 1
+          FROM unnest(historical_entry.iso_control_references) reference(reference_value)
+          JOIN public.frameworks framework
+            ON framework.slug='iso-27001' AND framework.version='2022'
+           AND framework.published_at IS NOT NULL
+          JOIN public.requirements requirement
+            ON requirement.framework_id=framework.id
+           AND requirement.code=regexp_replace(reference.reference_value,'^A[.]','')
+          JOIN public.requirement_control_mappings requirement_mapping
+            ON requirement_mapping.requirement_id=requirement.id
+          WHERE requirement_mapping.control_id=historical_link.control_id
+        ))
+  ) THEN RAISE EXCEPTION 'Phase 2 pilot baseline precondition failed'; END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM public.github_finding_provenance historical_finding_provenance
+    LEFT JOIN public.monitoring_findings historical_finding
+      ON historical_finding.id=historical_finding_provenance.finding_id
+     AND historical_finding.organisation_id=historical_finding_provenance.organisation_id
+    LEFT JOIN public.github_official_compliance_results latest_finding_result
+      ON latest_finding_result.observation_id=historical_finding_provenance.latest_observation_id
+     AND latest_finding_result.organisation_id=historical_finding_provenance.organisation_id
+    LEFT JOIN public.github_official_compliance_results latest_failed_result
+      ON latest_failed_result.observation_id=historical_finding_provenance.latest_failed_observation_id
+     AND latest_failed_result.organisation_id=historical_finding_provenance.organisation_id
+    WHERE historical_finding_provenance.organisation_id=org_id
+      AND (
+        historical_finding.id IS NULL
+        OR historical_finding.finding_origin IS DISTINCT FROM 'github'
+        OR historical_finding.provider_repository_id IS DISTINCT FROM historical_finding_provenance.provider_repository_id
+        OR historical_finding.check_id IS DISTINCT FROM historical_finding_provenance.check_id
+        OR latest_finding_result.id IS NULL
+        OR latest_finding_result.finding_id IS DISTINCT FROM historical_finding_provenance.finding_id
+        OR latest_finding_result.collection_run_id IS DISTINCT FROM historical_finding_provenance.latest_collection_run_id
+        OR latest_finding_result.approval_id IS DISTINCT FROM historical_finding_provenance.latest_approval_id
+        OR latest_finding_result.mapping_pack_id IS DISTINCT FROM historical_finding_provenance.latest_mapping_pack_id
+        OR latest_failed_result.id IS NULL
+        OR latest_failed_result.outcome IS DISTINCT FROM 'fail'
+        OR latest_failed_result.finding_id IS DISTINCT FROM historical_finding_provenance.finding_id
+        OR latest_failed_result.collection_run_id IS DISTINCT FROM historical_finding_provenance.latest_failed_collection_run_id
+        OR (historical_finding_provenance.resolved_at IS NULL
+            AND latest_finding_result.outcome IS DISTINCT FROM 'fail')
+        OR (historical_finding_provenance.resolved_at IS NOT NULL AND (
+          latest_finding_result.outcome IS DISTINCT FROM 'pass'
+          OR historical_finding.status IS DISTINCT FROM 'resolved'
+          OR historical_finding.resolved_at IS DISTINCT FROM historical_finding_provenance.resolved_at
+        ))
+        OR NOT EXISTS (
+          SELECT 1 FROM public.github_finding_transitions historical_transition
+          WHERE historical_transition.organisation_id=org_id
+            AND historical_transition.finding_id=historical_finding_provenance.finding_id
+            AND historical_transition.observation_id=historical_finding_provenance.latest_observation_id
+            AND historical_transition.approval_id=historical_finding_provenance.latest_approval_id
+            AND historical_transition.mapping_pack_id=historical_finding_provenance.latest_mapping_pack_id
+        )
+      )
+  ) THEN RAISE EXCEPTION 'Phase 2 pilot baseline precondition failed'; END IF;
 
   expectations := jsonb_build_array(
     jsonb_build_object('table','assessment_sessions','id','73000000-0000-4000-8000-000000000001','natural','CEO Demo ISO 27001 Gap Assessment','row',jsonb_build_object('id','73000000-0000-4000-8000-000000000001','organisation_id',org_id,'catalogue_version_id','00000000-0000-4000-8000-000000000001','title','CEO Demo ISO 27001 Gap Assessment','state','completed','revision',3,'created_by',owner_id,'completed_at','2026-09-03T08:30:00Z','created_at','2026-09-03T08:00:00Z','updated_at','2026-09-03T08:30:00Z')),
