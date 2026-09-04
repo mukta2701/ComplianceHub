@@ -69,6 +69,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         <a className="active" href="#workspace"><Icon name="settings" />Workspace</a>
         <a href="#team"><Icon name="users" />Team members</a>
         <a href="#security"><Icon name="lock" />Security</a>
+        <a href="#connected-apps"><Icon name="activity" />Connected assistants</a>
       </nav>
 
       <div className="settings-content">

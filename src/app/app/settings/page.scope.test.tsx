@@ -87,4 +87,12 @@ describe("Settings active organisation scope", () => {
     expect(screen.queryAllByText("Sibling-only member")).toHaveLength(0);
     expect(hoisted.queries).toContainEqual({ table: "memberships", column: "organisation_id", value: ORGANISATION_ID });
   });
+
+  it("links Settings navigation to connected assistants", async () => {
+    const { default: SettingsPage } = await import("./page");
+
+    render(await SettingsPage({ searchParams: Promise.resolve({}) }));
+
+    expect(screen.getByRole("link", { name: "Connected assistants" })).toHaveAttribute("href", "#connected-apps");
+  });
 });
