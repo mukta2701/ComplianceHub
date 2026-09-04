@@ -28,6 +28,12 @@ delete from public.memberships where organisation_id in (
 );
 delete from public.asset_categories where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000004');
 delete from public.risk_categories where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000004');
+-- Audit capture is intentionally disabled for this fixture cleanup, so remove
+-- only the exact synthetic organisation events before deleting their parents.
+delete from public.audit_events where organisation_id in (
+  '72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002',
+  '72000000-0000-4000-8000-000000000004'
+);
 delete from public.organisations where id in (
   '72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002',
   '72000000-0000-4000-8000-000000000004'
@@ -370,7 +376,6 @@ select is(
   'an unrelated committed sentinel job remains byte-identical across the full test body'
 );
 
-select * from finish();
 
 begin;
 set local session_replication_role = replica;
@@ -382,7 +387,20 @@ delete from public.github_installations where organisation_id in ('72000000-0000
 delete from public.memberships where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000004');
 delete from public.asset_categories where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000004');
 delete from public.risk_categories where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000004');
+delete from public.audit_events where organisation_id in (
+  '72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002',
+  '72000000-0000-4000-8000-000000000004'
+);
 delete from public.organisations where id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000004');
 delete from public.profiles where id::text like '72000000-0000-4000-8000-00000000000%';
 delete from auth.users where id::text like '72000000-0000-4000-8000-00000000000%';
+select is(
+  (select count(*) from public.audit_events where organisation_id in (
+    '72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002',
+    '72000000-0000-4000-8000-000000000004'
+  )),
+  0::bigint,
+  'fixture cleanup leaves no synthetic organisation audit events'
+);
 commit;
+select * from finish();
