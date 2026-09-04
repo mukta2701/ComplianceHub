@@ -93,30 +93,33 @@ evidence artifact.
 
 ## Final fresh-scan proof
 
-A second real read-only collection was run against the installed
+A final real read-only collection was run from the visible **Check GitHub now**
+button against the installed
 `compliancehub-mukta-local-pilot` GitHub App and the selected
 `mukta2701/ComplianceHub` repository. The scanner checked one installation and
 one repository, stored 15 observations, and completed with no repository
-failure or deferred repository. Protected GitHub state had the same SHA before
-and after the collection.
+failure or deferred repository. The page confirmed, "GitHub check finished.
+Monitoring status is refreshed." A controlled repeatability run of the same
+scanner separately proved that protected GitHub state had the same SHA before
+and after collection.
 
 The newest official result set contains exactly 15 checks: eight pass, five
-fail, and two unknown. It is current through 5 September 2026 at 15:43 BST.
-The historical evidence lineage contains eight current records and eight
+fail, and two unknown. It is current through 5 September 2026 at 16:07 BST.
+The historical evidence lineage contains eight current records and 16
 superseded records. Obsolete machine-evidence replacement tasks have zero open
 records; the eight older tasks are cancelled with audit history retained.
 
 A new non-interactive Codex process then read that newest generation through
 the MCP and exited successfully with:
 
-`FRESH_GITHUB_MCP_OK total=15 pass=8 fail=5 unknown=2`
+`FINAL_FRESH_GITHUB_MCP_OK total=15 pass=8 fail=5 unknown=2`
 
 All seven read-only tools are approved for non-interactive local use. The
 write-capable digest tool remains disabled.
 
 ## Final verification gate
 
-- Application: 240 test files, 2,071 tests passed, 3 intentionally skipped.
+- Application: 241 test files, 2,073 tests passed, 3 intentionally skipped.
 - Database: 90 files, 1,888 tests passed.
 - Live integrations: 3 files, 6 tests passed against local Supabase.
 - Lint, TypeScript checks, and the production build passed.
