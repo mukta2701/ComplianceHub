@@ -26,11 +26,13 @@ Requirements: Node.js 22+, npm, Docker Desktop, and the Supabase CLI.
 ```bash
 cp .env.example .env.local
 npm install
-npx supabase start
+npx supabase start -x analytics
 npm run dev
 ```
 
-Use the local Supabase values printed by `supabase start` in `.env.local`. If you use
+The app does not require Supabase's optional local analytics container; excluding
+it keeps the small demo stack responsive. Use the local Supabase values printed
+by `supabase start` in `.env.local`. If you use
 `supabase status -o env`, map its names to the application names before starting
 Next.js (the CLI prints `API_URL`, `ANON_KEY`, and `SERVICE_ROLE_KEY`):
 

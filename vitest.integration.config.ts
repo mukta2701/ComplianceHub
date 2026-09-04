@@ -22,5 +22,11 @@ export default defineConfig({
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.integration.test.{ts,tsx}"],
     exclude: [...configDefaults.exclude],
+    // These suites intentionally share the same disposable local Supabase
+    // instance. Running files in parallel creates artificial lock contention
+    // between otherwise unrelated destructive setup/cleanup transactions.
+    fileParallelism: false,
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
   },
 });
