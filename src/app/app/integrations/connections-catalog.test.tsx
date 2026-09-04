@@ -76,13 +76,15 @@ describe("ConnectionsCatalog", () => {
     expect(githubCard).not.toHaveTextContent("Monitor repositories and security controls.");
     expect(githubCard).toHaveTextContent("acme/isms");
     expect(within(githubCard).getByText("acme/isms")).toHaveClass("connection-card-target");
-    const githubCardFooter = within(githubCard).getByRole("button", { name: "Manage" }).parentElement;
+    const githubCardFooter = within(githubCard).getByRole("button", { name: "Manage GitHub Issues" }).parentElement;
     expect(githubCardFooter).toHaveClass("connection-card-footer");
     expect(githubCardFooter).not.toHaveClass("connection-actions");
     expect(jiraCard).toHaveTextContent("Setup required");
     expect(jiraCard).toHaveTextContent("Project not selected");
+    expect(within(jiraCard).getByRole("button", { name: "Continue setup Jira" })).toBeVisible();
     expect(slackCard).toHaveTextContent("Connected");
     expect(slackCard).toHaveTextContent("#compliance-alerts");
+    expect(within(slackCard).getByRole("button", { name: "Manage Slack" })).toBeVisible();
     expect(screen.queryByRole("heading", { name: "Monitoring sources" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Evidence sources" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Alert channels" })).not.toBeInTheDocument();
@@ -143,15 +145,15 @@ describe("ConnectionsCatalog", () => {
 
     const githubCard = screen.getByRole("article", { name: "GitHub Issues connection" });
     expect(within(githubCard).getByText("Paused")).toBeVisible();
-    expect(within(githubCard).getByRole("button", { name: "Manage" })).toHaveClass("secondary");
+    expect(within(githubCard).getByRole("button", { name: "Manage GitHub Issues" })).toHaveClass("secondary");
 
     const slackCard = screen.getByRole("article", { name: "Slack connection" });
     expect(within(slackCard).getByText("Paused")).toBeVisible();
-    expect(within(slackCard).getByRole("button", { name: "Manage" })).toHaveClass("secondary");
+    expect(within(slackCard).getByRole("button", { name: "Manage Slack" })).toHaveClass("secondary");
 
     const jiraCard = screen.getByRole("article", { name: "Jira connection" });
     expect(within(jiraCard).getByText("Setup required")).toBeVisible();
-    expect(within(jiraCard).getByRole("button", { name: "Continue setup" })).toHaveClass("primary");
+    expect(within(jiraCard).getByRole("button", { name: "Continue setup Jira" })).toHaveClass("primary");
   });
 
   it("shows a provider as connected when any record is enabled", () => {
@@ -176,11 +178,11 @@ describe("ConnectionsCatalog", () => {
 
     const slackCard = screen.getByRole("article", { name: "Slack connection" });
     expect(within(slackCard).getByText("Connected")).toBeVisible();
-    expect(within(slackCard).getByRole("button", { name: "Manage" })).toHaveClass("secondary");
+    expect(within(slackCard).getByRole("button", { name: "Manage Slack" })).toHaveClass("secondary");
 
     const githubCard = screen.getByRole("article", { name: "GitHub Issues connection" });
     expect(within(githubCard).getByText("Not connected")).toBeVisible();
-    expect(within(githubCard).getByRole("button", { name: "Connect" })).toHaveClass("primary");
+    expect(within(githubCard).getByRole("button", { name: "Connect GitHub Issues" })).toHaveClass("primary");
   });
 
   it("opens only the selected provider management panel", async () => {
@@ -188,7 +190,7 @@ describe("ConnectionsCatalog", () => {
     render(<ConnectionsCatalog connections={connections} alertChannels={alertChannels} />);
 
     const githubCard = screen.getByRole("article", { name: "GitHub Issues connection" });
-    const githubManage = within(githubCard).getByRole("button", { name: "Manage" });
+    const githubManage = within(githubCard).getByRole("button", { name: "Manage GitHub Issues" });
     expect(githubManage).toHaveAttribute("aria-expanded", "false");
     expect(githubManage).toHaveAttribute("aria-controls", "connection-management-panel");
     await user.click(githubManage);
@@ -198,7 +200,7 @@ describe("ConnectionsCatalog", () => {
     expect(within(githubPanel).getByText("acme/isms")).toBeVisible();
 
     const slackCard = screen.getByRole("article", { name: "Slack connection" });
-    const slackManage = within(slackCard).getByRole("button", { name: "Manage" });
+    const slackManage = within(slackCard).getByRole("button", { name: "Manage Slack" });
     await user.click(slackManage);
     expect(githubManage).toHaveAttribute("aria-expanded", "false");
     expect(slackManage).toHaveAttribute("aria-expanded", "true");
@@ -218,10 +220,9 @@ describe("ConnectionsCatalog", () => {
 
     const githubCard = screen.getByRole("article", { name: "GitHub Issues connection" });
     expect(githubCard).toHaveTextContent("Not connected");
-    await user.click(within(githubCard).getByRole("button", { name: "Connect" }));
+    await user.click(within(githubCard).getByRole("button", { name: "Connect GitHub Issues" }));
 
-    const panel = screen.getByRole("region", { name: "Connect GitHub Issues" });
-    expect(within(panel).getByRole("button", { name: "Connect GitHub" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "Connect GitHub Issues" })).toBeVisible();
   });
 
   it("lets an Owner choose one digest channel and inspect safe delivery history", async () => {
@@ -249,7 +250,7 @@ describe("ConnectionsCatalog", () => {
       }]}
     />);
 
-    await user.click(within(screen.getByRole("article", { name: "Slack connection" })).getByRole("button", { name: "Manage" }));
+    await user.click(within(screen.getByRole("article", { name: "Slack connection" })).getByRole("button", { name: "Manage Slack" }));
     const panel = screen.getByRole("region", { name: "Manage Slack" });
     expect(within(panel).getByText("Daily digest")).toBeVisible();
     expect(within(panel).getByRole("button", { name: "Stop daily digest" })).toBeVisible();
@@ -277,7 +278,7 @@ describe("ConnectionsCatalog", () => {
       canManageDailyDigest
     />);
 
-    await user.click(within(screen.getByRole("article", { name: "Slack connection" })).getByRole("button", { name: "Manage" }));
+    await user.click(within(screen.getByRole("article", { name: "Slack connection" })).getByRole("button", { name: "Manage Slack" }));
     const panel = screen.getByRole("region", { name: "Manage Slack" });
     await user.click(within(panel).getByRole("button", { name: "Use #security-alerts for daily digest" }));
 
@@ -297,7 +298,7 @@ describe("ConnectionsCatalog", () => {
       canManageDailyDigest
     />);
 
-    await user.click(within(screen.getByRole("article", { name: "Slack connection" })).getByRole("button", { name: "Manage" }));
+    await user.click(within(screen.getByRole("article", { name: "Slack connection" })).getByRole("button", { name: "Manage Slack" }));
     const panel = screen.getByRole("region", { name: "Manage Slack" });
     await user.click(within(panel).getByRole("button", { name: "Stop daily digest" }));
 
@@ -323,7 +324,7 @@ describe("ConnectionsCatalog", () => {
       canManageDailyDigest
     />);
 
-    await user.click(within(screen.getByRole("article", { name: "Slack connection" })).getByRole("button", { name: "Manage" }));
+    await user.click(within(screen.getByRole("article", { name: "Slack connection" })).getByRole("button", { name: "Manage Slack" }));
     const panel = screen.getByRole("region", { name: "Manage Slack" });
     expect(within(panel).getByText("Paused")).toBeVisible();
     expect(within(panel).getByText("Daily digest")).toBeVisible();

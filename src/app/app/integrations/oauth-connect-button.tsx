@@ -9,7 +9,7 @@ import {
 } from "./actions";
 
 const PROVIDER_LABEL: Record<IntegrationProvider, string> = {
-  github: "GitHub",
+  github: "GitHub Issues",
   jira: "Jira",
 };
 

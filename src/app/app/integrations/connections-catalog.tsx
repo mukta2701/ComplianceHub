@@ -459,6 +459,7 @@ export function ConnectionsCatalog({
               ref={(element) => { triggerRefs.current[provider.id] = element; }}
               aria-controls="connection-management-panel"
               aria-expanded={selectedProvider === provider.id}
+              aria-label={`${action} ${provider.label}`}
               onClick={() => setSelectedProvider(provider.id)}
             >{action}</button>
           </div>
