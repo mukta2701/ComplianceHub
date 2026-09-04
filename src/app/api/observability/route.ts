@@ -6,6 +6,8 @@ import { logError } from "@/lib/observability/logger";
 export const dynamic = "force-dynamic";
 const MAX_OBSERVABILITY_BODY_BYTES = 8 * 1024;
 const OPAQUE_DIGEST = /^[A-Za-z0-9._:-]{1,200}$/;
+const OBSERVABILITY_GLOBAL_LIMIT = 300;
+const OBSERVABILITY_WINDOW_MS = 60_000;
 
 class ObservabilityRequestError extends Error {
   constructor(readonly status: number) { super("Invalid observability request"); }
@@ -73,7 +75,12 @@ async function readDigest(request: Request): Promise<string> {
 export async function POST(request: Request) {
   const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
   try {
-    await enforceRateLimit(`observability:${ip}`, { limit: 30, windowMs: 60_000 });
+    // The forwarded address can be rewritten by a trusted edge, but it is still
+    // attacker-controlled on some deployments. Keep the per-address burst
+    // guard for normal traffic and enforce a site-wide cap independently so
+    // rotating that header cannot create unbounded durable writes.
+    await enforceRateLimit("observability:global", { limit: OBSERVABILITY_GLOBAL_LIMIT, windowMs: OBSERVABILITY_WINDOW_MS });
+    await enforceRateLimit(`observability:${ip}`, { limit: 30, windowMs: OBSERVABILITY_WINDOW_MS });
   } catch {
     return NextResponse.json({ ok: false }, { status: 429 });
   }

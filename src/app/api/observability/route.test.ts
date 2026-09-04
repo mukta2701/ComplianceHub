@@ -58,6 +58,17 @@ describe("POST /api/observability", () => {
     expect(JSON.stringify(hoisted.logError.mock.calls)).not.toContain(secret);
   });
 
+  it("always applies a site-wide write cap even when the forwarded address changes", async () => {
+    const response = await POST(new Request("https://compliance.example/api/observability", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-forwarded-for": "198.51.100.8, 10.0.0.1" },
+      body: JSON.stringify({ digest: "safe-digest" }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(hoisted.enforceRateLimit).toHaveBeenCalledWith("observability:global", { limit: 300, windowMs: 60_000 });
+  });
+
   it("rejects non-JSON media types before parsing or logging", async () => {
     const response = await POST(new Request("https://compliance.example/api/observability", {
       method: "POST",

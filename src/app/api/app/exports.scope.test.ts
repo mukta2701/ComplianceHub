@@ -14,6 +14,7 @@ const hoisted = vi.hoisted(() => ({
   protectExport: vi.fn(),
   recordExportAudit: vi.fn(),
   queries: [] as Array<{ table: string; column: string; value: unknown }>,
+  queryErrors: new Set<string>(),
 }));
 
 vi.mock("@/lib/app-context", () => ({ requireAppContext: hoisted.requireContext }));
@@ -61,15 +62,15 @@ function fakeClient() {
         limit: vi.fn(() => builder),
         maybeSingle: vi.fn(async () => {
           const rows = rowsFor(table).filter((row) => equals.every(([column, value]) => row[column] === value));
-          return { data: rows[0] ?? null, error: null };
+          return { data: rows[0] ?? null, error: hoisted.queryErrors.has(table) ? { message: `${table} unavailable` } : null };
         }),
         single: vi.fn(async () => {
           const rows = rowsFor(table).filter((row) => equals.every(([column, value]) => row[column] === value));
-          return { data: rows[0] ?? null, error: null };
+          return { data: rows[0] ?? null, error: hoisted.queryErrors.has(table) ? { message: `${table} unavailable` } : null };
         }),
         then: (resolve: (value: unknown) => unknown, reject?: (reason: unknown) => unknown) => {
           const rows = rowsFor(table).filter((row) => equals.every(([column, value]) => row[column] === value));
-          return Promise.resolve({ data: rows, error: null }).then(resolve, reject);
+          return Promise.resolve({ data: rows, error: hoisted.queryErrors.has(table) ? { message: `${table} unavailable` } : null }).then(resolve, reject);
         },
       };
       return builder;
@@ -90,6 +91,9 @@ function context() {
 beforeEach(() => {
   vi.resetModules();
   hoisted.queries.length = 0;
+  hoisted.queryErrors.clear();
+  hoisted.protectExport.mockClear();
+  hoisted.recordExportAudit.mockClear();
   const activeContext = context();
   hoisted.requireContext.mockResolvedValue(activeContext);
   hoisted.protectExport.mockResolvedValue(undefined);
@@ -160,6 +164,17 @@ describe("active-organisation export boundaries", () => {
 
     expect(response.status).toBe(200);
     expect(body).toContain("Active evidence,note,current,2026-08-18,,Unassigned");
+  });
+
+  it("returns an error instead of a successful empty export when the source query fails", async () => {
+    hoisted.queryErrors.add("risks");
+    const { GET } = await import("./risks/export/route");
+
+    const response = await GET(new Request("http://localhost/api/app/risks/export?format=csv"));
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: "Could not export risks" });
+    expect(hoisted.recordExportAudit).not.toHaveBeenCalled();
   });
 
   it("does not export SoA items from a sibling organisation for an explicit register id", async () => {

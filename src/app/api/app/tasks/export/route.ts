@@ -11,8 +11,9 @@ export async function GET(request: Request) {
   const { supabase, organisation, user } = await requireAppContext();
   const auditContext = { organisationId: organisation.id, userId: user.id, resource: "tasks" as const, format };
   await protectExport(auditContext);
-  const { data } = await supabase.from("tasks").select("id,title,detail,status,due_on,recurrence,source,profiles:owner_id(display_name)").eq("organisation_id", organisation.id).order("due_on", { ascending: true, nullsFirst: false }).order("created_at", { ascending: false });
-  const rows = (data ?? []) as unknown as Row[];
+  const result = await supabase.from("tasks").select("id,title,detail,status,due_on,recurrence,source,profiles:owner_id(display_name)").eq("organisation_id", organisation.id).order("due_on", { ascending: true, nullsFirst: false }).order("created_at", { ascending: false });
+  if (result.error) return NextResponse.json({ error: "Could not export tasks" }, { status: 500, headers: { "cache-control": "private, no-store" } });
+  const rows = (result.data ?? []) as unknown as Row[];
   const columns: ExportColumn<Row>[] = [
     { header: "Title", value: (t) => t.title },
     { header: "Owner", value: (t) => one(t.profiles)?.display_name ?? "Unassigned" },

@@ -15,19 +15,24 @@ export async function GET(request: Request) {
   let sessionId = requestedSessionId;
   let catalogueVersionId: string | null = null;
   if (sessionId) {
-    const { data: session } = await supabase.from("assessment_sessions").select("id,catalogue_version_id").eq("id", sessionId).eq("organisation_id", organisation.id).maybeSingle();
+    const { data: session, error } = await supabase.from("assessment_sessions").select("id,catalogue_version_id").eq("id", sessionId).eq("organisation_id", organisation.id).maybeSingle();
+    if (error) return NextResponse.json({ error: "Could not export assessment" }, { status: 500, headers: { "cache-control": "private, no-store" } });
     if (!session) return NextResponse.json({ error: "No assessment session found" }, { status: 404 });
     catalogueVersionId = session.catalogue_version_id;
   } else {
-    const { data: latest } = await supabase.from("assessment_sessions").select("id,catalogue_version_id").eq("organisation_id", organisation.id).order("updated_at", { ascending: false }).limit(1).maybeSingle();
+    const { data: latest, error } = await supabase.from("assessment_sessions").select("id,catalogue_version_id").eq("organisation_id", organisation.id).order("updated_at", { ascending: false }).limit(1).maybeSingle();
+    if (error) return NextResponse.json({ error: "Could not export assessment" }, { status: 500, headers: { "cache-control": "private, no-store" } });
     if (!latest) return NextResponse.json({ error: "No assessment session found" }, { status: 404 });
     sessionId = latest.id;
     catalogueVersionId = latest.catalogue_version_id;
   }
-  const [{ data: questions }, { data: responses }] = await Promise.all([
+  const [questionsResult, responsesResult] = await Promise.all([
     supabase.from("catalogue_questions").select("id,code,prompt,position").eq("catalogue_version_id", catalogueVersionId).order("position"),
     supabase.from("assessment_responses").select("question_id,answer,evidence_note").eq("session_id", sessionId).eq("organisation_id", organisation.id),
   ]);
+  if (questionsResult.error || responsesResult.error) return NextResponse.json({ error: "Could not export assessment" }, { status: 500, headers: { "cache-control": "private, no-store" } });
+  const { data: questions } = questionsResult;
+  const { data: responses } = responsesResult;
   const responseByQuestion = new Map<string, { answer: string | null; evidence_note: string | null }>();
   for (const r of responses ?? []) responseByQuestion.set(r.question_id, { answer: r.answer, evidence_note: r.evidence_note });
   const rows: Row[] = (questions ?? []).map((q) => {

@@ -12,8 +12,9 @@ export async function GET(request: Request) {
   const { supabase, organisation, user } = await requireAppContext();
   const auditContext = { organisationId: organisation.id, userId: user.id, resource: "risks" as const, format };
   await protectExport(auditContext);
-  const { data } = await supabase.from("risks").select("reference,title,description,likelihood,impact,treatment_plan,status,review_date,risk_categories(name),profiles:owner_id(display_name)").eq("organisation_id", organisation.id).order("reference");
-  const rows = (data ?? []) as unknown as Row[];
+  const result = await supabase.from("risks").select("reference,title,description,likelihood,impact,treatment_plan,status,review_date,risk_categories(name),profiles:owner_id(display_name)").eq("organisation_id", organisation.id).order("reference");
+  if (result.error) return NextResponse.json({ error: "Could not export risks" }, { status: 500, headers: { "cache-control": "private, no-store" } });
+  const rows = (result.data ?? []) as unknown as Row[];
   const columns: ExportColumn<Row>[] = [
     { header: "Risk ID", value: (r) => r.reference },
     { header: "Risk Description", value: (r) => r.description || r.title },
