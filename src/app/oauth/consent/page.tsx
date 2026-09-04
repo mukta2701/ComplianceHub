@@ -32,7 +32,7 @@ export default async function OAuthConsentPage({ searchParams }: { searchParams:
     <section className="card" style={{ padding: "28px" }}>
       <p className="eyebrow">SECURE CONNECTION</p><h1>{clientName} wants to connect</h1>
       <p style={{ color: "#5b6473" }}>This application will act as your ComplianceHub account. Access remains limited by your workspace membership and can be revoked later.</p>
-      <dl className="fact-grid" style={{ margin: "20px 0" }}><div><dt>Identity information</dt><dd>{scopes.join(", ")}</dd></div><div><dt>Return destination</dt><dd>{redirectOrigin}</dd></div></dl>
+      <dl className="fact-grid" style={{ margin: "20px 0" }}><div><dt>Identity information</dt><dd>{scopes.join(", ")}</dd></div>{scopes.includes("offline_access") && <div><dt>Offline access</dt><dd>Allows this application to refresh its access when you are not actively using ComplianceHub. You can revoke the connection later.</dd></div>}<div><dt>Return destination</dt><dd>{redirectOrigin}</dd></div></dl>
       <form action={oauthConsentAction} style={{ display: "flex", gap: "10px" }}>
         <input type="hidden" name="authorizationId" value={authorizationId} />
         <button className="button primary" name="decision" value="approve">Approve connection</button>

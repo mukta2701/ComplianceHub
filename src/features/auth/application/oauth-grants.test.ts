@@ -17,9 +17,11 @@ describe("user OAuth grants", () => {
     await expect(revokeUserOAuthGrant({ auth: { oauth: { revokeGrant: vi.fn().mockResolvedValue({ error: { message: "secret" } }) } } } as never, "11111111-1111-4111-8111-111111111111")).resolves.toEqual({ ok: false });
   });
 
-  it("fails closed when consent requests any unsupported scope", () => {
-    expect(validateRequestedIdentityScopes("openid email profile")).toEqual(["openid", "email", "profile"]);
-    expect(validateRequestedIdentityScopes("openid admin:write")).toBeNull();
+  it("allows the four identity and refresh scopes while failing closed on any unknown scope", () => {
+    expect(validateRequestedIdentityScopes("openid profile email")).toEqual(["openid", "profile", "email"]);
+    expect(validateRequestedIdentityScopes("openid profile email offline_access")).toEqual(["openid", "profile", "email", "offline_access"]);
+    expect(validateRequestedIdentityScopes("phone")).toBeNull();
+    expect(validateRequestedIdentityScopes("openid profile email offline_access phone")).toBeNull();
     expect(validateRequestedIdentityScopes("   ")).toBeNull();
   });
 

@@ -19,14 +19,23 @@ describe("OAuthConsentPage scopes", () => {
     hoisted.getAuthorizationDetails.mockResolvedValue({ data: { ...base, scope: "openid email offline_access profile" }, error: null });
     render(await OAuthConsentPage({ searchParams: Promise.resolve({ authorization_id: id }) }));
     expect(screen.getByText("openid, email, offline_access, profile")).toBeInTheDocument();
+    expect(screen.getByText("Offline access")).toBeInTheDocument();
+    expect(screen.getByText(/refresh its access when you are not actively using ComplianceHub/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Approve connection" })).toBeInTheDocument();
   });
-  it("fails closed and removes approval controls for an unsupported scope", async () => {
-    hoisted.getAuthorizationDetails.mockResolvedValue({ data: { ...base, scope: "openid admin:write" }, error: null });
+  it("shows approval controls without an offline disclosure for the three identity scopes", async () => {
+    hoisted.getAuthorizationDetails.mockResolvedValue({ data: { ...base, scope: "openid email profile" }, error: null });
+    render(await OAuthConsentPage({ searchParams: Promise.resolve({ authorization_id: id }) }));
+    expect(screen.getByText("openid, email, profile")).toBeInTheDocument();
+    expect(screen.queryByText("Offline access")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve connection" })).toBeInTheDocument();
+  });
+  it.each(["phone", "openid email profile offline_access phone"])("fails closed without approving or reflecting unsupported scope request %s", async (scope) => {
+    hoisted.getAuthorizationDetails.mockResolvedValue({ data: { ...base, scope }, error: null });
     render(await OAuthConsentPage({ searchParams: Promise.resolve({ authorization_id: id }) }));
     expect(screen.getByRole("alert")).toHaveTextContent("unsupported access");
     expect(screen.queryByRole("button", { name: "Approve connection" })).not.toBeInTheDocument();
-    expect(document.body).not.toHaveTextContent("admin:write");
+    expect(document.body).not.toHaveTextContent("phone");
   });
   it("renders an allowlisted terminal action error without requiring an authorization id", async () => {
     render(await OAuthConsentPage({ searchParams: Promise.resolve({ message: "Could not complete that authorization request." }) }));

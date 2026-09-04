@@ -32,6 +32,11 @@ describe("oauthConsentAction", () => {
     const method = decision === "approve" ? hoisted.client.auth.oauth.approveAuthorization : hoisted.client.auth.oauth.denyAuthorization;
     expect(method).toHaveBeenCalledWith(authorizationId, { skipBrowserRedirect: true });
   });
+  it("approves the exact identity and offline refresh scope set", async () => {
+    hoisted.client.auth.oauth.getAuthorizationDetails.mockResolvedValue({ data: { ...details, scope: "openid profile email offline_access" }, error: null });
+    await expect(oauthConsentAction(form("approve"))).rejects.toThrow(/^REDIRECT:https:\/\/client\.example\/callback/);
+    expect(hoisted.client.auth.oauth.approveAuthorization).toHaveBeenCalledWith(authorizationId, { skipBrowserRedirect: true });
+  });
   it("submits a bounded opaque Supabase authorization id", async () => {
     const opaqueId = "elvrapg4j3ab5gvtp4zyya7qi3e6mrhg";
     await expect(oauthConsentAction(form("approve", opaqueId))).rejects.toThrow(/^REDIRECT:https:\/\/client\.example\/callback/);
@@ -41,8 +46,8 @@ describe("oauthConsentAction", () => {
     hoisted.client.auth.oauth.approveAuthorization.mockResolvedValue({ data: { redirect_url: "https://evil.example/steal" }, error: null });
     await expect(oauthConsentAction(form())).rejects.toThrow("REDIRECT:/oauth/consent?message=Could+not+complete+that+authorization+request.");
   });
-  it("fails closed without approving when an unsupported scope is requested", async () => {
-    hoisted.client.auth.oauth.getAuthorizationDetails.mockResolvedValue({ data: { ...details, scope: "openid admin:write" }, error: null });
+  it.each(["phone", "openid profile email offline_access phone"])("fails closed without approving or reflecting unsupported scope request %s", async (scope) => {
+    hoisted.client.auth.oauth.getAuthorizationDetails.mockResolvedValue({ data: { ...details, scope }, error: null });
     await expect(oauthConsentAction(form())).rejects.toThrow("REDIRECT:/oauth/consent?message=That+authorization+request+requests+unsupported+access.");
     expect(hoisted.client.auth.oauth.approveAuthorization).not.toHaveBeenCalled();
   });
