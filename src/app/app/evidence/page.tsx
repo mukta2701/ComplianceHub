@@ -22,10 +22,12 @@ export default async function EvidencePage({
   const { supabase, organisation, membership } = await requireAppContext();
   const isMember = membership?.role === "member";
   const params = await searchParams;
-  const [{ data: items }, { data: controls }, { data: policies }, { data: aiSettings }] = await Promise.all([
+  const [{ data: items }, { data: controls }, { data: policies }, { data: risks }, { data: tasks }, { data: aiSettings }] = await Promise.all([
     supabase.from("evidence").select("id,title,kind,url,storage_path,status,collected_on,valid_until,source_id,evidence_sources(provider),evidence_links(id,control_id,risk_id,task_id,controls(code,title),risks(reference),tasks(title))").eq("organisation_id", organisation.id).order("created_at", { ascending: false }).limit(200),
     supabase.from("controls").select("id,code,title").order("position"),
     supabase.from("policies").select("id,reference,title").eq("organisation_id", organisation.id).order("reference"),
+    supabase.from("risks").select("id,reference,title").eq("organisation_id", organisation.id).in("status", ["open", "treating", "accepted"]).order("reference"),
+    supabase.from("tasks").select("id,title").eq("organisation_id", organisation.id).in("status", ["open", "in_progress"]).order("due_on", { ascending: true, nullsFirst: false }).order("title"),
     supabase.from("ai_workspace_settings").select("enabled").eq("organisation_id", organisation.id).maybeSingle(),
   ]);
   const asOf = new Date().toISOString();
@@ -45,6 +47,8 @@ export default async function EvidencePage({
     <>
       {controls?.map((c) => <option key={c.id} value={`control:${c.id}`}>{c.code}: {c.title}</option>)}
       <optgroup label="Policies">{policies?.map((p) => <option key={p.id} value={`policy:${p.id}`}>{p.reference}: {p.title}</option>)}</optgroup>
+      <optgroup label="Risks">{risks?.map((risk) => <option key={risk.id} value={`risk:${risk.id}`}>Risk {risk.reference}: {risk.title}</option>)}</optgroup>
+      <optgroup label="Tasks">{tasks?.map((task) => <option key={task.id} value={`task:${task.id}`}>Task: {task.title}</option>)}</optgroup>
     </>
   );
   return <>

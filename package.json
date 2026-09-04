@@ -20,7 +20,11 @@
     "test:e2e": "playwright test",
     "github:shadow-proof": "node --conditions=react-server --import=tsx scripts/github-shadow-proof.ts",
     "demo:ceo-fixture": "node --import=tsx scripts/local-ceo-demo-fixture.ts",
-    "verify": "npm run lint && npm run typecheck && npm test && npm run build"
+    "verify": "npm run lint && npm run typecheck && npm test && npm run build",
+    "demo:build": "node --import=tsx scripts/demo-local.ts build",
+    "demo:start": "node --import=tsx scripts/demo-local.ts start",
+    "demo:setup": "node --import=tsx scripts/demo-local.ts setup",
+    "demo:verify": "node --import=tsx scripts/demo-local.ts setup -- --verify-only"
   },
   "dependencies": {
     "@modelcontextprotocol/core": "2.0.0",

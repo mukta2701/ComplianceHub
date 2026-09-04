@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 function query(table: string) {
   const chain: Record<string, unknown> = {};
-  for (const method of ["select", "eq", "order", "limit", "maybeSingle"]) chain[method] = vi.fn(() => chain);
+  for (const method of ["select", "eq", "in", "order", "limit", "maybeSingle"]) chain[method] = vi.fn(() => chain);
   chain.then = (resolve: (value: unknown) => unknown) => Promise.resolve({ data: table === "evidence" ? [{ id: "e1", title: "Access review", kind: "note", url: null, storage_path: null, status: "current", collected_on: "2026-09-01", valid_until: null, source_id: null, evidence_sources: null, evidence_links: [] }] : table === "ai_workspace_settings" ? { enabled: true } : [], error: null }).then(resolve);
   return chain;
 }
