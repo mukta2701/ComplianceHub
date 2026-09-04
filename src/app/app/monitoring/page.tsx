@@ -120,7 +120,7 @@ function GitHubMonitoringSection({
       aria-label="GitHub check summary"
       style={{ marginTop: "12px", padding: "14px 18px", fontSize: "13px", fontWeight: 700 }}
     >
-      {officialResults.length} checks · {passed} passed · <Link href="#active-findings">{needAction} need action</Link> · {unknown} could not be verified
+      {officialResults.length} {officialResults.length === 1 ? "check" : "checks"} · {passed} passed · <Link href="#active-findings">{needAction} {needAction === 1 ? "needs" : "need"} action</Link> · {unknown} could not be verified
       {notApplicable > 0 && <> · {notApplicable} not applicable</>}
     </Card>}
   </section>;

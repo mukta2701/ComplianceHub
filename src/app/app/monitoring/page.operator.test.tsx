@@ -184,7 +184,16 @@ describe("operator monitoring page", () => {
     render(await MonitoringPage());
 
     expect(screen.getByRole("note", { name: "GitHub check summary" }))
-      .toHaveTextContent("4 checks · 1 passed · 1 need action · 1 could not be verified · 1 not applicable");
+      .toHaveTextContent("4 checks · 1 passed · 1 needs action · 1 could not be verified · 1 not applicable");
+  });
+
+  it("uses singular grammar for one failed GitHub check", async () => {
+    hoisted.officialOutcomes = ["fail"];
+    render(await MonitoringPage());
+
+    const summary = screen.getByRole("note", { name: "GitHub check summary" });
+    expect(summary).toHaveTextContent("1 check · 0 passed · 1 needs action · 0 could not be verified");
+    expect(within(summary).getByRole("link", { name: "1 needs action" })).toHaveAttribute("href", "#active-findings");
   });
 
   it("uses neutral zero-findings wording even when GitHub is connected", async () => {
