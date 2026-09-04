@@ -14,6 +14,13 @@ vi.mock("./actions", () => ({
   setDailyDigestChannelAction: vi.fn(),
   setIntegrationConnectionEnabledAction: vi.fn(),
 }));
+vi.mock("./jira/actions", () => ({
+  configureJiraProjectsAction: vi.fn(),
+  disconnectJiraConnectionAction: vi.fn(),
+  selectJiraSiteAction: vi.fn(),
+  setJiraConnectionEnabledAction: vi.fn(),
+  syncJiraConnectionAction: vi.fn(),
+}));
 
 import { ConnectionsCatalog } from "./connections-catalog";
 import { setDailyDigestChannelAction } from "./actions";
@@ -42,6 +49,16 @@ const alertChannels = [{
   enabled: true,
   daily_digest_enabled: true,
 }];
+
+const nativeJiraConnection = {
+  id: "native-jira-1",
+  provider: "jira" as const,
+  label: "Acme Jira",
+  provider_account_name: "Acme workspace",
+  enabled: true,
+  health: "healthy" as const,
+  target_count: 2,
+};
 
 describe("ConnectionsCatalog", () => {
   it("places supplied Settings navigation between the page heading and provider grid", () => {
@@ -185,9 +202,24 @@ describe("ConnectionsCatalog", () => {
     expect(within(githubCard).getByRole("button", { name: "Connect GitHub Issues" })).toHaveClass("primary");
   });
 
+  it("renders native Jira connections with project scope and native lifecycle actions", async () => {
+    const user = userEvent.setup();
+    render(<ConnectionsCatalog connections={[]} alertChannels={[]} nativeJiraConnections={[nativeJiraConnection]} />);
+
+    const jiraCard = screen.getByRole("article", { name: "Jira connection" });
+    expect(jiraCard).toHaveTextContent("Connected");
+    expect(jiraCard).toHaveTextContent("2 projects");
+    await user.click(within(jiraCard).getByRole("button", { name: "Manage Jira" }));
+    const panel = screen.getByRole("region", { name: "Manage Jira" });
+    expect(panel).toHaveTextContent("Acme workspace");
+    expect(within(panel).getByRole("button", { name: "Pause Jira" })).toBeVisible();
+    expect(within(panel).getByRole("button", { name: "Sync Jira" })).toBeVisible();
+    expect(within(panel).getByRole("button", { name: "Disconnect" })).toBeVisible();
+  });
+
   it("opens only the selected provider management panel", async () => {
     const user = userEvent.setup();
-    render(<ConnectionsCatalog connections={connections} alertChannels={alertChannels} />);
+    render(<ConnectionsCatalog connections={connections} alertChannels={alertChannels} canManageDailyDigest />);
 
     const githubCard = screen.getByRole("article", { name: "GitHub Issues connection" });
     const githubManage = within(githubCard).getByRole("button", { name: "Manage GitHub Issues" });
@@ -212,6 +244,16 @@ describe("ConnectionsCatalog", () => {
     expect(screen.queryByRole("region", { name: "Manage Slack" })).not.toBeInTheDocument();
     expect(slackManage).toHaveFocus();
     expect(slackManage).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("keeps Slack destinations visible but hides Owner-only mutations from Admins", async () => {
+    const user = userEvent.setup();
+    render(<ConnectionsCatalog connections={connections} alertChannels={alertChannels} />);
+    await user.click(within(screen.getByRole("article", { name: "Slack connection" })).getByRole("button", { name: "Manage Slack" }));
+    const panel = screen.getByRole("region", { name: "Manage Slack" });
+    expect(within(panel).getByText("#compliance-alerts")).toBeVisible();
+    expect(within(panel).queryAllByRole("button", { name: /Pause|Enable|Remove|Add Slack|daily digest/i })).toHaveLength(0);
+    expect(within(panel).queryByRole("textbox", { name: "Slack destination URL" })).not.toBeInTheDocument();
   });
 
   it("opens a focused connection panel for a provider that is not connected", async () => {

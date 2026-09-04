@@ -12,14 +12,29 @@ import {
   setDailyDigestChannelAction,
   setIntegrationConnectionEnabledAction,
 } from "./actions";
+import {
+  disconnectJiraConnectionAction,
+  setJiraConnectionEnabledAction,
+  syncJiraConnectionAction,
+} from "./jira/actions";
 
 export type ConnectionSummary = {
   id: string;
   provider: "github" | "jira";
   label: string;
   config: { owner?: string; repo?: string; baseUrl?: string; projectKey?: string; cloudId?: string };
-  connection_mode: "sandbox" | "oauth";
+  connection_mode: "sandbox" | "oauth" | "jira_oauth";
   enabled: boolean;
+};
+
+export type NativeJiraConnectionSummary = {
+  id: string;
+  provider: "jira";
+  label: string;
+  provider_account_name: string | null;
+  enabled: boolean;
+  health: "never_synced" | "healthy" | "needs_attention";
+  target_count: number;
 };
 
 export type AlertChannelSummary = {
@@ -78,10 +93,15 @@ function connectionNeedsSetup(connection: ConnectionSummary) {
   return !connection.config.cloudId;
 }
 
+function nativeJiraNeedsSetup(connection: NativeJiraConnectionSummary) {
+  return connection.target_count < 1;
+}
+
 function providerTargetSummary(
   provider: ProviderId,
   connections: ConnectionSummary[],
   alertChannels: AlertChannelSummary[],
+  nativeJiraConnections: NativeJiraConnectionSummary[],
 ) {
   if (provider === "slack") {
     if (alertChannels.length === 0) return "Not configured";
@@ -89,6 +109,10 @@ function providerTargetSummary(
     return alertChannels[0].label || "Slack channel";
   }
   const providerConnections = connections.filter((connection) => connection.provider === provider);
+  if (provider === "jira" && nativeJiraConnections.length > 0) {
+    const count = nativeJiraConnections.reduce((total, connection) => total + connection.target_count, 0);
+    return count === 1 ? "1 project" : `${count} projects`;
+  }
   if (providerConnections.length === 0) return "Not configured";
   if (providerConnections.length > 1) return `${providerConnections.length} connections`;
   const connection = providerConnections[0];
@@ -155,6 +179,7 @@ function ProviderPanel({
   panelRef,
   canManageDailyDigest,
   digestDeliveries,
+  nativeJiraConnections,
 }: {
   provider: ProviderId;
   connections: ConnectionSummary[];
@@ -163,10 +188,13 @@ function ProviderPanel({
   panelRef: React.RefObject<HTMLElement | null>;
   canManageDailyDigest: boolean;
   digestDeliveries: DailyDigestDeliverySummary[];
+  nativeJiraConnections: NativeJiraConnectionSummary[];
 }) {
   const metadata = PROVIDERS.find((candidate) => candidate.id === provider)!;
   const providerConnections = connections.filter((connection) => connection.provider === provider);
-  const isConnected = provider === "slack" ? alertChannels.length > 0 : providerConnections.length > 0;
+  const isConnected = provider === "slack"
+    ? alertChannels.length > 0
+    : providerConnections.length > 0 || (provider === "jira" && nativeJiraConnections.length > 0);
   const panelVerb = isConnected ? "Manage" : "Connect";
 
   return <section
@@ -197,6 +225,7 @@ function ProviderPanel({
     /> : <SystemPanel
       provider={provider}
       connections={providerConnections}
+      nativeJiraConnections={provider === "jira" ? nativeJiraConnections : []}
     />}
   </section>;
 }
@@ -204,22 +233,51 @@ function ProviderPanel({
 function SystemPanel({
   provider,
   connections,
+  nativeJiraConnections,
 }: {
   provider: "github" | "jira";
   connections: ConnectionSummary[];
+  nativeJiraConnections: NativeJiraConnectionSummary[];
 }) {
   const label = provider === "github" ? "GitHub Issues" : "Jira";
 
-  if (connections.length === 0) {
+  if (connections.length === 0 && nativeJiraConnections.length === 0) {
     return <div className="connections-panel-empty">
       <p>{provider === "github"
         ? "Connect GitHub, then choose the repository where ComplianceHub may create remediation issues."
         : "Connect your Jira workspace, then choose exactly what ComplianceHub may use."}</p>
-      <OAuthConnectButton provider={provider} />
+      {provider === "jira" ? <a className="button primary" href="/api/integrations/jira/connect">Connect Jira</a> : <OAuthConnectButton provider={provider} />}
     </div>;
   }
 
   return <div className="connections-account-list">
+    {nativeJiraConnections.map((connection) => {
+      const needsSetup = nativeJiraNeedsSetup(connection);
+      const healthLabel = connection.health === "healthy" ? "Healthy" : connection.health === "needs_attention" ? "Needs attention" : "Not synced";
+      return <div className="connections-account" key={connection.id}>
+        <div className="connections-account-summary">
+          <div>
+            <strong>{connection.label || label}</strong>
+            <p>{connection.provider_account_name || "Jira workspace"} · {connection.target_count} {connection.target_count === 1 ? "project" : "projects"}</p>
+          </div>
+          <span style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+            <Pill tone={needsSetup ? "amber" : connection.enabled ? "green" : "neutral"}>{needsSetup ? "Setup required" : connection.enabled ? "Active" : "Paused"}</Pill>
+            {!needsSetup && <Pill tone={connection.health === "healthy" ? "green" : connection.health === "needs_attention" ? "amber" : "neutral"}>{healthLabel}</Pill>}
+          </span>
+        </div>
+        {needsSetup ? <p className="field-hint">Reconnect Jira to choose at least one project.</p> : <div className="connections-account-actions">
+          <ToggleForm id={connection.id} enabled={connection.enabled} label={label} action={setJiraConnectionEnabledAction} />
+          <form action={syncJiraConnectionAction}>
+            <input type="hidden" name="id" value={connection.id} />
+            <button className="button secondary" type="submit">Sync Jira</button>
+          </form>
+          <form action={disconnectJiraConnectionAction}>
+            <input type="hidden" name="id" value={connection.id} />
+            <button className="button secondary danger" type="submit">Disconnect</button>
+          </form>
+        </div>}
+      </div>;
+    })}
     {connections.map((connection) => {
       const needsSetup = connectionNeedsSetup(connection);
       const target = provider === "github"
@@ -335,7 +393,7 @@ function SlackPanel({ alertChannels, canManageDailyDigest, digestDeliveries }: {
             {channel.daily_digest_enabled && <Pill tone="blue">Daily digest</Pill>}
           </span>
         </div>
-        <div className="connections-account-actions">
+        {canManageDailyDigest && <div className="connections-account-actions">
           <ToggleForm
             id={channel.id}
             enabled={channel.enabled}
@@ -351,13 +409,13 @@ function SlackPanel({ alertChannels, canManageDailyDigest, digestDeliveries }: {
             pendingChannelId={digestPendingChannelId}
             onSubmit={submitDigestChannel}
           />}
-        </div>
+        </div>}
       </div>)}
     </div>}
 
     {digestMessage && <p className="field-hint" role="status" aria-live="polite">{digestMessage}</p>}
 
-    <form action={addAlertChannelAction} className="app-form connections-slack-form">
+    {canManageDailyDigest ? <form action={addAlertChannelAction} className="app-form connections-slack-form">
       <h4>{alertChannels.length > 0 ? "Add another channel" : "Add a channel"}</h4>
       <div className="form-grid">
         <label>Slack destination URL<input name="endpoint" type="url" placeholder="Paste the Slack HTTPS endpoint" required /></label>
@@ -366,7 +424,7 @@ function SlackPanel({ alertChannels, canManageDailyDigest, digestDeliveries }: {
       </div>
       <button className="button primary" type="submit">Add Slack channel</button>
       <p className="field-hint">The destination is encrypted and never displayed again.</p>
-    </form>
+    </form> : <p className="field-hint">A workspace Owner manages Slack destinations.</p>}
 
     {canManageDailyDigest && <section style={{ marginTop: "20px" }} aria-label="Daily digest delivery history">
       <h4>Recent daily digests</h4>
@@ -393,12 +451,14 @@ export function ConnectionsCatalog({
   navigation,
   canManageDailyDigest = false,
   digestDeliveries = [],
+  nativeJiraConnections = [],
 }: {
   connections: ConnectionSummary[];
   alertChannels: AlertChannelSummary[];
   navigation?: React.ReactNode;
   canManageDailyDigest?: boolean;
   digestDeliveries?: DailyDigestDeliverySummary[];
+  nativeJiraConnections?: NativeJiraConnectionSummary[];
 }) {
   const [selectedProvider, setSelectedProvider] = useState<ProviderId | null>(null);
   const panelRef = useRef<HTMLElement>(null);
@@ -430,8 +490,9 @@ export function ConnectionsCatalog({
     <div className="connections-provider-grid connections-grid" data-testid="connections-grid">
       {PROVIDERS.map((provider) => {
         const providerConnections = connections.filter((connection) => connection.provider === provider.id);
-        const records = provider.id === "slack" ? liveSlackChannels : providerConnections;
-        const needsSetup = providerConnections.some(connectionNeedsSetup);
+        const nativeConnections = provider.id === "jira" ? nativeJiraConnections : [];
+        const records = provider.id === "slack" ? liveSlackChannels : [...providerConnections, ...nativeConnections];
+        const needsSetup = providerConnections.some(connectionNeedsSetup) || nativeConnections.some(nativeJiraNeedsSetup);
         const hasEnabledRecord = records.some((record) => record.enabled);
         const status = records.length === 0
           ? "Not connected"
@@ -441,7 +502,7 @@ export function ConnectionsCatalog({
               ? "Connected"
               : "Paused";
         const action = records.length === 0 ? "Connect" : needsSetup ? "Continue setup" : "Manage";
-        const targetSummary = providerTargetSummary(provider.id, connections, liveSlackChannels);
+        const targetSummary = providerTargetSummary(provider.id, connections, liveSlackChannels, nativeJiraConnections);
         return <article className="connections-provider-card connection-card" aria-label={`${provider.label} connection`} key={provider.id}>
           <div className="connections-provider-heading connection-card-head">
             <span className={`connections-provider-mark connection-icon ${provider.id}`} aria-hidden="true">{provider.mark}</span>
@@ -475,6 +536,7 @@ export function ConnectionsCatalog({
       onClose={closeProviderPanel}
       canManageDailyDigest={canManageDailyDigest}
       digestDeliveries={digestDeliveries}
+      nativeJiraConnections={nativeJiraConnections}
     />}
   </div>;
 }

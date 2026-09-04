@@ -1,3 +1,4 @@
+import { buildQueuedSlackPayload, toSafeSlackDeliveryPayload, type SlackAlertDeliveryStore, type SlackDeliveryLeaseIdentity } from "./slack-alert-queue";
 import type { CheckSeverity } from "../domain/monitor-provider";
 import { approveSlackDestination } from "@/features/mcp/application/slack-destination-policy";
 
@@ -43,32 +44,9 @@ export function meetsSeverity(finding: CheckSeverity, floor: CheckSeverity): boo
   return SEVERITY_RANK[finding] >= SEVERITY_RANK[floor];
 }
 
-const SEVERITY_EMOJI: Record<CheckSeverity, string> = { low: "🔵", medium: "🟡", high: "🟠", critical: "🔴" };
-
-// Slack Block Kit payload — a compact alert card. Kept pure so the exact blocks
-// are asserted in tests without hitting the webhook.
-export function buildSlackPayload(finding: AlertFinding): {
-  text: string;
-  blocks: unknown[];
-} {
-  const emoji = SEVERITY_EMOJI[finding.severity];
-  const heading = `${emoji} ComplianceHub alert — ${finding.severity.toUpperCase()}`;
-  const text = `${heading}: ${finding.title} (${finding.controlRef} · ${finding.subjectId})`;
-  return {
-    text, // notification fallback
-    blocks: [
-      { type: "section", text: { type: "mrkdwn", text: `*${heading}*\n${finding.title}` } },
-      {
-        type: "section",
-        fields: [
-          { type: "mrkdwn", text: `*Control:*\n${finding.controlRef}` },
-          { type: "mrkdwn", text: `*Subject:*\n${finding.subjectId}` },
-        ],
-      },
-      { type: "section", text: { type: "mrkdwn", text: finding.detail } },
-      { type: "context", elements: [{ type: "mrkdwn", text: "Detected by ComplianceHub continuous monitoring" }] },
-    ],
-  };
+// Shared bounded payload: all provider-controlled content is literal Slack text.
+export function buildSlackPayload(finding: AlertFinding): { text: string; blocks: unknown[] } {
+  return buildQueuedSlackPayload(toSafeSlackDeliveryPayload(finding));
 }
 
 export type WhatsAppPayload = {
@@ -105,6 +83,7 @@ export type DeliverPorts = {
   // Write the in-app notification(s) for this finding (recipient resolution +
   // idempotent upsert live in the orchestrator, which owns the DB handle).
   notifyInApp: (finding: AlertFinding) => Promise<void>;
+  slackDelivery?: { store: SlackAlertDeliveryStore; workerId: string };
 };
 
 // Deliver one finding to one channel. Never throws: a channel that errors or
@@ -118,6 +97,7 @@ export async function deliverAlert(
   if (!meetsSeverity(finding.severity, channel.minSeverity)) {
     return { ...base, status: "skipped", reason: "below channel min_severity" };
   }
+  let slackLease: SlackDeliveryLeaseIdentity | null = null;
   try {
     switch (channel.type) {
       case "slack": {
@@ -130,7 +110,25 @@ export async function deliverAlert(
         if (approved.status !== "approved") {
           return { ...base, status: "failed", reason: "Slack destination is not approved" };
         }
-        await ports.postSlack(approved.canonicalUrl, buildSlackPayload(finding));
+        const safePayload = toSafeSlackDeliveryPayload(finding);
+        if (ports.slackDelivery) {
+          slackLease = await ports.slackDelivery.store.enqueueAndClaim({
+            organisationId: finding.organisationId,
+            channelId: channel.id,
+            kind: "monitoring_finding", subjectType: "monitoring_finding",
+            subjectId: `${finding.checkId}::${finding.subjectId}`.slice(0, 512),
+            payload: safePayload,
+          }, ports.slackDelivery.workerId);
+          if (!slackLease) return { ...base, status: "skipped", reason: "alert already queued or delivered" };
+        }
+        // Enqueueing can await I/O: recheck the destination immediately before transport.
+        const finalApproval = approveSlackDestination(approved.canonicalUrl);
+        if (finalApproval.status !== "approved") throw new Error("Slack destination is not approved");
+        await ports.postSlack(finalApproval.canonicalUrl, buildQueuedSlackPayload(safePayload));
+        if (slackLease && ports.slackDelivery
+          && !await ports.slackDelivery.store.complete(slackLease.deliveryId, slackLease.lockToken)) {
+          return { ...base, status: "failed", reason: "Alert delivery outcome could not be recorded." };
+        }
         return { ...base, status: "delivered" };
       }
       case "in_app": {
@@ -148,6 +146,14 @@ export async function deliverAlert(
       }
     }
   } catch (error) {
+    if (channel.type === "slack") {
+      if (slackLease && ports.slackDelivery) {
+        try { await ports.slackDelivery.store.fail(slackLease.deliveryId, slackLease.lockToken); }
+        catch { /* The expired lease remains recoverable by the queue worker. */ }
+      }
+      return { ...base, status: "failed", reason: slackLease
+        ? "Alert delivery failed. Retry scheduled." : "Slack alert delivery failed." };
+    }
     return { ...base, status: "failed", reason: error instanceof Error ? error.message : "delivery error" };
   }
 }

@@ -1,4 +1,8 @@
-import type { CheckResult, MonitorProviderKind } from "../domain/monitor-provider";
+import type {
+  CheckResult,
+  MonitorConnectionMode,
+  MonitorProviderKind,
+} from "../domain/monitor-provider";
 import { findingKey, planFindings, planResolutions } from "../domain/detect";
 import type { AlertChannel, AlertFinding, DeliveryResult } from "./deliver";
 
@@ -15,7 +19,7 @@ export type MonitorSource = {
   provider: MonitorProviderKind;
   config: Record<string, unknown>;
   accessToken: string;
-  connectionMode: "sandbox" | "oauth";
+  connectionMode: MonitorConnectionMode;
   brokerConnectionId: string | null;
   brokerProviderConfigKey: string | null;
 };

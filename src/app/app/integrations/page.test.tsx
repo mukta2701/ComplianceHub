@@ -59,7 +59,10 @@ function query(table: string) {
 
 vi.mock("@/lib/app-context", () => ({
   requireAppContext: () => Promise.resolve({
-    supabase: { from: (table: string) => query(table) },
+    supabase: {
+      from: (table: string) => query(table),
+      rpc: vi.fn(() => Promise.resolve({ data: [], error: null })),
+    },
     organisation: { id: "org-1", name: "Example Ltd" },
     membership: { role: hoisted.role },
     user: { id: "user-1", email: "admin@example.test" },

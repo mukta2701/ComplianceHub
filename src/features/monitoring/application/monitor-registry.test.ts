@@ -15,4 +15,26 @@ describe("monitor provider mode routing", () => {
     vi.stubEnv("MONITORING_LIVE", "");
     expect(resolveMonitorProvider({ provider: "github", connectionMode: "oauth" })).toBe(githubMonitorProvider);
   });
+
+  it("routes native Jira sources to the Jira provider", async () => {
+    const jiraRequest = async () => ({ status: 200, data: { isLast: true, issues: [] } });
+    const provider = resolveMonitorProvider(
+      { provider: "jira", connectionMode: "jira_oauth" },
+      { jiraRequest },
+    );
+
+    const checks = await provider.runChecks({
+      id: "jira-source",
+      provider: "jira",
+      config: {
+        baseUrl: "https://acme.atlassian.net",
+        cloudId: "1324a887-45db-4bf4-8e99-ef0ff456d421",
+        projectKey: "SEC",
+      },
+      connectionMode: "jira_oauth",
+    });
+
+    expect(checks).toHaveLength(3);
+    expect(checks.every((check) => check.checkId.startsWith("jira."))).toBe(true);
+  });
 });

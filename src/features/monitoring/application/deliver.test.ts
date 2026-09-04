@@ -25,10 +25,11 @@ describe("meetsSeverity", () => {
 });
 
 describe("buildSlackPayload", () => {
-  it("puts the control, subject and detail into the blocks and a text fallback", () => {
+  it("puts provider text in literal blocks with a safe notification fallback", () => {
     const payload = buildSlackPayload(finding);
-    expect(payload.text).toContain("A.8.32");
-    expect(payload.text).toContain("acme/isms");
+    expect(payload.text).toContain("CRITICAL");
+    expect(JSON.stringify(payload.blocks)).toContain("A.8.32");
+    expect(JSON.stringify(payload.blocks)).toContain("acme/isms");
     expect(JSON.stringify(payload.blocks)).toContain("Production branch is unprotected");
     expect(JSON.stringify(payload.blocks)).toContain("No protection rule on main.");
   });
@@ -184,6 +185,6 @@ describe("deliverAlert", () => {
     const p = { postSlack: vi.fn().mockRejectedValue(new Error("503 from Slack")), notifyInApp: vi.fn() };
     const result = await deliverAlert(channel({ type: "slack", config: { webhookUrl: APPROVED_SLACK_WEBHOOK } }), finding, p);
     expect(result.status).toBe("failed");
-    expect(result.reason).toContain("503");
+    expect(result.reason).toBe("Slack alert delivery failed.");
   });
 });

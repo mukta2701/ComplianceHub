@@ -7,7 +7,9 @@
 // keyed by checkId + subjectId, so re-detection upserts rather than duplicating,
 // and a check that flips back to passing auto-resolves its finding).
 
-export type MonitorProviderKind = "github";
+export type MonitorProviderKind = "github" | "jira";
+
+export type MonitorConnectionMode = "sandbox" | "oauth" | "github_app" | "jira_oauth";
 
 export type CheckSeverity = "low" | "medium" | "high" | "critical";
 
@@ -15,8 +17,8 @@ export type MonitorConnection = {
   id: string;
   provider: MonitorProviderKind;
   config: Record<string, unknown>;
-  accessToken: string;
-  connectionMode?: "sandbox" | "oauth";
+  accessToken?: string;
+  connectionMode?: MonitorConnectionMode;
   brokerConnectionId?: string | null;
   brokerProviderConfigKey?: string | null;
 };

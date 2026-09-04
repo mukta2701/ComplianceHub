@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { createSupabaseSlackAlertDeliveryStore } from "./slack-alert-store";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { memoizeOwners } from "@/features/automation/application/owner-resolver";
 import { decryptSecret } from "@/lib/security/secrets";
@@ -63,6 +65,7 @@ export function buildMonitorDependencies(
   });
 
   const ports: DeliverPorts = {
+    slackDelivery: { store: createSupabaseSlackAlertDeliveryStore(supabase), workerId: `monitor:${randomUUID()}` },
     postSlack: postMonitoringSlackWebhook,
     postWhatsApp: createTwilioWhatsAppPort(),
     notifyInApp: async (finding: AlertFinding) => {
