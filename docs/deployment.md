@@ -135,9 +135,9 @@ an Azure Container Registry. Render, AWS, and Vercel hosting are not used.
    one-unit monthly budget in the subscription's billing currency with 50%, 80%,
    and 100% notifications. The bootstrap app intentionally serves Microsoft's
    sample on port 80; do not change that sample to port 3100. The first real
-   application rollout consumes `infra/azure/application.bicep` and atomically
-   migrates the app ingress, application container, and all health probes to
-   port 3100.
+   application rollout derives a template-only ARM patch from that exact
+   authorised revision, replaces the application image, environment, scale, and
+   all health probes, then separately migrates ingress to port 3100.
 3. Record the `containerAppFqdn` output. Set `NEXT_PUBLIC_SITE_URL` to its HTTPS
    origin and `MCP_RESOURCE_URL` to the same origin ending exactly in `/mcp`.
 4. Create the protected GitHub environment `azure-staging`. Configure the
@@ -146,12 +146,12 @@ an Azure Container Registry. Render, AWS, and Vercel hosting are not used.
    placed in the Bicep parameters file or container image.
 5. Create a Microsoft Entra application and GitHub federated credential only
    after the account owner approves the persistent authorization. Grant only the
-   custom ARM-deployment role at the staging resource group, Container App
-   read/write at the exact app, and managed-environment read/join at the exact
-   environment. Azure CLI also needs `listSecrets/action` at that exact app to
-   preserve the untouched rollback slot during its update; never print that
-   response. Do not grant subscription scope, Contributor, delete, exec, or
-   role-management permissions.
+   minimum Container App read/write and `listSecrets/action` permissions at the
+   exact app. The workflow does not need resource-group deployment permission,
+   subscription scope, Contributor, delete, exec, role-management, or
+   managed-environment mutation. Azure CLI uses `listSecrets/action` only
+   inside the existing `secret set` operation to preserve the untouched
+   rollback slot; the workflow never requests or prints secret values itself.
 6. The **Deploy Azure staging** workflow publishes and deploys `main` only after
    the complete `CI` workflow succeeds. A manual run may publish without
    deploying, or deploy a deliberately selected ref after the workflow exists on
@@ -172,10 +172,18 @@ an Azure Container Registry. Render, AWS, and Vercel hosting are not used.
    policy-capable bridge image; a steady-state final accepts a policy-capable
    `bridge` or `strict` predecessor. Both paths match the non-secret health
    marker, captured mode, and release SHA. Before mutation it also records the
-   captured previous ingress target port. The workflow then deploys
-   `infra/azure/application.bicep`, creates one exact new revision, binds the
-   inactive secret slot exactly once, and proves ingress plus all three health
-   probes use port 3100 before accepting Healthy/Running,
+   captured previous ingress target port. The workflow then binds the inactive
+   secret slot exactly once and creates one exact new revision with a
+   mode-`0600`, template-only JSON payload derived from the authorised previous
+   revision. It does not apply `infra/azure/application.bicep` during rollout:
+   that full resource template intentionally omits `configuration.secrets`, so
+   applying it to an existing app could reset app-level secrets. This preserves
+   the existing app-level secrets: the workflow's partial PATCH contains only
+   `properties.template`, never requests secret
+   values, deletes the private payload on every step exit, compares the app's
+   secret-name inventory before and after without values, and separately updates
+   ingress. It then proves ingress plus all three health probes use port 3100
+   before accepting Healthy/Running,
    `latestReadyRevisionName`, marker/release identity, or OAuth/MCP smoke. On
    failure or cancellation it restores the captured previous ingress target
    port before copying only the captured previous revision, so the port-80
