@@ -70,7 +70,7 @@ async function sweep(request: Request) {
     listActiveEvidence: async () => {
       const rows = await collectIdPages(async (afterId, limit) => {
         let query = supabase.from("evidence")
-          .select("id,organisation_id,title,owner_id,status,valid_until")
+          .select("id,organisation_id,title,owner_id,status,valid_until,machine_provenance:github_evidence_provenance!github_evidence_provenance_evidence_tenant_fk(evidence_id)")
           .in("status", ["current", "expiring", "expired"]).not("valid_until", "is", null)
           .order("id", { ascending: true }).limit(limit);
         if (afterId) query = query.gt("id", afterId);
@@ -81,6 +81,9 @@ async function sweep(request: Request) {
       return rows.map((row): SweepEvidence => ({
         id: row.id, organisationId: row.organisation_id, title: row.title, ownerId: row.owner_id,
         status: row.status as "current" | "expiring" | "expired", validUntil: row.valid_until,
+        isMachineManaged: Array.isArray(row.machine_provenance)
+          ? row.machine_provenance.length > 0
+          : Boolean(row.machine_provenance),
       }));
     },
     updateEvidenceStatus: async (id, status) => {

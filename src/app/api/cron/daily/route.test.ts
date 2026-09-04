@@ -262,6 +262,19 @@ describe("GET /api/cron/daily", () => {
     );
   });
 
+  it("ages and notifies GitHub-managed evidence without raising a manual replacement task", async () => {
+    store.evidence[0].machine_provenance = [{ evidence_id: "ev-1" }];
+
+    const response = await GET(request("test-secret"));
+
+    expect(response.status).toBe(200);
+    expect(store.evidence[0].status).toBe("expired");
+    expect(expiryTasks()).toHaveLength(0);
+    expect(store.notifications.some((notification) => (
+      notification.kind === "evidence_expired" && notification.subject_id === "ev-1"
+    ))).toBe(true);
+  });
+
   it("raises exactly one policy_review task for the due policy and notifies the owner", async () => {
     const response = await GET(request("test-secret"));
     expect(response.status).toBe(200);

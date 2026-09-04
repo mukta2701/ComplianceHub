@@ -11,8 +11,8 @@ function makeDeps(overrides: Partial<SweepDependencies> = {}): SweepDependencies
     statusUpdates, createdTasks, createdNotifications,
     today: "2026-07-02",
     listActiveEvidence: async () => [
-      { id: "e1", organisationId: "org1", title: "Backup report", ownerId: "u1", status: "current", validUntil: "2026-07-20" },
-      { id: "e2", organisationId: "org1", title: "Old cert", ownerId: null, status: "expiring", validUntil: "2026-06-01" },
+      { id: "e1", organisationId: "org1", title: "Backup report", ownerId: "u1", status: "current", validUntil: "2026-07-20", isMachineManaged: false },
+      { id: "e2", organisationId: "org1", title: "Old cert", ownerId: null, status: "expiring", validUntil: "2026-06-01", isMachineManaged: false },
     ],
     updateEvidenceStatus: async (id, status) => { statusUpdates.push([id, status]); },
     listOpenExpiryTaskEvidenceIds: async () => ["e1"],
@@ -48,7 +48,7 @@ describe("runDailySweep", () => {
   it("raises a task and notification for evidence already marked expired", async () => {
     const deps = makeDeps({
       listActiveEvidence: async () => [
-        { id: "e3", organisationId: "org1", title: "Uploaded stale cert", ownerId: "u1", status: "expired", validUntil: "2026-07-01" },
+        { id: "e3", organisationId: "org1", title: "Uploaded stale cert", ownerId: "u1", status: "expired", validUntil: "2026-07-01", isMachineManaged: false },
       ],
       listOpenExpiryTaskEvidenceIds: async () => [],
       listOverdueTasks: async () => [],
@@ -70,7 +70,7 @@ describe("runDailySweep", () => {
     // on that. Result: zero new tasks and zero notifications, day after day.
     const deps = makeDeps({
       listActiveEvidence: async () => [
-        { id: "e3", organisationId: "org1", title: "Uploaded stale cert", ownerId: "u1", status: "expired", validUntil: "2026-07-01" },
+        { id: "e3", organisationId: "org1", title: "Uploaded stale cert", ownerId: "u1", status: "expired", validUntil: "2026-07-01", isMachineManaged: false },
       ],
       listOpenExpiryTaskEvidenceIds: async () => [], // prior expiry task is `done`, not open
       createTask: async () => false, // upsert conflicts with the existing done task
