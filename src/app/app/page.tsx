@@ -114,7 +114,7 @@ export default async function AppHome() {
     register
       ? supabase.from("soa_items").select("status").eq("organisation_id", organisation.id).eq("soa_register_id", register.id).then((r) => r.data)
       : Promise.resolve([] as { status: string }[]),
-    supabase.from("evidence").select("id,title,status,valid_until").eq("organisation_id", organisation.id).in("status", ["expiring", "expired"]).order("valid_until", { ascending: true, nullsFirst: false }).limit(25).then((r) => r.data),
+    supabase.from("evidence").select("id,title,status,valid_until,machine_provenance:github_evidence_provenance!github_evidence_provenance_evidence_tenant_fk()").eq("organisation_id", organisation.id).in("status", ["expiring", "expired"]).is("machine_provenance", null).order("valid_until", { ascending: true, nullsFirst: false }).limit(25).then((r) => r.data),
     supabase.from("policies").select("id,reference,title,review_due").eq("organisation_id", organisation.id).eq("status", "in_review").order("reference").limit(25).then((r) => r.data),
     supabase.from("tasks").select("id,title,due_on,source,owner_id").eq("organisation_id", organisation.id).in("status", ["open", "in_progress"]).not("due_on", "is", null).order("due_on", { ascending: true }).limit(25).then((r) => r.data),
     supabase.from("audit_events").select("action,entity_type,occurred_at").eq("organisation_id", organisation.id).order("occurred_at", { ascending: false }).limit(6).then((r) => r.data),
@@ -143,7 +143,11 @@ export default async function AppHome() {
       source: "Statement of Applicability",
       dueOn: null,
     })),
-    ...(staleEvidence ?? []).map((item): DashboardActionInput => ({
+    ...(staleEvidence ?? []).filter((item) => (
+      Array.isArray(item.machine_provenance)
+        ? item.machine_provenance.length === 0
+        : !item.machine_provenance
+    )).map((item): DashboardActionInput => ({
       id: `evidence-${item.id}`,
       kind: "evidence_review",
       severity: item.status === "expired" ? "high" : "normal",
