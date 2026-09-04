@@ -144,7 +144,7 @@ async function openSlackPanel(page: Page) {
   const panel = page.getByRole("region", { name: /^(Connect|Manage) Slack$/ });
   if (await panel.isVisible()) return panel;
   const card = page.getByRole("article", { name: "Slack connection" });
-  const trigger = card.getByRole("button", { name: /^(Connect|Manage)$/ });
+  const trigger = card.getByRole("button", { name: /^(Connect|Manage) Slack$/ });
   await trigger.scrollIntoViewIfNeeded();
   await trigger.click();
   await expect(panel).toBeVisible();
