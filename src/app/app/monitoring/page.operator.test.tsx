@@ -6,6 +6,11 @@ const hoisted = vi.hoisted(() => ({
   controlRoomLoads: [] as unknown[][],
   mappingReviewLoads: [] as unknown[][],
   tables: [] as string[],
+  officialOutcomes: [
+    "pass", "pass", "pass", "pass", "pass", "pass", "pass", "pass",
+    "fail", "fail", "fail", "fail", "fail",
+    "unknown", "unknown",
+  ],
   rows: {
     monitoring_findings: [{
       id: "41000000-0000-4000-8000-000000000001", control_ref: "A.8.32",
@@ -64,11 +69,7 @@ vi.mock("@/features/github/application/github-compliance-control-room", () => ({
       repositories: [{
         id: "43000000-0000-4000-8000-000000000002",
         available: true,
-        officialResults: [
-          "pass", "pass", "pass", "pass", "pass", "pass", "pass", "pass",
-          "fail", "fail", "fail", "fail", "fail",
-          "unknown", "unknown",
-        ].map((outcome, index) => ({ id: `result-${index}`, outcome })),
+        officialResults: hoisted.officialOutcomes.map((outcome, index) => ({ id: `result-${index}`, outcome })),
       }],
       exhaustedAttention: { total: 0, truncated: false, items: [] },
     });
@@ -115,6 +116,11 @@ describe("operator monitoring page", () => {
     hoisted.controlRoomLoads = [];
     hoisted.mappingReviewLoads = [];
     hoisted.tables = [];
+    hoisted.officialOutcomes = [
+      "pass", "pass", "pass", "pass", "pass", "pass", "pass", "pass",
+      "fail", "fail", "fail", "fail", "fail",
+      "unknown", "unknown",
+    ];
   });
 
   it("shows monitoring operations but hides owner-only finding controls for Admin", async () => {
@@ -166,11 +172,19 @@ describe("operator monitoring page", () => {
     render(await MonitoringPage());
 
     const summary = screen.getByRole("note", { name: "GitHub check summary" });
-    expect(summary).toHaveTextContent("15 checks · 8 verified · 5 need action · 2 could not be verified");
+    expect(summary).toHaveTextContent("15 checks · 8 passed · 5 need action · 2 could not be verified");
     expect(within(summary).getByRole("link", { name: "5 need action" })).toHaveAttribute("href", "#active-findings");
     expect(screen.getByRole("heading", { name: "Active findings" }).closest(".monitor-findings-card"))
       .toHaveAttribute("id", "active-findings");
     expect(summary).not.toHaveTextContent(/some checks could not be completed/i);
+  });
+
+  it("accounts visibly for not-applicable GitHub checks", async () => {
+    hoisted.officialOutcomes = ["pass", "fail", "unknown", "not_applicable"];
+    render(await MonitoringPage());
+
+    expect(screen.getByRole("note", { name: "GitHub check summary" }))
+      .toHaveTextContent("4 checks · 1 passed · 1 need action · 1 could not be verified · 1 not applicable");
   });
 
   it("uses neutral zero-findings wording even when GitHub is connected", async () => {

@@ -103,9 +103,10 @@ function GitHubMonitoringSection({
   room: GitHubComplianceControlRoom;
 }) {
   const officialResults = room.repositories.flatMap((repository) => repository.officialResults);
-  const verified = officialResults.filter((result) => result.outcome === "pass").length;
+  const passed = officialResults.filter((result) => result.outcome === "pass").length;
   const needAction = officialResults.filter((result) => result.outcome === "fail").length;
   const unknown = officialResults.filter((result) => result.outcome === "unknown").length;
+  const notApplicable = officialResults.filter((result) => result.outcome === "not_applicable").length;
   return <section className="monitor-github-section" aria-label="GitHub repository monitoring">
     <GitHubCollectionHealthPanel
       installations={installations}
@@ -119,7 +120,8 @@ function GitHubMonitoringSection({
       aria-label="GitHub check summary"
       style={{ marginTop: "12px", padding: "14px 18px", fontSize: "13px", fontWeight: 700 }}
     >
-      {officialResults.length} checks · {verified} verified · <Link href="#active-findings">{needAction} need action</Link> · {unknown} could not be verified
+      {officialResults.length} checks · {passed} passed · <Link href="#active-findings">{needAction} need action</Link> · {unknown} could not be verified
+      {notApplicable > 0 && <> · {notApplicable} not applicable</>}
     </Card>}
   </section>;
 }
