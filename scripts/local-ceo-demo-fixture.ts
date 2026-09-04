@@ -223,7 +223,7 @@ BEGIN
     OR (SELECT count(*) FROM public.github_official_compliance_results WHERE organisation_id=org_id) <> 15
     OR (SELECT count(*) FROM public.monitoring_findings WHERE organisation_id=org_id AND status='open') <> 5
     OR (SELECT count(*) FROM public.monitoring_findings WHERE organisation_id=org_id) <> 5
-    OR (SELECT count(*) FROM public.evidence WHERE organisation_id=org_id AND status='current') <> 8
+    OR (SELECT count(*) FROM public.evidence WHERE organisation_id=org_id AND status IN ('current','expiring') AND valid_until >= current_date) <> 8
     OR (SELECT count(*) FROM public.evidence WHERE organisation_id=org_id) <> 8
     OR (SELECT count(*) FROM public.github_evidence_provenance WHERE organisation_id=org_id) <> 8
     OR (SELECT count(*) FROM public.evidence_links WHERE organisation_id=org_id) <> 15

@@ -101,6 +101,20 @@ describe("local CEO demo fixture guards", () => {
     expect(fixtureVerifySql).toContain("COMMIT;");
   });
 
+  it("accepts only eight unexpired current-or-expiring Phase 2 evidence rows", () => {
+    for (const sql of [fixtureApplySql, fixtureVerifySql]) {
+      expect(sql).toContain(
+        "(SELECT count(*) FROM public.evidence WHERE organisation_id=org_id AND status IN ('current','expiring') AND valid_until >= current_date) <> 8",
+      );
+      expect(sql).toContain(
+        "(SELECT count(*) FROM public.evidence WHERE organisation_id=org_id) <> 8",
+      );
+      expect(sql).not.toContain(
+        "(SELECT count(*) FROM public.evidence WHERE organisation_id=org_id AND status='current') <> 8",
+      );
+    }
+  });
+
   it("never mutates protected tables or calls external services", () => {
     const source = readFileSync(join(process.cwd(), "scripts/local-ceo-demo-fixture.ts"), "utf8");
     for (const table of protectedTableNames) {
