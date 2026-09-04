@@ -75,11 +75,14 @@ persisted in the proof artifact:
 ```
 
 A focused subprocess test separately proved that loopback fetch succeeds while
-GitHub and Slack attempts supplied as string, `URL`, and `Request` inputs are
-blocked and atomically recorded. After both live proofs, the launcher terminated
-its child, verified port 3100 was released, and removed its private temporary
-ledger, control, event, and current-artifact files. The normal unguarded local
-application server was then restored.
+two GitHub and two Slack attempts spanning string, `URL`, and `Request` inputs
+are blocked and atomically recorded. After both live proofs, the launcher
+terminated its child, verified port 3100 was released, and removed its private
+temporary ledger, control, event, and current-artifact files. Cleanup is always
+attempted after temporary-directory creation, including setup, shutdown, and
+port-release failures; a workflow failure remains the reported primary error.
+The launcher never signals an unrelated port listener. The normal unguarded
+local application server was then restored.
 
 ## Redaction-safe reproduction commands
 
@@ -102,25 +105,11 @@ SUPABASE_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY" \
 npx tsx scripts/mcp-proof-owned-server.ts
 ```
 
-The launcher generates `$RUN_ID`, `$CONTROL_FILE`, `$LEDGER_FILE`, and
-`$PRIVATE_CURRENT_OUTPUT` inside its mode-0700 temporary directory. Its exact
-pinned child proof invocations are equivalent to:
-
-```bash
-MCP_PROOF_PROTOCOL=current \
-MCP_PROOF_OUTPUT="$PRIVATE_CURRENT_OUTPUT" \
-MCP_PROOF_SERVER_RUN_ID="$RUN_ID" \
-MCP_PROOF_SERVER_CONTROL_FILE="$CONTROL_FILE" \
-MCP_PROOF_SERVER_NETWORK_LEDGER="$LEDGER_FILE" \
-npx tsx scripts/mcp-github-read-proof.ts
-
-MCP_PROOF_PROTOCOL=legacy \
-MCP_PROOF_OUTPUT=artifacts/phase3-0-mcp-foundation-proof.json \
-MCP_PROOF_SERVER_RUN_ID="$RUN_ID" \
-MCP_PROOF_SERVER_CONTROL_FILE="$CONTROL_FILE" \
-MCP_PROOF_SERVER_NETWORK_LEDGER="$LEDGER_FILE" \
-npx tsx scripts/mcp-github-read-proof.ts
-```
+The launcher invocation above is the single supported reproduction command. It
+internally pins the current `2026-07-28` client and legacy `2025-11-25` client.
+Its private run ID, control file, ledger, and current-client output are
+intentionally generated inside its mode-0700 temporary directory and are not a
+supported standalone client interface.
 
 After the launcher exits and confirms cleanup, restore the normal server without
 the proof preload:
@@ -166,8 +155,8 @@ artifact was not edited; its preserved SHA-256 is
 
 ## Regression gate and Codex configuration
 
-The focused proof and protected-resource tests passed: 2 files, 18 tests. The
-fresh final gate passed lint, type checking, all 239 test files (2,035 passed,
+The focused proof and protected-resource tests passed: 2 files, 20 tests. The
+fresh final gate passed lint, type checking, all 239 test files (2,037 passed,
 3 skipped), and the production build with all 29 static pages generated.
 Artifact schema validation, exact `0600` mode, the cursor-field privacy scan,
 and `git diff --check` also passed.

@@ -1,11 +1,12 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import * as proofHarness from "../../../../scripts/mcp-github-read-proof";
+import * as ownedLauncher from "../../../../scripts/mcp-proof-owned-server";
 import {
   buildPhase3Proof,
   buildProtectedDomainSnapshotQuery,
@@ -187,6 +188,53 @@ describe("Phase 3 local MCP foundation proof", () => {
     if (!assertCanClaim) return;
     expect(() => assertCanClaim([])).not.toThrow();
     expect(() => assertCanClaim([333])).toThrow(/another listener/i);
+  });
+
+  it("removes private state after early setup failure without replacing the primary error", async () => {
+    const runLifecycle = (ownedLauncher as unknown as {
+      runOwnedProofLifecycle?: <T>(input: {
+        operation: () => Promise<T>;
+        stopOwnedChild: () => Promise<void>;
+        verifyPortReleased: () => Promise<void>;
+        removePrivateState: () => Promise<void>;
+      }) => Promise<T>;
+    }).runOwnedProofLifecycle;
+    expect(runLifecycle).toBeTypeOf("function");
+    if (!runLifecycle) return;
+    const directory = await mkdtemp(join(tmpdir(), "compliancehub-mcp-cleanup-"));
+    const primary = new Error("early setup failed");
+
+    await expect(runLifecycle({
+      operation: async () => { throw primary; },
+      stopOwnedChild: async () => undefined,
+      verifyPortReleased: async () => undefined,
+      removePrivateState: async () => rm(directory, { recursive: true, force: true }),
+    })).rejects.toBe(primary);
+    await expect(stat(directory)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("removes private state even when owned shutdown and port-release verification both fail", async () => {
+    const runLifecycle = (ownedLauncher as unknown as {
+      runOwnedProofLifecycle?: <T>(input: {
+        operation: () => Promise<T>;
+        stopOwnedChild: () => Promise<void>;
+        verifyPortReleased: () => Promise<void>;
+        removePrivateState: () => Promise<void>;
+      }) => Promise<T>;
+    }).runOwnedProofLifecycle;
+    expect(runLifecycle).toBeTypeOf("function");
+    if (!runLifecycle) return;
+    const directory = await mkdtemp(join(tmpdir(), "compliancehub-mcp-cleanup-"));
+    const attempted: string[] = [];
+
+    await expect(runLifecycle({
+      operation: async () => "proof-complete",
+      stopOwnedChild: async () => { attempted.push("owned-stop"); throw new Error("shutdown failed"); },
+      verifyPortReleased: async () => { attempted.push("port-check"); throw new Error("foreign listener"); },
+      removePrivateState: async () => { attempted.push("private-remove"); await rm(directory, { recursive: true, force: true }); },
+    })).rejects.toThrow(/cleanup/i);
+    expect(attempted).toEqual(["owned-stop", "port-check", "private-remove"]);
+    await expect(stat(directory)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("captures the complete read-only contract without persisting an opaque cursor", () => {
@@ -484,7 +532,8 @@ describe("Phase 3 local MCP foundation proof", () => {
         "const githubUrl = new URL(\"https://api.github.com/user\")",
         "const githubRequest = new Request(\"https://github.com/settings\")",
         "const slackRequest = new Request(\"https://hooks.slack.com/services/test\")",
-        "for (const target of [githubUrl, githubRequest, slackRequest]) {",
+        "const slackString = \"https://slack.com/api/test\"",
+        "for (const target of [githubUrl, githubRequest, slackRequest, slackString]) {",
         "  try { await fetch(target) } catch {}",
         "}",
       ].join(";");
@@ -509,7 +558,7 @@ describe("Phase 3 local MCP foundation proof", () => {
     }));
     expect(eventRecords.filter((event) => event.kind === "activation")).toHaveLength(1);
     expect(eventRecords.filter((event) => event.kind === "provider-attempt").map((event) => event.provider)).toEqual([
-      "github", "github", "slack",
+      "github", "github", "slack", "slack",
     ]);
   });
 

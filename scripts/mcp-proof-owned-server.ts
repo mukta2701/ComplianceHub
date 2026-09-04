@@ -43,6 +43,7 @@ function requiredLocalEnvironment(environment: NodeJS.ProcessEnv) {
 }
 
 async function stopChild(child: ChildProcess) {
+  if (!child.pid) return;
   if (child.exitCode !== null || child.signalCode !== null) return;
   child.kill("SIGTERM");
   await Promise.race([once(child, "exit"), delay(5_000)]);
@@ -135,68 +136,97 @@ async function sha256File(path: string) {
   return createHash("sha256").update(await readFile(path)).digest("hex");
 }
 
+export async function runOwnedProofLifecycle<T>(input: {
+  operation: () => Promise<T>;
+  stopOwnedChild: () => Promise<void>;
+  verifyPortReleased: () => Promise<void>;
+  removePrivateState: () => Promise<void>;
+}) {
+  let result: T | undefined;
+  let primaryFailure: unknown;
+  let hasPrimaryFailure = false;
+  try {
+    result = await input.operation();
+  } catch (error) {
+    primaryFailure = error;
+    hasPrimaryFailure = true;
+  }
+
+  const cleanupFailures: unknown[] = [];
+  for (const cleanup of [input.stopOwnedChild, input.verifyPortReleased, input.removePrivateState]) {
+    try { await cleanup(); } catch (error) { cleanupFailures.push(error); }
+  }
+  if (hasPrimaryFailure) throw primaryFailure;
+  if (cleanupFailures.length > 0) throw new Error("The owned MCP proof cleanup did not complete safely.");
+  return result as T;
+}
+
 export async function runOwnedServerProof(environment: NodeJS.ProcessEnv = process.env) {
   const local = requiredLocalEnvironment(environment);
   assertLauncherCanClaimPort(await findProofPortListenerPids());
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "compliancehub-mcp-owned-"));
-  await chmod(temporaryDirectory, 0o700);
-  const runId = randomBytes(32).toString("base64url");
-  const ledgerPath = join(temporaryDirectory, "network-ledger.json");
-  const controlPath = join(temporaryDirectory, "server-control.json");
-  const eventDirectory = `${ledgerPath}.events`;
-  const currentOutput = join(temporaryDirectory, CURRENT_OUTPUT_NAME);
-  await createOwnerOnlyJson(ledgerPath, { schemaVersion: 1, runId, guardActive: true });
-  await mkdir(eventDirectory, { mode: 0o700 });
-  await chmod(eventDirectory, 0o700);
-  await createOwnerOnlyJson(controlPath, {
-    schemaVersion: 1, runId, status: "starting", port: 3100,
-    launcherPid: process.pid, childPid: null, listenerPid: null,
-  });
+  let nextChild: ChildProcess | undefined;
+  return runOwnedProofLifecycle({
+    operation: async () => {
+      await chmod(temporaryDirectory, 0o700);
+      const runId = randomBytes(32).toString("base64url");
+      const ledgerPath = join(temporaryDirectory, "network-ledger.json");
+      const controlPath = join(temporaryDirectory, "server-control.json");
+      const eventDirectory = `${ledgerPath}.events`;
+      const currentOutput = join(temporaryDirectory, CURRENT_OUTPUT_NAME);
+      await createOwnerOnlyJson(ledgerPath, { schemaVersion: 1, runId, guardActive: true });
+      await mkdir(eventDirectory, { mode: 0o700 });
+      await chmod(eventDirectory, 0o700);
+      await createOwnerOnlyJson(controlPath, {
+        schemaVersion: 1, runId, status: "starting", port: 3100,
+        launcherPid: process.pid, childPid: null, listenerPid: null,
+      });
 
-  const guardPath = resolve("scripts/mcp-proof-server-network-guard.cjs");
-  const nextScript = resolve("node_modules/next/dist/bin/next");
-  const nextChild = spawn(process.execPath, [nextScript, "dev", "--hostname", "127.0.0.1", "--port", "3100"], {
-    cwd: process.cwd(),
-    env: {
-      ...environment,
-      NEXT_PUBLIC_SUPABASE_URL: local.url,
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: local.anonKey,
-      SUPABASE_SERVICE_ROLE_KEY: local.serviceKey,
-      NEXT_PUBLIC_SITE_URL: "http://127.0.0.1:3100",
-      MCP_RESOURCE_URL: ENDPOINT,
-      APP_ENCRYPTION_KEY: randomBytes(32).toString("base64"),
-      MCP_PROOF_SERVER_RUN_ID: runId,
-      MCP_PROOF_SERVER_NETWORK_LEDGER: ledgerPath,
-      NODE_OPTIONS: `--require=${JSON.stringify(guardPath)}`,
+      const guardPath = resolve("scripts/mcp-proof-server-network-guard.cjs");
+      const nextScript = resolve("node_modules/next/dist/bin/next");
+      nextChild = spawn(process.execPath, [nextScript, "dev", "--hostname", "127.0.0.1", "--port", "3100"], {
+        cwd: process.cwd(),
+        env: {
+          ...environment,
+          NEXT_PUBLIC_SUPABASE_URL: local.url,
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: local.anonKey,
+          SUPABASE_SERVICE_ROLE_KEY: local.serviceKey,
+          NEXT_PUBLIC_SITE_URL: "http://127.0.0.1:3100",
+          MCP_RESOURCE_URL: ENDPOINT,
+          APP_ENCRYPTION_KEY: randomBytes(32).toString("base64"),
+          MCP_PROOF_SERVER_RUN_ID: runId,
+          MCP_PROOF_SERVER_NETWORK_LEDGER: ledgerPath,
+          NODE_OPTIONS: `--require=${JSON.stringify(guardPath)}`,
+        },
+        stdio: "inherit",
+      });
+
+      await waitForOwnedServer({ child: nextChild, controlPath, ledgerPath, runId });
+      await runProofClient({ protocol: "current", outputPath: currentOutput, runId, controlPath, ledgerPath });
+      await runProofClient({ protocol: "legacy", outputPath: FINAL_OUTPUT, runId, controlPath, ledgerPath });
+      const finalObservation = await verifyOwnedProofServer({
+        ...environment,
+        MCP_PROOF_SERVER_RUN_ID: runId,
+        MCP_PROOF_SERVER_CONTROL_FILE: controlPath,
+        MCP_PROOF_SERVER_NETWORK_LEDGER: ledgerPath,
+      });
+      if (finalObservation.githubAttempts !== 0 || finalObservation.slackAttempts !== 0) {
+        throw new Error("The owned guarded server recorded a provider attempt.");
+      }
+      return {
+        currentArtifactSha256: await sha256File(currentOutput),
+        retainedArtifactSha256: await sha256File(FINAL_OUTPUT),
+        serverNetwork: finalObservation,
+      };
     },
-    stdio: "inherit",
+    stopOwnedChild: async () => { if (nextChild) await stopChild(nextChild); },
+    verifyPortReleased: async () => {
+      if ((await findProofPortListenerPids()).length !== 0) {
+        throw new Error("The owned guarded server did not release the exact proof port.");
+      }
+    },
+    removePrivateState: async () => rm(temporaryDirectory, { recursive: true, force: true }),
   });
-
-  try {
-    await waitForOwnedServer({ child: nextChild, controlPath, ledgerPath, runId });
-    await runProofClient({ protocol: "current", outputPath: currentOutput, runId, controlPath, ledgerPath });
-    await runProofClient({ protocol: "legacy", outputPath: FINAL_OUTPUT, runId, controlPath, ledgerPath });
-    const finalObservation = await verifyOwnedProofServer({
-      ...environment,
-      MCP_PROOF_SERVER_RUN_ID: runId,
-      MCP_PROOF_SERVER_CONTROL_FILE: controlPath,
-      MCP_PROOF_SERVER_NETWORK_LEDGER: ledgerPath,
-    });
-    if (finalObservation.githubAttempts !== 0 || finalObservation.slackAttempts !== 0) {
-      throw new Error("The owned guarded server recorded a provider attempt.");
-    }
-    return {
-      currentArtifactSha256: await sha256File(currentOutput),
-      retainedArtifactSha256: await sha256File(FINAL_OUTPUT),
-      serverNetwork: finalObservation,
-    };
-  } finally {
-    await stopChild(nextChild);
-    if ((await findProofPortListenerPids()).length !== 0) {
-      throw new Error("The owned guarded server did not release the exact proof port.");
-    }
-    await rm(temporaryDirectory, { recursive: true, force: true });
-  }
 }
 
 async function main() {
