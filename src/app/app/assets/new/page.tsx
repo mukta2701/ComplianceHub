@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { requireAppContext } from "@/lib/app-context";
 import { PageIntro } from "@/components/ui";
 import { ASSET_CLASSIFICATION_LABEL, ASSET_VALUE_LABEL, type AssetClassification, type AssetValue } from "@/features/assets/domain/assets";
@@ -5,7 +6,8 @@ import { one } from "@/lib/supabase/one";
 import { createAssetAction } from "../actions";
 
 export default async function NewAssetPage() {
-  const { supabase, organisation } = await requireAppContext();
+  const { supabase, organisation, membership } = await requireAppContext();
+  if (membership.role === "member") redirect("/app/assets");
   const [{ data: categories }, { data: members }] = await Promise.all([
     supabase.from("asset_categories").select("id,name").eq("organisation_id", organisation.id).order("position"),
     supabase.from("memberships").select("user_id,profiles(display_name)").eq("organisation_id", organisation.id),

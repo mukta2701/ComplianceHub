@@ -1,10 +1,12 @@
+import { redirect } from "next/navigation";
 import { requireAppContext } from "@/lib/app-context";
 import { PageIntro } from "@/components/ui";
 import { one } from "@/lib/supabase/one";
 import { createTaskAction } from "../actions";
 
 export default async function NewTaskPage() {
-  const { supabase, organisation } = await requireAppContext();
+  const { supabase, organisation, membership } = await requireAppContext();
+  if (membership.role === "member") redirect("/app/tasks");
   const [{ data: members }, { data: controls }, { data: risks }] = await Promise.all([
     supabase.from("memberships").select("user_id,profiles(display_name)").eq("organisation_id", organisation.id),
     supabase.from("controls").select("id,code,title").order("position"),

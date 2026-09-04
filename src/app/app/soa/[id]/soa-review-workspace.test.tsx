@@ -158,6 +158,17 @@ function workspaceItem(overrides: Partial<SoaReviewWorkspaceItem>): SoaReviewWor
 }
 
 describe("SoaReviewWorkspace", () => {
+  it("keeps Member review navigation available without editable decisions", async () => {
+    const saveAction = vi.fn();
+    render(<SoaReviewWorkspace items={items} members={members} currentUserId={CURRENT_USER_ID} saveAction={saveAction} readOnly />);
+    expect(screen.getByLabelText("Applicability decision")).toBeDisabled();
+    expect(screen.getByLabelText("Owner assignment")).toBeDisabled();
+    expect(screen.getByLabelText("Rationale")).toHaveAttribute("readonly");
+    expect(screen.queryByRole("button", { name: "Save draft" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("tab", { name: "Evidence" }));
+    expect(screen.getByLabelText("Evidence references")).toHaveAttribute("readonly");
+    expect(saveAction).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     navigation.refresh.mockReset();
   });
@@ -663,5 +674,34 @@ describe("SoaReviewWorkspace", () => {
     expect(soaCss).not.toMatch(/#[0-9a-f]{3,8}\b|rgba?\(/i);
     expect(workspaceRule).not.toContain("overflow:hidden");
     expect(detailRule).not.toContain("overflow:hidden");
+  });
+});
+
+
+describe("SoA optional AI restoration", () => {
+  it("targets the selected SoA item and resets its AI draft when switching controls", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({
+      id: "suggestion", status: "draft", output: { explanation: "Review rationale", recommendedAction: "Confirm applicability", confidence: "medium" }, source_references: [],
+    }) });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<SoaReviewWorkspace items={items} members={members} currentUserId={CURRENT_USER_ID} saveAction={vi.fn()} aiEnabled />);
+    await userEvent.click(screen.getByRole("button", { name: "Draft explanation and next step" }));
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ targetType: "soa_item", targetId: "item-1" });
+    expect(await screen.findByRole("button", { name: "Mark draft reviewed" })).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: /Review A.8.8/ }));
+    expect(screen.getByRole("button", { name: "Draft explanation and next step" })).toBeVisible();
+    expect(screen.queryByText("Review rationale")).not.toBeInTheDocument();
+  });
+  it("requires unsaved decisions to be saved before generating AI context", async () => {
+    render(<SoaReviewWorkspace items={items} members={members} currentUserId={CURRENT_USER_ID} saveAction={vi.fn().mockResolvedValue(undefined)} aiEnabled />);
+    await userEvent.type(screen.getByLabelText("Rationale"), "Working rationale");
+    expect(screen.queryByRole("button", { name: "Draft explanation and next step" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    expect(await screen.findByRole("button", { name: "Draft explanation and next step" })).toBeVisible();
+  });
+  it.each([{ aiEnabled: false, readOnly: false }, { aiEnabled: true, readOnly: true }])("keeps optional AI unavailable for %j", (access) => {
+    render(<SoaReviewWorkspace items={items} members={members} currentUserId={CURRENT_USER_ID} saveAction={vi.fn()} {...access} />);
+    expect(screen.queryByRole("button", { name: "Draft explanation and next step" })).not.toBeInTheDocument();
+    expect(screen.getByText("Why this matters")).toBeVisible();
   });
 });

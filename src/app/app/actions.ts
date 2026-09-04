@@ -86,24 +86,29 @@ export async function createAssessmentAction() {
 }
 
 export async function createRiskAction(formData: FormData) {
-  const { supabase, user, organisation } = await requireAppContext();
+  const { supabase, user, organisation, membership } = await requireAppContext();
+  if (membership.role === "member") throw new Error("Only workspace operators can create risks");
   await enforceRateLimit(`risk:${user.id}`, { limit: 30, windowMs: 60_000 });
-  const parsed = riskInputSchema.parse({ ...Object.fromEntries(formData), organisationId: organisation.id });
+  const parsed = riskInputSchema.parse({ ...Object.fromEntries(formData), organisationId: organisation.id, ownerId: formData.get("ownerId") || null });
   const { error } = await supabase.from("risks").insert({ organisation_id: organisation.id, reference: parsed.reference, title: parsed.title, description: parsed.description, category_id: parsed.categoryId, owner_id: parsed.ownerId || null, likelihood: parsed.likelihood, impact: parsed.impact, treatment: parsed.treatment, treatment_plan: parsed.treatmentPlan, residual_likelihood: parsed.residualLikelihood, residual_impact: parsed.residualImpact, review_date: parsed.reviewDate || null, status: parsed.status, evidence: parsed.evidence, source_assessment_session_id: parsed.sourceAssessmentSessionId || null, source_soa_register_id: parsed.sourceSoaRegisterId || null, created_by: user.id });
   if (error) throw new Error("Could not save risk");
   revalidatePath("/app/risks"); redirect("/app/risks");
 }
 
 export async function deleteRiskAction(formData: FormData) {
-  const { supabase, organisation } = await requireAppContext();
-  const { error } = await supabase.from("risks").delete().eq("id", String(formData.get("id"))).eq("organisation_id", organisation.id); if (error) throw new Error("Could not delete the risk");
+  const { supabase, organisation, membership } = await requireAppContext();
+  if (membership.role === "member") throw new Error("Only workspace operators can delete risks");
+  const { data, error } = await supabase.from("risks").delete().eq("id", String(formData.get("id"))).eq("organisation_id", organisation.id).select("id").maybeSingle();
+  if (error || !data) throw new Error("Could not delete the risk");
   revalidatePath("/app/risks");
 }
 
 export async function updateRiskStatusAction(formData: FormData) {
-  const { supabase, organisation } = await requireAppContext();
+  const { supabase, organisation, membership } = await requireAppContext();
+  if (membership.role === "member") throw new Error("Only workspace operators can update risks");
   const status = String(formData.get("status")); if (!["open","treating","accepted","closed"].includes(status)) throw new Error("Invalid risk status");
-  const { error } = await supabase.from("risks").update({ status }).eq("id", String(formData.get("id"))).eq("organisation_id", organisation.id); if (error) throw new Error("Could not update risk");
+  const { data, error } = await supabase.from("risks").update({ status }).eq("id", String(formData.get("id"))).eq("organisation_id", organisation.id).select("id").maybeSingle();
+  if (error || !data) throw new Error("Could not update risk");
   revalidatePath("/app/risks");
 }
 

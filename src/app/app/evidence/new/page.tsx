@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { requireAppContext } from "@/lib/app-context";
 import { PageIntro } from "@/components/ui";
 import { one } from "@/lib/supabase/one";
@@ -5,7 +6,8 @@ import { createEvidenceAction } from "../actions";
 
 export default async function NewEvidencePage({ searchParams }: { searchParams: Promise<{ replaces?: string; message?: string }> }) {
   const { replaces, message } = await searchParams;
-  const { supabase, organisation } = await requireAppContext();
+  const { supabase, organisation, membership } = await requireAppContext();
+  if (membership.role === "member") redirect("/app/evidence");
   const { data: members } = await supabase.from("memberships").select("user_id,profiles(display_name)").eq("organisation_id", organisation.id);
   return <>
     <PageIntro eyebrow="EVIDENCE" title="Add evidence" body="Attach a file, link or note. Set a valid-until date; freshness is then tracked automatically." />

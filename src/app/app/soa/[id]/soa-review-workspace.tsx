@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { AiSuggestionPanel } from "@/components/ai-suggestion-panel";
 import { useRouter } from "next/navigation";
 import {
   useCallback,
@@ -64,6 +65,8 @@ export type SoaReviewWorkspaceProps = {
   members: MemberOption[];
   currentUserId: string;
   saveAction: SaveAction;
+  readOnly?: boolean;
+  aiEnabled?: boolean;
 };
 
 const DOMAINS: SoaDomain[] = ["organisational", "people", "physical", "technological"];
@@ -190,7 +193,7 @@ function filterWorkspaceItems(
   return applyEvidenceFilter(applyBlockerFilter(queueFiltered, blocker), freshness);
 }
 
-export function SoaReviewWorkspace({ items, members, currentUserId, saveAction }: SoaReviewWorkspaceProps) {
+export function SoaReviewWorkspace({ items, members, currentUserId, saveAction, readOnly = false, aiEnabled = false }: SoaReviewWorkspaceProps) {
   const router = useRouter();
   const initialItems = useMemo(() => [...items].sort((left, right) => left.position - right.position), [items]);
   const [optimisticDrafts, setOptimisticDrafts] = useState<Record<string, OptimisticDraft>>({});
@@ -445,7 +448,7 @@ export function SoaReviewWorkspace({ items, members, currentUserId, saveAction }
   }
 
   async function save(advance: boolean) {
-    if (!selectedItem || !selectedDraft || saving || !visibleItems.some((item) => item.id === selectedItem.id)) return;
+    if (readOnly || !selectedItem || !selectedDraft || saving || !visibleItems.some((item) => item.id === selectedItem.id)) return;
     setSaving(true);
     setSaveMessage("Saving");
     const formData = new FormData();
@@ -569,6 +572,10 @@ export function SoaReviewWorkspace({ items, members, currentUserId, saveAction }
               <div><strong>What you decide here</strong><p>Confirm whether this control applies, how far it is implemented, who owns it, and the rationale and references supporting that decision.</p></div>
             </div>
 
+            {aiEnabled && !readOnly && (dirty || saving
+              ? <p>Save this control&apos;s decisions before requesting an AI draft.</p>
+              : <AiSuggestionPanel key={`${selectedItem.id}:${selectedItem.applicable}:${selectedItem.status}`} target={{ targetType: "soa_item", targetId: selectedItem.id }} />)}
+
             <div className="soa-detail-tabs" role="tablist" aria-label="Control review sections">
               {DETAIL_TABS.map((tab) => <button
                 key={tab.value}
@@ -586,16 +593,16 @@ export function SoaReviewWorkspace({ items, members, currentUserId, saveAction }
 
             <div className="soa-detail-panel" role="tabpanel" id={`soa-panel-${activeTab}`} aria-labelledby={`soa-tab-${activeTab}`}>
               {activeTab === "decision" ? <div className="soa-decision-fields">
-                <label>Applicability decision<select value={String(selectedDraft.applicable)} onChange={(event) => updateApplicability(event.target.value === "true")}><option value="true">Applicable</option><option value="false">Not applicable</option></select></label>
-                <label>Implementation status<select value={selectedDraft.status} disabled={!selectedDraft.applicable} onChange={(event) => updateDraft({ ...selectedDraft, status: event.target.value as SoaStatus })}>{selectedDraft.applicable ? IMPLEMENTATION_STATUSES.map((status) => <option key={status} value={status}>{SOA_STATUS_LABEL[status]}</option>) : <option value="not_applicable">{SOA_STATUS_LABEL.not_applicable}</option>}</select></label>
-                <label>Owner assignment<select value={selectedDraft.ownerId ?? ""} onChange={(event) => updateDraft({ ...selectedDraft, ownerId: event.target.value || null })}><option value="">Unassigned</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label>
-                <label className="soa-rationale">Rationale<textarea required value={selectedDraft.justification} onChange={(event) => updateDraft({ ...selectedDraft, justification: event.target.value })} /></label>
+                <label>Applicability decision<select disabled={readOnly} value={String(selectedDraft.applicable)} onChange={(event) => updateApplicability(event.target.value === "true")}><option value="true">Applicable</option><option value="false">Not applicable</option></select></label>
+                <label>Implementation status<select value={selectedDraft.status} disabled={readOnly || !selectedDraft.applicable} onChange={(event) => updateDraft({ ...selectedDraft, status: event.target.value as SoaStatus })}>{selectedDraft.applicable ? IMPLEMENTATION_STATUSES.map((status) => <option key={status} value={status}>{SOA_STATUS_LABEL[status]}</option>) : <option value="not_applicable">{SOA_STATUS_LABEL.not_applicable}</option>}</select></label>
+                <label>Owner assignment<select disabled={readOnly} value={selectedDraft.ownerId ?? ""} onChange={(event) => updateDraft({ ...selectedDraft, ownerId: event.target.value || null })}><option value="">Unassigned</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label>
+                <label className="soa-rationale">Rationale<textarea readOnly={readOnly} required value={selectedDraft.justification} onChange={(event) => updateDraft({ ...selectedDraft, justification: event.target.value })} /></label>
               </div> : null}
 
               {activeTab === "evidence" ? <div className="soa-evidence-panel">
                 <div className="soa-evidence-health"><strong>Evidence health</strong><p>{evidenceHealth(selectedItem)}</p>{selectedItem.evidenceExpiring > 0 ? <small>{selectedItem.evidenceExpiring} item{selectedItem.evidenceExpiring === 1 ? " is" : "s are"} nearing expiry.</small> : null}{selectedItem.evidenceExpired > 0 ? <small>{selectedItem.evidenceExpired} item{selectedItem.evidenceExpired === 1 ? " has" : "s have"} expired.</small> : null}</div>
                 {selectedItem.linkedEvidence.length ? <ul className="soa-linked-records">{selectedItem.linkedEvidence.map((evidence) => <li key={evidence.id}><span><strong>{evidence.title}</strong><small>{titleCase(evidence.kind)}{evidence.validUntil ? ` - valid until ${formatDate(evidence.validUntil)}` : " - no expiry date"}</small></span><StatusLabel tone={evidenceTone(evidence.status)}>{titleCase(evidence.status)}</StatusLabel></li>)}</ul> : <p className="soa-record-empty"><strong>No linked evidence</strong><span>No evidence records are currently mapped to this control.</span></p>}
-                <label>Evidence references<textarea value={selectedDraft.evidenceText} onChange={(event) => updateDraft({ ...selectedDraft, evidenceText: event.target.value })} /></label>
+                <label>Evidence references<textarea readOnly={readOnly} value={selectedDraft.evidenceText} onChange={(event) => updateDraft({ ...selectedDraft, evidenceText: event.target.value })} /></label>
                 <Link href="/app/evidence">Open evidence library</Link>
               </div> : null}
 
@@ -610,11 +617,11 @@ export function SoaReviewWorkspace({ items, members, currentUserId, saveAction }
               </div> : null}
             </div>
 
-            <footer className="soa-detail-actions">
+            {readOnly ? <p className="soa-detail-actions">Read-only review. A workspace operator can update these decisions.</p> : <footer className="soa-detail-actions">
               <p role="status" aria-live="polite">{saveMessage}</p>
               <button type="submit" name="saveIntent" value="draft" className="button secondary" disabled={saving}>{saving ? "Saving" : "Save draft"}</button>
               <button type="submit" name="saveIntent" value="next" className="button primary" disabled={saving}>{saving ? "Saving" : "Save and next"}</button>
-            </footer>
+            </footer>}
           </form>
         ) : <section className="soa-review-detail soa-review-empty"><h2>No control selected</h2><p>Adjust the filters or choose a control from the review queue.</p></section>}
       </div>

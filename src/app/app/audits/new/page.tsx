@@ -1,10 +1,12 @@
 import { requireAppContext } from "@/lib/app-context";
+import { redirect } from "next/navigation";
 import { PageIntro } from "@/components/ui";
 import { one } from "@/lib/supabase/one";
 import { createAuditAction } from "../actions";
 
 export default async function NewAuditPage() {
-  const { supabase, organisation } = await requireAppContext();
+  const { supabase, organisation, membership } = await requireAppContext();
+  if (membership.role === "member") redirect("/app/audits");
   const { data: members } = await supabase.from("memberships").select("user_id,profiles(display_name)").eq("organisation_id", organisation.id);
   return <>
     <PageIntro eyebrow="AUDIT" title="Plan an audit" body="Define the scope and window. You will add checklist items and raise findings from the audit's page." />

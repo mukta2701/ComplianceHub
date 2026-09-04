@@ -40,7 +40,7 @@ export default async function AutomationPage({ searchParams }: { searchParams: P
     };
   });
   return <>
-    <PageIntro eyebrow="AUTOMATION" title="Review the work your systems prepared" body="Connected systems collect bounded evidence, map it to GRC work, and prepare drafts. Nothing becomes a compliance decision until the assigned owner reviews it." action={<span style={{ display: "flex", gap: "8px" }}><form action={generateAutomationBaselineAction}><button className="button primary">Generate baseline</button></form><Link className="button secondary" href="/app/setup">Edit setup</Link></span>} />
+    <PageIntro eyebrow="AUTOMATION" title="Review the work your systems prepared" body="Connected systems collect bounded evidence, map it to GRC work, and prepare drafts. Nothing becomes a compliance decision until the assigned owner reviews it." action={<span style={{ display: "flex", gap: "8px" }}>{membership.role === "owner" && <form action={generateAutomationBaselineAction}><button className="button primary">Generate baseline</button></form>}<Link className="button secondary" href="/app/setup">Edit setup</Link></span>} />
     {message && <Card role="status" style={{ padding: "12px", marginBottom: "16px", background: "#f0f7ff", borderColor: "#cfe0fb" }}>{message}</Card>}
     <div className="stats-grid"><Stat label="CONNECTED SYSTEMS" value={(connections ?? []).filter((connection) => connection.status === "connected").length} detail={`${connections?.length ?? 0} configured`} tone="blue" /><Stat label="YOUR REVIEWS" value={mine.length} detail="drafts waiting for you" tone={mine.length ? "amber" : "green"} /><Stat label="ALL DRAFTS" value={drafts.length} detail="human review required" tone={drafts.length ? "amber" : "green"} /></div>
     <Card style={{ padding: "20px", marginTop: "16px" }}>
@@ -50,7 +50,7 @@ export default async function AutomationPage({ searchParams }: { searchParams: P
     <section style={{ marginTop: "22px" }} aria-labelledby="automation-inbox"><h2 id="automation-inbox" style={{ fontSize: "16px", margin: "0 0 10px" }}>Automation inbox</h2>
       {acceptedEvidenceTitle && <div role="status" style={{ padding: "12px", marginBottom: "12px", background: "#f2faf5", border: "1px solid #cce8d5", borderRadius: "6px", color: "#245c35", fontSize: "13px" }}><b>Evidence accepted.</b> {acceptedEvidenceTitle} is now available in <Link href="/app/evidence">Evidence</Link>.</div>}
       {!drafts.length && <EmptyState icon="clipboard" title="No automation drafts yet" body="Complete setup, then run a baseline collection. Evidence and remediation drafts will appear here for the people responsible for the work." primary={{ href: "/app/setup", label: "Set up automation" }} />}
-      {drafts.length > 0 && <AutomationInbox proposals={inboxProposals} currentUserId={user.id} aiEnabled={Boolean(aiSettings?.enabled)} collectorVersion={process.env.EVIDENCE_LIVE === "1" ? "live-collector-v1" : "sandbox-fake-1"} collectorMode={process.env.EVIDENCE_LIVE === "1" ? "live" : "deterministic sandbox"} />}
+      {drafts.length > 0 && <AutomationInbox proposals={inboxProposals} currentUserId={user.id} canCreateTaskDraft={membership.role === "owner" || membership.role === "admin"} aiEnabled={Boolean(aiSettings?.enabled)} collectorVersion={process.env.EVIDENCE_LIVE === "1" ? "live-collector-v1" : "sandbox-fake-1"} collectorMode={process.env.EVIDENCE_LIVE === "1" ? "live" : "deterministic sandbox"} />}
     </section>
   </>;
 }

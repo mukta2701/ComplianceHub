@@ -10,8 +10,9 @@ import { AiSuggestionPanel } from "@/components/ai-suggestion-panel";
 
 export default async function RiskDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { supabase, organisation } = await requireAppContext();
-  const { data: risk } = await supabase.from("risks").select("id,reference,title,description,likelihood,impact,residual_likelihood,residual_impact,status,review_date,treatment,treatment_plan,risk_categories(name)").eq("id", id).eq("organisation_id", organisation.id).maybeSingle();
+  const { supabase, organisation, membership } = await requireAppContext();
+  const canManage = membership.role !== "member";
+  const { data: risk } = await supabase.from("risks").select("id,reference,title,description,owner_id,evidence,likelihood,impact,residual_likelihood,residual_impact,status,review_date,treatment,treatment_plan,risk_categories(name)").eq("id", id).eq("organisation_id", organisation.id).maybeSingle();
   if (!risk) notFound();
   const [{ data: plans }, { data: cfg }, { data: members }, { data: controls }, { data: aiSettings }] = await Promise.all([
     supabase.from("risk_treatment_plans").select("id,reference,summary,treatment_measures,status,target_completion,actual_completion,assigned_lead_id").eq("risk_id", id).eq("organisation_id", organisation.id).order("reference"),
@@ -29,15 +30,19 @@ export default async function RiskDetailPage({ params }: { params: Promise<{ id:
   const nextRef = `RTP-${String((plans?.length ?? 0) + 1).padStart(3, "0")}`;
   return <>
     <Link href="/app/risks" style={{ color: "var(--blue)", fontSize: "13px", fontWeight: 700 }}>← Back to risks</Link>
-    <PageIntro eyebrow={`RISK ${risk.reference}`} title={risk.title} body={risk.description} />
+    <PageIntro eyebrow={`RISK ${risk.reference}`} title={risk.title} body={risk.description} action={canManage && <Link className="button secondary" href={`/app/risks/${id}/edit`}>Edit risk</Link>} />
     <Card style={{ padding: "22px" }}><dl className="fact-grid">
       <div><dt>Category</dt><dd>{category?.name ?? "—"}</dd></div>
+      <div><dt>Owner</dt><dd>{leadName.get(risk.owner_id) ?? "Unassigned"}</dd></div>
       <div><dt>Inherent</dt><dd>{inherent} · {RISK_BAND_LABEL[riskBand(inherent, config)]}</dd></div>
       <div><dt>Residual</dt><dd>{residual} · {RISK_BAND_LABEL[riskBand(residual, config)]}</dd></div>
       <div><dt>Status</dt><dd style={{ textTransform: "capitalize" }}>{risk.status}</dd></div>
       <div><dt>Treatment</dt><dd style={{ textTransform: "capitalize" }}>{risk.treatment}</dd></div>
       <div><dt>Review date</dt><dd>{risk.review_date ?? "—"}</dd></div>
-    </dl></Card>
+    </dl>
+      {risk.treatment_plan && <><h3 style={{ fontSize: "14px" }}>Treatment approach</h3><p style={{ whiteSpace: "pre-wrap" }}>{risk.treatment_plan}</p></>}
+      {risk.evidence && <><h3 style={{ fontSize: "14px" }}>Evidence references</h3><p style={{ whiteSpace: "pre-wrap" }}>{risk.evidence}</p></>}
+    </Card>
     {aiSettings?.enabled && <AiSuggestionPanel target={{ targetType: "risk", targetId: risk.id }} />}
     <Card style={{ padding: "22px", marginTop: "16px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
@@ -46,16 +51,16 @@ export default async function RiskDetailPage({ params }: { params: Promise<{ id:
       </div>
       <ul style={{ listStyle: "none", margin: "14px 0 0", padding: 0, display: "grid", gap: "10px" }}>
         {plans?.map((p) => { const lead = leadName.get(p.assigned_lead_id); return <li key={p.id} className="card" style={{ padding: "14px", display: "flex", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
-          <span><b>{p.reference}</b>{p.summary && <> — {p.summary}</>}<small style={{ display: "block", color: "#596273" }}>Lead: {lead ?? "Unassigned"}{p.target_completion ? ` · target ${p.target_completion}` : ""}{p.actual_completion ? ` · done ${p.actual_completion}` : ""}</small></span>
+          <span><b>{p.reference}</b>{p.summary && <> — {p.summary}</>}{p.treatment_measures && <span style={{ display: "block", whiteSpace: "pre-wrap", marginTop: "6px" }}>{p.treatment_measures}</span>}<small style={{ display: "block", color: "#596273" }}>Lead: {lead ?? "Unassigned"}{p.target_completion ? ` · target ${p.target_completion}` : ""}{p.actual_completion ? ` · done ${p.actual_completion}` : ""}</small></span>
           <span style={{ display: "flex", gap: "8px", alignItems: "center" }}>
             <Pill tone={RTP_STATUS_TONE[p.status as RtpStatus]}>{RTP_STATUS_LABEL[p.status as RtpStatus]}</Pill>
-            <form action={updateRtpStatusAction} style={{ display: "flex", gap: "6px", alignItems: "center" }}><input type="hidden" name="id" value={p.id} /><input type="hidden" name="riskId" value={id} /><select name="status" className="field" defaultValue={p.status} aria-label={`Status for ${p.reference}`}><option value="planned">Planned</option><option value="in_progress">In progress</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option></select><button className="button secondary" style={{ minHeight: "32px", padding: "6px 12px" }}>Save</button></form>
-            <form action={deleteRtpAction}><input type="hidden" name="id" value={p.id} /><input type="hidden" name="riskId" value={id} /><button style={{ color: "var(--red)", border: 0, background: "none" }} aria-label={`Delete ${p.reference}`}>Delete</button></form>
+            {canManage && <form action={updateRtpStatusAction} style={{ display: "flex", gap: "6px", alignItems: "center" }}><input type="hidden" name="id" value={p.id} /><input type="hidden" name="riskId" value={id} /><select name="status" className="field" defaultValue={p.status} aria-label={`Status for ${p.reference}`}><option value="planned">Planned</option><option value="in_progress">In progress</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option></select><button className="button secondary" style={{ minHeight: "32px", padding: "6px 12px" }}>Save</button></form>}
+            {canManage && <form action={deleteRtpAction}><input type="hidden" name="id" value={p.id} /><input type="hidden" name="riskId" value={id} /><button style={{ color: "var(--red)", border: 0, background: "none" }} aria-label={`Delete ${p.reference}`}>Delete</button></form>}
           </span>
         </li>; })}
         {!plans?.length && <li style={{ color: "#596273", fontSize: "13px" }}>No treatment plans yet.</li>}
       </ul>
-      <form action={createRtpAction} className="app-form" style={{ marginTop: "16px", padding: "16px", borderTop: "1px solid #edf0f4" }}>
+      {canManage && <form action={createRtpAction} className="app-form" style={{ marginTop: "16px", padding: "16px", borderTop: "1px solid #edf0f4" }}>
         <input type="hidden" name="riskId" value={id} />
         <h3 style={{ fontSize: "13px", margin: 0 }}>Add a treatment plan</h3>
         <div className="form-grid">
@@ -68,7 +73,7 @@ export default async function RiskDetailPage({ params }: { params: Promise<{ id:
         <label>Treatment measures<textarea name="treatmentMeasures" maxLength={10000} /></label>
         <label style={{ display: "flex", gap: "8px", alignItems: "center", flexDirection: "row" }}><input type="checkbox" name="spawnTask" value="on" style={{ width: "auto", margin: 0 }} />Also create an owned, dated task for this plan</label>
         <button className="button primary">Add treatment plan</button>
-      </form>
+      </form>}
     </Card>
   </>;
 }

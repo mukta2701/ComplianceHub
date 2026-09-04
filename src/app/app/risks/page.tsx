@@ -15,6 +15,7 @@ const BAND_TONE: Record<string, string> = { low: "green", moderate: "amber", hig
 
 export default async function RisksPage() {
   const { supabase, organisation, membership } = await requireAppContext();
+  const canManage = membership.role !== "member";
   const [{ data }, { data: gaps }, { data: linkedTasks }, { data: evidenceLinks }, { data: cfg }] = await Promise.all([
     supabase.from("risks").select("id,reference,title,category_id,risk_categories(name),likelihood,impact,residual_likelihood,residual_impact,status,review_date").eq("organisation_id", organisation.id).order("updated_at", { ascending: false }).limit(500),
     supabase.from("assessment_responses").select("session_id,question_id,answer,catalogue_questions!assessment_responses_question_id_fkey(code,prompt)").eq("organisation_id", organisation.id).in("answer", ["no", "partially"]).limit(10),
@@ -29,6 +30,7 @@ export default async function RisksPage() {
   const grid: number[][] = Array.from({ length: 6 }, () => Array(6).fill(0));
   let riskTotal = 0;
   for (const r of data ?? []) {
+    if (r.status === "closed") continue;
     const l = (r.residual_likelihood ?? r.likelihood) as number;
     const i = (r.residual_impact ?? r.impact) as number;
     if (Number.isInteger(l) && Number.isInteger(i) && l >= 1 && l <= 5 && i >= 1 && i <= 5) { grid[l][i] += 1; riskTotal += 1; }
@@ -45,13 +47,13 @@ export default async function RisksPage() {
     <PageIntro eyebrow="RISK" title="Risk register" body="Track inherent and residual exposure on a documented 5×5 matrix." action={<span style={{ display: "flex", gap: "8px" }}>
       <a className="button secondary" href="/api/app/risks/export?format=xlsx">Export XLSX</a>
       <a className="button secondary" href="/api/app/risks/export?format=csv">CSV</a>
-      <Link className="button secondary" href="/app/risks/import">Import</Link>
-      <Link className="button primary" href="/app/risks/new"><Icon name="plus" />Add risk</Link>
+      {canManage && <Link className="button secondary" href="/app/risks/import">Import</Link>}
+      {canManage && <Link className="button primary" href="/app/risks/new"><Icon name="plus" />Add risk</Link>}
     </span>} />
     <SubTabs tabs={[{ href: "/app/risks", label: "Risks" }, { href: "/app/assets", label: "Assets" }]} />
-    {Boolean(gapSuggestions.length) && <Card style={{ padding: "20px", marginBottom: "16px", borderColor: "#efe1aa", background: "#fffbef" }}><h2 style={{ fontSize: "15px", margin: "0 0 4px" }}>Assessment gap suggestions</h2><p style={{ fontSize: "12px", color: "#596273", margin: 0 }}>Nothing is created until you accept it.</p>{gapSuggestions.map((gap) => <div key={gap.key} style={{ display: "flex", justifyContent: "space-between", gap: "16px", marginTop: "12px" }}><span style={{ fontSize: "13px" }}>{gap.label}</span><span style={{ display: "flex", flexShrink: 0, gap: "16px" }}><form action={acceptRiskSuggestionAction}><input type="hidden" name="questionId" value={gap.questionId} /><input type="hidden" name="sessionId" value={gap.sessionId} /><button style={{ color: "var(--blue)", fontWeight: 700, border: 0, background: "none" }}>Accept as risk</button></form><Link style={{ color: "var(--blue)", fontWeight: 700 }} href={`/app/tasks/from-gap?questionId=${gap.questionId}`}>Accept as task</Link></span></div>)}</Card>}
+    {Boolean(gapSuggestions.length) && <Card style={{ padding: "20px", marginBottom: "16px", borderColor: "#efe1aa", background: "#fffbef" }}><h2 style={{ fontSize: "15px", margin: "0 0 4px" }}>Assessment gap suggestions</h2><p style={{ fontSize: "12px", color: "#596273", margin: 0 }}>{canManage ? "Nothing is created until you accept it." : "Workspace owners and admins can accept these gaps as risks or tasks."}</p>{gapSuggestions.map((gap) => <div key={gap.key} style={{ display: "flex", justifyContent: "space-between", gap: "16px", marginTop: "12px" }}><span style={{ fontSize: "13px" }}>{gap.label}</span><span style={{ display: "flex", flexShrink: 0, gap: "16px" }}>{canManage && <form action={acceptRiskSuggestionAction}><input type="hidden" name="questionId" value={gap.questionId} /><input type="hidden" name="sessionId" value={gap.sessionId} /><button style={{ color: "var(--blue)", fontWeight: 700, border: 0, background: "none" }}>Accept as risk</button></form>}{canManage && <Link style={{ color: "var(--blue)", fontWeight: 700 }} href={`/app/tasks/from-gap?questionId=${gap.questionId}`}>Accept as task</Link>}</span></div>)}</Card>}
     {!data?.length ? (
-      <EmptyState icon="alert" title="Start your risk register" body="Record the threats to your information — each scored for inherent and residual likelihood and impact on a documented 5×5 matrix. Add your first risk, or import a register you already keep in a spreadsheet." primary={{ href: "/app/risks/new", label: "Add your first risk" }} secondary={{ href: "/app/risks/import", label: "Import from spreadsheet" }} />
+      <EmptyState icon="alert" title={canManage ? "Start your risk register" : "No risks recorded yet"} body={canManage ? "Record the threats to your information — each scored for inherent and residual likelihood and impact on a documented 5×5 matrix. Add your first risk, or import a register you already keep in a spreadsheet." : "Risks recorded by a workspace owner or admin will appear here with their exposure and treatment status."} primary={canManage ? { href: "/app/risks/new", label: "Add your first risk" } : undefined} secondary={canManage ? { href: "/app/risks/import", label: "Import from spreadsheet" } : undefined} />
     ) : (<>
     <Card style={{ padding: "18px", marginBottom: "16px" }}>
       <h2 style={{ fontSize: "15px", margin: "0 0 4px" }}>Risk posture</h2>
@@ -85,9 +87,9 @@ export default async function RisksPage() {
         <td><b><Link href={`/app/risks/${r.id}`}>{r.title}</Link></b><small>{one(r.risk_categories)?.name ?? "—"}</small>{linked.length > 0 && <small>Linked tasks: {linked.map((t, i) => <span key={t.id}>{i > 0 && ", "}<Link href={`/app/tasks/${t.id}`}>{t.title}</Link></span>)}</small>}{freshness.total > 0 && <small>Evidence: {freshness.total}{freshness.expiring > 0 ? ` · ${freshness.expiring} expiring` : ""}{freshness.expired > 0 ? ` · ${freshness.expired} expired` : ""}</small>}</td>
         <td>{(() => { const band = riskBand(inherent, config); return <Pill tone={exceedsAppetite(inherent, config) ? "critical" : (BAND_TONE[band] ?? "neutral")}>{inherent} · {RISK_BAND_LABEL[band]}</Pill>; })()}</td>
         <td>{(() => { const band = riskBand(residual, config); return <Pill tone={exceedsAppetite(residual, config) ? "critical" : (BAND_TONE[band] ?? "neutral")}>{residual} · {RISK_BAND_LABEL[band]}</Pill>; })()}</td>
-        <td><RiskStatusSelect id={r.id} status={r.status} /></td>
+        <td>{canManage ? <RiskStatusSelect id={r.id} status={r.status} /> : <span style={{ textTransform: "capitalize" }}>{r.status}</span>}</td>
         <td>{r.review_date ?? "—"}</td>
-        <td><form action={deleteRiskAction}><input type="hidden" name="id" value={r.id} /><button style={{ color: "var(--red)", border: 0, background: "none" }}>Delete</button></form></td>
+        <td>{canManage && <form action={deleteRiskAction}><input type="hidden" name="id" value={r.id} /><button style={{ color: "var(--red)", border: 0, background: "none" }}>Delete</button></form>}</td>
       </tr>; })}
     </tbody></table></div></Card>
     </>)}

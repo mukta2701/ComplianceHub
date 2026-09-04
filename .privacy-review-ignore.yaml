@@ -4,6 +4,12 @@
 max_ttl_days: 14
 require_github_issue: false
 entries:
+  - id: "791e1779b64a7dc9"
+    reason: "Reviewed static demo assessment JSX: prompt is a fixed question label rendered to the screen; no model call, network transfer, or personal data occurs on this line"
+    privacy_approver: "Codex Astra release review"
+    security_approver: "Codex Astra release review"
+    created_on: "2026-09-05"
+    expires_on: "2026-09-19"
   - id: "7ed1326f2bd376c7"
     reason: "Static TypeScript manifest shape naming the plugin defaultPrompt field; no user or personal data"
     privacy_approver: "Phase 2 contract reviewer"

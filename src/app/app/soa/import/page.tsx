@@ -1,10 +1,12 @@
+import { redirect } from "next/navigation";
 import { PageIntro, Card } from "@/components/ui";
 import { requireAppContext } from "@/lib/app-context";
 import { ImportWizard } from "@/app/app/imports/import-wizard";
 import { SOA_IMPORT_FIELDS } from "@/features/imports/adapters/soa";
 
 export default async function SoaImportPage() {
-  const { supabase, organisation } = await requireAppContext();
+  const { supabase, organisation, membership } = await requireAppContext();
+  if (membership.role === "member") redirect("/app/soa");
   const { data: registers } = await supabase.from("soa_registers").select("id,title").eq("organisation_id", organisation.id).order("updated_at", { ascending: false });
   const fields = SOA_IMPORT_FIELDS.map((f) => ({ key: f.key, label: f.label, required: f.required }));
   return <>

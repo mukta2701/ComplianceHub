@@ -30,7 +30,8 @@ export default async function AuditDetailPage({ params }: { params: Promise<{ id
       // Expected in a plain Server Component render; the cookie self-expires.
     }
   }
-  const { supabase, organisation } = await requireAppContext();
+  const { supabase, organisation, membership } = await requireAppContext();
+  const isMember = membership.role === "member";
   const { data: audit } = await supabase.from("audits").select("id,reference,title,scope,status,framework,planned_start,planned_end").eq("id", id).eq("organisation_id", organisation.id).maybeSingle();
   if (!audit) notFound();
   const [{ data: items }, { data: findings }, { data: members }, { data: tokens }, { data: aiSettings }] = await Promise.all([
@@ -54,13 +55,14 @@ export default async function AuditDetailPage({ params }: { params: Promise<{ id
   const status = audit.status as AuditStatus;
   return <>
     <Link href="/app/audits" style={{ color: "var(--blue)", fontSize: "13px", fontWeight: 700 }}>← Back to audits</Link>
-    <PageIntro eyebrow={`AUDIT ${audit.reference} · ${audit.framework}`} title={audit.title} body={audit.scope || "No scope recorded yet."} action={
+    <PageIntro eyebrow={`AUDIT ${audit.reference} · ${audit.framework}`} title={audit.title} body={audit.scope || "No scope recorded yet."} action={!isMember && (
       <form action={updateAuditStatusAction} style={{ display: "flex", gap: "8px", alignItems: "center" }}>
         <input type="hidden" name="id" value={id} />
         <select name="status" className="field" defaultValue={status} aria-label="Audit status">{(["planned", "in_progress", "reporting", "closed"] as AuditStatus[]).map((s) => <option key={s} value={s}>{AUDIT_STATUS_LABEL[s]}</option>)}</select>
         <button className="button secondary">Update status</button>
       </form>
-    } />
+    )} />
+    {isMember && <p>Audit status: {AUDIT_STATUS_LABEL[status]}</p>}
 
     <Card style={{ padding: "18px", marginBottom: "16px" }}>
       <h2 style={{ fontSize: "15px", margin: "0 0 8px" }}>Checklist progress</h2>
@@ -82,29 +84,29 @@ export default async function AuditDetailPage({ params }: { params: Promise<{ id
           <td>{i.checklist_item}</td>
           <td><Pill tone={CHECKLIST_RESULT_TONE[i.compliant as ChecklistResult]}>{CHECKLIST_RESULT_LABEL[i.compliant as ChecklistResult]}</Pill></td>
           <td>
-            <form action={updateChecklistItemAction} style={{ display: "grid", gap: "6px" }}>
+            {isMember ? <>{i.evidence_note || "—"}{i.findings && <small style={{ display: "block" }}>{i.findings}</small>}</> : <form action={updateChecklistItemAction} style={{ display: "grid", gap: "6px" }}>
               <input type="hidden" name="id" value={i.id} /><input type="hidden" name="auditId" value={id} />
               <select name="compliant" defaultValue={i.compliant} aria-label={`Result for ${i.checklist_item}`}>{RESULTS.map((r) => <option key={r} value={r}>{CHECKLIST_RESULT_LABEL[r]}</option>)}</select>
               <input name="evidenceNote" defaultValue={i.evidence_note} placeholder="Evidence" aria-label={`Evidence for ${i.checklist_item}`} />
               <input name="findings" defaultValue={i.findings} placeholder="Findings" aria-label={`Findings for ${i.checklist_item}`} />
               <button className="button secondary">Save</button>
-            </form>
+            </form>}
           </td>
         </tr>)}
         {!rows.length && <tr><td colSpan={4} style={{ color: "#596273" }}>No checklist items yet. Add the first one below.</td></tr>}
       </tbody>
     </table></div></Card>
 
-    <Card style={{ padding: "18px", marginTop: "16px" }}>
+    {!isMember && <Card style={{ padding: "18px", marginTop: "16px" }}>
       <h2 style={{ fontSize: "15px", margin: "0 0 4px" }}>Populate from control library</h2>
       <p style={{ fontSize: "12px", color: "#596273", margin: "0 0 12px" }}>Adds a checklist row for every Annex A control not already listed. Safe to run again — it only fills in the controls still missing.</p>
       <form action={populateAuditChecklistAction}>
         <input type="hidden" name="auditId" value={id} />
         <button className="button secondary"><Icon name="clipboard" />Populate from control library</button>
       </form>
-    </Card>
+    </Card>}
 
-    <Card style={{ padding: "18px", marginTop: "16px" }}>
+    {!isMember && <Card style={{ padding: "18px", marginTop: "16px" }}>
       <h2 style={{ fontSize: "15px", margin: "0 0 10px" }}>Add checklist item</h2>
       <form action={addChecklistItemAction} className="app-form">
         <input type="hidden" name="auditId" value={id} />
@@ -115,23 +117,27 @@ export default async function AuditDetailPage({ params }: { params: Promise<{ id
         <label>Checklist item<input name="checklistItem" required maxLength={2000} placeholder="The question the auditor asks." /></label>
         <button className="button secondary">Add item</button>
       </form>
-    </Card>
+    </Card>}
 
     <Card style={{ padding: "18px", marginTop: "16px" }}>
       <h2 style={{ fontSize: "15px", margin: "0 0 10px" }}>Findings</h2>
       <ul style={{ listStyle: "none", margin: "0 0 14px", padding: 0, display: "grid", gap: "10px" }}>
         {(findings ?? []).map((x) => <li key={x.id} style={{ display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "start" }}>
-          <div><Pill tone={FINDING_SEVERITY_TONE[x.severity as FindingSeverity]}>{FINDING_SEVERITY_LABEL[x.severity as FindingSeverity]}</Pill> {x.summary}{x.task_id && <small style={{ display: "block", color: "#596273" }}>Corrective-action task raised.</small>}</div>
-          <form action={updateFindingStatusAction} style={{ display: "flex", gap: "6px" }}>
+          <div><Pill tone={FINDING_SEVERITY_TONE[x.severity as FindingSeverity]}>{FINDING_SEVERITY_LABEL[x.severity as FindingSeverity]}</Pill> {x.summary}
+            {x.corrective_action && <p style={{ whiteSpace: "pre-wrap", margin: "8px 0", fontSize: "13px" }}>{x.corrective_action}</p>}
+            {x.task_id && <Link href={`/app/tasks/${x.task_id}`} style={{ display: "block", fontSize: "12px", color: "var(--blue)" }}>Open corrective-action task</Link>}
+          </div>
+          {isMember && <span>Finding status: {FINDING_STATUS_LABEL[x.status as FindingStatus]}</span>}
+          {!isMember && <form action={updateFindingStatusAction} style={{ display: "flex", gap: "6px" }}>
             <input type="hidden" name="id" value={x.id} /><input type="hidden" name="auditId" value={id} />
             <select name="status" defaultValue={x.status} aria-label={`Status of finding: ${x.summary}`}>{(["open", "in_progress", "closed"] as FindingStatus[]).map((s) => <option key={s} value={s}>{FINDING_STATUS_LABEL[s]}</option>)}</select>
             <button className="button secondary">Save</button>
-          </form>
+          </form>}
         </li>)}
         {!findings?.length && <li style={{ color: "#596273", fontSize: "13px" }}>No findings raised yet.</li>}
       </ul>
-      <h3 style={{ fontSize: "14px", margin: "0 0 8px" }}>Raise a finding</h3>
-      <form action={raiseFindingAction} className="app-form">
+      {!isMember && <h3 style={{ fontSize: "14px", margin: "0 0 8px" }}>Raise a finding</h3>}
+      {!isMember && <form action={raiseFindingAction} className="app-form">
         <input type="hidden" name="auditId" value={id} />
         <label>Summary<input name="summary" required maxLength={2000} /></label>
         <div className="form-grid">
@@ -142,10 +148,10 @@ export default async function AuditDetailPage({ params }: { params: Promise<{ id
         <label>Corrective action<textarea name="correctiveAction" maxLength={10000} /></label>
         <label style={{ display: "flex", gap: "8px", alignItems: "center", fontWeight: 700 }}><input type="checkbox" name="spawnTask" style={{ width: "auto" }} />Raise a corrective-action task from this finding</label>
         <button className="button primary">Raise finding</button>
-      </form>
+      </form>}
     </Card>
 
-    <Card style={{ padding: "18px", marginTop: "16px" }}>
+    {!isMember && <Card style={{ padding: "18px", marginTop: "16px" }}>
       <h2 style={{ fontSize: "15px", margin: "0 0 4px" }}>Share with an auditor</h2>
       <p style={{ fontSize: "12px", color: "#596273", margin: "0 0 12px" }}>Create a time-boxed, read-only link. It needs no login and expires automatically. Copy it now — it is shown only once.</p>
       {link && <Card role="status" style={{ padding: "12px", background: "#eef7ee", borderColor: "#bfe0bf", marginBottom: "12px" }}><b>New link (copy now):</b> <code style={{ wordBreak: "break-all" }}>{`/audit-view/${link}`}</code></Card>}
@@ -168,6 +174,6 @@ export default async function AuditDetailPage({ params }: { params: Promise<{ id
         </li>)}
         {!recentViews.length && <li style={{ color: "#596273", fontSize: "13px" }}>No auditor views recorded yet.</li>}
       </ul>
-    </Card>
+    </Card>}
   </>;
 }

@@ -38,6 +38,7 @@ export type AutomationInboxProposal = {
 type Props = {
   proposals: AutomationInboxProposal[];
   currentUserId: string;
+  canCreateTaskDraft: boolean;
   aiEnabled: boolean;
   collectorVersion: string;
   collectorMode: string;
@@ -56,7 +57,7 @@ function mappings(value: unknown): string[] {
   return value.filter((item): item is string => typeof item === "string").slice(0, 8);
 }
 
-export function AutomationInbox({ proposals, currentUserId, aiEnabled, collectorVersion, collectorMode }: Props) {
+export function AutomationInbox({ proposals, currentUserId, canCreateTaskDraft, aiEnabled, collectorVersion, collectorMode }: Props) {
   const [filter, setFilter] = useState("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<Confirmation>(null);
@@ -108,10 +109,10 @@ export function AutomationInbox({ proposals, currentUserId, aiEnabled, collector
               <input type="hidden" name="id" value={proposal.id} /><input type="hidden" name="decision" value="accepted" />
               {confirmingEvidence ? <button className="button primary" type="submit">Confirm acceptance</button> : <button className="button primary" type="button" onClick={() => setConfirmation({ proposalId: proposal.id, kind: "evidence" })}>Accept as evidence</button>}
             </form>}
-            <form action={createAutomationTaskDraftAction}>
+            {canCreateTaskDraft && <form action={createAutomationTaskDraftAction}>
               <input type="hidden" name="id" value={proposal.id} />
               {confirmingTask ? <button className="button secondary" type="submit">Confirm task draft</button> : <button className="button secondary" type="button" onClick={() => setConfirmation({ proposalId: proposal.id, kind: "task" })}>Create task draft</button>}
-            </form>
+            </form>}
             <button className="button ghost" type="button" onClick={() => setSelectedId(proposal.id)}>Use as draft</button>
             <form action={recollectAutomationProposalAction}><input type="hidden" name="id" value={proposal.id} /><button className="button ghost" type="submit">Recollect</button></form>
             <form action={reviewAutomationProposalAction} className="automation-dismiss-form"><input type="hidden" name="id" value={proposal.id} /><input type="hidden" name="decision" value="dismissed" /><input aria-label={`Reason for dismissing ${title}`} name="dismissalReason" maxLength={1000} required placeholder="Why does this not apply?" /><button className="button ghost" type="submit">Dismiss</button></form>

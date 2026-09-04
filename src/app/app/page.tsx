@@ -106,7 +106,6 @@ export default async function AppHome() {
     { count: soaRegisters },
     { count: members },
     { count: invites },
-    { count: integrations },
   ] = await Promise.all([
     register
       ? supabase.from("soa_items").select("id,control_code,control_title").eq("organisation_id", organisation.id).eq("soa_register_id", register.id).eq("status", "pending").order("position").limit(25).then((r) => r.data)
@@ -129,7 +128,6 @@ export default async function AppHome() {
     supabase.from("soa_registers").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id),
     supabase.from("memberships").select("user_id", { count: "exact", head: true }).eq("organisation_id", organisation.id),
     supabase.from("invitations").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id),
-    supabase.from("integration_connections").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).eq("enabled", true).is("revoked_at", null),
   ]);
 
   const actionInputs: DashboardActionInput[] = [
@@ -223,7 +221,6 @@ export default async function AppHome() {
     hasEvidence: (liveEvidence ?? 0) > 0,
     hasPolicy: (policies ?? 0) > 0,
     hasTeam: (members ?? 0) > 1 || (invites ?? 0) > 0,
-    hasIntegration: (integrations ?? 0) > 0,
   });
 
   const primaryHref = topAction?.destination ?? "/app/assessment";
@@ -386,6 +383,10 @@ export default async function AppHome() {
             <Link className="button secondary" href={step.href}>{step.cta} <Icon name="arrow" /></Link>
           </li>)}
         </ol>
+      </Card>}
+      {!checklist.complete && <Card>
+        <div className="card-head"><div><h2>Reduce admin later</h2><p>Integrations are optional. Connect your systems when you want to collect evidence and prepare drafts for review.</p></div></div>
+        <Link className="button secondary" href="/app/setup">Explore integrations <Icon name="arrow" /></Link>
       </Card>}
     </div>
   </>;

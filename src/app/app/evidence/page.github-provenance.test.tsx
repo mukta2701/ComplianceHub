@@ -11,7 +11,7 @@ const hoisted = vi.hoisted(() => ({
 
 function query(data: unknown[]) {
   const chain: Record<string, unknown> = {};
-  for (const method of ["select", "eq", "order", "limit"]) chain[method] = vi.fn(() => chain);
+  for (const method of ["select", "eq", "order", "limit", "maybeSingle"]) chain[method] = vi.fn(() => chain);
   chain.then = (resolve: (value: { data: unknown[]; error: null }) => unknown) => Promise.resolve({ data, error: null }).then(resolve);
   return chain;
 }

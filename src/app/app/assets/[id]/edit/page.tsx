@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { requireAppContext } from "@/lib/app-context";
 import { PageIntro } from "@/components/ui";
 import { ASSET_CLASSIFICATION_LABEL, ASSET_VALUE_LABEL, type AssetClassification, type AssetValue } from "@/features/assets/domain/assets";
@@ -7,7 +7,8 @@ import { updateAssetAction } from "../../actions";
 
 export default async function EditAssetPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { supabase, organisation } = await requireAppContext();
+  const { supabase, organisation, membership } = await requireAppContext();
+  if (membership.role === "member") redirect(`/app/assets/${id}`);
   const [{ data: asset }, { data: categories }, { data: members }] = await Promise.all([
     supabase.from("assets").select("id,reference,description,owner_location,owner_id,classification,value_criticality,category_id,security_controls,lifespan,last_updated,remarks").eq("id", id).eq("organisation_id", organisation.id).maybeSingle(),
     supabase.from("asset_categories").select("id,name").eq("organisation_id", organisation.id).order("position"),

@@ -6,6 +6,7 @@ import { requireAppContext } from "@/lib/app-context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { gapTaskInputSchema, taskInputSchema } from "@/features/tasks/application/task";
 import { nextDueDate, type TaskRecurrence } from "@/features/tasks/domain/tasks";
+import { z } from "zod";
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -23,7 +24,9 @@ export async function createTaskAction(formData: FormData) {
 }
 
 export async function updateTaskStatusAction(formData: FormData) {
-  const { supabase, organisation } = await requireAppContext();
+  const { supabase, organisation, membership, user } = await requireAppContext();
+  if (membership.role !== "owner" && membership.role !== "admin") throw new Error("Only workspace operators can update task status");
+  await enforceRateLimit(`task-status:${user.id}`, { limit: 30, windowMs: 60_000 });
   const status = String(formData.get("status"));
   if (!["open", "in_progress", "done", "cancelled"].includes(status)) throw new Error("Invalid task status");
   const id = String(formData.get("id"));
@@ -36,10 +39,26 @@ export async function updateTaskStatusAction(formData: FormData) {
     });
     if (error) throw new Error("Could not complete recurring task");
   } else {
-    const { error } = await supabase.from("tasks").update({ status, updated_at: new Date().toISOString() }).eq("id", id).eq("organisation_id", organisation.id);
-    if (error) throw new Error("Could not update task");
+    const { data, error } = await supabase.from("tasks").update({ status, updated_at: new Date().toISOString() }).eq("id", id).eq("organisation_id", organisation.id).select("id").maybeSingle();
+    if (error || !data) throw new Error("Could not update task");
   }
   revalidatePath("/app/tasks"); revalidatePath("/app");
+}
+
+export async function updateTaskAction(formData: FormData) {
+  const { supabase, organisation, membership, user } = await requireAppContext();
+  if (membership.role !== "owner" && membership.role !== "admin") throw new Error("Only workspace operators can edit tasks");
+  await enforceRateLimit(`task-edit:${user.id}`, { limit: 30, windowMs: 60_000 });
+  const id = z.uuid().parse(String(formData.get("id")));
+  const parsed = taskInputSchema.parse({ ...Object.fromEntries(formData), organisationId: organisation.id });
+  const { data, error } = await supabase.from("tasks").update({
+    title: parsed.title, detail: parsed.detail, owner_id: parsed.ownerId, due_on: parsed.dueOn,
+    recurrence: parsed.recurrence, control_id: parsed.controlId, risk_id: parsed.riskId,
+    updated_at: new Date().toISOString(),
+  }).eq("id", id).eq("organisation_id", organisation.id).select("id").maybeSingle();
+  if (error) throw new Error("Could not update task");
+  if (!data) throw new Error("Task not found");
+  revalidatePath("/app/tasks"); revalidatePath(`/app/tasks/${id}`); redirect(`/app/tasks/${id}`);
 }
 
 export async function createGapTaskAction(formData: FormData) {

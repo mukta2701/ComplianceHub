@@ -25,7 +25,7 @@ function isSoaStatus(value: unknown): value is SoaStatus {
 
 export default async function SoaReviewPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { supabase, user, organisation } = await requireAppContext();
+  const { supabase, user, organisation, membership } = await requireAppContext();
   const { data: register, error: registerError } = await supabase
     .from("soa_registers")
     .select("id,title,version")
@@ -35,7 +35,7 @@ export default async function SoaReviewPage({ params }: { params: Promise<{ id: 
 
   if (registerError || !register) notFound();
 
-  const [itemResult, memberResult] = await Promise.all([
+  const [itemResult, memberResult, aiSettingsResult] = await Promise.all([
     supabase
       .from("soa_items")
       .select("id,control_id,control_code,control_title,applicable,status,justification,evidence,owner_id,position")
@@ -46,6 +46,7 @@ export default async function SoaReviewPage({ params }: { params: Promise<{ id: 
       .from("memberships")
       .select("user_id,profiles(display_name)")
       .eq("organisation_id", organisation.id),
+    supabase.from("ai_workspace_settings").select("enabled").eq("organisation_id", organisation.id).maybeSingle(),
   ]);
 
   if (itemResult.error || memberResult.error) throw new Error("Could not load the SoA review queue");
@@ -203,7 +204,7 @@ export default async function SoaReviewPage({ params }: { params: Promise<{ id: 
       eyebrow={`SOA REVIEW - DRAFT V${register.version}`}
       title={register.title}
       body={canFinalise ? `Preflight complete. All ${summary.total} controls have been reviewed.` : preflight}
-      action={canFinalise ? (
+      action={canFinalise && membership.role !== "member" ? (
         <form action={finaliseSoaAction} data-soa-finalise-form>
           <input type="hidden" name="registerId" value={id} />
           <button className="button primary">Finalise immutable v{register.version}</button>
@@ -213,6 +214,8 @@ export default async function SoaReviewPage({ params }: { params: Promise<{ id: 
       )}
     />
     <SoaReviewWorkspace
+      aiEnabled={!aiSettingsResult.error && aiSettingsResult.data?.enabled === true}
+      readOnly={membership.role === "member"}
       items={queueItems}
       members={memberOptions}
       currentUserId={user.id}

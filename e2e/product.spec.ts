@@ -223,7 +223,9 @@ test("a new user creates an isolated workspace and starts an assessment", async 
   // is counted as done, while the first actionable assessment step remains.
   const checklist = page.locator(".onboarding-card");
   await expect(checklist.getByRole("heading", { name: "Get certification-ready" })).toBeVisible();
-  await expect(checklist.getByText("1 of 8 done")).toBeVisible();
+  await expect(checklist.getByText("1 of 7 done")).toBeVisible();
+  await expect(checklist.getByText("Connect a tracker", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Reduce admin later" })).toBeVisible();
   await expect(checklist.locator("li", { hasText: "Create your workspace" })).toHaveCount(0);
   const assessmentStep = checklist.locator("li", { hasText: "Run your first readiness assessment" });
   await expect(assessmentStep.getByRole("link", { name: /Start assessment/ })).toBeVisible();
@@ -427,7 +429,7 @@ test("an audit runs from plan through checklist to a corrective-action task", as
   await page.getByRole("button", { name: "Raise finding" }).click();
 
   await expect(page.getByText("Leavers retained access beyond policy")).toBeVisible();
-  await expect(page.getByText("Corrective-action task raised.")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open corrective-action task" })).toBeVisible();
 
   const detailAxe = await new AxeBuilder({ page }).analyze();
   expect(detailAxe.violations).toEqual([]);
@@ -1013,7 +1015,7 @@ test("a task is pushed to a sandbox tracker, polled to In Progress, then the con
   // This deterministic local scenario uses the development-only sample-data
   // forms; provider prompts remain untouched.
   await expect(page.getByRole("heading", { name: "Connections", level: 2 })).toBeVisible();
-  const githubCard = page.getByRole("article", { name: "GitHub connection" });
+  const githubCard = page.getByRole("article", { name: "GitHub Issues connection" });
   const jiraCard = page.getByRole("article", { name: "Jira connection" });
   const slackCard = page.getByRole("article", { name: "Slack connection" });
   await expect(githubCard).toBeVisible();
@@ -1036,25 +1038,6 @@ test("a task is pushed to a sandbox tracker, polled to In Progress, then the con
   await expect(jiraCard).toContainText("Sandbox Jira");
   await expect(jiraCard.getByRole("button", { name: "Manage" })).toBeVisible();
 
-  // Add a local GitHub monitoring source from the same Settings tab, then prove
-  // Monitoring renders only connected systems and active findings.
-  const addMonitorSource = page.getByRole("button", { name: "Add sandbox monitoring source" });
-  if (!await addMonitorSource.isVisible()) {
-    await page.getByText("Local preview tools", { exact: true }).click();
-  }
-  const monitorForm = page.locator("form", { has: addMonitorSource });
-  await monitorForm.getByLabel("GitHub owner").fill("acme");
-  await monitorForm.getByLabel("Repository").fill("compliance");
-  await monitorForm.getByLabel("Label", { exact: true }).fill("Sandbox GitHub monitoring");
-  const monitorSourcePost = page.waitForResponse((response) =>
-    response.request().method() === "POST"
-      && new URL(response.url()).pathname === "/app/integrations",
-  );
-  const [, response] = await Promise.all([
-    monitorForm.getByRole("button", { name: "Add sandbox monitoring source" }).click(),
-    monitorSourcePost,
-  ]);
-  expect(response.status()).toBeLessThan(400);
   // 2. Axe on the integrations page.
   const integrationsAxe = await new AxeBuilder({ page }).analyze();
   expect(integrationsAxe.violations).toEqual([]);
@@ -1062,9 +1045,7 @@ test("a task is pushed to a sandbox tracker, polled to In Progress, then the con
 
   await page.goto("/app/monitoring");
   await expect(page.getByRole("heading", { name: "Continuous monitoring", level: 2 })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Connected systems" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Active findings" })).toBeVisible();
-  await expect(page.getByText("Sandbox GitHub monitoring")).toBeVisible();
   await expect(page.getByText("No active findings are currently visible.")).toBeVisible();
   await expect(page.getByRole("link", { name: "Manage connections and alerts" })).toHaveAttribute("href", "/app/integrations");
   await expect(page.getByRole("button", { name: /Connect/ })).toHaveCount(0);
@@ -1398,4 +1379,20 @@ test("an invited Member opens Framework Coverage from read-only navigation", asy
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   expect(consoleErrors).toEqual([]);
   expect(failedRequests).toEqual([]);
+
+  // Members use the deliberately reduced portal. Core operator registers must
+  // remain inaccessible even when their paths are entered directly.
+  for (const route of ["risks", "assets", "tasks", "evidence", "assessment", "soa", "audits", "kpis"]) {
+    await page.goto(`/app/${route}`);
+    await expect(page).toHaveURL(/\/app$/);
+    await expect(page.getByRole("button", { name: /^(Save|Delete|Add|Create|New assessment|Generate draft|Seed)/i })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: /^(Add|New|Import)/i })).toHaveCount(0);
+  }
+  for (const route of ["risks", "assets", "tasks", "evidence"]) {
+    await page.goto(`/app/${route}/new`);
+    await expect(page).toHaveURL(/\/app$/);
+  }
+  for (const route of ["risks", "tasks", "evidence"]) {
+    expect((await page.request.get(`/api/app/${route}/export?format=csv`)).status()).toBe(403);
+  }
 });

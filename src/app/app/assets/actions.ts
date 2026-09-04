@@ -6,6 +6,10 @@ import { requireAppContext } from "@/lib/app-context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { assetInputSchema } from "@/features/assets/application/asset";
 
+function requireAssetManager(role: "owner" | "admin" | "member") {
+  if (role === "member") throw new Error("Only workspace operators can manage assets");
+}
+
 function toRow(parsed: ReturnType<typeof assetInputSchema.parse>, organisationId: string) {
   return {
     organisation_id: organisationId, reference: parsed.reference, description: parsed.description,
@@ -16,7 +20,8 @@ function toRow(parsed: ReturnType<typeof assetInputSchema.parse>, organisationId
 }
 
 export async function createAssetAction(formData: FormData) {
-  const { supabase, user, organisation } = await requireAppContext();
+  const { supabase, user, organisation, membership } = await requireAppContext();
+  requireAssetManager(membership.role);
   await enforceRateLimit(`asset:${user.id}`, { limit: 30, windowMs: 60_000 });
   const parsed = assetInputSchema.parse({ ...Object.fromEntries(formData), organisationId: organisation.id });
   const { error } = await supabase.from("assets").insert({ ...toRow(parsed, organisation.id), created_by: user.id });
@@ -25,22 +30,27 @@ export async function createAssetAction(formData: FormData) {
 }
 
 export async function updateAssetAction(formData: FormData) {
-  const { supabase, organisation } = await requireAppContext();
+  const { supabase, organisation, membership } = await requireAppContext();
+  requireAssetManager(membership.role);
   const id = String(formData.get("id"));
   const parsed = assetInputSchema.parse({ ...Object.fromEntries(formData), organisationId: organisation.id });
-  const { error } = await supabase.from("assets").update({ ...toRow(parsed, organisation.id), updated_at: new Date().toISOString() }).eq("id", id).eq("organisation_id", organisation.id);
+  const { data, error } = await supabase.from("assets").update({ ...toRow(parsed, organisation.id), updated_at: new Date().toISOString() }).eq("id", id).eq("organisation_id", organisation.id).select("id").maybeSingle();
   if (error) throw new Error("Could not update the asset");
+  if (!data) throw new Error("Asset not found");
   revalidatePath(`/app/assets/${id}`); redirect(`/app/assets/${id}`);
 }
 
 export async function deleteAssetAction(formData: FormData) {
-  const { supabase, organisation } = await requireAppContext();
-  const { error } = await supabase.from("assets").delete().eq("id", String(formData.get("id"))).eq("organisation_id", organisation.id); if (error) throw new Error("Could not delete the asset");
+  const { supabase, organisation, membership } = await requireAppContext();
+  requireAssetManager(membership.role);
+  const { data, error } = await supabase.from("assets").delete().eq("id", String(formData.get("id"))).eq("organisation_id", organisation.id).select("id").maybeSingle(); if (error) throw new Error("Could not delete the asset");
+  if (!data) throw new Error("Asset not found");
   revalidatePath("/app/assets"); redirect("/app/assets");
 }
 
 export async function linkAssetRiskAction(formData: FormData) {
-  const { supabase, user, organisation } = await requireAppContext();
+  const { supabase, user, organisation, membership } = await requireAppContext();
+  requireAssetManager(membership.role);
   const assetId = String(formData.get("assetId"));
   const riskId = String(formData.get("riskId"));
   if (!assetId || !riskId) throw new Error("Asset and risk IDs are required");
@@ -50,10 +60,12 @@ export async function linkAssetRiskAction(formData: FormData) {
 }
 
 export async function unlinkAssetRiskAction(formData: FormData) {
-  const { supabase, organisation } = await requireAppContext();
+  const { supabase, organisation, membership } = await requireAppContext();
+  requireAssetManager(membership.role);
   const assetId = String(formData.get("assetId"));
   const riskId = String(formData.get("riskId"));
   if (!assetId || !riskId) throw new Error("Asset and risk IDs are required");
-  const { error } = await supabase.from("asset_risks").delete().eq("asset_id", assetId).eq("risk_id", riskId).eq("organisation_id", organisation.id); if (error) throw new Error("Could not unlink the risk");
+  const { data, error } = await supabase.from("asset_risks").delete().eq("asset_id", assetId).eq("risk_id", riskId).eq("organisation_id", organisation.id).select("asset_id").maybeSingle(); if (error) throw new Error("Could not unlink the risk");
+  if (!data) throw new Error("Asset risk link not found");
   revalidatePath(`/app/assets/${assetId}`);
 }

@@ -5,7 +5,7 @@ import { SubTabs } from "@/components/sub-tabs";
 import { createSoaAction } from "../actions";
 
 export default async function SoaPage() {
-  const { supabase, organisation } = await requireAppContext();
+  const { supabase, organisation, membership } = await requireAppContext();
   const [{ data: assessments }, { data: registers }, { data: snapshots }] = await Promise.all([
     supabase.from("assessment_sessions").select("id,title").eq("organisation_id", organisation.id).order("updated_at", { ascending: false }),
     supabase.from("soa_registers").select("id,title,version,updated_at").eq("organisation_id", organisation.id).order("updated_at", { ascending: false }),
@@ -15,10 +15,10 @@ export default async function SoaPage() {
     <PageIntro eyebrow="SOA" title="Statement of Applicability" body="Generate a draft from an assessment, review every applicability decision, then finalise an immutable snapshot." action={<span style={{ display: "flex", gap: "8px" }}>
       <a className="button secondary" href={`/api/app/soa/export?format=xlsx`}>Export XLSX</a>
       <a className="button secondary" href={`/api/app/soa/export?format=csv`}>CSV</a>
-      <Link className="button secondary" href="/app/soa/import">Import</Link>
+      {membership.role !== "member" && <Link className="button secondary" href="/app/soa/import">Import</Link>}
     </span>} />
     <SubTabs tabs={[{ href: "/app/soa", label: "Statement of Applicability" }, { href: "/app/frameworks", label: "Framework coverage" }]} />
-    {assessments?.length ? (
+    {membership.role === "member" ? <Card style={{ padding: "18px" }}>Read-only access. A workspace operator can generate and finalise statements.</Card> : assessments?.length ? (
       <Card style={{ padding: "16px" }}><form action={createSoaAction} style={{ display: "flex", gap: "12px" }}><select name="assessmentId" required className="field" style={{ flex: 1 }}><option value="">Select an assessment</option>{assessments.map((a) => <option key={a.id} value={a.id}>{a.title}</option>)}</select><button className="button primary">Generate draft</button></form></Card>
     ) : (
       <EmptyState icon="clipboard" title="Complete an assessment first" body="A Statement of Applicability is generated from a readiness assessment — its answers decide which controls apply. Complete an assessment, then come back here to generate your draft SoA." primary={{ href: "/app/assessment", label: "Start an assessment" }} />

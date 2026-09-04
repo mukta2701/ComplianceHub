@@ -36,7 +36,9 @@ function updateClient() {
       eqCalls.push([column, value]);
       return builder;
     }),
-    then: (resolve: (value: { error: null }) => unknown) => Promise.resolve(resolve({ error: null })),
+    select: vi.fn(() => builder),
+    maybeSingle: vi.fn(() => Promise.resolve({ data: { id: FINDING_ID }, error: null })),
+    then: (resolve: (value: { data: { id: string }; error: null }) => unknown) => Promise.resolve(resolve({ data: { id: FINDING_ID }, error: null })),
   };
   const update = vi.fn(() => builder);
   const from = vi.fn(() => ({ update }));
@@ -51,6 +53,7 @@ function checklistOwnershipClient() {
   };
   const findingInsert = vi.fn();
   const evidenceInsert = vi.fn();
+  const rpc = vi.fn().mockResolvedValue({ data: FINDING_ID, error: null });
   findingInsert.mockReturnValue({
     select: vi.fn(() => ({ single: vi.fn().mockResolvedValue({ data: { id: FINDING_ID }, error: null }) })),
   });
@@ -60,7 +63,7 @@ function checklistOwnershipClient() {
     if (table === "audit_findings") return { insert: findingInsert };
     return { insert: evidenceInsert };
   });
-  return { from, checklistLookup, findingInsert, evidenceInsert };
+  return { from, rpc, checklistLookup, findingInsert, evidenceInsert };
 }
 
 describe("audit mutation object scoping", () => {
@@ -130,6 +133,28 @@ describe("audit mutation object scoping", () => {
     expect(client.checklistLookup.eq).toHaveBeenCalledWith("audit_id", AUDIT_ID);
     expect(client.checklistLookup.eq).toHaveBeenCalledWith("organisation_id", ORGANISATION_ID);
     expect(client.findingInsert).not.toHaveBeenCalled();
+  });
+
+  it("rejects Members before any audit mutation", async () => {
+    const client = checklistOwnershipClient();
+    (hoisted.ctx as { supabase: unknown; membership: unknown }).supabase = client;
+    (hoisted.ctx as { membership: unknown }).membership = { role: "member" };
+    await expect(raiseFindingAction(form({ auditId: AUDIT_ID, summary: "Denied", severity: "observation", rootCause: "", correctiveAction: "", ownerId: "", dueOn: "", spawnTask: "" }))).rejects.toThrow("Only workspace operators can modify audits");
+    expect(client.rpc).not.toHaveBeenCalled();
+  });
+
+  it("raises a finding and optional corrective task through the atomic RPC", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: FINDING_ID, error: null });
+    (hoisted.ctx as { supabase: unknown }).supabase = { rpc };
+    await expect(raiseFindingAction(form({ auditId: AUDIT_ID, summary: "Missing evidence", severity: "minor_nc", rootCause: "Process gap", correctiveAction: "Collect evidence", ownerId: USER_ID, dueOn: "2026-10-01", spawnTask: "on" }))).resolves.toBeUndefined();
+    expect(rpc).toHaveBeenCalledWith("raise_finding_with_task", expect.objectContaining({ target_organisation_id: ORGANISATION_ID, finding_input: expect.objectContaining({ audit_id: AUDIT_ID, owner_id: USER_ID, due_on: "2026-10-01", spawn_task: true }) }));
+  });
+
+  it("surfaces an atomic RPC failure without attempting partial writes", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: null, error: new Error("db failure") });
+    (hoisted.ctx as { supabase: unknown }).supabase = { rpc };
+    await expect(raiseFindingAction(form({ auditId: AUDIT_ID, summary: "Failure", severity: "observation", rootCause: "", correctiveAction: "", ownerId: "", dueOn: "", spawnTask: "" }))).rejects.toThrow("Could not raise the finding");
+    expect(rpc).toHaveBeenCalledOnce();
   });
 
   it("rejects evidence links to a checklist item from another audit", async () => {

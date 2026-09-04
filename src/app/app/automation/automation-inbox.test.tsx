@@ -38,7 +38,7 @@ const proposal: AutomationInboxProposal = {
 
 describe("AutomationInbox", () => {
   it("exposes provenance, limitations, and human-review controls", () => {
-    render(<AutomationInbox proposals={[proposal]} currentUserId="owner-1" aiEnabled={false} collectorVersion="sandbox-fake-1" collectorMode="deterministic sandbox" />);
+    render(<AutomationInbox proposals={[proposal]} currentUserId="owner-1" canCreateTaskDraft={true} aiEnabled={false} collectorVersion="sandbox-fake-1" collectorMode="deterministic sandbox" />);
 
     expect(screen.getByText("Branch protection settings")).toBeInTheDocument();
     expect(screen.getByText(/18 Aug 2026/)).toBeInTheDocument();
@@ -55,7 +55,7 @@ describe("AutomationInbox", () => {
 
   it("keeps filters and use-as-draft selection in the browser without calling a server action", async () => {
     const user = userEvent.setup();
-    render(<AutomationInbox proposals={[proposal]} currentUserId="owner-1" aiEnabled={false} collectorVersion="sandbox-fake-1" collectorMode="deterministic sandbox" />);
+    render(<AutomationInbox proposals={[proposal]} currentUserId="owner-1" canCreateTaskDraft={true} aiEnabled={false} collectorVersion="sandbox-fake-1" collectorMode="deterministic sandbox" />);
 
     await user.click(screen.getByRole("button", { name: "Use as draft" }));
     expect(screen.getByRole("status")).toHaveTextContent(/selected as a draft/i);
@@ -69,7 +69,7 @@ describe("AutomationInbox", () => {
 
   it("requires explicit confirmation before accepting a proposal", async () => {
     const user = userEvent.setup();
-    render(<AutomationInbox proposals={[proposal]} currentUserId="owner-1" aiEnabled={false} collectorVersion="sandbox-fake-1" collectorMode="deterministic sandbox" />);
+    render(<AutomationInbox proposals={[proposal]} currentUserId="owner-1" canCreateTaskDraft={true} aiEnabled={false} collectorVersion="sandbox-fake-1" collectorMode="deterministic sandbox" />);
 
     await user.click(screen.getByRole("button", { name: "Accept as evidence" }));
     expect(screen.getByRole("button", { name: "Confirm acceptance" })).toBeInTheDocument();
@@ -77,14 +77,14 @@ describe("AutomationInbox", () => {
   });
 
   it("does not present a task proposal as compliance evidence", () => {
-    render(<AutomationInbox proposals={[{ ...proposal, targetType: "task" }]} currentUserId="owner-1" aiEnabled={false} collectorVersion="sandbox-fake-1" collectorMode="deterministic sandbox" />);
+    render(<AutomationInbox proposals={[{ ...proposal, targetType: "task" }]} currentUserId="owner-1" canCreateTaskDraft={true} aiEnabled={false} collectorVersion="sandbox-fake-1" collectorMode="deterministic sandbox" />);
 
     expect(screen.queryByRole("button", { name: "Accept as evidence" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create task draft" })).toBeInTheDocument();
   });
 
   it("shows an explicit empty mapping state when a proposal has no suggestions", () => {
-    render(<AutomationInbox proposals={[{ ...proposal, output: { ...proposal.output, mappings: [] } }]} currentUserId="owner-1" aiEnabled={false} collectorVersion="sandbox-fake-1" collectorMode="deterministic sandbox" />);
+    render(<AutomationInbox proposals={[{ ...proposal, output: { ...proposal.output, mappings: [] } }]} currentUserId="owner-1" canCreateTaskDraft={true} aiEnabled={false} collectorVersion="sandbox-fake-1" collectorMode="deterministic sandbox" />);
 
     expect(screen.getByText("Suggested mappings")).toBeInTheDocument();
     expect(screen.getByText("No mapping suggested")).toBeInTheDocument();

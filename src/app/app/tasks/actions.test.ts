@@ -20,6 +20,7 @@ class TaskBuilder implements PromiseLike<Result> {
   select() { return this; }
   eq() { return this; }
   single() { return this; }
+  maybeSingle() { return this; }
 
   update() {
     this.operation = "update";
@@ -36,7 +37,7 @@ class TaskBuilder implements PromiseLike<Result> {
   private result(): Result {
     return this.operation === "select"
       ? { data: this.task, error: null }
-      : { data: null, error: null };
+      : { data: this.task, error: null };
   }
 
   then<T1 = Result, T2 = never>(
@@ -49,6 +50,22 @@ class TaskBuilder implements PromiseLike<Result> {
 
 describe("updateTaskStatusAction", () => {
   beforeEach(() => { vi.clearAllMocks(); });
+
+  it("rejects Members before reading a task", async () => {
+    const from = vi.fn();
+    hoisted.ctx = {
+      supabase: { from },
+      organisation: { id: "20000000-0000-4000-8000-000000000001" },
+      membership: { role: "member" },
+    };
+    const { updateTaskStatusAction } = await import("./actions");
+    const formData = new FormData();
+    formData.set("id", "30000000-0000-4000-8000-000000000001");
+    formData.set("status", "done");
+
+    await expect(updateTaskStatusAction(formData)).rejects.toThrow("Only workspace operators can update task status");
+    expect(from).not.toHaveBeenCalled();
+  });
 
   it("completes a recurring task through one atomic RPC", async () => {
     const directWrites: string[] = [];
@@ -74,6 +91,7 @@ describe("updateTaskStatusAction", () => {
       supabase,
       user: { id: "10000000-0000-4000-8000-000000000001" },
       organisation: { id: "20000000-0000-4000-8000-000000000001" },
+      membership: { role: "admin" },
     };
 
     const { updateTaskStatusAction } = await import("./actions");
