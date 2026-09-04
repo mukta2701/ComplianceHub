@@ -29,7 +29,10 @@ vi.mock("@/lib/app-context", () => ({
         return query(table, table === "evidence" ? [{
           id: "evidence-1", title: "Quarterly access review", kind: "note", url: null,
           storage_path: null, status: "current", collected_on: "2026-08-25", valid_until: "2026-09-24",
-          source_id: null, evidence_sources: null, evidence_links: [],
+          source_id: null, evidence_sources: null, evidence_links: [{
+            id: "link-policy-1", control_id: null, risk_id: null, task_id: null, policy_id: "policy-1",
+            controls: null, risks: null, tasks: null, policies: { reference: "NS-POL-1", title: "Access policy" },
+          }],
         }] : table === "controls" ? [{ id: "control-1", code: "AC-1", title: "Access control" }] : table === "policies" ? [{ id: "policy-1", reference: "POL-1", title: "Access policy" }] : table === "risks" ? [{ id: "risk-1", reference: "R-1", title: "Access risk", status: "open" }] : table === "tasks" ? [{ id: "task-1", title: "Review access evidence", status: "open", source: "risk_treatment" }] : []);
       },
     },
@@ -57,6 +60,7 @@ describe("EvidencePage Member branch", () => {
     expect(screen.queryByRole("button", { name: "Withdraw" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Link" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Remove link" })).not.toBeInTheDocument();
+    expect(screen.getByText("Policy: NS-POL-1: Access policy")).toBeInTheDocument();
     expect(hoisted.tables).toContain("evidence");
   });
 
@@ -77,5 +81,16 @@ describe("EvidencePage Member branch", () => {
       { table: "risks", value: "org-1" },
       { table: "tasks", value: "org-1" },
     ]));
+  });
+
+  it("renders policy links with their policy label instead of a missing task title", async () => {
+    hoisted.tables = [];
+    hoisted.organisationFilters = [];
+    hoisted.role = "admin";
+
+    render(await EvidencePage());
+
+    expect(screen.getByText("Policy: NS-POL-1: Access policy")).toBeInTheDocument();
+    expect(screen.queryByText("Task: undefined")).not.toBeInTheDocument();
   });
 });
