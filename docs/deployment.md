@@ -147,11 +147,13 @@ an Azure Container Registry. Render, AWS, and Vercel hosting are not used.
 5. Create a Microsoft Entra application and GitHub federated credential only
    after the account owner approves the persistent authorization. Grant only the
    minimum Container App read/write and `listSecrets/action` permissions at the
-   exact app. The workflow does not need resource-group deployment permission,
-   subscription scope, Contributor, delete, exec, role-management, or
-   managed-environment mutation. Azure CLI uses `listSecrets/action` only
-   inside the existing `secret set` operation to preserve the untouched
-   rollback slot; the workflow never requests or prints secret values itself.
+   exact app, plus `Microsoft.App/managedEnvironments/join/action` at the exact
+   managed environment. The existing `secret set` command performs a full
+   secret update and may internally read existing secret values to preserve the
+   untouched rollback slot; the workflow itself never prints those values. Do
+   not grant resource-group deployment permission, subscription scope,
+   Contributor, delete, exec, role-management, or any broader
+   managed-environment permission.
 6. The **Deploy Azure staging** workflow publishes and deploys `main` only after
    the complete `CI` workflow succeeds. A manual run may publish without
    deploying, or deploy a deliberately selected ref after the workflow exists on

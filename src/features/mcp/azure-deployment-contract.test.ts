@@ -371,6 +371,28 @@ describe("Azure staging deployment contract", () => {
       .toBeLessThan(rolloutRevision.indexOf('test "$health_state" = "Healthy"'));
   });
 
+  it("requires the exact revision to be Provisioned before changing ingress", () => {
+    const rolloutRevision = workflow.slice(
+      workflow.indexOf("- name: Create rollout revision"),
+      workflow.indexOf("- name: Verify deployed health"),
+    );
+    const revisionGate = rolloutRevision.indexOf("revision_provisioning_state");
+    const ingressUpdate = rolloutRevision.indexOf("az containerapp ingress update");
+    expect(rolloutRevision).toMatch(/containerapp revision show[\s\S]*--revision "\$new_revision"[\s\S]*properties\.provisioningState/);
+    expect(rolloutRevision).toContain('test "$revision_provisioning_state" = "Provisioned"');
+    expect(rolloutRevision).toMatch(/Failed\|Deprovisioned\)[\s\S]*exit 1/);
+    expect(rolloutRevision).toMatch(/revision_health_state[\s\S]*Degraded[\s\S]*exit 1/);
+    expect(rolloutRevision).toMatch(/for _ in \$\(seq 1 60\)[\s\S]*sleep 5/);
+    expect(revisionGate).toBeGreaterThan(0);
+    expect(ingressUpdate).toBeGreaterThan(revisionGate);
+  });
+
+  it("documents the exact managed-environment join permission without broader Azure roles", () => {
+    expect(deployment).toMatch(/Microsoft\.App\/managedEnvironments\/join\/action[\s\S]{0,120}exact\s+managed environment/i);
+    expect(deployment).toMatch(/secret set[\s\S]{0,240}may internally read[\s\S]{0,180}workflow itself never prints/i);
+    expect(deployment).toMatch(/do\s+not grant[^.]*subscription scope[^.]*Contributor[^.]*delete[^.]*exec[^.]*role-management/i);
+  });
+
   it("restores the captured ingress port before copying the rollback revision", () => {
     const rollback = workflow.slice(workflow.indexOf("- name: Restore the previous healthy revision"));
     const ingressRestore = rollback.indexOf("az containerapp ingress update");
