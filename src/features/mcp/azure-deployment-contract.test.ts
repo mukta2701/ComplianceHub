@@ -130,8 +130,8 @@ describe("Azure staging deployment contract", () => {
 
   it("stages and binds each sensitive value exactly once while exposing only nonsecret rollout capability", () => {
     expect(workflow.split("az containerapp secret set")).toHaveLength(2);
-    expect(workflow.split('"DAILY_DIGEST_RESERVATION_MODE=$runtime_reservation_mode"')).toHaveLength(2);
-    expect(workflow.split('"COMPLIANCEHUB_RELEASE_SHA=$DEPLOY_SHA"')).toHaveLength(2);
+    expect(workflow.split('"dailyDigestReservationMode=$runtime_reservation_mode"')).toHaveLength(2);
+    expect(workflow.split('"complianceHubReleaseSha=$DEPLOY_SHA"')).toHaveLength(2);
     expect(bicep).toContain("param dailyDigestReservationMode string = 'strict'");
     expect(bicep).toContain("param complianceHubReleaseSha string = 'unknown'");
     expect(bicep).toContain("{ name: 'DAILY_DIGEST_RESERVATION_MODE', value: dailyDigestReservationMode }");
@@ -156,7 +156,7 @@ describe("Azure staging deployment contract", () => {
     const publish = workflow.slice(workflow.indexOf("  publish:"), deployJobStart);
     const deploy = workflow.slice(deployJobStart);
     const stagedSecret = '"${{ steps.rollout.outputs.slack-allowed-ref }}=$SLACK_ALLOWED_WEBHOOK_SHA256"';
-    const runtimeBinding = '"SLACK_ALLOWED_WEBHOOK_SHA256=secretref:${{ steps.rollout.outputs.slack-allowed-ref }}"';
+    const runtimeBinding = '"slackAllowedWebhookSha256RefName=${{ steps.rollout.outputs.slack-allowed-ref }}"';
 
     expect(publish).not.toContain(name);
     expect(dockerfile).not.toMatch(/(?:ARG|NEXT_PUBLIC_)\s*SLACK_ALLOWED_WEBHOOK_SHA256/);
@@ -189,7 +189,17 @@ describe("Azure staging deployment contract", () => {
         GITHUB_APPROVED_SECURITY_WORKFLOW_IDS: "github-approved-workflow-ids",
       }[name];
       const stagedSecret = '"${{ steps.rollout.outputs.' + refOutput + '-ref }}=$' + name + '"';
-      const runtimeBinding = '"' + name + '=secretref:${{ steps.rollout.outputs.' + refOutput + '-ref }}"';
+      const bicepParameter = {
+        GITHUB_APP_ID: "githubAppIdRefName",
+        GITHUB_APP_CLIENT_ID: "githubAppClientIdRefName",
+        GITHUB_APP_CLIENT_SECRET: "githubAppClientCredentialRefName",
+        GITHUB_APP_PRIVATE_KEY: "githubAppPrivateKeyRefName",
+        GITHUB_WEBHOOK_SECRET: "githubWebhookHmacRefName",
+        GITHUB_APP_SLUG: "githubAppSlugRefName",
+        GITHUB_ALLOWED_ACCOUNT_ID: "githubAllowedAccountIdRefName",
+        GITHUB_APPROVED_SECURITY_WORKFLOW_IDS: "githubApprovedSecurityWorkflowIdsRefName",
+      }[name];
+      const runtimeBinding = `"${bicepParameter}=\${{ steps.rollout.outputs.${refOutput}-ref }}"`;
 
       expect(publish, name).not.toContain(name);
       expect(dockerfile, name).not.toMatch(new RegExp(`(?:ARG|NEXT_PUBLIC_)\\s*${name}`));
@@ -197,7 +207,7 @@ describe("Azure staging deployment contract", () => {
       expect(clientSources, name).not.toContain(name);
       expect(healthRoutes, name).not.toContain(name);
       expect(deploy, name).toContain(`${name}: \${{ secrets.AZURE_${name} }}`);
-      expect(deploy, name).toMatch(new RegExp(`${name}=secretref:\\$\\{\\{ steps\\.rollout\\.outputs\\.[a-z0-9-]+-ref \\}\\}`));
+      expect(deploy, name).toContain(runtimeBinding);
       expect(deploy.split(stagedSecret), `${name} staged secret`).toHaveLength(2);
       expect(deploy.split(runtimeBinding), `${name} runtime binding`).toHaveLength(2);
       expect(bicep, name).toMatch(new RegExp(`name: '${name}'[\\s\\S]{0,80}secretRef:`));
@@ -265,12 +275,89 @@ describe("Azure staging deployment contract", () => {
   });
 
   it("proves the exact rollout and rollback revisions are ready before canonical smoke tests", () => {
-    expect(workflow).toMatch(/new_revision=.*containerapp revision copy[\s\S]*--query properties\.latestRevisionName/);
+    expect(workflow).toMatch(/az deployment group create[\s\S]*--template-file infra\/azure\/application\.bicep[\s\S]*new_revision=[\s\S]*properties\.latestRevisionName/);
     expect(workflow).toMatch(/containerapp revision show[\s\S]*--revision "\$new_revision"[\s\S]*Running/);
     expect(workflow).toMatch(/latestReadyRevisionName[\s\S]*test "\$latest_ready_revision" = "\$new_revision"/);
     expect(workflow).toMatch(/CANONICAL_SITE_URL[\s\S]*curl[\s\S]*\/api\/health\/live/);
     expect(workflow).toMatch(/rollback_revision=.*containerapp revision copy[\s\S]*--query properties\.latestRevisionName/);
     expect(workflow).toMatch(/--revision "\$rollback_revision"[\s\S]*Running[\s\S]*latestReadyRevisionName/);
+  });
+
+  it("creates the rollout revision from the complete application Bicep contract", () => {
+    const rolloutRevision = workflow.slice(
+      workflow.indexOf("- name: Create rollout revision"),
+      workflow.indexOf("- name: Verify deployed health"),
+    );
+    expect(rolloutRevision).toContain("az deployment group create");
+    expect(rolloutRevision).toContain("--template-file infra/azure/application.bicep");
+    expect(rolloutRevision).not.toContain("az containerapp revision copy");
+    for (const parameter of [
+      "managedEnvironmentName",
+      "containerAppName",
+      "imageReference",
+      "revisionSuffix",
+      "nextPublicSupabaseUrl",
+      "nextPublicSupabaseAnonKey",
+      "nextPublicSupabasePublishableKey",
+      "nextPublicSiteUrl",
+      "mcpResourceUrl",
+      "supabaseOauthIssuer",
+      "supabaseOauthJwksUrl",
+      "mcpJwtAlgorithms",
+      "dailyDigestReservationMode",
+      "complianceHubReleaseSha",
+      "supabaseRefName",
+      "encryptionRefName",
+      "cronRefName",
+      "slackAllowedWebhookSha256RefName",
+      "githubAppIdRefName",
+      "githubAppClientIdRefName",
+      "githubAppClientCredentialRefName",
+      "githubAppPrivateKeyRefName",
+      "githubWebhookHmacRefName",
+      "githubAppSlugRefName",
+      "githubAllowedAccountIdRefName",
+      "githubApprovedSecurityWorkflowIdsRefName",
+    ]) {
+      expect(rolloutRevision, parameter).toContain(`${parameter}=`);
+    }
+  });
+
+  it("verifies 3100 ingress and all three new-revision probes before health acceptance", () => {
+    const capture = workflow.slice(
+      workflow.indexOf("- name: Capture rollback revision"),
+      workflow.indexOf("- name: Stage rollback-safe secret slot"),
+    );
+    const rolloutRevision = workflow.slice(
+      workflow.indexOf("- name: Create rollout revision"),
+      workflow.indexOf("- name: Verify deployed health"),
+    );
+    expect(capture).toContain("properties.configuration.ingress.targetPort");
+    expect(capture).toContain('echo "previous-target-port=$previous_target_port"');
+    expect(rolloutRevision).toContain('test "$deployed_target_port" = "3100"');
+    expect(rolloutRevision).toContain("properties.template.containers[0].probes[].httpGet.port");
+    expect(rolloutRevision).toContain("length == 3 and all(.[]; . == 3100)");
+    expect(rolloutRevision.indexOf('test "$deployed_target_port" = "3100"'))
+      .toBeLessThan(rolloutRevision.indexOf('test "$health_state" = "Healthy"'));
+    expect(rolloutRevision.indexOf("length == 3 and all(.[]; . == 3100)"))
+      .toBeLessThan(rolloutRevision.indexOf('test "$health_state" = "Healthy"'));
+  });
+
+  it("restores the captured ingress port before copying the rollback revision", () => {
+    const rollback = workflow.slice(workflow.indexOf("- name: Restore the previous healthy revision"));
+    const ingressRestore = rollback.indexOf("az containerapp ingress update");
+    const revisionCopy = rollback.indexOf("az containerapp revision copy");
+    expect(rollback).toContain('previous_target_port="${{ steps.rollout.outputs.previous-target-port }}"');
+    expect(rollback).toContain('--target-port "$previous_target_port"');
+    expect(rollback).toContain('test "$restored_target_port" = "$previous_target_port"');
+    expect(ingressRestore).toBeGreaterThan(0);
+    expect(revisionCopy).toBeGreaterThan(ingressRestore);
+    expect(rollback).not.toContain("--target-port 3000");
+  });
+
+  it("documents bootstrap-to-3100 migration and captured-port rollback", () => {
+    expect(deployment).toMatch(/bootstrap[^.]*port 80[\s\S]*application\.bicep[\s\S]*3100/i);
+    expect(deployment).toMatch(/captured previous ingress target port[\s\S]*rollback/i);
   });
 
   it("functionally verifies OAuth/MCP and restores the previous healthy revision", () => {

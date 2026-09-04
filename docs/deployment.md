@@ -133,7 +133,11 @@ an Azure Container Registry. Render, AWS, and Vercel hosting are not used.
    email for budget alerts. The template creates the resource group, capped
    30-day Log Analytics workspace, Consumption environment, bootstrap app, and a
    one-unit monthly budget in the subscription's billing currency with 50%, 80%,
-   and 100% notifications.
+   and 100% notifications. The bootstrap app intentionally serves Microsoft's
+   sample on port 80; do not change that sample to port 3100. The first real
+   application rollout consumes `infra/azure/application.bicep` and atomically
+   migrates the app ingress, application container, and all health probes to
+   port 3100.
 3. Record the `containerAppFqdn` output. Set `NEXT_PUBLIC_SITE_URL` to its HTTPS
    origin and `MCP_RESOURCE_URL` to the same origin ending exactly in `/mcp`.
 4. Create the protected GitHub environment `azure-staging`. Configure the
@@ -167,14 +171,18 @@ an Azure Container Registry. Render, AWS, and Vercel hosting are not used.
    fingerprint. The first final proves that the exact rollback revision is the
    policy-capable bridge image; a steady-state final accepts a policy-capable
    `bridge` or `strict` predecessor. Both paths match the non-secret health
-   marker, captured mode, and release SHA. The workflow then creates one new
-   revision, binds the inactive secret
-   slot exactly once, waits for that exact revision to be Healthy/Running and
-   `latestReadyRevisionName`, and validates the marker/release identity before
-   OAuth/MCP smoke. On failure or cancellation it copies only the captured
-   previous revision, verifies the copied image and references are identical,
-   and for a final rollback proves the restored `v1`, exact captured previous
-   mode (`bridge` or `strict`), and release identity.
+   marker, captured mode, and release SHA. Before mutation it also records the
+   captured previous ingress target port. The workflow then deploys
+   `infra/azure/application.bicep`, creates one exact new revision, binds the
+   inactive secret slot exactly once, and proves ingress plus all three health
+   probes use port 3100 before accepting Healthy/Running,
+   `latestReadyRevisionName`, marker/release identity, or OAuth/MCP smoke. On
+   failure or cancellation it restores the captured previous ingress target
+   port before copying only the captured previous revision, so the port-80
+   bootstrap and any older revision can recover without a hardcoded legacy
+   port. It verifies the copied image and references are identical and, for a
+   final rollback, proves the restored `v1`, exact captured previous mode
+   (`bridge` or `strict`), and release identity.
 9. Do not merge or deploy this release until the hosted migration checkpoint and
    GitHub organisation-owner registration checkpoint below are complete. The
    current environment has no GitHub App values, `main` auto-deploys after CI,

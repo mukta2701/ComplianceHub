@@ -137,6 +137,13 @@ jobs:
             --query properties.latestReadyRevisionName \
             --output tsv)"
           test -n "$previous_revision"
+          previous_target_port="$(az containerapp show \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_CONTAINER_APP" \
+            --query properties.configuration.ingress.targetPort \
+            --output tsv)"
+          [[ "$previous_target_port" =~ ^[1-9][0-9]{0,4}$ ]]
+          (( 10#$previous_target_port <= 65535 ))
           current_environment="$(az containerapp revision show \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --name "$AZURE_CONTAINER_APP" \
@@ -281,6 +288,7 @@ jobs:
           fi
           {
             echo "previous-revision=$previous_revision"
+            echo "previous-target-port=$previous_target_port"
             echo "previous-image=$previous_image"
             echo "previous-revision-fqdn=$previous_revision_fqdn"
             echo "previous-ref-fingerprint=$previous_ref_fingerprint"
@@ -424,50 +432,65 @@ jobs:
             --output none
           echo "mutation-started=true" >> "$GITHUB_OUTPUT"
 
-      - name: Create rollout revision from the previous healthy revision
+      - name: Create rollout revision from the complete application contract
         id: revision
         env:
           IMAGE_REFERENCE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.publish.outputs.image-digest }}
         run: |
           set -euo pipefail
           runtime_reservation_mode="${{ steps.rollout.outputs.runtime-reservation-mode }}"
-          new_revision="$(az containerapp revision copy \
+          az deployment group create \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "compliancehub-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --template-file infra/azure/application.bicep \
+            --parameters \
+              "managedEnvironmentName=$AZURE_CONTAINER_ENVIRONMENT" \
+              "containerAppName=$AZURE_CONTAINER_APP" \
+              "imageReference=$IMAGE_REFERENCE" \
+              "revisionSuffix=run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+              "nextPublicSupabaseUrl=${{ vars.NEXT_PUBLIC_SUPABASE_URL }}" \
+              "nextPublicSupabaseAnonKey=${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY }}" \
+              "nextPublicSupabasePublishableKey=${{ vars.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}" \
+              "nextPublicSiteUrl=${{ vars.NEXT_PUBLIC_SITE_URL }}" \
+              "mcpResourceUrl=${{ vars.MCP_RESOURCE_URL }}" \
+              "supabaseOauthIssuer=${{ vars.SUPABASE_OAUTH_ISSUER }}" \
+              "supabaseOauthJwksUrl=${{ vars.SUPABASE_OAUTH_JWKS_URL }}" \
+              "mcpJwtAlgorithms=${{ vars.MCP_JWT_ALGORITHMS }}" \
+              "dailyDigestReservationMode=$runtime_reservation_mode" \
+              "complianceHubReleaseSha=$DEPLOY_SHA" \
+              "supabaseRefName=${{ steps.rollout.outputs.service-role-ref }}" \
+              "encryptionRefName=${{ steps.rollout.outputs.encryption-ref }}" \
+              "cronRefName=${{ steps.rollout.outputs.cron-ref }}" \
+              "slackAllowedWebhookSha256RefName=${{ steps.rollout.outputs.slack-allowed-ref }}" \
+              "githubAppIdRefName=${{ steps.rollout.outputs.github-app-id-ref }}" \
+              "githubAppClientIdRefName=${{ steps.rollout.outputs.github-client-id-ref }}" \
+              "githubAppClientCredentialRefName=${{ steps.rollout.outputs.github-client-secret-ref }}" \
+              "githubAppPrivateKeyRefName=${{ steps.rollout.outputs.github-private-key-ref }}" \
+              "githubWebhookHmacRefName=${{ steps.rollout.outputs.github-webhook-secret-ref }}" \
+              "githubAppSlugRefName=${{ steps.rollout.outputs.github-app-slug-ref }}" \
+              "githubAllowedAccountIdRefName=${{ steps.rollout.outputs.github-allowed-account-id-ref }}" \
+              "githubApprovedSecurityWorkflowIdsRefName=${{ steps.rollout.outputs.github-approved-workflow-ids-ref }}" \
+            --only-show-errors \
+            --output none
+          new_revision="$(az containerapp show \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --name "$AZURE_CONTAINER_APP" \
-            --from-revision "${{ steps.rollout.outputs.previous-revision }}" \
-            --image "$IMAGE_REFERENCE" \
-            --revision-suffix "run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
-            --cpu 0.5 \
-            --memory 1Gi \
-            --min-replicas 0 \
-            --max-replicas 1 \
-            --replace-env-vars \
-              "NEXT_PUBLIC_SUPABASE_URL=${{ vars.NEXT_PUBLIC_SUPABASE_URL }}" \
-              "NEXT_PUBLIC_SUPABASE_ANON_KEY=${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY }}" \
-              "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=${{ vars.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}" \
-              "NEXT_PUBLIC_SITE_URL=${{ vars.NEXT_PUBLIC_SITE_URL }}" \
-              "MCP_RESOURCE_URL=${{ vars.MCP_RESOURCE_URL }}" \
-              "SUPABASE_OAUTH_ISSUER=${{ vars.SUPABASE_OAUTH_ISSUER }}" \
-              "SUPABASE_OAUTH_JWKS_URL=${{ vars.SUPABASE_OAUTH_JWKS_URL }}" \
-              "MCP_JWT_ALGORITHMS=${{ vars.MCP_JWT_ALGORITHMS }}" \
-              "DAILY_DIGEST_RESERVATION_MODE=$runtime_reservation_mode" \
-              "COMPLIANCEHUB_RELEASE_SHA=$DEPLOY_SHA" \
-              "SUPABASE_SERVICE_ROLE_KEY=secretref:${{ steps.rollout.outputs.service-role-ref }}" \
-              "APP_ENCRYPTION_KEY=secretref:${{ steps.rollout.outputs.encryption-ref }}" \
-              "CRON_SECRET=secretref:${{ steps.rollout.outputs.cron-ref }}" \
-              "SLACK_ALLOWED_WEBHOOK_SHA256=secretref:${{ steps.rollout.outputs.slack-allowed-ref }}" \
-              "GITHUB_APP_ID=secretref:${{ steps.rollout.outputs.github-app-id-ref }}" \
-              "GITHUB_APP_CLIENT_ID=secretref:${{ steps.rollout.outputs.github-client-id-ref }}" \
-              "GITHUB_APP_CLIENT_SECRET=secretref:${{ steps.rollout.outputs.github-client-secret-ref }}" \
-              "GITHUB_APP_PRIVATE_KEY=secretref:${{ steps.rollout.outputs.github-private-key-ref }}" \
-              "GITHUB_WEBHOOK_SECRET=secretref:${{ steps.rollout.outputs.github-webhook-secret-ref }}" \
-              "GITHUB_APP_SLUG=secretref:${{ steps.rollout.outputs.github-app-slug-ref }}" \
-              "GITHUB_ALLOWED_ACCOUNT_ID=secretref:${{ steps.rollout.outputs.github-allowed-account-id-ref }}" \
-              "GITHUB_APPROVED_SECURITY_WORKFLOW_IDS=secretref:${{ steps.rollout.outputs.github-approved-workflow-ids-ref }}" \
-            --only-show-errors \
             --query properties.latestRevisionName \
             --output tsv)"
           test "$new_revision" = "${AZURE_CONTAINER_APP}--run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          deployed_target_port="$(az containerapp show \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_CONTAINER_APP" \
+            --query properties.configuration.ingress.targetPort \
+            --output tsv)"
+          test "$deployed_target_port" = "3100"
+          deployed_probe_ports="$(az containerapp revision show \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_CONTAINER_APP" \
+            --revision "$new_revision" \
+            --query 'properties.template.containers[0].probes[].httpGet.port' \
+            --output json)"
+          jq --exit-status 'length == 3 and all(.[]; . == 3100)' <<< "$deployed_probe_ports" >/dev/null
           health_state=""
           running_state=""
           for _ in $(seq 1 60); do
@@ -560,6 +583,21 @@ jobs:
         run: |
           set -euo pipefail
           rollback_capability_required="${{ steps.rollout.outputs.rollback-capability-required }}"
+          previous_target_port="${{ steps.rollout.outputs.previous-target-port }}"
+          [[ "$previous_target_port" =~ ^[1-9][0-9]{0,4}$ ]]
+          (( 10#$previous_target_port <= 65535 ))
+          az containerapp ingress update \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_CONTAINER_APP" \
+            --target-port "$previous_target_port" \
+            --only-show-errors \
+            --output none
+          restored_target_port="$(az containerapp show \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_CONTAINER_APP" \
+            --query properties.configuration.ingress.targetPort \
+            --output tsv)"
+          test "$restored_target_port" = "$previous_target_port"
           rollback_revision="$(az containerapp revision copy \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --name "$AZURE_CONTAINER_APP" \
