@@ -11,6 +11,7 @@ const eslintConfig = defineConfig([
     ".next/**",
     // Ignore agent-managed nested worktrees and their generated build output.
     ".superpowers/**",
+    "artifacts/**",
     "out/**",
     "build/**",
     "test-results/**",

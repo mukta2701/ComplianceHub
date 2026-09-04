@@ -185,8 +185,13 @@ test("Owner controls the single Slack digest destination while Admin remains rea
   const compactSuffix = createHash("sha256").update(owner.suffix).digest("hex").slice(0, 10);
   const firstLabel = `#digest-primary-${compactSuffix}`;
   const secondLabel = `#digest-backup-${compactSuffix}`;
-  const firstWebhook = `https://hooks.slack.com/services/T${compactSuffix}/BPRIMARY/secret-primary-${compactSuffix}`;
-  const secondWebhook = `https://hooks.slack.com/services/T${compactSuffix}/BBACKUP/secret-backup-${compactSuffix}`;
+  // Two channel records exercise selection changes against the one explicitly
+  // approved synthetic destination. This test never invokes the Slack transport.
+  const firstWebhook = "https://hooks.slack.com/services/T_TEST/B_TEST/S_TEST";
+  const secondWebhook = firstWebhook;
+  expect(localEnvironment("SLACK_ALLOWED_WEBHOOK_SHA256")).toBe(
+    createHash("sha256").update(firstWebhook).digest("hex"),
+  );
 
   await page.goto("/app/integrations");
   await addSlackChannel(page, firstLabel, firstWebhook);
@@ -297,8 +302,9 @@ test("Owner controls the single Slack digest destination while Admin remains rea
   ]);
   await page.goto("/app/integrations");
   panel = await openSlackPanel(page);
-  await expect(channelCard(panel, firstLabel).getByRole("button", { name: `Pause ${firstLabel}` })).toBeVisible();
-  await expect(panel.getByRole("button", { name: "Add Slack channel" })).toBeVisible();
+  await expect(channelCard(panel, firstLabel).getByRole("button", { name: `Pause ${firstLabel}` })).toHaveCount(0);
+  await expect(panel.getByRole("button", { name: "Add Slack channel" })).toHaveCount(0);
+  await expect(panel.getByText("A workspace Owner manages Slack destinations.")).toBeVisible();
   await expect(panel.getByRole("button", { name: /daily digest/i })).toHaveCount(0);
   await expect(panel.getByRole("region", { name: "Daily digest delivery history" })).toHaveCount(0);
   await expect(panel).not.toContainText("SLACK_REJECTED");

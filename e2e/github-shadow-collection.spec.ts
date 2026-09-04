@@ -467,7 +467,7 @@ test("selects repository scope in Connections and shows official collection heal
   expect(installationId).toMatch(/^[0-9a-f-]{36}$/);
 
   await page.goto("/app/integrations");
-  await expect(page.getByRole("heading", { name: "GitHub App connection" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "GitHub repository access" })).toBeVisible();
   for (const fullName of repositoryNames) await selectRepository(page, fullName);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 

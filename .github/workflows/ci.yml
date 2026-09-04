@@ -68,6 +68,9 @@ jobs:
             echo "CRON_SECRET=ci-test-cron-secret"
             echo "APP_ENCRYPTION_KEY=$app_encryption_key"
             echo "E2E_TEST_TOOLS_ENABLED=1"
+            # Synthetic destination used only for configuration/lifecycle E2E;
+            # those tests never invoke the Slack transport.
+            echo "SLACK_ALLOWED_WEBHOOK_SHA256=36b243d5b0e2304cbdf6f5bf362061b4f0e5cdc842c7f407af9253d0207cce52"
           } >> "$GITHUB_ENV"
       # Build only after the same local Supabase environment used by the
       # browser suite is available. Playwright starts this artifact through
