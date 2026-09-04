@@ -21,6 +21,7 @@ describe("user OAuth grants", () => {
     expect(validateRequestedIdentityScopes("openid profile email")).toEqual(["openid", "profile", "email"]);
     expect(validateRequestedIdentityScopes("openid profile email offline_access")).toEqual(["openid", "profile", "email", "offline_access"]);
     expect(validateRequestedIdentityScopes("phone")).toBeNull();
+    expect(validateRequestedIdentityScopes("admin:write")).toBeNull();
     expect(validateRequestedIdentityScopes("openid profile email offline_access phone")).toBeNull();
     expect(validateRequestedIdentityScopes("   ")).toBeNull();
   });

@@ -18,6 +18,7 @@ describe("OAuthConsentPage scopes", () => {
   it("shows approval controls when ChatGPT requests refresh-token continuity", async () => {
     hoisted.getAuthorizationDetails.mockResolvedValue({ data: { ...base, scope: "openid email offline_access profile" }, error: null });
     render(await OAuthConsentPage({ searchParams: Promise.resolve({ authorization_id: id }) }));
+    expect(screen.getByText("Requested scopes")).toBeInTheDocument();
     expect(screen.getByText("openid, email, offline_access, profile")).toBeInTheDocument();
     expect(screen.getByText("Offline access")).toBeInTheDocument();
     expect(screen.getByText(/refresh its access when you are not actively using ComplianceHub/i)).toBeInTheDocument();
@@ -30,12 +31,16 @@ describe("OAuthConsentPage scopes", () => {
     expect(screen.queryByText("Offline access")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Approve connection" })).toBeInTheDocument();
   });
-  it.each(["phone", "openid email profile offline_access phone"])("fails closed without approving or reflecting unsupported scope request %s", async (scope) => {
+  it.each([
+    ["phone", "phone"],
+    ["admin:write", "admin:write"],
+    ["openid email profile offline_access phone", "phone"],
+  ])("fails closed without approving or reflecting unsupported scope request %s", async (scope, unknownScope) => {
     hoisted.getAuthorizationDetails.mockResolvedValue({ data: { ...base, scope }, error: null });
     render(await OAuthConsentPage({ searchParams: Promise.resolve({ authorization_id: id }) }));
     expect(screen.getByRole("alert")).toHaveTextContent("unsupported access");
     expect(screen.queryByRole("button", { name: "Approve connection" })).not.toBeInTheDocument();
-    expect(document.body).not.toHaveTextContent("phone");
+    expect(document.body).not.toHaveTextContent(unknownScope);
   });
   it("renders an allowlisted terminal action error without requiring an authorization id", async () => {
     render(await OAuthConsentPage({ searchParams: Promise.resolve({ message: "Could not complete that authorization request." }) }));

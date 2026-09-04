@@ -46,7 +46,7 @@ describe("oauthConsentAction", () => {
     hoisted.client.auth.oauth.approveAuthorization.mockResolvedValue({ data: { redirect_url: "https://evil.example/steal" }, error: null });
     await expect(oauthConsentAction(form())).rejects.toThrow("REDIRECT:/oauth/consent?message=Could+not+complete+that+authorization+request.");
   });
-  it.each(["phone", "openid profile email offline_access phone"])("fails closed without approving or reflecting unsupported scope request %s", async (scope) => {
+  it.each(["phone", "admin:write", "openid profile email offline_access phone"])("fails closed without approving or reflecting unsupported scope request %s", async (scope) => {
     hoisted.client.auth.oauth.getAuthorizationDetails.mockResolvedValue({ data: { ...details, scope }, error: null });
     await expect(oauthConsentAction(form())).rejects.toThrow("REDIRECT:/oauth/consent?message=That+authorization+request+requests+unsupported+access.");
     expect(hoisted.client.auth.oauth.approveAuthorization).not.toHaveBeenCalled();
