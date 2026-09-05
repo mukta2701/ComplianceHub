@@ -7,7 +7,7 @@ import { AUDITOR_LINK_FLASH_COOKIE } from "@/features/audits/application/auditor
 import { Card, PageIntro, Pill, Progress } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { one } from "@/lib/supabase/one";
-import { updateAuditStatusAction, addChecklistItemAction, populateAuditChecklistAction, updateChecklistItemAction, raiseFindingAction, updateFindingStatusAction } from "../actions";
+import { updateAuditStatusAction, addChecklistItemAction, populateAuditChecklistAction, updateChecklistItemAction, raiseFindingAction, updateFindingStatusAction, linkChecklistEvidenceAction } from "../actions";
 import { mintAuditorTokenAction, revokeAuditorTokenAction } from "./share-actions";
 import { AiSuggestionPanel } from "@/components/ai-suggestion-panel";
 
@@ -34,14 +34,19 @@ export default async function AuditDetailPage({ params }: { params: Promise<{ id
   const isMember = membership.role === "member";
   const { data: audit } = await supabase.from("audits").select("id,reference,title,scope,status,framework,planned_start,planned_end").eq("id", id).eq("organisation_id", organisation.id).maybeSingle();
   if (!audit) notFound();
-  const [{ data: items }, { data: findings }, { data: members }, { data: tokens }, { data: aiSettings }] = await Promise.all([
+  const [{ data: items, error: itemsError }, { data: findings, error: findingsError }, { data: members }, { data: tokens }, { data: aiSettings }, { data: evidence, error: evidenceError }, { data: evidenceLinks, error: evidenceLinksError }] = await Promise.all([
     supabase.from("audit_checklist_items").select("id,area,clause_reference,checklist_item,compliant,evidence_note,findings").eq("audit_id", id).eq("organisation_id", organisation.id).order("position"),
     supabase.from("audit_findings").select("id,summary,severity,status,corrective_action,task_id").eq("audit_id", id).eq("organisation_id", organisation.id).order("created_at"),
     supabase.from("memberships").select("user_id,profiles(display_name)").eq("organisation_id", organisation.id),
     supabase.from("auditor_access_tokens").select("id,label,expires_at,revoked_at,audit_id").eq("audit_id", id).eq("organisation_id", organisation.id).order("created_at", { ascending: false }),
     supabase.from("ai_workspace_settings").select("enabled").eq("organisation_id", organisation.id).maybeSingle(),
+    supabase.from("evidence").select("id,title,status,collected_on,valid_until").eq("organisation_id", organisation.id).order("created_at", { ascending: false }).limit(200),
+    supabase.from("evidence_links").select("id,evidence_id,audit_checklist_item_id,evidence(id,title,status,collected_on,valid_until),audit_checklist_items!inner(audit_id)").eq("organisation_id", organisation.id).eq("audit_checklist_items.audit_id", id),
   ]);
+  if (itemsError || findingsError || evidenceError || evidenceLinksError) throw new Error("Could not load audit evidence");
   const rows = items ?? [];
+  const availableEvidence = evidence ?? [];
+  const linkedEvidence = evidenceLinks ?? [];
   const { data: accessRows, error: accessRowsError } = await supabase.from("auditor_access_log")
     .select("viewed_at,auditor_access_tokens!inner(label)")
     .eq("organisation_id", organisation.id)
@@ -91,6 +96,15 @@ export default async function AuditDetailPage({ params }: { params: Promise<{ id
               <input name="findings" defaultValue={i.findings} placeholder="Findings" aria-label={`Findings for ${i.checklist_item}`} />
               <button className="button secondary">Save</button>
             </form>}
+            {(() => {
+              const links = linkedEvidence.filter((link) => link.audit_checklist_item_id === i.id);
+              const linkedIds = new Set(links.map((link) => link.evidence_id));
+              return <div aria-label={`Evidence linked to ${i.checklist_item}`} style={{ display: "grid", gap: "4px", marginTop: "8px" }}>
+                {links.map((link) => { const item = one(link.evidence); return <div key={link.id} style={{ fontSize: "12px", minWidth: 0, maxWidth: "100%", overflowWrap: "anywhere" }}>{item ? <><Link href={`/app/evidence?evidence=${item.id}#evidence-${item.id}`}>{item.title}</Link> · <Pill tone={item.status === "current" ? "green" : item.status === "expiring" ? "amber" : item.status === "expired" ? "red" : "neutral"}>{item.status}</Pill>{(item.collected_on || item.valid_until) && <small style={{ display: "block", color: "#596273" }}>{item.collected_on && `collected ${new Intl.DateTimeFormat("en-GB", { dateStyle: "long", timeZone: "UTC" }).format(new Date(item.collected_on))}`}{item.collected_on && item.valid_until && " · "}{item.valid_until && `valid until ${new Intl.DateTimeFormat("en-GB", { dateStyle: "long", timeZone: "UTC" }).format(new Date(item.valid_until))}`}</small>}</> : <span style={{ color: "#596273" }}>Linked evidence unavailable ({link.evidence_id})</span>}</div>; })}
+                {!isMember && availableEvidence.some((item) => !linkedIds.has(item.id)) && <form action={linkChecklistEvidenceAction} style={{ display: "flex", gap: "6px", alignItems: "end", flexWrap: "wrap", minWidth: 0, maxWidth: "100%" }}><input type="hidden" name="auditId" value={id} /><input type="hidden" name="checklistItemId" value={i.id} /><label style={{ fontSize: "12px", fontWeight: 700, minWidth: 0, maxWidth: "100%" }}>Link existing evidence<select name="evidenceId" required defaultValue="" aria-label={`Evidence to link to ${i.checklist_item}`} style={{ maxWidth: "100%" }}><option value="" disabled>Select evidence</option>{availableEvidence.filter((item) => !linkedIds.has(item.id)).map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label><button className="button secondary">Link evidence</button></form>}
+                {!links.length && (isMember || !availableEvidence.some((item) => !linkedIds.has(item.id))) && <small style={{ color: "#596273" }}>No linked evidence.</small>}
+              </div>;
+            })()}
           </td>
         </tr>)}
         {!rows.length && <tr><td colSpan={4} style={{ color: "#596273" }}>No checklist items yet. Add the first one below.</td></tr>}

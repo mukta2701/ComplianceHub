@@ -3,6 +3,8 @@ import { requireAppContext } from "@/lib/app-context";
 import { toCsv, toXlsx, type ExportColumn } from "@/features/exports/exports";
 import { protectExport, recordExportAudit } from "@/features/exports/export-audit";
 import { CHECKLIST_RESULT_LABEL, FINDING_SEVERITY_LABEL, FINDING_STATUS_LABEL, type ChecklistResult, type FindingSeverity, type FindingStatus } from "@/features/audits/domain/audits";
+import { one } from "@/lib/supabase/one";
+import { collectIdPages } from "@/lib/supabase/paginate";
 
 type PackRow = { section: string; ref: string; item: string; result: string; detail: string };
 
@@ -14,13 +16,37 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   await protectExport(auditContext);
   const { data: audit } = await supabase.from("audits").select("reference,title").eq("id", id).eq("organisation_id", organisation.id).maybeSingle();
   if (!audit) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  const [{ data: items }, { data: findings }] = await Promise.all([
+  const [{ data: items, error: itemsError }, { data: findings, error: findingsError }] = await Promise.all([
     supabase.from("audit_checklist_items").select("area,clause_reference,checklist_item,compliant,evidence_note,findings").eq("audit_id", id).eq("organisation_id", organisation.id).order("position"),
     supabase.from("audit_findings").select("summary,severity,status,corrective_action").eq("audit_id", id).eq("organisation_id", organisation.id).order("created_at"),
   ]);
+  if (itemsError || findingsError) return NextResponse.json({ error: "Could not load the complete audit pack. Please try again." }, { status: 503 });
+  const evidenceRows: PackRow[] = [];
+  try {
+    const links = await collectIdPages(async (afterId, limit) => {
+      let query = supabase.from("evidence_links")
+        .select("id,evidence_id,audit_checklist_item_id,audit_checklist_items!inner(audit_id,checklist_item),evidence(id,title,description,kind,status,collected_on,valid_until)")
+        .eq("organisation_id", organisation.id).eq("audit_checklist_items.audit_id", id)
+        .order("id", { ascending: true }).limit(limit);
+      if (afterId) query = query.gt("id", afterId);
+      const { data, error } = await query;
+      if (error) throw new Error("Evidence unavailable");
+      return data ?? [];
+    });
+    for (const link of links) {
+      const evidence = one(link.evidence);
+      const checklist = one(link.audit_checklist_items);
+      if (!evidence || !checklist) throw new Error("Evidence unavailable");
+      evidenceRows.push({ section: "Linked evidence", ref: evidence.id, item: evidence.title, result: evidence.status,
+        detail: [`Checklist: ${checklist.checklist_item}`, `Kind: ${evidence.kind}`, `Collected: ${evidence.collected_on}`, `Valid until: ${evidence.valid_until ?? "No expiry recorded"}`, evidence.description].filter(Boolean).join(" — ") });
+    }
+  } catch {
+    return NextResponse.json({ error: "Could not load the complete audit pack. Please try again." }, { status: 503 });
+  }
   const rows: PackRow[] = [
     ...(items ?? []).map((i) => ({ section: "Checklist", ref: `${i.area} ${i.clause_reference}`.trim(), item: i.checklist_item, result: CHECKLIST_RESULT_LABEL[i.compliant as ChecklistResult], detail: [i.evidence_note, i.findings].filter(Boolean).join(" — ") })),
     ...(findings ?? []).map((f) => ({ section: "Finding", ref: FINDING_SEVERITY_LABEL[f.severity as FindingSeverity], item: f.summary, result: FINDING_STATUS_LABEL[f.status as FindingStatus], detail: f.corrective_action })),
+    ...evidenceRows,
   ];
   const columns: ExportColumn<PackRow>[] = [
     { header: "Section", value: (r) => r.section }, { header: "Reference", value: (r) => r.ref },
