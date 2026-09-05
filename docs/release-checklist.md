@@ -4,6 +4,9 @@
 
 ### Latest user correction — restore the familiar Evidence experience
 
+- Astra retry completed successfully. Follow-up review found a pre-existing boundary error: 200 recent evidence records plus an older selected item exceeded the provenance loader's 200-ID limit. The selected item now replaces the last displayed row; no record is deleted. A full-size regression reproduces the failure before the fix.
+- A later local health check found the old Next process unresponsive at 100% CPU while Supabase remained healthy. The native sample records repeated exception/log handling; the initiating error is not yet established. Only the application process was stopped, and new runtime output goes to a local log file. Recovery checks and exact tested build are recorded in `artifacts/runtime-check-2026-09-05/`; this is not a claimed root-cause fix for the stall.
+
 The user has paused the fictional resolution scenario and all feature expansion. The immediate priority is restoring the basic Evidence experience from the existing demo/design history.
 
 - [x] Compared the current populated page, git history (`b48beba`, `161d9d1`, `5e15b0b`, `1a90596`), July UI uplift/design notes, backlog and archived demo screenshots. The main clutter is the 93-control baseline displayed as full chips with removal buttons, plus the large freshness donut. Rolling back only the latest linkage commit would leave that problem intact.

@@ -40,7 +40,11 @@ export default async function EvidencePage({
     const { data: selected, error } = await supabase.from("evidence").select(EVIDENCE_COLUMNS)
       .eq("id", requestedEvidence).eq("organisation_id", organisation.id).maybeSingle();
     if (error) throw new Error("Could not load the selected evidence");
-    if (selected) items.unshift(selected); else selectedMissing = true;
+    if (selected) {
+      items.unshift(selected);
+      // Preserve the requested record within the provenance loader's page limit.
+      items.splice(200);
+    } else selectedMissing = true;
   }
   const asOf = new Date().toISOString();
   const officialRecords = await loadOfficialGitHubEvidenceProvenance(
