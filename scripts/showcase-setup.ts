@@ -265,6 +265,7 @@ export async function main() {
         if (verifyOnly || manifest.ids[`soa_review_${item.id}`]) throw new Error(`SoA decision drift: ${item.control_code}`);
         console.log(`Reviewing control ${item.control_code}`);
         await page.goto(`/app/soa/${soa.id}`); await page.getByRole('button', { name: `Review ${item.control_code} ${item.control_title}`, exact: true }).click();
+        await expect(page.locator('.soa-detail-heading h2')).toHaveText(`${item.control_code} ${item.control_title}`);
         await page.getByRole('combobox', { name: 'Applicability decision', exact: true }).selectOption('true'); await page.getByRole('combobox', { name: 'Implementation status', exact: true }).selectOption(status); await page.getByRole('combobox', { name: 'Owner assignment', exact: true }).selectOption(user.id); await page.getByRole('textbox', { name: 'Rationale', exact: true }).fill(rationale); await submit('Save draft');
         await waitExpected('soa_items', { id: item.id }, expected);
         reconcileRecord(await rows('soa_items', { id: item.id }), item.id, expected);
