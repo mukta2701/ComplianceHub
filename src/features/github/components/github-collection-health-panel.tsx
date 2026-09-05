@@ -8,6 +8,7 @@ import { Pill } from "@/components/ui";
 import { recheckGitHubInstallationAction, type GitHubOfficialRecheckResult } from "@/app/app/monitoring/github-actions";
 import type { GitHubInstallationSummary } from "./github-installation-panel";
 import type { GitHubRuntimeReadiness } from "@/features/github/application/github-runtime-config";
+import { formatMonitoringTime } from "./format-monitoring-time";
 
 export type GitHubRepositoryMonitoringSummary = {
   repository_id: string;
@@ -50,14 +51,7 @@ function monitoringHealth(
     : { label: "Up to date", tone: "green" };
 }
 
-function formatLastChecked(value: string): string | null {
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return null;
-  return new Intl.DateTimeFormat("en-GB", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
-}
+const formatLastChecked = formatMonitoringTime;
 
 function recheckFeedback(result: GitHubOfficialRecheckResult): string {
   const summary = result.summary;

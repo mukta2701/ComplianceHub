@@ -122,7 +122,7 @@ describe("GitHubCollectionHealthPanel", () => {
     expect(within(repoArticle("Adtecher/compliancehub")).getByText("Ready for first check")).toBeVisible();
     expect(within(repoArticle("Adtecher/running")).getByText("Checking now")).toBeVisible();
     expect(within(repoArticle("Adtecher/current")).getByText("Up to date")).toBeVisible();
-    expect(repoArticle("Adtecher/current")).toHaveTextContent(/Last checked 1 Sept 2026/);
+    expect(repoArticle("Adtecher/current")).toHaveTextContent(/Last checked 01 Sep 2026, 09:00/);
     expect(within(repoArticle("Adtecher/issue")).getByText("1 check needs attention")).toBeVisible();
     expect(within(repoArticle("Adtecher/partial")).getByText("Some checks could not be completed")).toBeVisible();
     expect(within(repoArticle("Adtecher/partial")).getByText("3 checks need attention")).toBeVisible();

@@ -17,6 +17,7 @@ import type {
   OfficialGitHubRecordProvenance,
 } from "../application/github-record-provenance";
 import { githubFindingPresentation } from "./github-check-presentation";
+import { formatMonitoringTime } from "./format-monitoring-time";
 
 const STATUS_LABEL: Record<GitHubFindingTransitionStatus, string> = {
   open: "Open",
@@ -27,15 +28,7 @@ const STATUS_LABEL: Record<GitHubFindingTransitionStatus, string> = {
 };
 
 function formatTime(value: string): string {
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone: "Europe/London",
-  }).format(new Date(value));
+  return formatMonitoringTime(value) ?? "Date unavailable";
 }
 
 function FocusedOfficialRecord({
