@@ -39,13 +39,21 @@ supported by checklist review and evidence; it is not automated provider verific
 The complete fictional resolution rehearsal remains pending the scenario decision
 recorded in the active checklist; the earlier RC3 walkthrough below does not prove it.
 
+The newer usability checkpoint has been tested locally; see the current checklist
+section and `artifacts/workflow-usability-2026-09-05/checkpoint.json` for its exact
+runtime commit. RC3 remains the preserved earlier release, not a claim that the
+new monitoring-to-resolution scenario is complete. To run the current checkpoint,
+keep the existing checkout and use the commands below; do not switch branches over
+unfinished work. The private task checkpoint preserves its pre-existing **In progress** state.
+
 ## Start the demo
 
 Prerequisites: Node 22 or later (rehearsed with Node 25.6.1/npm 11.9.0), the
 locked dependencies, Supabase CLI, and the existing Colima Docker context. Allow at least 4 GB of VM memory when running the demo
 and a separate database test stack together; the existing 2 GB VM needs completed
 test services stopped to avoid resource pressure.
-Use the checkout at `demo-rc-20260905-3` (preserve any later work before switching).
+For the historical RC3 demonstration, use its tag in a separate checkout. For the
+current usability checkpoint, use this existing branch; the launcher records its exact commit.
 Run from the ComplianceHub checkout:
 
 ```sh
