@@ -17,6 +17,7 @@ import {
 import { requireAppContext } from "@/lib/app-context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
+import { GitHubRuntimeConfigError, readGitHubRuntimeConfig } from "@/features/github/application/github-runtime-config";
 
 const installationSchema = z.object({ installationId: z.uuid() }).strict();
 const collectionSummarySchema = z.object({
@@ -39,6 +40,7 @@ const collectionSummarySchema = z.object({
 export type GitHubOfficialRecheckResult = {
   ok: boolean;
   message: string;
+  kind?: "unavailable";
   summary?: CollectionSummary;
   materialisation?: ReconciliationSummary;
 };
@@ -48,19 +50,11 @@ const failure = {
   message: "Could not run this official GitHub recheck. Please try again.",
 } as const;
 
-function approvedSecurityWorkflowIds(): number[] {
-  const values = (process.env.GITHUB_APPROVED_SECURITY_WORKFLOW_IDS ?? "")
-    .split(",")
-    .map((value) => value.trim());
-  if (values.length < 1 || values.length > 20 || values.some((value) => !/^[1-9][0-9]*$/.test(value))) {
-    throw new Error("GitHub collection is not configured");
-  }
-  const ids = values.map(Number);
-  if (ids.some((value) => !Number.isSafeInteger(value)) || new Set(ids).size !== ids.length) {
-    throw new Error("GitHub collection is not configured");
-  }
-  return ids;
-}
+const unavailable = {
+  ok: false,
+  kind: "unavailable",
+  message: "Fresh GitHub verification is unavailable in this app runtime. Saved GitHub results remain visible.",
+} as const;
 
 export async function recheckGitHubInstallationAction(
   formData: FormData,
@@ -84,14 +78,12 @@ export async function recheckGitHubInstallationAction(
     }
 
     await enforceRateLimit(`github-manual:${organisation.id}:${user.id}`, { limit: 5, windowMs: 60_000 });
-    const appId = process.env.GITHUB_APP_ID?.trim() ?? "";
-    const privateKey = process.env.GITHUB_APP_PRIVATE_KEY?.trim() ?? "";
-    if (!appId || !privateKey) return failure;
+    const { appId, privateKey, approvedSecurityWorkflowIds } = readGitHubRuntimeConfig();
     const service = createSupabaseServiceClient();
     const dependencies = buildCollectionDependencies(service, {
       appId,
       privateKey,
-      approvedSecurityWorkflowIds: approvedSecurityWorkflowIds(),
+      approvedSecurityWorkflowIds,
     });
     const summary = collectionSummarySchema.parse(await runGitHubCollection(dependencies, {
       trigger: "manual",
@@ -129,7 +121,8 @@ export async function recheckGitHubInstallationAction(
       summary,
       materialisation,
     };
-  } catch {
+  } catch (error) {
+    if (error instanceof GitHubRuntimeConfigError) return unavailable;
     return failure;
   }
 }

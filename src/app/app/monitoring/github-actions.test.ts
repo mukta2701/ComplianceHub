@@ -206,4 +206,22 @@ describe("official GitHub recheck action", () => {
     expect(JSON.stringify(result)).not.toContain("provider-sensitive-detail");
     expect(hoisted.revalidatePath).not.toHaveBeenCalled();
   });
+
+  it("returns a typed safe unavailable result when runtime configuration is missing", async () => {
+    vi.stubEnv("GITHUB_APP_PRIVATE_KEY", "");
+    const lookup = installationLookup();
+    hoisted.ctx = {
+      supabase: { from: vi.fn(() => lookup) },
+      user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
+    };
+    const form = new FormData();
+    form.set("installationId", INSTALLATION_ID);
+
+    await expect(recheckGitHubInstallationAction(form)).resolves.toEqual({
+      ok: false,
+      kind: "unavailable",
+      message: "Fresh GitHub verification is unavailable in this app runtime. Saved GitHub results remain visible.",
+    });
+    expect(hoisted.runGitHubCollection).not.toHaveBeenCalled();
+  });
 });

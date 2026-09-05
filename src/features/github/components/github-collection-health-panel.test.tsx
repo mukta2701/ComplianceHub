@@ -20,13 +20,17 @@ const repository: GitHubRepositoryMonitoringSummary = {
   selected: true, available: true, latest_run_id: "10000000-0000-4000-8000-000000000012",
   latest_status: "succeeded", latest_failed_count: 2, last_completed_collection_at: "2026-09-01T08:00:00Z",
 };
+const cleanCollectionSummary = {
+  installationsChecked: 1, repositoriesChecked: 1, observationsStored: 15,
+  repositoriesFailed: 0, repositoriesDeferred: 0, runsPartial: 0, terminalRuns: [],
+};
 
 function renderPanel({ installations = [installation], repositories = [repository], role = "owner" }: {
   installations?: GitHubInstallationSummary[];
   repositories?: GitHubRepositoryMonitoringSummary[];
   role?: "owner" | "admin" | "member";
 } = {}) {
-  return render(<GitHubCollectionHealthPanel installations={installations} repositories={repositories} nowIso="2026-09-01T10:00:00Z" role={role} />);
+  return render(<GitHubCollectionHealthPanel installations={installations} repositories={repositories} nowIso="2026-09-01T10:00:00Z" role={role} runtimeReadiness={{ available: true, status: "ready" }} />);
 }
 
 function repoArticle(name: string) {
@@ -50,12 +54,12 @@ describe("GitHubCollectionHealthPanel", () => {
   });
 
   it("shows disconnected guidance by role", () => {
-    const { rerender } = render(<GitHubCollectionHealthPanel installations={[]} repositories={[]} nowIso="2026-09-01T10:00:00Z" role="owner" />);
+    const { rerender } = render(<GitHubCollectionHealthPanel installations={[]} repositories={[]} nowIso="2026-09-01T10:00:00Z" role="owner" runtimeReadiness={{ available: true, status: "ready" }} />);
     expect(screen.getByText("GITHUB MONITORING")).toBeVisible();
     expect(screen.queryByText("CONNECTED MONITORING")).not.toBeInTheDocument();
     expect(screen.getByText("GitHub is not connected.")).toBeVisible();
     expect(screen.getByRole("link", { name: "Connect GitHub" })).toHaveAttribute("href", "/app/integrations");
-    rerender(<GitHubCollectionHealthPanel installations={[]} repositories={[]} nowIso="2026-09-01T10:00:00Z" role="member" />);
+    rerender(<GitHubCollectionHealthPanel installations={[]} repositories={[]} nowIso="2026-09-01T10:00:00Z" role="member" runtimeReadiness={{ available: true, status: "ready" }} />);
     expect(screen.getByText("GitHub is not connected. Ask a workspace Owner or Admin to manage the connection.")).toBeVisible();
     expect(screen.queryByRole("link", { name: "Connect GitHub" })).not.toBeInTheDocument();
   });
@@ -69,7 +73,7 @@ describe("GitHubCollectionHealthPanel", () => {
   });
 
   it("disables Owner checks until at least one selected repository is available", () => {
-    const { rerender } = render(<GitHubCollectionHealthPanel installations={[installation]} repositories={[]} nowIso="2026-09-01T10:00:00Z" role="owner" />);
+    const { rerender } = render(<GitHubCollectionHealthPanel installations={[installation]} repositories={[]} nowIso="2026-09-01T10:00:00Z" role="owner" runtimeReadiness={{ available: true, status: "ready" }} />);
     expect(screen.getByRole("button", { name: "Check GitHub now" })).toBeDisabled();
     expect(screen.getByText("Select at least one available repository before checking GitHub.")).toBeVisible();
 
@@ -78,9 +82,29 @@ describe("GitHubCollectionHealthPanel", () => {
       repositories={[{ ...repository, available: false }]}
       nowIso="2026-09-01T10:00:00Z"
       role="owner"
+      runtimeReadiness={{ available: true, status: "ready" }}
     />);
     expect(screen.getByRole("button", { name: "Check GitHub now" })).toBeDisabled();
     expect(screen.getByText("No selected repositories are currently available to check.")).toBeVisible();
+  });
+
+  it("explains runtime unavailability and disables doomed checks while retaining saved results", () => {
+    render(<GitHubCollectionHealthPanel
+      installations={[installation]}
+      repositories={[repository]}
+      nowIso="2026-09-01T10:00:00Z"
+      role="owner"
+      runtimeReadiness={{ available: false, status: "unavailable" }}
+    />);
+    expect(screen.getByRole("button", { name: "Check GitHub now" })).toBeDisabled();
+    expect(screen.getByText("Saved GitHub results remain visible, but fresh GitHub verification is unavailable in this app runtime.")).toBeVisible();
+    expect(screen.getByText("Up to date")).toBeVisible();
+  });
+
+  it("fails closed when readiness is omitted", () => {
+    render(<GitHubCollectionHealthPanel installations={[installation]} repositories={[repository]} nowIso="2026-09-01T10:00:00Z" role="owner" />);
+    expect(screen.getByRole("button", { name: "Check GitHub now" })).toBeDisabled();
+    expect(screen.getByText(/fresh GitHub verification is unavailable/i)).toBeVisible();
   });
 
   it("maps every repository run and freshness state with human-readable last-check times", () => {
@@ -148,6 +172,79 @@ describe("GitHubCollectionHealthPanel", () => {
     expect(button).toBeEnabled();
     expect(button).toHaveAttribute("aria-busy", "false");
     expect(hoisted.refresh).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["runsPartial", { runsPartial: 1 }],
+    ["repositoriesFailed", { repositoriesFailed: 1 }],
+    ["repositoriesDeferred", { repositoriesDeferred: 1 }],
+  ] as const)("describes %s without claiming blanket success", async (_label, summary) => {
+    const user = userEvent.setup();
+    hoisted.recheck.mockResolvedValueOnce({
+      ok: true,
+      message: "Official GitHub recheck finished.",
+      summary: { ...cleanCollectionSummary, ...summary },
+      materialisation: { awaitingApproval: 0, needsAttention: 0 },
+    });
+    renderPanel();
+    await user.click(screen.getByRole("button", { name: "Check GitHub now" }));
+    const expected = _label === "runsPartial"
+      ? "GitHub check attempted 1 repositories: 0 deferred, 0 failed; some runs were partial. Review the repository statuses below."
+      : _label === "repositoriesFailed"
+        ? "GitHub check attempted 1 repositories: 0 deferred, 1 failed. Review the repository statuses below."
+        : "GitHub check attempted 1 repositories: 1 deferred, 0 failed. Review the repository statuses below.";
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(expected));
+    expect(screen.getByRole("status")).not.toHaveTextContent("refreshed");
+    expect(hoisted.refresh).toHaveBeenCalledOnce();
+  });
+
+  it.each(["awaitingApproval", "needsAttention"] as const)("describes materialisation %s as a next step", async (field) => {
+    const user = userEvent.setup();
+    hoisted.recheck.mockResolvedValueOnce({ ok: true, message: "Official GitHub recheck finished.", materialisation: { [field]: 1 } });
+    renderPanel();
+    await user.click(screen.getByRole("button", { name: "Check GitHub now" }));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(field === "awaitingApproval" ? "Some records await Owner approval." : "Some records failed to update and need attention."));
+    expect(screen.getByRole("status")).not.toHaveTextContent("Monitoring status is refreshed");
+  });
+
+  it("reports all-failed collection and approval follow-up together without claiming refresh", async () => {
+    const user = userEvent.setup();
+    hoisted.recheck.mockResolvedValueOnce({
+      ok: true, message: "Official GitHub recheck finished.",
+      summary: { ...cleanCollectionSummary, repositoriesChecked: 0, repositoriesFailed: 1 },
+      materialisation: { awaitingApproval: 1, needsAttention: 0 },
+    });
+    renderPanel();
+    await user.click(screen.getByRole("button", { name: "Check GitHub now" }));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("GitHub check attempted 0 repositories: 0 deferred, 1 failed. Review the repository statuses below. Some records await Owner approval."));
+    expect(screen.getByRole("status")).not.toHaveTextContent("refreshed");
+  });
+
+  it("reports all-deferred collection without claiming refresh", async () => {
+    const user = userEvent.setup();
+    hoisted.recheck.mockResolvedValueOnce({
+      ok: true, message: "Official GitHub recheck finished.",
+      summary: { ...cleanCollectionSummary, repositoriesChecked: 0, repositoriesDeferred: 2 },
+      materialisation: { awaitingApproval: 0, needsAttention: 0 },
+    });
+    renderPanel();
+    await user.click(screen.getByRole("button", { name: "Check GitHub now" }));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("GitHub check attempted 0 repositories: 2 deferred, 0 failed. Review the repository statuses below."));
+    expect(screen.getByRole("status")).not.toHaveTextContent("refreshed");
+  });
+
+  it("combines partial collection and records needing attention", async () => {
+    const user = userEvent.setup();
+    hoisted.recheck.mockResolvedValueOnce({
+      ok: true, message: "Official GitHub recheck finished.",
+      summary: { ...cleanCollectionSummary, repositoriesFailed: 1, runsPartial: 1 },
+      materialisation: { awaitingApproval: 0, needsAttention: 1 },
+    });
+    renderPanel();
+    await user.click(screen.getByRole("button", { name: "Check GitHub now" }));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/some records failed to update and need attention/i));
+    expect(screen.getByRole("status")).toHaveTextContent(/some runs were partial/i);
+    expect(screen.getByRole("status")).not.toHaveTextContent("refreshed");
   });
 
   it("keeps feedback adjacent to each installation and normalises implementation wording", async () => {

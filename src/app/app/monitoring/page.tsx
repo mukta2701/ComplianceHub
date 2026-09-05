@@ -36,6 +36,7 @@ import {
   GitHubCollectionHealthPanel,
   type GitHubRepositoryMonitoringSummary,
 } from "@/features/github/components/github-collection-health-panel";
+import { getGitHubRuntimeReadiness, type GitHubRuntimeReadiness } from "@/features/github/application/github-runtime-config";
 
 const SEVERITY_TONE: Record<CheckSeverity, StatusTone> = { critical: "risk", high: "risk", medium: "attention", low: "neutral" };
 const SEVERITY_PILL: Record<CheckSeverity, string> = { critical: "red", high: "red", medium: "amber", low: "blue" };
@@ -95,12 +96,14 @@ function GitHubMonitoringSection({
   repositories,
   nowIso,
   room,
+  runtimeReadiness,
 }: {
   role: "owner" | "admin" | "member";
   installations: GitHubInstallationSummary[];
   repositories: GitHubRepositoryMonitoringSummary[];
   nowIso: string;
   room: GitHubComplianceControlRoom;
+  runtimeReadiness: GitHubRuntimeReadiness;
 }) {
   const officialResults = room.repositories.flatMap((repository) => repository.officialResults);
   const passed = officialResults.filter((result) => result.outcome === "pass").length;
@@ -113,6 +116,7 @@ function GitHubMonitoringSection({
       repositories={repositories}
       nowIso={nowIso}
       role={role}
+      runtimeReadiness={runtimeReadiness}
     />
     {officialResults.length > 0 && <Card
       className="github-check-summary"
@@ -155,6 +159,7 @@ export default async function MonitoringPage({
   searchParams: Promise<{ finding?: string | string[]; githubPage?: string | string[] }>;
 } = { searchParams: Promise.resolve({}) }) {
   const { supabase, organisation, membership } = await requireAppContext();
+  const runtimeReadiness = getGitHubRuntimeReadiness();
   const params = await searchParams;
   const requestedFinding = parseOfficialRecordSelection(params.finding);
   const requestedPage = Array.isArray(params.githubPage) ? params.githubPage[0] : params.githubPage;
@@ -193,6 +198,7 @@ export default async function MonitoringPage({
         repositories={repositories}
         nowIso={new Date().toISOString()}
         room={controlRoom}
+        runtimeReadiness={runtimeReadiness}
       />}
       githubTechnicalReview={<GitHubTechnicalReview
         room={controlRoom}
@@ -287,6 +293,7 @@ export default async function MonitoringPage({
       repositories={repositories}
       nowIso={new Date().toISOString()}
       room={controlRoom}
+      runtimeReadiness={runtimeReadiness}
     />
 
     <Card className="monitor-findings-card" id="active-findings">

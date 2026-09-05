@@ -5,8 +5,9 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { Pill } from "@/components/ui";
-import { recheckGitHubInstallationAction } from "@/app/app/monitoring/github-actions";
+import { recheckGitHubInstallationAction, type GitHubOfficialRecheckResult } from "@/app/app/monitoring/github-actions";
 import type { GitHubInstallationSummary } from "./github-installation-panel";
+import type { GitHubRuntimeReadiness } from "@/features/github/application/github-runtime-config";
 
 export type GitHubRepositoryMonitoringSummary = {
   repository_id: string;
@@ -58,16 +59,36 @@ function formatLastChecked(value: string): string | null {
   }).format(date);
 }
 
+function recheckFeedback(result: GitHubOfficialRecheckResult): string {
+  const summary = result.summary;
+  const checked = summary?.repositoriesChecked ?? 0;
+  const failed = summary?.repositoriesFailed ?? 0;
+  const deferred = summary?.repositoriesDeferred ?? 0;
+  const partial = (summary?.runsPartial ?? 0) > 0;
+  const collection = failed > 0 || deferred > 0 || partial
+    ? `GitHub check attempted ${checked} repositories: ${deferred} deferred, ${failed} failed${partial ? "; some runs were partial" : ""}. Review the repository statuses below.`
+    : "GitHub check finished.";
+  const followUps = [
+    (result.materialisation?.awaitingApproval ?? 0) > 0 ? "Some records await Owner approval." : "",
+    (result.materialisation?.needsAttention ?? 0) > 0 ? "Some records failed to update and need attention." : "",
+  ].filter(Boolean);
+  return followUps.length > 0
+    ? `${collection} ${followUps.join(" ")}`
+    : collection === "GitHub check finished." ? "GitHub check finished. Monitoring status is refreshed." : collection;
+}
+
 export function GitHubCollectionHealthPanel({
   installations,
   repositories,
   nowIso,
   role,
+  runtimeReadiness = { available: false, status: "unavailable" },
 }: {
   installations: GitHubInstallationSummary[];
   repositories: GitHubRepositoryMonitoringSummary[];
   nowIso: string;
   role: WorkspaceRole;
+  runtimeReadiness?: GitHubRuntimeReadiness;
 }) {
   const router = useRouter();
   const [pendingInstallations, setPendingInstallations] = useState<Set<string>>(() => new Set());
@@ -86,11 +107,16 @@ export function GitHubCollectionHealthPanel({
       if (result.ok) {
         setMessages((current) => ({
           ...current,
-          [installation.id]: "GitHub check finished. Monitoring status is refreshed.",
+          [installation.id]: recheckFeedback(result),
         }));
         router.refresh();
       } else {
-        setMessages((current) => ({ ...current, [installation.id]: "GitHub could not be checked. Please try again." }));
+        setMessages((current) => ({
+          ...current,
+          [installation.id]: result.kind === "unavailable"
+            ? "Fresh GitHub verification is unavailable in this app runtime. Saved GitHub results remain visible."
+            : "GitHub could not be checked. Please try again.",
+        }));
       }
     } catch {
       setMessages((current) => ({ ...current, [installation.id]: "GitHub could not be checked. Please try again." }));
@@ -132,7 +158,8 @@ export function GitHubCollectionHealthPanel({
         const canRunThisInstallation = installation.status === "active"
           && installation.permissions_ok
           && installation.repository_selection === "selected"
-          && hasAvailableRepository;
+          && hasAvailableRepository
+          && runtimeReadiness.available;
         return <article className="github-installation" aria-label={`${installation.account_login} GitHub monitoring`} key={installation.id}>
           <div className="github-installation-head">
             <div>
@@ -158,6 +185,9 @@ export function GitHubCollectionHealthPanel({
           </p>}
           {!installation.permissions_ok && <p className="github-configuration-note" role="note">
             GitHub permissions need attention before this connection can be checked.
+          </p>}
+          {!runtimeReadiness.available && <p className="github-configuration-note" role="note">
+            Saved GitHub results remain visible, but fresh GitHub verification is unavailable in this app runtime.
           </p>}
           {role === "owner" && installation.repository_selection === "selected" && installationRepositories.length === 0 && <p className="field-hint">
             Select at least one available repository before checking GitHub.
