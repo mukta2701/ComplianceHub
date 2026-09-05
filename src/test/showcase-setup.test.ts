@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { assertLocalTargets, reconcileRecord, acquireLock, fingerprintRows } from '../../scripts/showcase-setup';
+import { assertLocalTargets, reconcileRecord, acquireLock, fingerprintRows, assertShowcaseMemberships } from '../../scripts/showcase-setup';
 
 describe('showcase safety', () => {
   it('allows only exact local origins, rejecting hosted targets and misleading URLs', () => {
@@ -24,6 +24,17 @@ describe('showcase safety', () => {
     const baseline = [{ id: 'a', title: 'Fixed', owner: 'owner-a' }, { id: 'b', title: 'Other' }];
     expect(fingerprintRows(baseline)).toBe(fingerprintRows([{ title: 'Other', id: 'b' }, { owner: 'owner-a', title: 'Fixed', id: 'a' }]));
     expect(fingerprintRows(baseline)).not.toBe(fingerprintRows([{ ...baseline[0], owner: 'owner-b' }, baseline[1]]));
+  });
+  it('permits only the declared owner and optional synthetic member in exactly one owner workspace', () => {
+    const owner = { user_id: 'owner', role: 'owner', organisation_id: 'org' };
+    const member = { user_id: 'member', role: 'member', organisation_id: 'org' };
+    const manifest = { version: 'showcase-member-v1', organisationId: 'org', ownerId: 'owner', memberId: 'member' };
+    expect(() => assertShowcaseMemberships([owner], [owner], 'org', 'owner')).not.toThrow();
+    expect(() => assertShowcaseMemberships([owner, member], [owner], 'org', 'owner', manifest)).not.toThrow();
+    expect(() => assertShowcaseMemberships([owner, member], [owner], 'org', 'owner')).toThrow();
+    expect(() => assertShowcaseMemberships([owner, { ...member, role: 'admin' }], [owner], 'org', 'owner', manifest)).toThrow();
+    expect(() => assertShowcaseMemberships([owner, member], [owner, { ...owner, organisation_id: 'other' }], 'org', 'owner', manifest)).toThrow();
+    expect(() => assertShowcaseMemberships([owner, member], [owner], 'org', 'owner', { ...manifest, ownerId: 'other' })).toThrow();
   });
   it('refuses concurrent setup and releases its own lock', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'showcase-lock-'));
