@@ -67,4 +67,20 @@ describe("export protection and audit", () => {
       expect.objectContaining({ organisationId: context.organisationId, resource: context.resource }),
     );
   });
+
+  it("normalizes a structured Supabase insert error for observability", async () => {
+    hoisted.createServiceClient.mockReturnValue({
+      from: vi.fn(() => ({ insert: vi.fn().mockResolvedValue({ error: { message: "permission denied", code: "42501" } }) })),
+    });
+    const { recordExportAudit } = await import("./export-audit");
+
+    await recordExportAudit(context);
+
+    expect(hoisted.logError).toHaveBeenCalledWith(
+      "action",
+      "export audit event unavailable",
+      expect.objectContaining({ message: "permission denied" }),
+      expect.objectContaining({ organisationId: context.organisationId }),
+    );
+  });
 });

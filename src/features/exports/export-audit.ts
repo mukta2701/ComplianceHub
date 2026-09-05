@@ -27,7 +27,14 @@ export async function recordExportAudit({ organisationId, userId, resource, form
       entity_id: `export:${resource}:${format}`,
       metadata: { resource, format },
     });
-    if (error) throw error;
+    if (error) {
+      // Supabase returns a structured PostgREST error object rather than an
+      // Error instance. Normalize it so observability retains the real cause.
+      const message = typeof error === "object" && error !== null && "message" in error
+        ? String((error as { message: unknown }).message)
+        : "Supabase audit insert failed";
+      throw new Error(message);
+    }
   } catch (error) {
     await logError("action", "export audit event unavailable", error, { organisationId, resource, format });
   }
