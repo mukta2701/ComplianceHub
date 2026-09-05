@@ -12,18 +12,28 @@ artifact_dir="${FRESH_ARTIFACT_DIR:-$repo_root/artifacts/release-2026-09-05}"
 mkdir -p "$artifact_dir"
 
 fail() { echo "fresh database validation failed: $*" >&2; exit 64; }
+write_metadata() { printf '%s\n' "$1" > "$artifact_dir/fresh-database.json"; }
+cleanup() {
+  local ids
+  ids="$($docker_bin ps -aq --filter "label=com.supabase.cli.project=$project_id" --filter "label=com.docker.compose.project=$project_id" 2>/dev/null || true)"
+  if [[ -n "$ids" ]]; then "$docker_bin" stop $ids >/dev/null 2>&1 || true; fi
+  if [[ -f "$artifact_dir/fresh-database.json" ]]; then
+    sed -E 's/"status":"[^"]+"/"status":"stopped-retained"/' "$artifact_dir/fresh-database.json" > "$artifact_dir/fresh-database.json.tmp"
+    mv "$artifact_dir/fresh-database.json.tmp" "$artifact_dir/fresh-database.json"
+  fi
+}
 [[ -z "${DOCKER_HOST:-}" ]] || fail "DOCKER_HOST must be unset"
 [[ -z "${DOCKER_CONTEXT:-}" || "${DOCKER_CONTEXT}" == "colima" ]] || fail "DOCKER_CONTEXT must be colima or unset"
 [[ -x "$docker_bin" ]] || fail "approved local Docker executable is unavailable"
 command -v "$supabase_bin" >/dev/null 2>&1 || fail "Supabase CLI is unavailable"
-socket="$($docker_bin context inspect colima --format '{{(index .Endpoints "docker").Host}}')" || fail "cannot inspect Docker context"
+socket="$($docker_bin context inspect colima --format '{{.Endpoints.docker.Host}}')" || fail "cannot inspect Docker context"
+[[ "$($docker_bin context show)" == "colima" ]] || fail "active Docker context must be colima"
 [[ "$socket" =~ ^unix:///.*\.colima/default/docker\.sock$ ]] || fail "Docker context is not the approved local Unix socket"
 [[ "$(git -C "$repo_root" rev-parse --show-toplevel)" == "$repo_root" ]] || fail "unexpected repository root"
 [[ "$project_id" =~ ^compliancehub-release-[0-9]+-[0-9]+$ ]] || fail "unsafe disposable project id"
+trap cleanup EXIT
 
-cat > "$artifact_dir/fresh-database.json" <<EOF
-{"projectId":"$project_id","workdir":"$project_dir","status":"starting"}
-EOF
+write_metadata "{\"projectId\":\"$project_id\",\"workdir\":\"$project_dir\",\"status\":\"starting\"}"
 printf '%s\n' "Fresh stack workdir: $project_dir"
 
 mkdir "$project_dir/supabase"
@@ -57,7 +67,5 @@ run_tests "$repo_root/supabase/tests/database/071_github_materialisation_jobs.sq
 run_tests "$repo_root/supabase/tests/database"
 api_url="http://127.0.0.1:$((base_port + 1))"
 db_port="$((base_port + 2))"
-cat > "$artifact_dir/fresh-database.json" <<EOF
-{"projectId":"$project_id","workdir":"$project_dir","apiUrl":"$api_url","dbPort":$db_port,"status":"passed"}
-EOF
+write_metadata "{\"projectId\":\"$project_id\",\"workdir\":\"$project_dir\",\"apiUrl\":\"$api_url\",\"dbPort\":$db_port,\"status\":\"passed\"}"
 printf '%s\n' "Fresh database validation passed; stack retained at $project_dir"

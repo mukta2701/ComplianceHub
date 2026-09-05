@@ -9,6 +9,11 @@ const snapshot: SoaSnapshot = {
   items: [{ questionId: "A.1", suggestedStatus: "operational", status: "operational", reviewed: true, justification: "Required for operations", evidence: "Policy-01" }],
 };
 
+const emptyEvidenceSnapshot: SoaSnapshot = {
+  ...snapshot,
+  items: [{ ...snapshot.items[0], evidence: "" }],
+};
+
 function extractPdfText(buffer: Buffer): string {
   const source = buffer.toString("latin1");
   const chunks: string[] = [];
@@ -34,6 +39,12 @@ function extractPdfText(buffer: Buffer): string {
     cursor = streamEnd + 9;
   }
   return chunks.join("\n").replace(/<([0-9a-fA-F]+)>/g, (_match, hex: string) => Buffer.from(hex, "hex").toString("latin1"));
+}
+
+function normalisePdfText(text: string): string {
+  let normalised = text;
+  for (let pass = 0; pass < 3; pass += 1) normalised = normalised.replace(/(?<=[A-Za-z])\s+-?\d+(?:\.\d+)?\s+(?=[A-Za-z])/g, "");
+  return normalised;
 }
 
 function extractDocxText(buffer: Buffer): Promise<string> {
@@ -97,5 +108,26 @@ describe("SoA exports", () => {
     expect(pdfText).toContain("Assessment:");
     expect(pdfText).toContain("assessment-1");
     expect(docxText).toContain("Assessment: assessment-1");
+  });
+
+  it("labels manual evidence references and explains linked vault records in both formats", async () => {
+    const view = buildSoaExportView(snapshot, { organisationName: "Acme Ltd", catalogueVersion: "2022-v1" });
+    const emptyView = buildSoaExportView(emptyEvidenceSnapshot, { organisationName: "Acme Ltd", catalogueVersion: "2022-v1" });
+    const [pdf, docx, emptyPdf, emptyDocx] = await Promise.all([
+      generateSoaPdf(view), generateSoaDocx(view), generateSoaPdf(emptyView), generateSoaDocx(emptyView),
+    ]);
+    const [pdfText, docxText, emptyPdfText, emptyDocxText] = await Promise.all([
+      normalisePdfText(extractPdfText(pdf)), extractDocxText(docx), normalisePdfText(extractPdfText(emptyPdf)), extractDocxText(emptyDocx),
+    ]);
+
+    for (const text of [pdfText, docxText]) {
+      expect(text).toContain("Manual evidence references");
+      expect(text).toContain("Policy-01");
+      expect(text).toContain("Linked evidence records are maintained separately");
+    }
+    for (const text of [emptyPdfText, emptyDocxText]) {
+      expect(text).toContain("No manual references recorded");
+      expect(text).toContain("Linked evidence records are maintained separately");
+    }
   });
 });

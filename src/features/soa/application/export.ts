@@ -27,10 +27,11 @@ export function generateSoaPdf(view: SoaExportView): Promise<Buffer> {
     document.on("error", reject);
     document.fontSize(20).text(view.title).moveDown();
     document.fontSize(10).text(`Organisation: ${view.organisationName}`).text(`Catalogue: ${view.catalogueVersion}`).text(`Version: ${view.version}`).text(`Assessment: ${view.assessmentId}`).text(`Finalised: ${view.finalisedAt} by ${view.finalisedBy}`).moveDown();
+    document.fontSize(9).text("This snapshot preserves manually entered references. Linked evidence records are maintained separately in the workspace evidence vault and are not embedded in this export.").moveDown();
     for (const item of view.items) {
       if (document.y > 700) document.addPage();
       document.fontSize(12).text(`${item.reference} — ${item.statusLabel}`, { continued: false });
-      document.fontSize(9).text(`Justification: ${item.justification || "Not provided"}`).text(`Evidence: ${item.evidence || "Not provided"}`).moveDown(0.5);
+      document.fontSize(9).text(`Justification: ${item.justification || "Not provided"}`).text(`Manual evidence references: ${item.evidence || "No manual references recorded"}`).moveDown(0.5);
     }
     document.end();
   });
@@ -38,13 +39,14 @@ export function generateSoaPdf(view: SoaExportView): Promise<Buffer> {
 
 export async function generateSoaDocx(view: SoaExportView): Promise<Buffer> {
   const rows = [
-    new TableRow({ children: ["Reference", "Status", "Justification", "Evidence"].map((text) => new TableCell({ children: [new Paragraph({ children: [new TextRun({ text, bold: true })] })] })) }),
-    ...view.items.map((item) => new TableRow({ children: [item.reference, item.statusLabel, item.justification, item.evidence].map((text) => new TableCell({ children: [new Paragraph(text || "Not provided")] })) })),
+    new TableRow({ children: ["Reference", "Status", "Justification", "Manual evidence references"].map((text) => new TableCell({ children: [new Paragraph({ children: [new TextRun({ text, bold: true })] })] })) }),
+    ...view.items.map((item) => new TableRow({ children: [item.reference, item.statusLabel, item.justification || "Not provided", item.evidence || "No manual references recorded"].map((text) => new TableCell({ children: [new Paragraph(text)] })) })),
   ];
   const document = new Document({ sections: [{ children: [
     new Paragraph({ text: view.title, heading: HeadingLevel.TITLE }),
     new Paragraph(`Organisation: ${view.organisationName}`), new Paragraph(`Catalogue: ${view.catalogueVersion}`),
     new Paragraph(`Version: ${view.version}`), new Paragraph(`Assessment: ${view.assessmentId}`), new Paragraph(`Finalised: ${view.finalisedAt} by ${view.finalisedBy}`),
+    new Paragraph("This snapshot preserves manually entered references. Linked evidence records are maintained separately in the workspace evidence vault and are not embedded in this export."),
     new Table({ rows }),
   ] }] });
   return Packer.toBuffer(document);

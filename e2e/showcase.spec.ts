@@ -33,10 +33,16 @@ test("rehearses the saved connected showcase journey without writes", async ({ p
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(`pageerror: ${error.message}`));
   page.on("console", (message) => { if (message.type() === "error") errors.push(`console: ${message.text()}`); });
-  page.on("requestfailed", (request) => errors.push(`request: ${request.url()} ${request.failure()?.errorText ?? "failed"}`));
+  page.on("requestfailed", (request) => {
+    const failure = request.failure()?.errorText ?? "failed";
+    // Next cancels speculative RSC fetches when navigation supersedes them.
+    // Each real navigation is separately required to reach its URL and content.
+    if (failure === "net::ERR_ABORTED") return; // Browser navigation/download cancellation; content and files are verified below.
+    errors.push(`request: ${request.url()} ${failure}`);
+  });
 
   await page.goto("/app");
-  const anonymousContext = await page.context().browser()!.newContext({ baseURL: BASE_ORIGIN });
+  const anonymousContext = await page.context().browser()!.newContext({ baseURL: BASE_ORIGIN, storageState: { cookies: [], origins: [] } });
   const anonymousPage = await anonymousContext.newPage();
   await anonymousPage.goto("/app");
   await expect(anonymousPage).toHaveURL(/\/sign-in$/);
@@ -111,4 +117,26 @@ test("rehearses the saved connected showcase journey without writes", async ({ p
   expect(download.suggestedFilename()).toBe("readiness-report.pdf");
   expect(readFileSync((await download.path())!).subarray(0, 4).toString()).toBe("%PDF");
   await checkPage(page, "leadership report", errors);
+});
+
+test.describe("showcase Member permissions", () => {
+  test.use({ storageState: showcaseEnabled ? "artifacts/showcase-v1/member-session.json" : { cookies: [], origins: [] } });
+  test("shows the published report and blocks operator routes and APIs", async ({ page }) => {
+    for (const route of ["/app/assessment", "/app/soa", "/app/evidence", "/app/risks/new", "/app/audits"]) {
+      await page.goto(route);
+      await expect(page).toHaveURL(`${BASE_ORIGIN}/app`);
+    }
+    const denied = await page.request.get("/api/app/evidence/export?format=csv");
+    expect(denied.status()).toBe(403);
+    await page.goto(`/app/policies/${manifest.ids.policy}`);
+    await expect(page.getByRole("button", { name: "Save policy", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Northstar access review policy", exact: true })).toBeVisible();
+    await page.goto("/app/reports/readiness");
+    await expect(page.getByText("PUBLISHED REPORT", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Publish to members", exact: true })).toHaveCount(0);
+    const report = await page.request.get("/api/app/reports/readiness/pdf");
+    expect(report.status()).toBe(200);
+    expect((await report.body()).subarray(0, 4).toString()).toBe("%PDF");
+    await checkPage(page, "Member report", []);
+  });
 });

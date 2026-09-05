@@ -20,7 +20,7 @@ describe("fresh database validation helper", () => {
     const fixture = mkdtempSync(`${tmpdir()}/fresh-helper-test-`);
     const fakeDocker = `${fixture}/docker`;
     const fakeSupabase = `${fixture}/supabase`;
-    writeFileSync(fakeDocker, '#!/bin/sh\nprintf "%s\\n" "unix:///Users/test/.colima/default/docker.sock"\n');
+    writeFileSync(fakeDocker, '#!/bin/sh\nif [ "$2" = show ]; then printf "colima\\n"; else printf "unix:///Users/test/.colima/default/docker.sock\\n"; fi\n');
     writeFileSync(fakeSupabase, '#!/bin/sh\ncase "$1" in start) exit 0;; test) printf "Files=0, Tests=0\\nResult: NOTESTS\\n";; esac\n');
     chmodSync(fakeDocker, 0o700);
     chmodSync(fakeSupabase, 0o700);
@@ -30,8 +30,20 @@ describe("fresh database validation helper", () => {
       env: { ...process.env, DOCKER_BIN: fakeDocker, SUPABASE_BIN: fakeSupabase, FRESH_ARTIFACT_DIR: artifactDir, TMPDIR: fixture },
     });
     expect(result.status).not.toBe(0);
-    expect(readFileSync(`${artifactDir}/fresh-database.json`, "utf8")).toContain('"status":"starting"');
+    expect(readFileSync(`${artifactDir}/fresh-database.json`, "utf8")).not.toContain('"status":"passed"');
     expect(result.stdout + result.stderr).toContain("no positive file/test counts");
+  });
+
+  it("rejects a wrong active Docker context before starting Supabase", () => {
+    const fixture = mkdtempSync(`${tmpdir()}/fresh-context-test-`);
+    const fakeDocker = `${fixture}/docker`;
+    const fakeSupabase = `${fixture}/supabase`;
+    writeFileSync(fakeDocker, '#!/bin/sh\nif [ "$2" = show ]; then printf "default\\n"; else printf "unix:///Users/test/.colima/default/docker.sock\\n"; fi\n');
+    writeFileSync(fakeSupabase, '#!/bin/sh\nprintf "started\\n" > "$FRESH_STARTED"\n');
+    chmodSync(fakeDocker, 0o700); chmodSync(fakeSupabase, 0o700);
+    const result = spawnSync("bash", ["scripts/test-db-fresh.sh"], { cwd: process.cwd(), encoding: "utf8", env: { ...process.env, DOCKER_BIN: fakeDocker, SUPABASE_BIN: fakeSupabase, FRESH_ARTIFACT_DIR: `${fixture}/artifacts`, TMPDIR: fixture, FRESH_STARTED: `${fixture}/started` } });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("active Docker context");
   });
 
   it("copies only the disposable config, migrations, seed, and database tests", () => {
