@@ -2,8 +2,8 @@
 
 This guide describes the fictional Northstar showcase on the existing local
 Supabase project `compliancehub`. Release acceptance and outstanding staging
-items are tracked in [release-checklist.md](release-checklist.md). The reproducible local release is tagged `demo-rc-20260905-2`. Resolve its exact
-commit with `git rev-parse demo-rc-20260905-2^{commit}`; final tested identity and
+items are tracked in [release-checklist.md](release-checklist.md). The reproducible local release is tagged `demo-rc-20260905-3`. Resolve its exact
+commit with `git rev-parse demo-rc-20260905-3^{commit}`; final tested identity and
 results are in `artifacts/release-2026-09-05/release-acceptance.json`. Staging has
 not been deployed or accepted.
 
@@ -13,7 +13,7 @@ Prerequisites: Node 22 or later (rehearsed with Node 25.6.1/npm 11.9.0), the
 locked dependencies, Supabase CLI, and the existing Colima Docker context. Allow at least 4 GB of VM memory when running the demo
 and a separate database test stack together; the existing 2 GB VM needs completed
 test services stopped to avoid resource pressure.
-Use the checkout at `demo-rc-20260905-2` (preserve any later work before switching).
+Use the checkout at `demo-rc-20260905-3` (preserve any later work before switching).
 Run from the ComplianceHub checkout:
 
 ```sh
@@ -100,14 +100,14 @@ attachments. The export now states this distinction explicitly.
 
 Security rehearsal limits public auditor views to 300 requests per minute across
 the site and 30 per issued link. A limited link displays temporary unavailability.
-Jira credential RPCs require the backend service role. Public error reporting
+Jira credential RPCs and direct counter updates require the backend service role. Audit events permit backend inserts and member-scoped reads; API roles cannot truncate the log or manipulate its identity sequence. Public error reporting
 returns 503 without a write if durable limiter storage is unavailable. Two
 moderate npm audit entries remain for one UUID advisory in ExcelJS; the identified
 ExcelJS path calls unaffected v4, as recorded in the release checklist.
 
 For a stopped app with the existing matching build/database, only
 `npm run demo:start` is needed. The accepted local database migration checkpoint
-is `20260905012000` (128 migrations). Do not point these commands at hosted
+is `20260905013000` (129 migrations). Do not point these commands at hosted
 Supabase or copy the synthetic local encryption key into staging.
 
 Re-run the saved desktop/mobile acceptance without creating business records:
