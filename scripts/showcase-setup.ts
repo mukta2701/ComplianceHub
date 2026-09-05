@@ -257,6 +257,12 @@ export async function main() {
       reconcileRecord(await rows('audit_checklist_items', { id: checklist.id }), checklist.id, { compliant: 'non_compliant', evidence_note: SPEC.note });
     }
     manifest.ids.checklist_review = checklist.id; await persist();
+    await ensure('evidence_audit', 'evidence_links', { evidence_id: evidence.id, audit_checklist_item_id: checklist.id }, {}, async () => {
+      await navigate(page, `/app/audits/${audit.id}`);
+      const select = page.getByLabel(`Evidence to link to ${SPEC.checklist}`, { exact: true });
+      await select.selectOption(evidence.id);
+      await submitLocator(select.locator('..').locator('..').getByRole('button', { name: 'Link evidence', exact: true }));
+    });
     await ensure('finding', 'audit_findings', { audit_id: audit.id, summary: SPEC.riskTitle }, { severity: 'observation' }, async () => { await navigate(page, `/app/audits/${audit.id}`); await page.getByLabel('Summary', { exact: true }).fill(SPEC.riskTitle); await page.getByLabel('Corrective action', { exact: true }).fill(`Follow the owned treatment plan ${SPEC.planRef}; no additional task is needed.`); await submit('Raise finding'); });
     const baselineTitle = 'Northstar fictional control baseline — Showcase v1';
     const baselineNote = 'FICTIONAL SIMULATION: Northstar reviewed the following control baseline for this showcase. All listed controls are demonstrated as operational except 5.1, where independent access-review sign-off is in progress under NS-R-001 and NS-RTP-001. This synthetic dossier is not real-world proof or certification.\r\n' + soaItems.sort((a, b) => a.position - b.position).map((item) => `${item.control_code}: ${item.control_title}`).join('\r\n');

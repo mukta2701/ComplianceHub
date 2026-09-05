@@ -7,6 +7,38 @@ commit with `git rev-parse demo-rc-20260905-3^{commit}`; final tested identity a
 results are in `artifacts/release-2026-09-05/release-acceptance.json`. Staging has
 not been deployed or accepted.
 
+## App, workspaces and accounts
+
+The local app is one running copy of ComplianceHub at `http://127.0.0.1:3100`,
+connected to the local Supabase database. Safari and the in-app Browser can stay
+signed in as different accounts. The workspace name in the sidebar identifies
+the records you are viewing; changing browsers does not change the application.
+
+- **ComplianceHub Local Demo** is the preserved reference workspace in Safari.
+  Its GitHub observations are saved records. The isolated production demo launcher
+  disables provider credentials, so this runtime cannot run fresh GitHub checks.
+- **Northstar Demo — Showcase v1** is the fictional showcase, with its own Owner
+  account and private credentials in `artifacts/showcase-v1/credentials.json`.
+  Its assessment, risks, tasks, policies, evidence and audit use the same app.
+  No live GitHub connection is implied by these fictional records.
+- The hosted Azure app is a separate running copy with a separate database and
+  accounts. A successful local sign-in does not verify its hosted counterpart.
+  Hosted acceptance remains pending the staging gates in the release checklist.
+
+Keep credentials and browser sessions private and beside their matching local
+manifest. Do not paste provider keys into these fictional account files or commit
+anything under the private `artifacts/showcase-v1/` directory.
+
+The current usability changes add readable **Evidence details**, links back to
+originating findings from tasks, evidence linking on audit checklists, and linked
+evidence metadata/content in the audit pack. Completed tasks can still receive
+new evidence. A task's **Done** status, a finding's recorded resolution and an
+evidence item's freshness are separate facts. GitHub resolution still requires
+a newer fresh passing observation. Human audit closure is an operator decision
+supported by checklist review and evidence; it is not automated provider verification.
+The complete fictional resolution rehearsal remains pending the scenario decision
+recorded in the active checklist; the earlier RC3 walkthrough below does not prove it.
+
 ## Start the demo
 
 Prerequisites: Node 22 or later (rehearsed with Node 25.6.1/npm 11.9.0), the
