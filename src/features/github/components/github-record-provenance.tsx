@@ -16,7 +16,7 @@ import type {
   OfficialGitHubFindingProvenance,
   OfficialGitHubRecordProvenance,
 } from "../application/github-record-provenance";
-import { githubFindingPresentation } from "./github-check-presentation";
+import { githubEvidenceTitle, githubFindingPresentation } from "./github-check-presentation";
 import { formatMonitoringTime } from "./format-monitoring-time";
 
 const STATUS_LABEL: Record<GitHubFindingTransitionStatus, string> = {
@@ -70,6 +70,7 @@ function ProvenanceDetails({ record }: { record: OfficialGitHubRecordProvenance 
       <Pill tone={record.freshness === "current" ? "green" : "amber"}>{freshnessLabel}</Pill>
     </div>
     <p className="github-official-record-summary">{record.catalogueSummary}</p>
+    <details className="evidence-disclosure"><summary>Technical details</summary>
     <dl className="github-official-provenance">
       <div><dt>Check</dt><dd><code>{record.checkId}</code></dd></div>
       <div><dt>ISO references</dt><dd>{record.isoControlReferences.join(" · ")}</dd></div>
@@ -79,6 +80,7 @@ function ProvenanceDetails({ record }: { record: OfficialGitHubRecordProvenance 
       <div><dt>Mapping version</dt><dd><code>{record.mappingVersion}</code></dd></div>
       <div className="github-official-provenance-wide"><dt>Mapping checksum</dt><dd><code>{record.mappingChecksum}</code></dd></div>
     </dl>
+    </details>
   </>;
 }
 
@@ -96,7 +98,7 @@ export function OfficialGitHubEvidenceCard({
   >
     <div className="finding-head">
       <Pill tone="blue">Official GitHub evidence</Pill>
-      <h2>{record.checkId}</h2>
+      <h2>{githubEvidenceTitle(record.checkId)}</h2>
     </div>
     <ProvenanceDetails record={record} />
     <p className="github-official-boundary" role="note">

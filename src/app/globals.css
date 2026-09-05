@@ -552,3 +552,23 @@ a.heat-cell:hover{outline:2px solid var(--ink);outline-offset:-2px}
 .automation-dismiss-form input{min-width:0;flex:1 1 200px;min-height:40px}
 @media(max-width:760px){.automation-inbox-toolbar{align-items:stretch;flex-direction:column}.automation-inbox-note{text-align:left}.automation-provenance{grid-template-columns:1fr 1fr}.automation-draft-heading{flex-direction:column}.automation-draft-actions{align-items:stretch;flex-direction:column}.automation-draft-actions form,.automation-draft-actions .button{width:100%}.automation-dismiss-form{align-items:stretch;flex-direction:column}.automation-dismiss-form input{width:100%;flex-basis:auto}}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+
+/* Evidence stays scannable; detailed mappings and editing are opt-in. */
+.evidence-disclosure{margin-top:12px;font-size:12px}
+.evidence-disclosure>summary{min-height:36px;padding:8px 0;cursor:pointer;color:var(--blue);font-weight:700}
+.evidence-disclosure>summary:focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:4px}
+.evidence-disclosure>p{color:var(--ch-text);line-height:1.6}
+.evidence-linked-records{margin-top:12px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;min-width:0}
+.evidence-link-form{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:8px;min-width:0}
+.evidence-link-form select{min-width:0;max-width:100%;flex:1 1 220px}
+.evidence-link-management{list-style:none;padding:0;margin:12px 0 0;display:grid;gap:8px}
+.evidence-link-management li{display:flex;gap:12px;justify-content:space-between;align-items:center;border-top:1px solid var(--ch-border);padding-top:8px;min-width:0}
+.evidence-link-management .button{min-height:32px;padding:6px 12px;font-size:11px}
+
+.evidence-vault .page-heading{flex-wrap:wrap;align-items:flex-start}
+.evidence-vault .page-heading__content{flex:1 1 320px}
+.evidence-vault .page-heading__action{max-width:100%}
+.evidence-vault .stats-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+.evidence-vault .stat{min-width:0;padding:16px;gap:10px}
+@media(max-width:1050px){.evidence-vault .stat-icon{display:none}}
+@media(max-width:540px){.evidence-vault .page-heading__content{flex-basis:auto}.evidence-vault .stat{padding:12px}.evidence-vault .stat p{display:none}}

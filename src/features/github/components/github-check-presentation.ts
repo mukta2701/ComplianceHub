@@ -95,3 +95,27 @@ export function githubFindingPresentation(checkId: string): GitHubFindingPresent
     ? PRESENTATIONS[checkId as ExpectedGitHubCheckId]
     : UNKNOWN_PRESENTATION;
 }
+
+const EVIDENCE_TITLES = {
+  "github.repository.visibility": "Repository visibility",
+  "github.repository.archived": "Repository activity",
+  "github.branch.force_pushes": "Force-push protection",
+  "github.branch.deletions": "Branch deletion protection",
+  "github.branch.approving_reviews": "Required approving reviews",
+  "github.branch.stale_approvals": "Stale approval handling",
+  "github.branch.code_owner_reviews": "Code-owner reviews",
+  "github.branch.status_checks": "Required status checks",
+  "github.dependabot.high_critical": "Dependency security alerts",
+  "github.code_scanning.high_critical": "Code-scanning alerts",
+  "github.secret_scanning.enabled": "Secret scanning",
+  "github.secret_scanning.push_protection": "Secret push protection",
+  "github.secret_scanning.open_alerts": "Open secret-scanning alerts",
+  "github.workflow.security": "Security workflow",
+  "github.administration.outside_collaborator_admins": "Outside collaborator access",
+} satisfies Record<ExpectedGitHubCheckId, string>;
+
+export function githubEvidenceTitle(checkId: string): string {
+  return Object.prototype.hasOwnProperty.call(EVIDENCE_TITLES, checkId)
+    ? EVIDENCE_TITLES[checkId as ExpectedGitHubCheckId]
+    : "Repository check";
+}

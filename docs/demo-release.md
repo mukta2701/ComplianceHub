@@ -36,8 +36,8 @@ new evidence. A task's **Done** status, a finding's recorded resolution and an
 evidence item's freshness are separate facts. GitHub resolution still requires
 a newer fresh passing observation. Human audit closure is an operator decision
 supported by checklist review and evidence; it is not automated provider verification.
-The complete fictional resolution rehearsal remains pending the scenario decision
-recorded in the active checklist; the earlier RC3 walkthrough below does not prove it.
+The complete fictional resolution rehearsal is paused while the Evidence usability
+correction takes priority in the active checklist; the earlier RC3 walkthrough below does not prove it.
 
 The newer usability checkpoint has been tested locally; see the current checklist
 section and `artifacts/workflow-usability-2026-09-05/checkpoint.json` for its exact
@@ -45,6 +45,14 @@ runtime commit. RC3 remains the preserved earlier release, not a claim that the
 new monitoring-to-resolution scenario is complete. To run the current checkpoint,
 keep the existing checkout and use the commands below; do not switch branches over
 unfinished work. The private task checkpoint preserves its pre-existing **In progress** state.
+
+On Evidence, the compact summary shows freshness. **Linked controls (93)** opens
+the baseline mapping list; **Manage links** opens the existing editing controls.
+**Evidence details** opens a note. Small risk/task/policy/audit links stay visible.
+Technical GitHub metadata is under **Technical details**. If an account changes
+in another browser tab, return to this tab to refresh its workspace and role from
+the server. The current restoration build/proof is recorded in
+`artifacts/evidence-restoration-2026-09-05/acceptance.json`.
 
 ## Start the demo
 

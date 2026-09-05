@@ -2,6 +2,17 @@
 
 ## Current priority — existing workflow usability, 2026-09-05
 
+### Latest user correction — restore the familiar Evidence experience
+
+The user has paused the fictional resolution scenario and all feature expansion. The immediate priority is restoring the basic Evidence experience from the existing demo/design history.
+
+- [x] Compared the current populated page, git history (`b48beba`, `161d9d1`, `5e15b0b`, `1a90596`), July UI uplift/design notes, backlog and archived demo screenshots. The main clutter is the 93-control baseline displayed as full chips with removal buttons, plus the large freshness donut. Rolling back only the latest linkage commit would leave that problem intact.
+- [x] Restore compact freshness summaries and readable responsive headings. Keep small useful record links visible; open long control mappings and link-editing forms only when requested. Preserve exact evidence IDs, notes, immutable records, working navigation and server actions. Official GitHub evidence uses reviewed readable check labels and collapses technical metadata; raw provider titles remain excluded.
+- [x] Correct cached workspace/account labels after another tab signs into a different account. The retained layout refreshes from the server on account changes, focus, visibility and browser-history restoration. Browser data never grants access or supplies workspace labels. No database records, roles or memberships were changed.
+- [x] Focused tests: 7 files / 46 tests pass, including 93-control disclosure, readable official provenance, existing tenant/Member restrictions and session-refresh behavior. Earlier failure logs retained. Exact production build/browser acceptance is recorded privately under `artifacts/evidence-restoration-2026-09-05/`; those runtime checks are required before calling this correction complete.
+- [ ] Full remediation-to-fresh-verification scenario remains deferred. Do not revive the earlier product-choice question or add integrations while the user is asking for basic usability restoration.
+
+
 The user has deferred live GitHub enablement. Continue the existing app and fictional showcase; the earlier RC3 acceptance below does **not** establish the complete finding → task → remediation → fresh verification → evidence → audit/report workflow.
 
 - [x] Confirm reference runtime: health reports `11a8fd5e5a4666051c346b097350468b915a4347`, local API `127.0.0.1:54321`, project `compliancehub`, migration `20260905013000`. Existing tags, historical fixture and private artifacts preserved.

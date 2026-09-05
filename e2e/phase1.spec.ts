@@ -139,6 +139,7 @@ test("a user runs the Phase 1 workflow loop", async ({ page, request }, testInfo
   await activate(page.getByRole("button", { name: "Save evidence" }));
   const currentEvidence = page.getByRole("heading", { name: currentEvidenceTitle }).locator("xpath=ancestor::section");
   await expect(currentEvidence.getByText("current", { exact: true })).toBeVisible();
+  await currentEvidence.getByText("Manage links", { exact: true }).click();
   await currentEvidence.getByLabel(`Link ${currentEvidenceTitle} to a control`).selectOption({ index: 1 });
   await activate(currentEvidence.getByRole("button", { name: "Link", exact: true }));
   await expect(currentEvidence.locator("span").filter({ hasText: /^CH-001:/ })).toBeVisible();
@@ -204,6 +205,7 @@ test("a user runs the Phase 1 workflow loop", async ({ page, request }, testInfo
   await activate(page.getByRole("button", { name: "Save evidence" }));
   const staleEvidence = page.getByRole("heading", { name: staleEvidenceTitle }).locator("xpath=ancestor::section");
   await expect(staleEvidence.getByText("expired", { exact: true })).toBeVisible();
+  await staleEvidence.getByText("Manage links", { exact: true }).click();
   const controlOptions = await staleEvidence.getByLabel(`Link ${staleEvidenceTitle} to a control`).locator("option").allTextContents();
   const controlLabel = controlOptions.find((label) => label.startsWith(`${controlCode}:`));
   expect(controlLabel).toBeTruthy();

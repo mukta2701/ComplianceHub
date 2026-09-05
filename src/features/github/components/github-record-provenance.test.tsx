@@ -37,6 +37,14 @@ const common = {
 };
 
 describe("official GitHub provenance cards", () => {
+  it("uses a readable catalogue label and keeps technical metadata out of the initial view", () => {
+    render(<OfficialGitHubEvidenceCard record={{ ...common, evidenceId: "evidence-compact" }} selected={false} />);
+    expect(screen.getByRole("heading", { name: "Force-push protection" })).toBeVisible();
+    expect(screen.getByText(common.mappingChecksum)).not.toBeVisible();
+    fireEvent.click(screen.getByText("Technical details"));
+    expect(screen.getByText(common.mappingChecksum)).toBeVisible();
+  });
+
   it("renders safe evidence provenance, focuses exact selection, and exposes no generic mutation controls", async () => {
     render(<OfficialGitHubEvidenceCard record={{ ...common, evidenceId: "30000000-0000-4000-8000-000000000001" }} selected />);
 

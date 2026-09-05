@@ -238,7 +238,7 @@ export async function main() {
     });
     for (const [kind, target] of [['control', control.id], ['risk', risk.id], ['task', task.id]]) {
       await ensure(`evidence_${kind}`, 'evidence_links', { evidence_id: evidence.id, [`${kind}_id`]: target }, {}, async () => {
-        await navigate(page, '/app/evidence'); const select = page.getByLabel(`Link ${SPEC.evidenceTitle} to a control`); await select.selectOption(`${kind}:${target}`); const form = select.locator('..'); await submitLocator(form.getByRole('button', { name: 'Link', exact: true }));
+        await navigate(page, '/app/evidence'); await page.locator(`#evidence-${evidence.id}`).getByText('Manage links', { exact: true }).click(); const select = page.getByLabel(`Link ${SPEC.evidenceTitle} to a control`); await select.selectOption(`${kind}:${target}`); const form = select.locator('..'); await submitLocator(form.getByRole('button', { name: 'Link', exact: true }));
       });
     }
     const policy = await ensure('policy', 'policies', { reference: SPEC.policyRef }, { title: SPEC.policyTitle, owner_id: user.id, body: SPEC.note }, async () => {
@@ -276,7 +276,7 @@ export async function main() {
     for (const item of soaItems) {
       const mapped = allMappings.data.find((entry) => entry.requirement_id === item.control_id); if (!mapped) throw new Error(`Missing evidence mapping for ${item.control_code}`);
       await ensure(`baseline_link_${mapped.control_id}`, 'evidence_links', { evidence_id: baseline.id, control_id: mapped.control_id }, {}, async () => {
-        await navigate(evidencePage, '/app/evidence'); const select = evidencePage.getByLabel(`Link ${baselineTitle} to a control`); await select.selectOption(`control:${mapped.control_id}`);
+        await navigate(evidencePage, '/app/evidence'); await evidencePage.locator(`#evidence-${baseline.id}`).getByText('Manage links', { exact: true }).click(); const select = evidencePage.getByLabel(`Link ${baselineTitle} to a control`); await select.selectOption(`control:${mapped.control_id}`);
         await Promise.all([evidencePage.waitForNavigation({ waitUntil: 'domcontentloaded' }), select.locator('..').getByRole('button', { name: 'Link', exact: true }).click()]);
       });
     }

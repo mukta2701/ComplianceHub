@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { requireAppContext } from "@/lib/app-context";
-import { Card, EmptyState, PageIntro, Pill } from "@/components/ui";
+import { Card, EmptyState, PageIntro, Pill, Stat } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { one } from "@/lib/supabase/one";
 import { downloadEvidenceAction, linkEvidenceAction, unlinkEvidenceAction, withdrawEvidenceAction } from "./actions";
@@ -53,7 +53,6 @@ export default async function EvidencePage({
   const selectedEvidence = requestedEvidence && officialByEvidence.has(requestedEvidence) ? requestedEvidence : null;
   const evidence = { current: 0, expiring: 0, expired: 0 };
   for (const i of items ?? []) { const st = i.status as string; if (st === "current" || st === "expiring" || st === "expired") evidence[st] += 1; }
-  const evidenceTotal = evidence.current + evidence.expiring + evidence.expired;
   const linkOptions = (
     <>
       {controls?.map((c) => <option key={c.id} value={`control:${c.id}`}>{c.code}: {c.title}</option>)}
@@ -62,8 +61,8 @@ export default async function EvidencePage({
       <optgroup label="Tasks">{tasks?.map((task) => <option key={task.id} value={`task:${task.id}`}>Task: {task.title}</option>)}</optgroup>
     </>
   );
-  return <>
-    <PageIntro eyebrow="EVIDENCE" title="Evidence vault" body="Immutable proof attached to controls. Freshness is tracked automatically, and stale items raise a replacement task." action={<span style={{ display: "flex", gap: "8px" }}>
+  return <div className="evidence-vault">
+    <PageIntro eyebrow="EVIDENCE" title="Evidence vault" body="Store and review the files, links and notes that support your controls." action={<span style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
       <a className="button secondary" href="/api/app/evidence/export?format=xlsx">Export XLSX</a>
       <a className="button secondary" href="/api/app/evidence/export?format=csv">CSV</a>
       {!isMember && <Link className="button primary" href="/app/evidence/new"><Icon name="plus" />Add evidence</Link>}
@@ -72,54 +71,51 @@ export default async function EvidencePage({
     {!items?.length ? (
       <EmptyState icon="file" title={isMember ? "No evidence recorded yet" : "Add your first evidence"} body={isMember ? "Evidence added by workspace operators will appear here. You can read the metadata and download available files." : "Attach immutable proof — files, links, or notes — to any control, risk, or task. Freshness is tracked automatically, and a replacement task is raised when something goes stale."} primary={isMember ? undefined : { href: "/app/evidence/new", label: "Add your first evidence" }} />
     ) : (<>
-    <Card style={{ marginBottom: "16px" }}>
-      <div className="card-head"><div><h2 style={{ fontSize: "15px", margin: 0 }}>Evidence freshness</h2><p style={{ fontSize: "11.5px", color: "#596273", margin: "3px 0 0" }}>{evidenceTotal} live {evidenceTotal === 1 ? "item" : "items"} in your vault · stale items raise a replacement task</p></div></div>
-      <div className="donut">
-        <div className="donut-ring">
-          <svg viewBox="0 0 120 120" aria-hidden="true"><g transform="rotate(-90 60 60)">
-            {evidenceTotal === 0
-              ? <circle className="d-empty" cx="60" cy="60" r="46" />
-              : (() => {
-                  const C = 2 * Math.PI * 46;
-                  const parts = [{ v: evidence.current, cls: "d-good" }, { v: evidence.expiring, cls: "d-warn" }, { v: evidence.expired, cls: "d-risk" }].filter((p) => p.v > 0);
-                  const gap = parts.length > 1 ? 3 : 0;
-                  let acc = 0;
-                  return parts.map((p, idx) => { const len = (p.v / evidenceTotal) * C; const dash = Math.max(len - gap, 0.5); const seg = <circle key={idx} className={p.cls} cx="60" cy="60" r="46" style={{ strokeDasharray: `${dash} ${C - dash}`, strokeDashoffset: -acc }} />; acc += len; return seg; });
-                })()}
-          </g></svg>
-          <div className="donut-center"><div className="d-count">{evidenceTotal}</div><div className="d-sub">items</div></div>
-        </div>
-        <div className="donut-legend">
-          <div className="seg-row"><span className="seg-dot" style={{ background: "var(--green)" }} />Current<b>{evidence.current}</b></div>
-          <div className="seg-row"><span className="seg-dot" style={{ background: "var(--amber)" }} />Expiring<b>{evidence.expiring}</b></div>
-          <div className="seg-row"><span className="seg-dot" style={{ background: "var(--red)" }} />Expired<b>{evidence.expired}</b></div>
-        </div>
-      </div>
-    </Card>
+    <div className="stats-grid" aria-label="Evidence freshness">
+      <Stat label="CURRENT" value={evidence.current} detail="Ready for review" tone="green" />
+      <Stat label="EXPIRING" value={evidence.expiring} detail="Review before expiry" tone="amber" />
+      <Stat label="EXPIRED" value={evidence.expired} detail="Needs fresh evidence" tone="red" />
+    </div>
     <div style={{ display: "grid", minWidth: 0, gap: "14px" }}>{items.map((item) => {
       const official = officialByEvidence.get(item.id);
       if (official) return <OfficialGitHubEvidenceCard key={item.id} record={official} selected={selectedEvidence === item.id} />;
+      const controlLinks = (item.evidence_links ?? []).filter((link) => link.control_id);
+      const relatedLinks = (item.evidence_links ?? []).filter((link) => !link.control_id);
+      const renderLink = (link: NonNullable<typeof item.evidence_links>[number], editing = false) => {
+        const c = one(link.controls); const r = one(link.risks); const t = one(link.tasks); const p = one(link.policies); const a = one(link.audit_checklist_items);
+        const label = c ? `${c.code}: ${c.title}` : r ? `Risk ${r.reference}` : t ? `Task: ${t.title}` : p ? `Policy: ${p.reference}: ${p.title}` : a ? `Audit: ${a.checklist_item}` : "Unspecified link";
+        const href = r && link.risk_id ? `/app/risks/${link.risk_id}` : t && link.task_id ? `/app/tasks/${link.task_id}` : p && link.policy_id ? `/app/policies/${link.policy_id}` : a ? `/app/audits/${a.audit_id}` : null;
+        return <span key={link.id} className={editing ? "evidence-link-label" : "pill neutral"} style={{ maxWidth: "100%", whiteSpace: "normal", overflowWrap: "anywhere" }}>{href && !editing ? <Link href={href}>{label}</Link> : label}</span>;
+      };
       return <Card key={item.id} id={`evidence-${item.id}`} style={{ minWidth: 0, overflow: "hidden", padding: "20px" }}>
       <div style={{ display: "flex", minWidth: 0, flexWrap: "wrap", justifyContent: "space-between", gap: "12px", alignItems: "center" }}>
-        <div style={{ minWidth: 0, flex: "1 1 220px" }}><h2 style={{ fontSize: "15px", margin: 0, overflowWrap: "anywhere" }}>{item.title}</h2><p style={{ fontSize: "12px", color: "#596273", margin: "3px 0 0", overflowWrap: "anywhere" }}>Collected {item.collected_on}{item.valid_until && ` · valid until ${item.valid_until}`}</p></div>
+        <div style={{ minWidth: 0, flex: "1 1 320px" }}><h2 style={{ fontSize: "15px", margin: 0, overflowWrap: "anywhere" }}>{item.title}</h2><p style={{ fontSize: "12px", color: "#596273", margin: "3px 0 0", overflowWrap: "anywhere" }}>Collected {item.collected_on}{item.valid_until && ` · valid until ${item.valid_until}`}</p></div>
         <div style={{ display: "flex", minWidth: 0, maxWidth: "100%", flexWrap: "wrap", alignItems: "center", gap: "12px" }}>{item.source_id && (() => { const src = one(item.evidence_sources); const provider = src?.provider ? PROVIDER_LABELS[src.provider] ?? src.provider : null; return <Pill tone="neutral">{provider ? `Auto · ${provider}` : "Auto"}</Pill>; })()}<Pill tone={TONE[item.status]}>{item.status}</Pill>
           {item.kind === "link" && item.url && <a style={{ color: "var(--blue)", fontWeight: 700, fontSize: "12px" }} href={item.url} rel="noreferrer" target="_blank">Open link</a>}
           {item.kind === "file" && <form action={downloadEvidenceAction}><input type="hidden" name="id" value={item.id} /><button className="button secondary" style={{ minHeight: "32px", padding: "6px 12px" }}>Download</button></form>}
           {!isMember && (item.status === "current" || item.status === "expiring" || item.status === "expired") && <><Link style={{ color: "var(--blue)", fontWeight: 700, fontSize: "12px" }} href={`/app/evidence/new?replaces=${item.id}`}>Supersede</Link><form action={withdrawEvidenceAction}><input type="hidden" name="id" value={item.id} /><button className="button secondary" style={{ minHeight: "32px", padding: "6px 12px", color: "var(--red)" }}>Withdraw</button></form></>}
         </div>
       </div>
-      {item.description && <details style={{ marginTop: "12px" }}><summary>Evidence details</summary><p style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{item.description}</p></details>}
-      <div style={{ marginTop: "12px", display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center" }}>
-        {item.evidence_links?.map((link) => { const c = one(link.controls); const r = one(link.risks); const t = one(link.tasks); const p = one(link.policies); const a = one(link.audit_checklist_items);
-          const label = c ? `${c.code}: ${c.title}` : r ? `Risk ${r.reference}` : t ? `Task: ${t.title}` : p ? `Policy: ${p.reference}: ${p.title}` : a ? `Audit: ${a.checklist_item}` : "Unspecified link";
-          const href = r && link.risk_id ? `/app/risks/${link.risk_id}` : t && link.task_id ? `/app/tasks/${link.task_id}` : p && link.policy_id ? `/app/policies/${link.policy_id}` : a ? `/app/audits/${a.audit_id}` : null;
-          return <span key={link.id} className="pill neutral" style={{ maxWidth: "100%", whiteSpace: "normal", overflowWrap: "anywhere" }}>{href ? <Link href={href}>{label}</Link> : label}{!isMember && <form action={unlinkEvidenceAction} style={{ display: "inline" }}><input type="hidden" name="linkId" value={link.id} /><button aria-label="Remove link" style={{ border: 0, background: "none", color: "#8b94a2", marginLeft: "4px" }}>×</button></form>}</span>; })}
-        {!isMember && <form action={linkEvidenceAction} style={{ display: "inline-flex", minWidth: 0, maxWidth: "100%", flexWrap: "wrap", alignItems: "center", gap: "8px" }}><input type="hidden" name="evidenceId" value={item.id} /><select name="target" defaultValue="" aria-label={`Link ${item.title} to a control`} className="field" style={{ minWidth: 0, maxWidth: "100%", flex: "1 1 220px" }}><option value="" disabled>Link to control…</option>{linkOptions}</select><button className="button secondary" style={{ minHeight: "32px", padding: "6px 12px" }}>Link</button></form>}
-      </div>
+      {item.description && <details className="evidence-disclosure" open={requestedEvidence === item.id}><summary>Evidence details</summary><p style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{item.description}</p></details>}
+      {(relatedLinks.length > 0 || (controlLinks.length > 0 && controlLinks.length <= 3)) && <div className="evidence-linked-records">
+        {controlLinks.length <= 3 && controlLinks.map((link) => renderLink(link))}
+        {relatedLinks.map((link) => renderLink(link))}
+      </div>}
+      {controlLinks.length > 3 && <details className="evidence-disclosure">
+        <summary>Linked controls ({controlLinks.length})</summary>
+        <div className="evidence-linked-records">{controlLinks.map((link) => renderLink(link))}</div>
+      </details>}
+      {!isMember && <details className="evidence-disclosure">
+        <summary>Manage links</summary>
+        <form action={linkEvidenceAction} className="evidence-link-form"><input type="hidden" name="evidenceId" value={item.id} /><select name="target" defaultValue="" aria-label={`Link ${item.title} to a control`} className="field"><option value="" disabled>Choose a control or record…</option>{linkOptions}</select><button className="button secondary">Link</button></form>
+        {(item.evidence_links?.length ?? 0) > 0 && <ul className="evidence-link-management">
+          {item.evidence_links?.map((link) => <li key={link.id}>{renderLink(link, true)}<form action={unlinkEvidenceAction}><input type="hidden" name="linkId" value={link.id} /><button className="button secondary" aria-label="Remove link">Remove</button></form></li>)}
+        </ul>}
+      </details>}
       {aiSettings?.enabled && <AiSuggestionPanel target={{ targetType: "evidence", targetId: item.id }} />}
     </Card>;
     })}
     </div>
     </>)}
-  </>;
+  </div>;
 }
