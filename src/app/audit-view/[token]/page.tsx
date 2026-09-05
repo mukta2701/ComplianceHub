@@ -23,7 +23,7 @@ export default async function AuditViewPage({ params }: { params: Promise<{ toke
   const supabase = await createSupabaseServerClient(); // anon role for a logged-out visitor
   const { data } = await supabase.rpc("audit_view_for_token", { raw_token: token });
   if (!data) {
-    return <Card style={{ padding: "24px" }} role="alert"><h1 style={{ fontSize: "20px", margin: "0 0 8px" }}>Link unavailable</h1><p>This auditor link is invalid, has expired, or has been revoked. Ask your contact to issue a new one.</p></Card>;
+    return <Card style={{ padding: "24px" }} role="alert"><h1 style={{ fontSize: "20px", margin: "0 0 8px" }}>Link unavailable</h1><p>This link may be invalid, expired, revoked, or temporarily unavailable. Wait a minute and try again; if it remains unavailable, ask your contact to check it.</p></Card>;
   }
   const payload = data as Payload;
   const report = buildReadinessReport({ ...payload, config: undefined });

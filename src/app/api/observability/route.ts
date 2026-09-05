@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
-import { enforceRateLimit } from "@/lib/security/rate-limit";
+import { enforceRateLimit, RateLimitUnavailableError } from "@/lib/security/rate-limit";
 import { logError } from "@/lib/observability/logger";
 
 export const dynamic = "force-dynamic";
@@ -79,10 +79,10 @@ export async function POST(request: Request) {
     // attacker-controlled on some deployments. Keep the per-address burst
     // guard for normal traffic and enforce a site-wide cap independently so
     // rotating that header cannot create unbounded durable writes.
-    await enforceRateLimit("observability:global", { limit: OBSERVABILITY_GLOBAL_LIMIT, windowMs: OBSERVABILITY_WINDOW_MS });
-    await enforceRateLimit(`observability:${ip}`, { limit: 30, windowMs: OBSERVABILITY_WINDOW_MS });
-  } catch {
-    return NextResponse.json({ ok: false }, { status: 429 });
+    await enforceRateLimit("observability:global", { limit: OBSERVABILITY_GLOBAL_LIMIT, windowMs: OBSERVABILITY_WINDOW_MS, failureMode: "closed" });
+    await enforceRateLimit(`observability:${ip}`, { limit: 30, windowMs: OBSERVABILITY_WINDOW_MS, failureMode: "closed" });
+  } catch (error) {
+    return NextResponse.json({ ok: false }, { status: error instanceof RateLimitUnavailableError ? 503 : 429, headers: { "cache-control": "no-store", "retry-after": "60" } });
   }
   let digest: string;
   try {

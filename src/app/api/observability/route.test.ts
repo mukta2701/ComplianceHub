@@ -6,7 +6,7 @@ const hoisted = vi.hoisted(() => ({
   logError: vi.fn(),
 }));
 
-vi.mock("@/lib/security/rate-limit", () => ({ enforceRateLimit: hoisted.enforceRateLimit }));
+vi.mock("@/lib/security/rate-limit", () => ({ enforceRateLimit: hoisted.enforceRateLimit, RateLimitUnavailableError: class extends Error {} }));
 vi.mock("@/lib/observability/logger", () => ({ logError: hoisted.logError }));
 
 import { POST } from "./route";
@@ -66,7 +66,7 @@ describe("POST /api/observability", () => {
     }));
 
     expect(response.status).toBe(200);
-    expect(hoisted.enforceRateLimit).toHaveBeenCalledWith("observability:global", { limit: 300, windowMs: 60_000 });
+    expect(hoisted.enforceRateLimit).toHaveBeenCalledWith("observability:global", { limit: 300, windowMs: 60_000, failureMode: "closed" });
   });
 
   it("rejects non-JSON media types before parsing or logging", async () => {
