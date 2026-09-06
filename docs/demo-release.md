@@ -36,8 +36,10 @@ new evidence. A task's **Done** status, a finding's recorded resolution and an
 evidence item's freshness are separate facts. GitHub resolution still requires
 a newer fresh passing observation. Human audit closure is an operator decision
 supported by checklist review and evidence; it is not automated provider verification.
-The complete fictional resolution rehearsal is paused while the Evidence usability
-correction takes priority in the active checklist; the earlier RC3 walkthrough below does not prove it.
+The separately labelled NS-AUD-002 follow-up now exercises the fictional human-review
+sequence. The original NS-AUD-001 and its open observation remain unchanged.
+This demonstrates recorded human verification; it does not enable live GitHub checks
+or add an enforced evidence prerequisite to manual audit closure.
 
 The newer usability checkpoint has been tested locally; see the current checklist
 section and `artifacts/workflow-usability-2026-09-05/checkpoint.json` for its exact
@@ -58,6 +60,42 @@ fix was tested at `8f19bbf9f213292239acb5d444a6e377e66e366d`; its build, tests a
 runtime recovery evidence are in `artifacts/runtime-check-2026-09-05/`. Always
 compare the running `/api/health` release SHA with `.next/local-demo-build.json`;
 an older acceptance file does not identify a newer running build.
+
+## Fictional finding-to-review walkthrough
+
+Use **Northstar Demo — Showcase v1**. In Internal audits, open **NS-AUD-002 —
+Northstar fictional independent sign-off follow-up**. Its checklist records the
+synthetic review, and its finding links to the owned corrective-action task.
+The task is Done. The rehearsal independently checked that the finding stayed
+In progress at that point; only a later explicit human closure changed it.
+
+Open the linked **Northstar FICTIONAL human review — NS-AUD-002** evidence note.
+It identifies the task, finding, checklist, control, review time, synthetic sample
+and limitations. Its collection date and validity are separate from task status.
+Return to the audit to inspect the compliant checklist and closed finding in its
+Reporting stage, then export the audit pack. A separate new Member report snapshot
+reflects this recorded state; the original publication remains preserved. The original audit's open observation is deliberately
+retained; this scenario does not claim the entire workspace is audit-ready.
+
+To extend an existing prepared local showcase, run:
+
+```sh
+npm run demo:setup -- -- --human-review
+npm run demo:setup -- -- --human-review --verify-only
+```
+
+Both separators are intentional: npm forwards one to the guarded launcher, which
+forwards the remaining arguments to setup. Subsequent ordinary setup runs also
+verify an existing human-review scenario. Setup checkpoints exact intended changes
+and refuses unrelated drift. If it stops with a pending action, preserve the
+manifest and log; confirm whether that action committed before retrying. Never
+clear a pending journal or delete records merely to make setup pass. The recorded
+first rehearsal includes recovered timing and selector failures for reference.
+
+The original readiness PDF is preserved. New exports use
+`artifacts/showcase-v1/human-review-audit-pack.csv` and
+`artifacts/showcase-v1/human-review-readiness-report.pdf`.
+Final release/browser acceptance remains recorded in the single release checklist.
 
 ## Start the demo
 
