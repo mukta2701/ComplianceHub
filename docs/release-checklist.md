@@ -4,6 +4,10 @@
 
 ### Latest user correction — restore the familiar Evidence experience
 
+- 2026-09-06 continuation: local production health still reports `8f19bbf9f213292239acb5d444a6e377e66e366d` with database OK. Actual in-app Browser followed Evidence → owned In Progress task → selected note (automatically expanded) → audit checklist → leadership report. The non-compliant checklist, open observation, one open task and two current evidence records remain distinct; no status or business record was changed. Mobile Evidence measures 390px content in a 390px viewport and retains collapsed mappings/editing controls.
+- Astra investigated the old native sample: 522/561 main-thread samples were in exception handling. An isolated subprocess using the installed Next environment and exception logger did not reproduce the loop with either drained or closed stderr; both handled one exception and exited normally. Repeated disabled-MCP OAuth errors coexist with a healthy server and do not establish causation. File-backed logs are an operational safeguard, not a proven fix.
+- Updated the existing operator guide with bounded health checks, private log-file startup, application-only recovery and explicit separation of current build identity from historical acceptance. The complete fictional verification lifecycle and hosted gates remain deferred; this continuation does not close them.
+
 - Astra retry completed successfully. Follow-up review found a pre-existing boundary error: 200 recent evidence records plus an older selected item exceeded the provenance loader's 200-ID limit. The selected item now replaces the last displayed row; no record is deleted. A full-size regression reproduces the failure before the fix.
 - A later local health check found the old Next process unresponsive at 100% CPU while Supabase remained healthy. The native sample records repeated exception/log handling; the initiating error is not yet established. Only the application process was stopped, and new runtime output goes to a local log file. Recovery checks and exact tested build are recorded in `artifacts/runtime-check-2026-09-05/`; this is not a claimed root-cause fix for the stall.
 

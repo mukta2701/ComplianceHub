@@ -51,8 +51,12 @@ the baseline mapping list; **Manage links** opens the existing editing controls.
 **Evidence details** opens a note. Small risk/task/policy/audit links stay visible.
 Technical GitHub metadata is under **Technical details**. If an account changes
 in another browser tab, return to this tab to refresh its workspace and role from
-the server. The current restoration build/proof is recorded in
-`artifacts/evidence-restoration-2026-09-05/acceptance.json`.
+the server. The restoration proof is recorded in
+`artifacts/evidence-restoration-2026-09-05/acceptance.json`. The subsequent selected-record
+fix was tested at `8f19bbf9f213292239acb5d444a6e377e66e366d`; its build, tests and
+runtime recovery evidence are in `artifacts/runtime-check-2026-09-05/`. Always
+compare the running `/api/health` release SHA with `.next/local-demo-build.json`;
+an older acceptance file does not identify a newer running build.
 
 ## Start the demo
 
@@ -124,6 +128,24 @@ The current linked page URLs are in `artifacts/showcase-v1/manifest.json`.
   sign-in attempts. Saved local browser sessions let setup resume normally.
 - If the app stops, rerun `npm run demo:start`. If source or migration identity
   changed, the launcher refuses the old build; build the intended commit again.
+- If the page hangs, check the app with `curl --max-time 8 -fsS
+  http://127.0.0.1:3100/api/health`. A timeout is a failed check, even when the
+  browser still displays an old page. Check `supabase status` separately. Stop
+  only the app with Ctrl-C in its startup terminal before restarting it; do not
+  reset or restart the database as a first response.
+- Keep a local log when rehearsing for an extended period. From the checkout,
+  run the following instead of the plain start command, and leave that terminal
+  open. A separate terminal can use `tail -f artifacts/runtime/current-server.log`.
+  Log output is diagnostic evidence, not proof that the application is healthy.
+
+  ```sh
+  mkdir -p artifacts/runtime
+  (umask 077; npm run demo:start >> artifacts/runtime/current-server.log 2>&1)
+  ```
+
+  A previous process entered an exception-reporting loop. File logging preserved
+  later diagnostics and the recovered process stayed responsive at the next-day
+  check; the original trigger remains unconfirmed.
 - If setup stops, preserve its output and rerun after correcting the cause.
   A lock records the setup process ID. Remove only a confirmed stale lock after
   checking that no setup process remains; never run two setups together.
