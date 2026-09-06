@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { requireAppContext } from "@/lib/app-context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
@@ -125,19 +126,31 @@ export async function generateAutomationBaselineAction() {
   const { data: sources, error } = await service.from("evidence_sources")
     .select("id,provider,config,access_token").eq("organisation_id", organisation.id).is("revoked_at", null);
   if (error) throw new Error("Could not load configured evidence sources");
+  let attempted = 0;
+  let completed = 0;
   for (const source of sources ?? []) {
     const config = (source.config ?? {}) as Record<string, unknown>;
     if (!automationConnectionId(config)) continue;
+    attempted += 1;
     try {
       const provider = resolveEvidenceProvider(source.provider as EvidenceProviderKind);
       const collected = await provider.collect({ id: source.id, provider: source.provider as EvidenceProviderKind, config, accessToken: decryptSecret(source.access_token) ?? "" });
       for (const item of collected) await persistCollectedAutomation({ supabase: service, organisationId: organisation.id, provider: source.provider as EvidenceProviderKind, config, collected: item });
+      completed += 1;
     } catch {
-      // Individual connector failures are reflected by the scheduled collector;
-      // a baseline request must still return the drafts from healthy systems.
+      // Keep drafts from healthy sources and report this run as incomplete.
+      // Never return raw provider or credential errors to the browser.
     }
   }
   revalidatePath("/app/automation");
+  const message = attempted === 0
+    ? "No automation sources are configured. Complete setup before collecting a baseline."
+    : completed === 0
+      ? "Baseline failed: no sources completed. Review connection setup and retry; existing drafts are preserved."
+      : completed < attempted
+        ? `Baseline incomplete: ${completed} of ${attempted} sources completed; ${attempted - completed} needs attention. Available drafts are preserved. Review connection setup and retry.`
+        : `Baseline collection completed for ${completed} source${completed === 1 ? "" : "s"}. Review available drafts below; unchanged records may produce no new drafts.`;
+  redirect(`/app/automation?message=${encodeURIComponent(message)}`);
 }
 
 export async function generateAutomationExplanationAction(formData: FormData) {
