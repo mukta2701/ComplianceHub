@@ -35,7 +35,7 @@ export default async function KpisPage() {
   const today = new Date().toISOString().slice(0, 10);
   const [{ data: kpis }, { data: members }, { data: measurements }] = await Promise.all([
     supabase.from("kpis").select("id,control_function,indicator,measurement_type,threshold,observations,next_steps,last_reviewed,task_id").eq("organisation_id", organisation.id).order("indicator"),
-    supabase.from("memberships").select("user_id,profiles(display_name)").eq("organisation_id", organisation.id),
+    supabase.from("memberships").select("user_id,job_title,profiles(display_name)").eq("organisation_id", organisation.id),
     supabase.from("kpi_measurements").select("kpi_id,value,measured_on").eq("organisation_id", organisation.id).order("measured_on"),
   ]);
   const rows = kpis ?? [];
@@ -78,13 +78,13 @@ export default async function KpisPage() {
               <button className="button secondary">Record</button>
             </form>}
           </td>
-          <td>{k.next_steps || "—"}{!isMember && k.next_steps && !k.task_id && <form action={raiseKpiTaskAction} style={{ marginTop: "6px", display: "flex", gap: "6px" }}><input type="hidden" name="id" value={k.id} /><input type="hidden" name="indicator" value={k.indicator} /><input type="hidden" name="nextSteps" value={k.next_steps} /><select name="ownerId" className="field" defaultValue="" aria-label={`Task owner for ${k.indicator}`}><option value="">Unassigned</option>{members?.map((m) => { const p = one(m.profiles); return <option key={m.user_id} value={m.user_id}>{p?.display_name ?? m.user_id}</option>; })}</select><button className="button secondary">Raise task</button></form>}{k.task_id && <small style={{ display: "block", color: "#596273" }}>Task raised.</small>}</td>
+          <td>{k.next_steps || "—"}{!isMember && k.next_steps && !k.task_id && <form action={raiseKpiTaskAction} style={{ marginTop: "6px", display: "flex", gap: "6px" }}><input type="hidden" name="id" value={k.id} /><input type="hidden" name="indicator" value={k.indicator} /><input type="hidden" name="nextSteps" value={k.next_steps} /><select name="ownerId" className="field" defaultValue="" aria-label={`Task owner for ${k.indicator}`}><option value="">Unassigned</option>{members?.map((m) => { const p = one(m.profiles); return <option key={m.user_id} value={m.user_id}>{p?.display_name || m.job_title || "Workspace member"}</option>; })}</select><button className="button secondary">Raise task</button></form>}{k.task_id && <small style={{ display: "block", color: "#596273" }}>Task raised.</small>}</td>
         </tr>;
         })}
       </tbody>
     </table></div></Card>
     )}
-    {!isMember && <Card id="add-kpi" style={{ padding: "18px" }}>
+    {!isMember && <details className="section-guide" open={rows.length === 0}><summary>Add a performance measure</summary><Card id="add-kpi" style={{ padding: "18px" }}>
       <h2 style={{ fontSize: "15px", margin: "0 0 10px" }}>Add a KPI</h2>
       <form action={createKpiAction} className="app-form">
         <div className="form-grid">
@@ -92,13 +92,13 @@ export default async function KpisPage() {
           <label>Indicator<input name="indicator" required maxLength={300} /></label>
           <label>Measurement type<select name="measurementType" defaultValue="manual"><option value="automatic">Automatic</option><option value="manual">Manual</option><option value="external">External</option></select></label>
           <label>Target / threshold<input name="threshold" maxLength={500} /></label>
-          <label>Responsible party<select name="responsibleId" defaultValue=""><option value="">Unassigned</option>{members?.map((m) => { const p = one(m.profiles); return <option key={m.user_id} value={m.user_id}>{p?.display_name ?? m.user_id}</option>; })}</select></label>
+          <label>Responsible party<select name="responsibleId" defaultValue=""><option value="">Unassigned</option>{members?.map((m) => { const p = one(m.profiles); return <option key={m.user_id} value={m.user_id}>{p?.display_name || m.job_title || "Workspace member"}</option>; })}</select></label>
           <label>Last reviewed<input name="lastReviewed" type="date" /></label>
         </div>
         <label>Observations<textarea name="observations" maxLength={10000} /></label>
         <label>Next steps<textarea name="nextSteps" maxLength={10000} /></label>
         <button className="button primary">Add KPI</button>
       </form>
-    </Card>}
+    </Card></details>}
   </>;
 }

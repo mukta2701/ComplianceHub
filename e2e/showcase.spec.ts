@@ -168,6 +168,12 @@ test("all showcase sections load with honest status and readable layouts", async
     await checkPage(page, path, errors);
   }
   await expect(page.getByText(/an empty inbox does not mean all checks have passed/)).toBeVisible();
+  await page.goto("/app/kpis");
+  await expect(page.getByRole("img", { name: "Trend of 2 readings" })).toBeVisible();
+  await expect(page.getByText("Target: 95%", { exact: true })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Indicator", exact: true })).not.toBeVisible();
+  await page.getByText("Add a performance measure", { exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "Indicator", exact: true })).toBeVisible();
   await page.goto("/app/reports/readiness");
   await expect(page.getByText("MATURITY", { exact: true })).toBeVisible();
   await expect(page.getByText("READY", { exact: true })).toHaveCount(0);
