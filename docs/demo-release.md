@@ -2,10 +2,12 @@
 
 This guide describes the fictional Northstar showcase on the existing local
 Supabase project `compliancehub`. Release acceptance and outstanding staging
-items are tracked in [release-checklist.md](release-checklist.md). The reproducible local release is tagged `demo-rc-20260905-3`. Resolve its exact
-commit with `git rev-parse demo-rc-20260905-3^{commit}`; final tested identity and
-results are in `artifacts/release-2026-09-05/release-acceptance.json`. Staging has
-not been deployed or accepted.
+items are tracked in [release-checklist.md](release-checklist.md). The current
+human-review candidate and exact environment are recorded in
+`artifacts/human-review-2026-09-06/acceptance-candidate.json`; final packaging is
+recorded alongside it in `release-package.json`. The earlier tag
+`demo-rc-20260905-3` and its acceptance artifacts remain preserved historical
+checkpoints. Staging has not been deployed or accepted.
 
 ## App, workspaces and accounts
 
