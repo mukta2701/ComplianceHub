@@ -3,8 +3,11 @@
 ## Current priority — whole-app clarity polish, 2026-09-06
 
 - [x] Inspect all 15 existing main navigation sections with fictional Northstar data and research official Vanta/Drata workflows. Findings and source links extend the existing `docs/design-review/2026-07-06-full-app-design-and-feature-draft.md`; no competing plan created.
-- [ ] Implement precise dashboard/report metrics, clear assessment/control/risk guidance, readable Evidence and truthful empty states. Preserve application workflows and historical data.
-- [ ] Run focused regressions, build, desktop/mobile section sweep and connected journey/Member checks; show actual app and record exact tested commit.
+- [x] Implement precise dashboard/report metrics, clear assessment/control/risk guidance, readable Evidence and truthful empty states. Preserve application workflows and historical data.
+- [x] Production source `bb10dba` passed 20 focused files / 95 tests, lint, typecheck, build and all 6 production browser tests (31.8s, zero retries). Browser tests cover all 15 main navigation sections on desktop/mobile, the existing connected journey with exports, Member restrictions, Evidence maintenance disclosures and the populated fictional performance trend. Two observed mobile failures (SoA form and Settings team controls) were corrected and rerun. Updated old-label test failures and the initial interrupted attempt remain preserved.
+- [x] Supported setup added one fictional manual performance measure and two dated readings (85% → 95%, target 95%). Normal rerun and verify-only passed without duplicates; existing Northstar task/finding statuses remain unchanged. Historical reference count/content hashes match across all 9 checked tables; private credentials remain mode 0600.
+- Evidence and exact final runtime identity: `artifacts/clarity-polish-2026-09-06/acceptance.json`, build/test/setup logs and `reference-preserved.json`. The later checklist-only commit requires a matching rebuild/restart; acceptance records both functional-test SHA and final running SHA.
+- Limitations: this is the existing local app with fictional data. Section loading does not prove every possible mutation. GitHub/provider configuration stays disabled; no public sharing, notification, hosted migration or deployment was performed. The original server-stall trigger, full fresh-verification lifecycle and staging gates are not closed by these changes.
 
 ## Earlier priority — existing workflow usability, 2026-09-05
 
