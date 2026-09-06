@@ -1,9 +1,10 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 type QueryResult = {
   data: unknown;
   count?: number | null;
+  error?: { message: string } | null;
   projectMachineProvenance?: boolean;
 };
 
@@ -152,5 +153,67 @@ describe("Owner dashboard", () => {
     render(await AppHome());
 
     expect(screen.getByText("Refresh evidence: Manual proof beyond machine rows")).toBeVisible();
+  });
+});
+
+
+describe("Dashboard maturity clarity", () => {
+  it("distinguishes missing SoA data from a measured zero", async () => {
+    const { container } = render(await AppHome());
+    expect(screen.getByRole("heading", { name: "Control maturity score" })).toBeVisible();
+    expect(container.querySelector(".g-pct")).toHaveTextContent("—");
+    expect(screen.getByText("No controls to score")).toBeVisible();
+  });
+
+  it("explains the weighted denominator including undecided controls", async () => {
+    hoisted.responses.soa_registers[0] = { data: { id: "soa-1" } };
+    hoisted.responses.soa_items = [{ data: [] }, { data: [
+      { status: "advanced" }, { status: "pending" }, { status: "not_applicable" },
+    ] }];
+    const { container } = render(await AppHome());
+    expect(container.querySelector(".g-pct")).toHaveTextContent("50%");
+    expect(screen.getByText(/2 controls scored · 1 excluded as not applicable/)).toBeVisible();
+    fireEvent.click(screen.getByText("How this score works"));
+    expect(screen.getByText(/Pending decisions count as zero/)).toBeVisible();
+  });
+
+  it("does not assign a score when all controls are excluded", async () => {
+    hoisted.responses.soa_registers[0] = { data: { id: "soa-1" } };
+    hoisted.responses.soa_items = [{ data: [] }, { data: [{ status: "not_applicable" }] }];
+    const { container } = render(await AppHome());
+    expect(container.querySelector(".g-pct")).toHaveTextContent("—");
+    expect(screen.getByText(/All controls are marked not applicable/)).toBeVisible();
+  });
+
+  it("does not turn full maturity into audit assurance", async () => {
+    hoisted.responses.soa_registers[0] = { data: { id: "soa-1" } };
+    hoisted.responses.soa_items = [{ data: [] }, { data: [{ status: "advanced" }] }];
+    const { container } = render(await AppHome());
+    expect(container.querySelector(".g-pct")).toHaveTextContent("100%");
+    expect(screen.queryByText(/^(Almost audit-ready|Audit-ready)$/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Does not verify evidence or audit readiness/)).toBeVisible();
+  });
+
+  it.each(["register", "statuses"])("does not show a zero score after a failed %s query", async (query) => {
+    if (query === "register") hoisted.responses.soa_registers[0] = { data: null, error: { message: "private database error" } };
+    else {
+      hoisted.responses.soa_registers[0] = { data: { id: "soa-1" } };
+      hoisted.responses.soa_items = [{ data: [] }, { data: null, error: { message: "private database error" } }];
+    }
+    await expect(AppHome()).rejects.toThrow("Could not load dashboard control maturity");
+  });
+
+  it("opens the specific stale evidence and presents task provenance once", async () => {
+    hoisted.responses.tasks = [{ data: [{ id: "task-1", title: "Review access", due_on: "2026-01-01", source: "manual", owner_id: null }] }];
+    render(await AppHome());
+    expect(screen.getByText("Refresh evidence: Manual policy proof").closest("a")).toHaveAttribute("href", "/app/evidence?evidence=manual-evidence");
+    expect(screen.getAllByText("Added manually")).toHaveLength(1);
+  });
+
+  it("presents export activity without duplicate machine labels", async () => {
+    hoisted.responses.audit_events = [{ data: [{ action: "export", entity_type: "export", occurred_at: "2026-09-06T09:00:00Z" }] }];
+    render(await AppHome());
+    expect(screen.getByText("Export generated")).toBeVisible();
+    expect(screen.queryByText("export · export")).not.toBeInTheDocument();
   });
 });

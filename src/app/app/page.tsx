@@ -58,14 +58,6 @@ function toneForAction(action: PrioritisedAction): StatusTone {
   return "neutral";
 }
 
-function readinessStage(percent: number): string {
-  if (percent <= 0) return "Not started";
-  if (percent < 34) return "Getting ready";
-  if (percent < 67) return "Building evidence";
-  if (percent < 100) return "Almost audit-ready";
-  return "Audit-ready";
-}
-
 export default async function AppHome() {
   const { supabase, organisation, membership } = await requireAppContext();
   if (membership.role === "member") {
@@ -80,13 +72,14 @@ export default async function AppHome() {
 
   // The latest SoA register anchors readiness, the maturity chart, and the
   // pending applicability decisions that block finalisation.
-  const { data: register } = await supabase
+  const { data: register, error: registerError } = await supabase
     .from("soa_registers")
     .select("id")
     .eq("organisation_id", organisation.id)
     .order("version", { ascending: false })
     .limit(1)
     .maybeSingle();
+  if (registerError) throw new Error("Could not load dashboard control maturity");
 
   const [
     pendingSoa,
@@ -111,7 +104,10 @@ export default async function AppHome() {
       ? supabase.from("soa_items").select("id,control_code,control_title").eq("organisation_id", organisation.id).eq("soa_register_id", register.id).eq("status", "pending").order("position").limit(25).then((r) => r.data)
       : Promise.resolve([] as { id: string; control_code: string; control_title: string }[]),
     register
-      ? supabase.from("soa_items").select("status").eq("organisation_id", organisation.id).eq("soa_register_id", register.id).then((r) => r.data)
+      ? supabase.from("soa_items").select("status").eq("organisation_id", organisation.id).eq("soa_register_id", register.id).then((r) => {
+          if (r.error) throw new Error("Could not load dashboard control maturity");
+          return r.data;
+        })
       : Promise.resolve([] as { status: string }[]),
     supabase.from("evidence").select("id,title,status,valid_until,machine_provenance:github_evidence_provenance!github_evidence_provenance_evidence_tenant_fk()").eq("organisation_id", organisation.id).in("status", ["expiring", "expired"]).is("machine_provenance", null).order("valid_until", { ascending: true, nullsFirst: false }).limit(25).then((r) => r.data),
     supabase.from("policies").select("id,reference,title,review_due").eq("organisation_id", organisation.id).eq("status", "in_review").order("reference").limit(25).then((r) => r.data),
@@ -151,9 +147,9 @@ export default async function AppHome() {
       severity: item.status === "expired" ? "high" : "normal",
       label: `Refresh evidence: ${item.title}`,
       explanation: item.status === "expired"
-        ? "This evidence has expired and no longer proves its control."
-        : "This evidence is expiring soon — refresh it to keep the control covered.",
-      destination: "/app/evidence",
+        ? "Its validity date has passed. Review it and add a current replacement."
+        : "Its validity date is approaching. Review it and arrange a replacement.",
+      destination: `/app/evidence?evidence=${encodeURIComponent(item.id)}`,
       source: "Evidence vault",
       dueOn: item.valid_until ?? null,
     })),
@@ -181,7 +177,8 @@ export default async function AppHome() {
   const actions = prioritiseDashboardActions(actionInputs, today);
   const topAction = actions[0] ?? null;
 
-  const readiness = summariseSoaReadiness((registerItems ?? []).map((s) => ({ status: s.status as SoaStatus }))).percent;
+  const readinessSummary = summariseSoaReadiness((registerItems ?? []).map((s) => ({ status: s.status as SoaStatus })));
+  const readiness = readinessSummary.percent;
 
   // Control-maturity distribution for the implementation bar.
   const statusCounts = new Map<string, number>();
@@ -233,14 +230,14 @@ export default async function AppHome() {
     <PageIntro
       eyebrow={organisation.name.toUpperCase()}
       title="Readiness dashboard"
-      body="Your highest-priority decisions first, then how your readiness is tracking. This is a readiness signal, not a certification."
+      body="Prioritise decisions and due work, then track control maturity, evidence freshness and open risks."
       action={<Link className="button primary" href={primaryHref}>{primaryLabel} <Icon name="arrow" /></Link>}
     />
 
     {/* Hero: readiness gauge + what to do next. */}
     <div className="dash-hero">
       <Card className="gauge-card">
-        <div className="card-head"><div><h3>Readiness confidence</h3><p>Applicable controls implemented</p></div><Pill>Live</Pill></div>
+        <div className="card-head"><div><h3>Control maturity score</h3><p>Weighted statuses on your latest SoA</p></div></div>
         <div className="gauge">
           <div className="gauge-ring">
             <svg viewBox="0 0 200 200" aria-hidden="true">
@@ -248,13 +245,16 @@ export default async function AppHome() {
               <circle className="g-arc" cx="100" cy="100" r={gaugeR} style={{ strokeDasharray: gaugeC, strokeDashoffset: gaugeC * (1 - readiness / 100) }} />
             </svg>
             <div className="gauge-center">
-              <div className="g-pct">{readiness}<span>%</span></div>
-              <div className="g-stage">{readinessStage(readiness)}</div>
+              <div className="g-pct">{readinessSummary.total > 0 ? <>{readiness}<span>%</span></> : "—"}</div>
+              <div className="g-stage">{readinessSummary.total > 0 ? "Weighted maturity" : "No controls to score"}</div>
             </div>
           </div>
-          <p className="g-cap">Reflects finalised SoA coverage. Not an ISO 27001 certification.</p>
+          <p className="g-cap">{readinessSummary.total > 0
+            ? `${readinessSummary.total} controls scored · ${totalControls - readinessSummary.total} excluded as not applicable.`
+            : totalControls > 0 ? "All controls are marked not applicable, so there is no maturity score." : "Add controls to your SoA to start measuring maturity."} Does not verify evidence or audit readiness.</p>
+          <details className="g-cap"><summary>How this score works</summary><p>Latest SoA statuses, including draft decisions: not started 0%, in progress 40%, established 70%, operational 90%, advanced 100%. Pending decisions count as zero; not applicable controls are excluded. The average is rounded to a whole percent.</p></details>
         </div>
-        <div className="card-foot"><span><Icon name="check" />Updated just now</span><Link href="/app/reports/readiness">Leadership report <Icon name="arrow" /></Link></div>
+        <div className="card-foot"><Link href={register ? `/app/soa/${register.id}` : "/app/soa"}>Review source SoA</Link><Link href="/app/reports/readiness">Leadership report <Icon name="arrow" /></Link></div>
       </Card>
 
       <Card className="action-queue">
@@ -266,7 +266,7 @@ export default async function AppHome() {
                   <b className="action-rank">{index + 1}</b>
                   <span className="action-body">
                     <strong>{action.label}</strong>
-                    <small>{action.explanation}</small>
+                    {action.explanation !== action.source && <small>{action.explanation}</small>}
                     <span className="action-meta">
                       <StatusLabel tone={toneForAction(action)}>{action.priorityReason}</StatusLabel>
                       <span>{action.source}</span>
@@ -277,7 +277,7 @@ export default async function AppHome() {
                 </Link>
               </li>)}
             </ol>
-          : <p className="empty-note">You are all caught up — no decisions or due work are waiting. New items appear here automatically as evidence ages, tasks fall due, or policies enter review.</p>}
+          : <p className="empty-note">No priority items are shown. Review All tasks for the full work list, including tasks without due dates.</p>}
         <div className="card-foot">
           {topAction
             ? <Link className="button primary" href={topAction.destination}>Start next action <Icon name="arrow" /></Link>
@@ -366,7 +366,7 @@ export default async function AppHome() {
         {(recentChanges ?? []).length > 0
           ? <ul className="change-list">
               {(recentChanges ?? []).map((change, index) => <li key={index}>
-                <span>{change.action.replace(/_/g, " ")} · {change.entity_type.replace(/_/g, " ")}</span>
+                <span>{change.action === "export" && change.entity_type === "export" ? "Export generated" : `${change.action.replace(/_/g, " ")} · ${change.entity_type.replace(/_/g, " ")}`}</span>
                 <time>{typeof change.occurred_at === "string" ? change.occurred_at.slice(0, 10) : ""}</time>
               </li>)}
             </ul>
