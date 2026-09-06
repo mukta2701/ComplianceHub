@@ -593,3 +593,13 @@ a.heat-cell:hover{outline:2px solid var(--ink);outline-offset:-2px}
 .dash-hero .g-stage{font-size:9px;max-width:92px;color:var(--ch-text-muted,#596273)}
 .dash-hero .g-cap{text-align:left;max-width:none;margin:0;font-size:12px;line-height:1.6}
 .dash-hero .gauge>details{grid-column:1/-1}
+
+@media(max-width:800px){
+  .settings-content{min-width:0}
+  .settings-content .team-list>div{flex-wrap:wrap}
+  .settings-content .team-list>div>span:not(.pill){min-width:0;overflow-wrap:anywhere}
+  .settings-content .team-list>div>.member-actions{flex:1 1 100%;max-width:100%;flex-wrap:wrap;margin-left:0}
+  .settings-content .member-actions form{gap:6px;flex-wrap:wrap;max-width:100%}
+  .settings-content .member-actions input{min-width:0;max-width:100%;flex:1 1 150px}
+  .settings-content .fact-grid{min-width:0;overflow-wrap:anywhere}
+}

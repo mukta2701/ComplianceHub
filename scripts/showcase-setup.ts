@@ -49,6 +49,7 @@ const SPEC = {
   riskRef: 'NS-R-001', riskTitle: 'Quarterly access reviews need independent sign-off',
   planRef: 'NS-RTP-001', evidenceTitle: 'Northstar fictional access review sample — September 2026',
   policyRef: 'NS-POL-001', policyTitle: 'Northstar access review policy', auditRef: 'NS-AUD-001', auditTitle: 'Northstar access governance review',
+  kpiIndicator: 'Northstar fictional access review completion (%)', kpiTarget: 'Target: 95%',
   note: 'FICTIONAL SHOWCASE v1: Northstar has documented baseline controls. Independent sign-off of quarterly access reviews remains a tracked improvement (NS-R-001 / NS-RTP-001). This is demonstration data, not audit assurance.',
   due: '2026-12-31', checklist: 'Has the quarterly access review received independent sign-off?',
 };
@@ -264,6 +265,18 @@ export async function main() {
       await submitLocator(select.locator('..').locator('..').getByRole('button', { name: 'Link evidence', exact: true }));
     });
     await ensure('finding', 'audit_findings', { audit_id: audit.id, summary: SPEC.riskTitle }, { severity: 'observation' }, async () => { await navigate(page, `/app/audits/${audit.id}`); await page.getByLabel('Summary', { exact: true }).fill(SPEC.riskTitle); await page.getByLabel('Corrective action', { exact: true }).fill(`Follow the owned treatment plan ${SPEC.planRef}; no additional task is needed.`); await submit('Raise finding'); });
+    const kpi = await ensure('kpi', 'kpis', { indicator: SPEC.kpiIndicator }, { control_function: 'Access management', measurement_type: 'manual', threshold: SPEC.kpiTarget, observations: 'FICTIONAL SHOWCASE: access review completion improved during the synthetic reporting period.', next_steps: 'FICTIONAL SHOWCASE: sustain at least 95% completion and review any exceptions.', responsible_id: user.id, created_by: user.id }, async () => {
+      await navigate(page, '/app/kpis'); await page.getByLabel('Control / function').fill('Access management'); await page.getByLabel('Indicator', { exact: true }).fill(SPEC.kpiIndicator); await page.getByLabel('Measurement type').selectOption('manual'); await page.getByLabel('Target / threshold').fill(SPEC.kpiTarget); await page.getByLabel('Responsible party').selectOption(user.id); await page.getByLabel('Last reviewed').fill('2026-09-06'); await page.getByLabel('Observations').fill('FICTIONAL SHOWCASE: access review completion improved during the synthetic reporting period.'); await page.getByLabel('Next steps').fill('FICTIONAL SHOWCASE: sustain at least 95% completion and review any exceptions.'); await submit('Add KPI');
+    });
+    for (const [key, measuredOn, value, note] of [
+      ['kpi_measurement_2026_08_31', '2026-08-31', 85, 'FICTIONAL SHOWCASE: 85% of synthetic access reviews were complete at period end.'],
+      ['kpi_measurement_2026_09_06', '2026-09-06', 95, 'FICTIONAL SHOWCASE: 95% of synthetic access reviews were complete after follow-up.'],
+    ] as const) {
+      await ensure(key, 'kpi_measurements', { kpi_id: kpi.id, measured_on: measuredOn }, { value, note, created_by: user.id }, async () => {
+        await navigate(page, '/app/kpis'); await page.getByLabel(`Measurement value for ${SPEC.kpiIndicator}`).fill(String(value)); await page.getByLabel(`Measurement date for ${SPEC.kpiIndicator}`).fill(measuredOn); await page.getByLabel(`Measurement note for ${SPEC.kpiIndicator}`).fill(note); const form = page.getByLabel(`Measurement value for ${SPEC.kpiIndicator}`).locator('..').locator('..'); await submitLocator(form.getByRole('button', { name: 'Record', exact: true }));
+      });
+    }
+    reconcileRecord(await rows('kpis', { id: kpi.id }), kpi.id, { last_reviewed: '2026-09-06' });
     const baselineTitle = 'Northstar fictional control baseline — Showcase v1';
     const baselineNote = 'FICTIONAL SIMULATION: Northstar reviewed the following control baseline for this showcase. All listed controls are demonstrated as operational except 5.1, where independent access-review sign-off is in progress under NS-R-001 and NS-RTP-001. This synthetic dossier is not real-world proof or certification.\r\n' + soaItems.sort((a, b) => a.position - b.position).map((item) => `${item.control_code}: ${item.control_title}`).join('\r\n');
     const baseline = await ensure('baseline_evidence', 'evidence', { title: baselineTitle }, { kind: 'note', owner_id: user.id, description: baselineNote }, async () => {
@@ -301,9 +314,9 @@ export async function main() {
     manifest.urls.soa_pdf = `${site}/api/app/soa/${snapshot.id}/pdf`;
     await ensure('report_snapshot', 'leadership_report_snapshots', {}, {}, async () => { await navigate(page, '/app/reports/readiness'); await submit('Publish to members'); });
     manifest.ids.control = control.id; manifest.ids.treatment = plan.id;
-    for (const [key, route] of Object.entries({ dashboard: '/app', assessment: `/app/assessment/${assessment.id}`, soa: `/app/soa/${soa.id}`, risk: `/app/risks/${risk.id}`, task: `/app/tasks/${task.id}`, evidence: '/app/evidence', policy: `/app/policies/${policy.id}`, audit: `/app/audits/${audit.id}`, report: '/app/reports/readiness' })) manifest.urls[key] = site + route;
-    manifest.fingerprints = {};
-    for (const table of ['assessment_sessions', 'assessment_responses', 'soa_registers', 'soa_snapshots', 'soa_items', 'risks', 'risk_treatment_plans', 'tasks', 'evidence', 'evidence_links', 'policies', 'audits', 'audit_checklist_items', 'audit_findings', 'leadership_report_snapshots']) { const current = await rows(table); manifest.counts[table] = current.length; manifest.fingerprints[table] = fingerprintRows(current); }
+    for (const [key, route] of Object.entries({ dashboard: '/app', assessment: `/app/assessment/${assessment.id}`, soa: `/app/soa/${soa.id}`, risk: `/app/risks/${risk.id}`, task: `/app/tasks/${task.id}`, evidence: '/app/evidence', policy: `/app/policies/${policy.id}`, audit: `/app/audits/${audit.id}`, kpis: '/app/kpis', report: '/app/reports/readiness' })) manifest.urls[key] = site + route;
+    manifest.fingerprints ??= {};
+    for (const table of ['assessment_sessions', 'assessment_responses', 'soa_registers', 'soa_snapshots', 'soa_items', 'risks', 'risk_treatment_plans', 'tasks', 'evidence', 'evidence_links', 'policies', 'audits', 'audit_checklist_items', 'audit_findings', 'kpis', 'kpi_measurements', 'leadership_report_snapshots']) { const current = await rows(table); manifest.counts[table] = current.length; manifest.fingerprints[table] = fingerprintRows(current); }
     for (const [name, url] of Object.entries({ 'soa.pdf': `/api/app/soa/${snapshot.id}/pdf`, 'readiness-report.pdf': '/api/app/reports/readiness/pdf', 'audit-pack.csv': `/api/app/audits/${audit.id}/pack?format=csv`, 'risks.csv': '/api/app/risks/export?format=csv' })) {
       const response = await page.request.get(url); if (!response.ok()) throw new Error(`Export failed: ${name}`); const bytes = await response.body(); if (!bytes.length || (name.endsWith('.pdf') && bytes.subarray(0, 4).toString() !== '%PDF')) throw new Error(`Invalid export ${name}`); await writeFile(path.join(dir, name), bytes, { mode: 0o600 });
     }

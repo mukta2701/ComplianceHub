@@ -48,7 +48,8 @@ unfinished work. The private task checkpoint preserves its pre-existing **In pro
 
 On Evidence, the compact summary shows freshness. **Linked controls (93)** opens
 the baseline mapping list; **Manage links** opens the existing editing controls.
-**Evidence details** opens a note. Small risk/task/policy/audit links stay visible.
+A short excerpt makes long notes readable at a glance. **Evidence details** opens
+the full note; **Manage record** contains Supersede and Withdraw. Small risk/task/policy/audit links stay visible.
 Technical GitHub metadata is under **Technical details**. If an account changes
 in another browser tab, return to this tab to refresh its workspace and role from
 the server. The restoration proof is recorded in
@@ -117,7 +118,10 @@ The current linked page URLs are in `artifacts/showcase-v1/manifest.json`.
    date, risk, control, and evidence.
 4. Open Evidence and Policies: show the access-review sample and approved
    NS-POL-001 policy. All names and records belong to the same fictional workspace.
-5. Open Internal audits: show NS-AUD-001, its non-compliant checklist item and
+5. Open Performance: the fictional access-review completion measure has two
+   manual readings, 85% and 95%, with a target of 95%. This demonstrates stored
+   readings and a real calculated trend, not a live integration.
+6. Open Internal audits: show NS-AUD-001, its non-compliant checklist item and
    observation referring to the existing treatment plan. Open Leadership report
    and download the report and audit pack.
 
@@ -190,3 +194,8 @@ npm run demo:start
 
 Exports append audit metadata as expected. The audit record contains the user,
 workspace, resource and format; it does not contain exported document contents.
+
+The dashboard and report label the existing weighted SoA metric as control maturity.
+Open **How this score works** for the weights and exclusions. This is separate
+from verification results. Research and section-level rationale extend the existing
+[design review](design-review/2026-07-06-full-app-design-and-feature-draft.md).
