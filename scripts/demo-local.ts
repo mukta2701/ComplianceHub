@@ -177,7 +177,7 @@ async function main(): Promise<void> {
   }
   env.CI = "1";
   env.PLAYWRIGHT_PORT = "3100";
-  const child: ChildProcess = spawn("npm", ["run", "test:e2e", ...parsed.args], { cwd: root, env, stdio: "inherit" });
+  const child: ChildProcess = spawn("npm", ["run", "test:e2e", "--", ...parsed.args], { cwd: root, env, stdio: "inherit" });
   child.on("exit", (code) => process.exit(code ?? 1));
 }
 

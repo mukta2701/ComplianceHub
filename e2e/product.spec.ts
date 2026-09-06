@@ -581,7 +581,7 @@ test("the leadership readiness report aggregates the ISMS into one accessible vi
   await expect(page.getByRole("heading", { name: "Leadership readiness report" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Risk posture" })).toBeVisible();
   // The SoA readiness ring is present with its readiness label.
-  await expect(page.getByText("READY", { exact: true })).toBeVisible();
+  await expect(page.getByText("MATURITY", { exact: true })).toBeVisible();
   await expect(page.getByText("OPEN NON-CONFORMITIES", { exact: true })).toBeVisible();
 
   const axe = await new AxeBuilder({ page }).analyze();

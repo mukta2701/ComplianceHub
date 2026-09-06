@@ -59,7 +59,7 @@ test("rehearses the saved connected showcase journey without writes", async ({ p
   await checkPage(page, "assessment", errors);
 
   await clickPath(page, "/app/soa");
-  await expect(page.getByText("Finalised snapshots")).toBeVisible();
+  await expect(page.getByText("Finalised statements")).toBeVisible();
   await page.locator(`a[href="/app/soa/${manifest.ids.soa}"]`).click();
   await page.waitForURL(new RegExp(`/app/soa/${manifest.ids.soa}$`));
   await expect(page.getByText(/Preflight complete|reviewed/)).toBeVisible();
