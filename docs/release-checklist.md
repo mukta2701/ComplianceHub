@@ -25,7 +25,9 @@
 - [x] Verify Monitoring/Automation availability, role and error behavior through actual navigation and focused failure regressions; retain database security proof and recheck current grants. Failure-path unit tests are not presented as a live provider exercise.
 - Final preservation check: all9historical reference count/content fingerprints match using the original SQL **newline** delimiter (`reference-preservation-newline.json`). The initial literal-backslash delimiter comparison is retained and rejected as an algorithm mismatch, not data drift. No historical records were repaired or overwritten.
 - Staging read-only recheck: current CLI default account belongs to another subscription/tenant; an explicit request to the saved target subscription still fails **AADSTS530035** (`azure-explicit-target.log`). No account switch, hosted configuration write, migration or deployment occurred. This is the first renewed blocked observation after completion of independent local work; final packaging continues.
-- [ ] Package exact production acceptance and staging approval handoff. No hosted writes, external notifications or repository changes are authorised by this continuation.
+- [x] Package local production acceptance, source archive and conditional staging handoff. Exact identity and checksum are in `artifacts/human-review-2026-09-06/release-package.json`; hosted execution is not approved or verified.
+- [x] Packaged-build throttled loading→loaded monitoring, missing-risk recovery and missing export404 pass (`loading-errors.json`). Actual Browser confirms no baseline action with zero sources. The operator guide includes the live GitHub rehearsal requiring an approved disposable target and local source rollback instructions.
+- [ ] Obtain interactive access to the saved Azure tenant and capture live image/configuration/recovery details before requesting deployment approval. Live GitHub target/access remains separately unapproved; no external notifications or hosted writes occurred.
 
 ## Earlier priority — whole-app clarity polish, 2026-09-06
 

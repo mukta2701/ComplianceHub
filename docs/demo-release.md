@@ -201,6 +201,46 @@ The current linked page URLs are in `artifacts/showcase-v1/manifest.json`.
   a known historical synthetic audit-row consistency limitation. Restoration
   work belongs in a separate environment.
 
+## Live GitHub rehearsal still requiring approval
+
+The local launcher deliberately disables provider credentials. Existing saved
+GitHub observations are historical; NS-AUD-002 is a fictional human review.
+Before a live rehearsal, the owner must identify and approve one disposable test
+repository and its GitHub App access. No existing customer repository is implied
+by the saved integration records.
+
+Once the target and environment are approved, use the existing integration flow
+and official monitoring controls. Record the repository, installation, release
+and first check time. Observe a known harmless configuration finding, create its
+owned remediation task, and record the remediation in the approved repository.
+Complete the task and confirm the finding remains unresolved. Run a newer check:
+a fresh pass must resolve the finding and produce its official evidence; a failure,
+stale result or unavailable connection must not count as resolution. Inspect the
+linked evidence and audit/report separately. Repeat the check to verify no duplicate
+finding or evidence identity is created. Keep notifications disabled throughout.
+
+Do not follow the historical shadow-pilot bridge migration steps for the current
+candidate. The updated private staging handoff is
+`artifacts/release-2026-09-05/staging-handoff.md`; it records the revised migration
+packet and the still-required Azure authentication and deployment approval.
+
+## Local source rollback
+
+The accepted source archive and its checksum are recorded in
+`artifacts/human-review-2026-09-06/release-package.json`. Preserve the current
+checkout and use a separate checkout of the recorded commit for recovery. Stop
+only the application process before starting a replacement on port 3100. Run
+`npm ci`, `npm run demo:build`, then `npm run demo:start` from that checkout using
+the same verified local database. Verify `/api/health` identifies that commit and
+open the existing Northstar audit before demonstrating it. Do not rerun fixture
+creation from a checkout missing its matching private manifest.
+
+This release adds no migrations beyond the preserved RC3 checkpoint. Source
+rollback does not undo fictional records and does not require deleting them.
+Hosted rollback is separate: the old hosted image is incompatible with the newer
+monitoring constraint, so it requires the paired application/database recovery
+plan in the staging handoff rather than a simple image switch.
+
 ## Scope
 
 External Slack/email/provider delivery is disabled for this rehearsal.
