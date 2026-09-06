@@ -1,6 +1,12 @@
 # Public beta release checklist
 
-## Current priority — existing workflow usability, 2026-09-05
+## Current priority — whole-app clarity polish, 2026-09-06
+
+- [x] Inspect all 15 existing main navigation sections with fictional Northstar data and research official Vanta/Drata workflows. Findings and source links extend the existing `docs/design-review/2026-07-06-full-app-design-and-feature-draft.md`; no competing plan created.
+- [ ] Implement precise dashboard/report metrics, clear assessment/control/risk guidance, readable Evidence and truthful empty states. Preserve application workflows and historical data.
+- [ ] Run focused regressions, build, desktop/mobile section sweep and connected journey/Member checks; show actual app and record exact tested commit.
+
+## Earlier priority — existing workflow usability, 2026-09-05
 
 ### Latest user correction — restore the familiar Evidence experience
 

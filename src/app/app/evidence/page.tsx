@@ -76,7 +76,7 @@ export default async function EvidencePage({
       <EmptyState icon="file" title={isMember ? "No evidence recorded yet" : "Add your first evidence"} body={isMember ? "Evidence added by workspace operators will appear here. You can read the metadata and download available files." : "Attach immutable proof — files, links, or notes — to any control, risk, or task. Freshness is tracked automatically, and a replacement task is raised when something goes stale."} primary={isMember ? undefined : { href: "/app/evidence/new", label: "Add your first evidence" }} />
     ) : (<>
     <div className="stats-grid" aria-label="Evidence freshness">
-      <Stat label="CURRENT" value={evidence.current} detail="Ready for review" tone="green" />
+      <Stat label="CURRENT" value={evidence.current} detail="Within its validity period" tone="green" />
       <Stat label="EXPIRING" value={evidence.expiring} detail="Review before expiry" tone="amber" />
       <Stat label="EXPIRED" value={evidence.expired} detail="Needs fresh evidence" tone="red" />
     </div>
@@ -97,9 +97,10 @@ export default async function EvidencePage({
         <div style={{ display: "flex", minWidth: 0, maxWidth: "100%", flexWrap: "wrap", alignItems: "center", gap: "12px" }}>{item.source_id && (() => { const src = one(item.evidence_sources); const provider = src?.provider ? PROVIDER_LABELS[src.provider] ?? src.provider : null; return <Pill tone="neutral">{provider ? `Auto · ${provider}` : "Auto"}</Pill>; })()}<Pill tone={TONE[item.status]}>{item.status}</Pill>
           {item.kind === "link" && item.url && <a style={{ color: "var(--blue)", fontWeight: 700, fontSize: "12px" }} href={item.url} rel="noreferrer" target="_blank">Open link</a>}
           {item.kind === "file" && <form action={downloadEvidenceAction}><input type="hidden" name="id" value={item.id} /><button className="button secondary" style={{ minHeight: "32px", padding: "6px 12px" }}>Download</button></form>}
-          {!isMember && (item.status === "current" || item.status === "expiring" || item.status === "expired") && <><Link style={{ color: "var(--blue)", fontWeight: 700, fontSize: "12px" }} href={`/app/evidence/new?replaces=${item.id}`}>Supersede</Link><form action={withdrawEvidenceAction}><input type="hidden" name="id" value={item.id} /><button className="button secondary" style={{ minHeight: "32px", padding: "6px 12px", color: "var(--red)" }}>Withdraw</button></form></>}
+          {!isMember && (item.status === "current" || item.status === "expiring" || item.status === "expired") && <details className="evidence-actions"><summary>Manage record</summary><div className="evidence-record-actions"><Link style={{ color: "var(--blue)", fontWeight: 700, fontSize: "12px" }} href={`/app/evidence/new?replaces=${item.id}`}>Supersede</Link><form action={withdrawEvidenceAction}><input type="hidden" name="id" value={item.id} /><button className="button secondary" style={{ minHeight: "32px", padding: "6px 12px", color: "var(--red)" }}>Withdraw</button></form></div><p>Replace this record with a new version, or withdraw it from active use. Its history is retained.</p></details>}
         </div>
       </div>
+      {item.description && item.description.length > 180 && <p className="evidence-preview">{item.description.slice(0, 180).trimEnd()}…</p>}
       {item.description && <details className="evidence-disclosure" open={requestedEvidence === item.id}><summary>Evidence details</summary><p style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{item.description}</p></details>}
       {(relatedLinks.length > 0 || (controlLinks.length > 0 && controlLinks.length <= 3)) && <div className="evidence-linked-records">
         {controlLinks.length <= 3 && controlLinks.map((link) => renderLink(link))}

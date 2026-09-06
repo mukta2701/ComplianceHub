@@ -46,7 +46,8 @@ export default async function KpisPage() {
     readingsByKpi.set(m.kpi_id, list);
   }
   return <>
-    <PageIntro eyebrow="MANAGEMENT REVIEW" title="Performance measures" body="The KPIs your management review discusses — indicator, measurement type, target, the trend of recorded readings, and the next steps that become tasks." />
+    <PageIntro eyebrow="MANAGEMENT REVIEW" title="Performance measures" body="Track a measurable outcome, compare readings with a target, and assign follow-up work. Trends appear after at least two recorded readings." />
+    {rows.length === 0 && <Card style={{ padding: "22px", marginBottom: "16px" }}><h2>No performance measures yet</h2><p>Start with a measure such as the percentage of access reviews completed on time. Define its target and record dated readings to show progress.</p><p>{isMember ? "A workspace operator can add a measure." : "Use the form below to add the first measure. Choosing Automatic labels the source; it does not connect a data feed."}</p></Card>}
     {rows.length > 0 && (
     <Card style={{ padding: 0, marginBottom: "16px" }}><div className="data-table-wrap" role="region" aria-label="KPI register" tabIndex={0}><table>
       <thead><tr><th>Function</th><th>Indicator</th><th>Type</th><th>Target</th><th>Reviewed</th><th>Trend</th><th>Next steps</th></tr></thead>

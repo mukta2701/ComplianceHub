@@ -140,3 +140,45 @@ test.describe("showcase Member permissions", () => {
     await checkPage(page, "Member report", []);
   });
 });
+
+test("all showcase sections load with honest status and readable layouts", async ({ page }) => {
+  test.setTimeout(120_000);
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  const sections = [
+    ["/app", "Readiness dashboard"],
+    ["/app/assessment", "Readiness assessments"],
+    ["/app/risks", "Risk register"],
+    ["/app/soa", "Statement of Applicability"],
+    ["/app/evidence", "Evidence vault"],
+    ["/app/tasks", "Tasks"],
+    ["/app/monitoring", "Continuous monitoring"],
+    ["/app/automation", "Review the work your systems prepared"],
+    ["/app/policies", "Policy library"],
+    ["/app/audits", "Internal audits"],
+    ["/app/kpis", "Performance measures"],
+    ["/app/reports/readiness", "Leadership readiness report"],
+    ["/app/trust", "Public Trust Center"],
+    ["/app/settings", "Organisation settings"],
+    ["/app/notifications", "Notifications"],
+  ];
+  for (const [path, heading] of sections) {
+    await page.goto(path);
+    await expect(page.getByRole("main").getByRole("heading", { name: heading, exact: true }).first()).toBeVisible();
+    await checkPage(page, path, errors);
+  }
+  await expect(page.getByText(/an empty inbox does not mean all checks have passed/)).toBeVisible();
+  await page.goto("/app/reports/readiness");
+  await expect(page.getByText("MATURITY", { exact: true })).toBeVisible();
+  await expect(page.getByText("READY", { exact: true })).toHaveCount(0);
+  await page.goto("/app/evidence");
+  const sample = page.locator(`#evidence-${manifest.ids.evidence}`);
+  await expect(sample.locator(".evidence-preview")).toBeVisible();
+  await expect(sample.getByRole("button", { name: "Withdraw", exact: true })).not.toBeVisible();
+  await sample.getByText("Manage record", { exact: true }).click();
+  await expect(sample.getByRole("button", { name: "Withdraw", exact: true })).toBeVisible();
+  await expect(sample.getByRole("link", { name: "Supersede", exact: true })).toHaveAttribute("href", `/app/evidence/new?replaces=${manifest.ids.evidence}`);
+  // Inspect maintenance affordances without altering the saved fictional records.
+  await page.reload();
+  await expect(sample.getByRole("button", { name: "Withdraw", exact: true })).not.toBeVisible();
+});

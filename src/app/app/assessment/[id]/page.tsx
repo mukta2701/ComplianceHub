@@ -25,7 +25,7 @@ export default async function AssessmentPage({ params }: { params: Promise<{ id:
     .map((question) => ({ ...question, categoryCode: category.code, categoryTitle: category.title, categoryPosition: category.position })));
   if (questions.length !== questionResult.data.length) throw new Error("Assessment question is missing its catalogue category");
   return <>
-    <PageIntro eyebrow="ASSESSMENT" title={session.title} body={session.state === "completed" ? "This assessment is complete. Its recorded answers and evidence notes are read-only." : membership.role === "member" ? "Read the recorded answers and evidence notes. A workspace operator can update this assessment." : "Answers save automatically. A conflict is shown rather than overwriting newer work."} />
+    <PageIntro eyebrow="ASSESSMENT" title={session.title} body={session.state === "completed" ? "This assessment is complete. Review its answers and evidence notes as the recorded baseline." : membership.role === "member" ? "You can review the recorded answers and evidence notes. Ask a workspace operator to make changes." : "Answer each question based on current practice. Your answers and evidence notes save automatically as you go."} />
     <AssessmentResponseList aiEnabled={!aiSettingsResult.error && aiSettingsResult.data?.enabled === true} readOnly={session.state === "completed" || membership.role === "member"} sessionId={id} questions={questions} initialRevision={session.revision} responses={responseResult.data} />
   </>;
 }

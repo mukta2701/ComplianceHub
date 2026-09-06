@@ -5,7 +5,8 @@ import { RiskStatusSelect } from "./risk-status-select";
 import { calculateRiskScore, riskBand, exceedsAppetite, RISK_BAND_LABEL, DEFAULT_RISK_MATRIX_CONFIG, type RiskMatrixConfig } from "@/features/risks/domain/risks";
 import { updateRiskMatrixConfigAction } from "./config-actions";
 import { summariseEvidenceFreshness, type EvidenceStatus } from "@/features/evidence/domain/evidence";
-import { Card, EmptyState, PageIntro, Pill } from "@/components/ui";
+import { Card, EmptyState, ModuleExplainer, PageIntro, Pill } from "@/components/ui";
+import { getModuleGuidance } from "@/features/education/domain/guidance";
 import { Icon } from "@/components/icons";
 import { SubTabs } from "@/components/sub-tabs";
 import { one } from "@/lib/supabase/one";
@@ -44,20 +45,21 @@ export default async function RisksPage() {
     return { key: `${gap.session_id}-${gap.question_id}`, questionId: gap.question_id, sessionId: gap.session_id, label: [question?.code, question?.prompt].filter(Boolean).join(": ") };
   });
   return <>
-    <PageIntro eyebrow="RISK" title="Risk register" body="Track inherent and residual exposure on a documented 5×5 matrix." action={<span style={{ display: "flex", gap: "8px" }}>
+    <PageIntro eyebrow="RISK" title="Risk register" body="Record what could harm the organisation, decide how to treat it, and review the remaining exposure over time." action={<span style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
       <a className="button secondary" href="/api/app/risks/export?format=xlsx">Export XLSX</a>
       <a className="button secondary" href="/api/app/risks/export?format=csv">CSV</a>
       {canManage && <Link className="button secondary" href="/app/risks/import">Import</Link>}
       {canManage && <Link className="button primary" href="/app/risks/new"><Icon name="plus" />Add risk</Link>}
     </span>} />
     <SubTabs tabs={[{ href: "/app/risks", label: "Risks" }, { href: "/app/assets", label: "Assets" }]} />
-    {Boolean(gapSuggestions.length) && <Card style={{ padding: "20px", marginBottom: "16px", borderColor: "#efe1aa", background: "#fffbef" }}><h2 style={{ fontSize: "15px", margin: "0 0 4px" }}>Assessment gap suggestions</h2><p style={{ fontSize: "12px", color: "#596273", margin: 0 }}>{canManage ? "Nothing is created until you accept it." : "Workspace owners and admins can accept these gaps as risks or tasks."}</p>{gapSuggestions.map((gap) => <div key={gap.key} style={{ display: "flex", justifyContent: "space-between", gap: "16px", marginTop: "12px" }}><span style={{ fontSize: "13px" }}>{gap.label}</span><span style={{ display: "flex", flexShrink: 0, gap: "16px" }}>{canManage && <form action={acceptRiskSuggestionAction}><input type="hidden" name="questionId" value={gap.questionId} /><input type="hidden" name="sessionId" value={gap.sessionId} /><button style={{ color: "var(--blue)", fontWeight: 700, border: 0, background: "none" }}>Accept as risk</button></form>}{canManage && <Link style={{ color: "var(--blue)", fontWeight: 700 }} href={`/app/tasks/from-gap?questionId=${gap.questionId}`}>Accept as task</Link>}</span></div>)}</Card>}
+    <details className="section-guide"><summary>How to review risks</summary><ModuleExplainer guidance={getModuleGuidance("risks")} /></details>
+    {Boolean(gapSuggestions.length) && <Card style={{ padding: "20px", marginBottom: "16px", borderColor: "#efe1aa", background: "#fffbef" }}><h2 style={{ fontSize: "15px", margin: "0 0 4px" }}>Follow up assessment gaps</h2><p style={{ fontSize: "12px", color: "#596273", margin: 0 }}>{canManage ? "These “No” or “Partially” answers identify gaps to review. Accept one as a risk or create a task; nothing is added until you choose." : "A workspace operator can turn these assessment gaps into risks or tasks."}</p>{gapSuggestions.map((gap) => <div key={gap.key} style={{ display: "flex", justifyContent: "space-between", gap: "16px", marginTop: "12px" }}><span style={{ fontSize: "13px" }}>{gap.label}</span><span style={{ display: "flex", flexShrink: 0, gap: "16px" }}>{canManage && <form action={acceptRiskSuggestionAction}><input type="hidden" name="questionId" value={gap.questionId} /><input type="hidden" name="sessionId" value={gap.sessionId} /><button style={{ color: "var(--blue)", fontWeight: 700, border: 0, background: "none" }}>Accept as risk</button></form>}{canManage && <Link style={{ color: "var(--blue)", fontWeight: 700 }} href={`/app/tasks/from-gap?questionId=${gap.questionId}`}>Create task</Link>}</span></div>)}</Card>}
     {!data?.length ? (
       <EmptyState icon="alert" title={canManage ? "Start your risk register" : "No risks recorded yet"} body={canManage ? "Record the threats to your information — each scored for inherent and residual likelihood and impact on a documented 5×5 matrix. Add your first risk, or import a register you already keep in a spreadsheet." : "Risks recorded by a workspace owner or admin will appear here with their exposure and treatment status."} primary={canManage ? { href: "/app/risks/new", label: "Add your first risk" } : undefined} secondary={canManage ? { href: "/app/risks/import", label: "Import from spreadsheet" } : undefined} />
     ) : (<>
     <Card style={{ padding: "18px", marginBottom: "16px" }}>
-      <h2 style={{ fontSize: "15px", margin: "0 0 4px" }}>Risk posture</h2>
-      <p style={{ fontSize: "12px", color: "#596273", margin: "0 0 14px" }}>Residual exposure across the 5×5 matrix — {riskTotal} open risk{riskTotal === 1 ? "" : "s"} by likelihood × impact.</p>
+      <h2 style={{ fontSize: "15px", margin: "0 0 4px" }}>Open risk posture</h2>
+      <p style={{ fontSize: "12px", color: "#596273", margin: "0 0 14px" }}>Remaining exposure for {riskTotal} open risk{riskTotal === 1 ? "" : "s"}, scored by likelihood × impact on the 5×5 matrix.</p>
       <div className="heatmap" style={{ maxWidth: "380px" }}>
         <div className="heat-axis heat-axis-y">Likelihood →</div>
         {[5, 4, 3, 2, 1].map((l) => [1, 2, 3, 4, 5].map((i) => { const c = grid[l][i]; return <span key={`${l}-${i}`} className={`heat-cell${c ? "" : " empty"}`} style={{ background: BAND_COLOR[riskBand(l * i, config)] }} title={`Likelihood ${l} × Impact ${i}${c ? ` — ${c} risk${c > 1 ? "s" : ""}` : ""}`}>{c || ""}</span>; }))}
@@ -71,14 +73,14 @@ export default async function RisksPage() {
       </div>
     </Card>
     <Card style={{ padding: "18px", marginBottom: "16px" }}>
-      <h2 style={{ fontSize: "15px", margin: "0 0 4px" }}>RAG band thresholds</h2>
-      <p style={{ fontSize: "12px", color: "#596273", margin: "0 0 12px" }}>Set the top of each band on the 1–25 scale. Scores above your appetite are flagged Critical.</p>
+      <h2 style={{ fontSize: "15px", margin: "0 0 4px" }}>Risk bands and appetite</h2>
+      <p style={{ fontSize: "12px", color: "#596273", margin: "0 0 12px" }}>Set the highest score for each band on the 1–25 scale. Scores above your risk appetite are highlighted for attention.</p>
       {hasCapability(membership.role, "manage_risk_matrix") ? <form action={updateRiskMatrixConfigAction} className="rag-editor" style={{ display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "end" }}>
-        <label style={{ fontSize: "12px", fontWeight: 700 }}>Low ≤<input name="lowMax" type="number" min={1} max={23} defaultValue={config.lowMax} /></label>
-        <label style={{ fontSize: "12px", fontWeight: 700 }}>Medium ≤<input name="moderateMax" type="number" min={2} max={24} defaultValue={config.moderateMax} /></label>
-        <label style={{ fontSize: "12px", fontWeight: 700 }}>High ≤<input name="highMax" type="number" min={3} max={24} defaultValue={config.highMax} /></label>
-        <label style={{ fontSize: "12px", fontWeight: 700 }}>Appetite<input name="appetite" type="number" min={1} max={25} defaultValue={config.appetite ?? ""} /></label>
-        <button className="button secondary">Save thresholds</button>
+        <label style={{ fontSize: "12px", fontWeight: 700 }}>Low up to<input name="lowMax" type="number" min={1} max={23} defaultValue={config.lowMax} /></label>
+        <label style={{ fontSize: "12px", fontWeight: 700 }}>Medium up to<input name="moderateMax" type="number" min={2} max={24} defaultValue={config.moderateMax} /></label>
+        <label style={{ fontSize: "12px", fontWeight: 700 }}>High up to<input name="highMax" type="number" min={3} max={24} defaultValue={config.highMax} /></label>
+        <label style={{ fontSize: "12px", fontWeight: 700 }}>Appetite above<input name="appetite" type="number" min={1} max={25} defaultValue={config.appetite ?? ""} /></label>
+        <button className="button secondary">Save risk bands</button>
       </form> : <p style={{ fontSize: "12px", color: "#596273", margin: 0 }}>Only workspace operators can change these thresholds.</p>}
     </Card>
     <Card><div className="data-table-wrap" role="region" aria-label="Risk register table" tabIndex={0}><table><thead><tr><th>Ref</th><th>Risk</th><th>Inherent</th><th>Residual</th><th>Status</th><th>Review</th><th></th></tr></thead><tbody>

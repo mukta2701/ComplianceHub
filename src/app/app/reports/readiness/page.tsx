@@ -16,9 +16,9 @@ function formatPublishedAt(value: string) {
 function ReportMetrics({ report }: { report: ReadinessReport }) {
   return <>
     <div className="stats-grid" style={{ alignItems: "center" }}>
-      <Card style={{ display: "grid", placeItems: "center", padding: "20px" }} aria-label={`Statement of Applicability readiness ${report.soaPercent}%`}><Ring value={report.soaPercent} /></Card>
+      <Card style={{ display: "grid", placeItems: "center", padding: "20px" }} aria-label={`Statement of Applicability readiness ${report.soaPercent}%`}><Ring value={report.soaPercent} label="MATURITY" /><p className="metric-explanation">Weighted control maturity from recorded SoA decisions. Evidence quality and audit conclusions are reviewed separately.</p></Card>
       <Stat label="OPEN TASKS" value={report.tasksOpen} detail={`${report.tasksOverdue} overdue`} tone={report.tasksOverdue > 0 ? "red" : "blue"} />
-      <Stat label="EVIDENCE HEALTH" value={report.evidence.total} detail={`${report.evidence.expiring} expiring · ${report.evidence.expired} expired`} tone={report.evidence.expired > 0 ? "red" : "green"} />
+      <Stat label="EVIDENCE RECORDS" value={report.evidence.total} detail={`${report.evidence.expiring} expiring · ${report.evidence.expired} expired`} tone={report.evidence.expired > 0 ? "red" : "green"} />
       <Stat label="OPEN NON-CONFORMITIES" value={report.openNonConformities} detail={`${report.openAudits} open audits`} tone={report.openNonConformities > 0 ? "amber" : "green"} />
     </div>
     <Card style={{ padding: "22px", marginTop: "16px" }}>
@@ -68,9 +68,9 @@ export default async function ReadinessReportPage() {
 
   return <>
     <PageIntro
-      eyebrow="LIVE OPERATOR REPORT"
+      eyebrow="WORKSPACE REPORT"
       title="Leadership readiness report"
-      body={`A live management view for ${organisation.name}. Publish an immutable snapshot when it is ready for members.`}
+      body={`Current recorded progress for ${organisation.name}. Review the open work below, then publish a fixed snapshot for members.`}
       action={<div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
         <form action={publishLeadershipReportAction}><button className="button primary">Publish to members</button></form>
         <a className="button secondary" href="/api/app/reports/readiness/pdf"><Icon name="download" />Download PDF</a>

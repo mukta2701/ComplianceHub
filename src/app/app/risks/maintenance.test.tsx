@@ -119,7 +119,7 @@ describe("maintaining risks", () => {
   it("counts only open exposure in the risk heatmap", async () => {
     state.rows.risks.push({ ...state.rows.risks[0], id: "closed", status: "closed" });
     render(await RisksPage());
-    expect(screen.getByText(/Residual exposure across/)).toHaveTextContent("1 open risk by likelihood");
+    expect(screen.getByText(/Remaining exposure for/)).toHaveTextContent("1 open risk, scored by likelihood");
   });
   it("lets Members read ownership, treatment instructions and evidence references", async () => {
     state.role = "member";

@@ -16,7 +16,7 @@ export default async function NotificationsPage() {
         <span className="notif-icon"><Icon name={KIND_ICON[n.kind] ?? "bell"} /></span>
         <span className="notif-body"><p>{n.message}{!n.read_at && <> <Pill>Unread</Pill></>}</p><small>{new Date(n.created_at).toLocaleString("en-GB")}</small></span>
         {!n.read_at && <form action={markNotificationReadAction}><input type="hidden" name="id" value={n.id} /><button className="button secondary" style={{ minHeight: "32px", padding: "6px 12px" }} aria-label={`Mark notification read: ${n.message}`}>Mark read</button></form>}
-      </li>) : <li className="notif-empty">Nothing needs your attention. Updates will appear here when something changes.</li>}
+      </li>) : <li className="notif-empty">No notifications recorded. Check Tasks and Monitoring for outstanding work; an empty inbox does not mean all checks have passed.</li>}
     </ul></Card>
   </>;
 }

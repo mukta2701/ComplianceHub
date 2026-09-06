@@ -27,7 +27,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
   const all = data ?? [];
   const tasks = all.filter((t) => filter === "all" ? true : filter === "overdue" ? isOverdue({ status: t.status as TaskStatus, dueOn: t.due_on }, today) : t.status === filter);
   return <>
-    <PageIntro eyebrow="REMEDIATION" title="Tasks" body="Owned, dated work generated from gaps, evidence expiry and your compliance calendar." action={<span style={{ display: "flex", gap: "8px" }}>
+    <PageIntro eyebrow="REMEDIATION" title="Tasks" body="See who owns each action and when it is due. Completing a task records the work done; findings still need their own verification." action={<span style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
       <a className="button secondary" href="/api/app/tasks/export?format=xlsx">Export XLSX</a>
       <a className="button secondary" href="/api/app/tasks/export?format=csv">CSV</a>
       {canManage && <Link className="button primary" href="/app/tasks/new"><Icon name="plus" />New task</Link>}

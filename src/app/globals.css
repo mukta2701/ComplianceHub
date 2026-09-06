@@ -572,3 +572,16 @@ a.heat-cell:hover{outline:2px solid var(--ink);outline-offset:-2px}
 .evidence-vault .stat{min-width:0;padding:16px;gap:10px}
 @media(max-width:1050px){.evidence-vault .stat-icon{display:none}}
 @media(max-width:540px){.evidence-vault .page-heading__content{flex-basis:auto}.evidence-vault .stat{padding:12px}.evidence-vault .stat p{display:none}}
+
+/* Evidence prioritises reading; record maintenance stays available on demand. */
+.evidence-preview{font-size:13px;line-height:1.65;color:var(--ch-text);margin:14px 0 2px;overflow-wrap:anywhere}
+.evidence-actions{font-size:12px;max-width:300px}
+.evidence-actions>summary{cursor:pointer;color:var(--blue);padding:8px 0;font-weight:600}
+.evidence-record-actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding-top:8px}
+.evidence-actions>p,.metric-explanation{font-size:12px;line-height:1.6;color:var(--ch-text-muted,#596273)}
+.metric-explanation{text-align:center;margin:8px 0 0;max-width:260px}
+.evidence-actions>summary:focus-visible{outline:2px solid var(--blue);outline-offset:3px}
+
+.section-guide{margin:0 0 18px;border-bottom:1px solid var(--line);padding-bottom:10px}
+.section-guide>summary{font-size:13px;font-weight:600;color:var(--blue);cursor:pointer;padding:8px 0}
+.section-guide>summary:focus-visible{outline:2px solid var(--blue);outline-offset:3px}
