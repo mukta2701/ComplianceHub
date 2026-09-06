@@ -188,3 +188,38 @@ test("all showcase sections load with honest status and readable layouts", async
   await page.reload();
   await expect(sample.getByRole("button", { name: "Withdraw", exact: true })).not.toBeVisible();
 });
+
+test("shows the completed fictional human-review chain without changing records", async ({ page }) => {
+  test.setTimeout(90_000);
+  const ids = manifest.ids;
+  for (const key of ["human_audit", "human_task", "human_finding", "human_checklist", "human_evidence"]) {
+    expect(ids[key], `Complete the guarded --human-review rehearsal: ${key}`).toBeTruthy();
+  }
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto(`/app/tasks/${ids.human_task}`);
+  await expect(page.locator('select[name="status"]')).toHaveValue("done");
+  await expect(page.locator(`a[href="/app/audits/${ids.human_audit}"]`).first()).toBeVisible();
+  await checkPage(page, "completed human-review task", errors);
+  await page.goto(`/app/evidence?evidence=${ids.human_evidence}`);
+  const evidence = page.locator(`#evidence-${ids.human_evidence}`);
+  await expect(evidence).toContainText("FICTIONAL HUMAN REVIEW");
+  await expect(evidence).toContainText("not live provider verification");
+  await expect(evidence).toContainText(ids.human_finding);
+  await checkPage(page, "fresh fictional review evidence", errors);
+  await page.goto(`/app/audits/${ids.human_audit}`);
+  await expect(page.getByLabel("Status of finding: FICTIONAL NS-AUD-002: independent sign-off needs a human review", { exact: true })).toHaveValue("closed");
+  await expect(page.getByLabel("Result for Has the fictional follow-up received a fresh human review?", { exact: true })).toHaveValue("compliant");
+  await expect(page.locator(`a[href*="evidence=${ids.human_evidence}"]`).first()).toBeVisible();
+  await page.reload();
+  await checkPage(page, "human-reviewed audit after refresh", errors);
+  const pack = await page.request.get(`/api/app/audits/${ids.human_audit}/pack?format=csv`);
+  expect(pack.status()).toBe(200);
+  const csv = await pack.text();
+  expect(csv).toContain("FICTIONAL HUMAN REVIEW");
+  expect(csv).toContain(ids.human_task);
+  expect(csv).toContain(ids.human_finding);
+  await page.goto("/app/reports/readiness");
+  await expect(page.getByRole("heading", { name: "Leadership readiness report" })).toBeVisible();
+  await checkPage(page, "current report after human review", errors);
+});

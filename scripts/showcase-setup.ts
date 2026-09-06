@@ -3,6 +3,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { mkdir, open, readFile, writeFile, rename, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { recoverHumanReview, runHumanReview, type HumanReviewJournal } from './showcase-human-review';
 
 export function assertLocalTargets(api: string, site: string) {
   for (const [value, port] of [[api, '54321'], [site, '3100']]) {
@@ -53,7 +54,7 @@ const SPEC = {
   note: 'FICTIONAL SHOWCASE v1: Northstar has documented baseline controls. Independent sign-off of quarterly access reviews remains a tracked improvement (NS-R-001 / NS-RTP-001). This is demonstration data, not audit assurance.',
   due: '2026-12-31', checklist: 'Has the quarterly access review received independent sign-off?',
 };
-type Manifest = { version: string; organisation: string; ownerEmail: string; ids: Record<string, string>; urls: Record<string, string>; counts: Record<string, number>; fingerprints?: Record<string, string>; verifiedAt?: string };
+type Manifest = { version: string; organisation: string; ownerEmail: string; ids: Record<string, string>; urls: Record<string, string>; counts: Record<string, number>; fingerprints?: Record<string, string>; verifiedAt?: string; humanReview?: HumanReviewJournal };
 
 export async function main() {
   const api = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
@@ -63,7 +64,8 @@ export async function main() {
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY, service = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!anon || !service) throw new Error('Run through the local demo launcher; local keys must be explicitly supplied');
   const verifyOnly = process.argv.includes('--verify-only');
-  if (process.argv.slice(2).some((arg) => arg !== '--verify-only')) throw new Error('Only --verify-only is supported');
+  const humanReview = process.argv.includes('--human-review');
+  if (process.argv.slice(2).some((arg) => !['--verify-only', '--human-review'].includes(arg))) throw new Error('Only --verify-only and --human-review are supported');
   const dir = path.resolve('artifacts/showcase-v1'); await mkdir(dir, { recursive: true, mode: 0o700 });
   const release = await acquireLock(dir);
   const { createClient } = await import('@supabase/supabase-js');
@@ -178,6 +180,8 @@ export async function main() {
     async function waitExpected(table: string, filters: Record<string, string>, expected: Record<string, unknown>) {
       await expect.poll(async () => { const current = await rows(table, filters); return current.length === 1 && Object.entries(expected).every(([key, value]) => current[0][key] === value); }, { timeout: 30_000 }).toBe(true);
     }
+    // Recover only a pre-journaled, exact UI delta; the original whole-table drift check still runs below.
+    await recoverHumanReview(manifest, rows, persist);
     for (const [table, count] of Object.entries(manifest.counts)) {
       const current = await rows(table);
       if (current.length !== count) throw new Error(`Showcase count drift: ${table}`);
@@ -312,12 +316,23 @@ export async function main() {
     }
     const snapshot = await ensure('soa_snapshot', 'soa_snapshots', { soa_register_id: soa.id }, {}, async () => { await navigate(page, `/app/soa/${soa.id}`); await submit(`Finalise immutable v${soa.version}`); });
     manifest.urls.soa_pdf = `${site}/api/app/soa/${snapshot.id}/pdf`;
-    await ensure('report_snapshot', 'leadership_report_snapshots', {}, {}, async () => { await navigate(page, '/app/reports/readiness'); await submit('Publish to members'); });
+    await ensure('report_snapshot', 'leadership_report_snapshots', manifest.ids.report_snapshot ? { id: manifest.ids.report_snapshot } : {}, {}, async () => { await navigate(page, '/app/reports/readiness'); await submit('Publish to members'); });
     manifest.ids.control = control.id; manifest.ids.treatment = plan.id;
     for (const [key, route] of Object.entries({ dashboard: '/app', assessment: `/app/assessment/${assessment.id}`, soa: `/app/soa/${soa.id}`, risk: `/app/risks/${risk.id}`, task: `/app/tasks/${task.id}`, evidence: '/app/evidence', policy: `/app/policies/${policy.id}`, audit: `/app/audits/${audit.id}`, kpis: '/app/kpis', report: '/app/reports/readiness' })) manifest.urls[key] = site + route;
     manifest.fingerprints ??= {};
-    for (const table of ['assessment_sessions', 'assessment_responses', 'soa_registers', 'soa_snapshots', 'soa_items', 'risks', 'risk_treatment_plans', 'tasks', 'evidence', 'evidence_links', 'policies', 'audits', 'audit_checklist_items', 'audit_findings', 'kpis', 'kpi_measurements', 'leadership_report_snapshots']) { const current = await rows(table); manifest.counts[table] = current.length; manifest.fingerprints[table] = fingerprintRows(current); }
-    for (const [name, url] of Object.entries({ 'soa.pdf': `/api/app/soa/${snapshot.id}/pdf`, 'readiness-report.pdf': '/api/app/reports/readiness/pdf', 'audit-pack.csv': `/api/app/audits/${audit.id}/pack?format=csv`, 'risks.csv': '/api/app/risks/export?format=csv' })) {
+    for (const table of ['assessment_sessions', 'assessment_responses', 'soa_registers', 'soa_snapshots', 'soa_items', 'risks', 'risk_treatment_plans', 'tasks', 'evidence', 'evidence_links', 'policies', 'audits', 'audit_checklist_items', 'audit_findings', 'kpis', 'kpi_measurements', 'leadership_report_snapshots']) { const current = await rows(table);
+      if (manifest.fingerprints[table] && (manifest.counts[table] !== current.length || manifest.fingerprints[table] !== fingerprintRows(current))) throw new Error(`Showcase changed during verification: ${table}`);
+      manifest.counts[table] = current.length; manifest.fingerprints[table] = fingerprintRows(current); }
+    // Persist the verified baseline before extending it. No existing snapshot is republished.
+    await persist();
+    let humanAuditId: string | undefined;
+    if (humanReview || manifest.humanReview) {
+      const [{ loadReadinessInput }, { buildReadinessReport }, { readinessReportSchema }] = await Promise.all([
+        import('../src/features/reports/application/load-readiness'), import('../src/features/reports/domain/readiness-report'), import('../src/features/reports/application/leadership-snapshots'),
+      ]);
+      humanAuditId = await runHumanReview({ manifest, page, ownerId: user.id, organisationId: org.id, organisationName: SPEC.organisation, controlId: control.id, verifyOnly, rows, persist, submit: submitLocator, loadReport: async () => readinessReportSchema.parse(buildReadinessReport(await loadReadinessInput(db, org.id))) });
+    }
+    for (const [name, url] of Object.entries({ 'soa.pdf': `/api/app/soa/${snapshot.id}/pdf`, ...(!humanAuditId ? { 'readiness-report.pdf': '/api/app/reports/readiness/pdf' } : {}), 'audit-pack.csv': `/api/app/audits/${audit.id}/pack?format=csv`, 'risks.csv': '/api/app/risks/export?format=csv', ...(humanAuditId ? { 'human-review-audit-pack.csv': `/api/app/audits/${humanAuditId}/pack?format=csv`, 'human-review-readiness-report.pdf': '/api/app/reports/readiness/pdf' } : {}) })) {
       const response = await page.request.get(url); if (!response.ok()) throw new Error(`Export failed: ${name}`); const bytes = await response.body(); if (!bytes.length || (name.endsWith('.pdf') && bytes.subarray(0, 4).toString() !== '%PDF')) throw new Error(`Invalid export ${name}`); await writeFile(path.join(dir, name), bytes, { mode: 0o600 });
     }
     manifest.verifiedAt = new Date().toISOString(); await persist(); console.log(`Showcase ${verifyOnly ? 'verified' : 'prepared'}: ${manifestPath}`);
