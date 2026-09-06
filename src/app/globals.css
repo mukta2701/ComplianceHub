@@ -585,3 +585,11 @@ a.heat-cell:hover{outline:2px solid var(--ink);outline-offset:-2px}
 .section-guide{margin:0 0 18px;border-bottom:1px solid var(--line);padding-bottom:10px}
 .section-guide>summary{font-size:13px;font-weight:600;color:var(--blue);cursor:pointer;padding:8px 0}
 .section-guide>summary:focus-visible{outline:2px solid var(--blue);outline-offset:3px}
+
+/* Keep the dashboard's first row compact enough to see the supporting metrics. */
+.dash-hero .gauge{display:grid;grid-template-columns:132px minmax(0,1fr);gap:12px;padding:18px;align-items:center}
+.dash-hero .gauge-ring,.dash-hero .gauge-ring svg{width:132px;height:132px}
+.dash-hero .g-pct{font-size:30px}
+.dash-hero .g-stage{font-size:9px;max-width:92px;color:var(--ch-text-muted,#596273)}
+.dash-hero .g-cap{text-align:left;max-width:none;margin:0;font-size:12px;line-height:1.6}
+.dash-hero .gauge>details{grid-column:1/-1}
