@@ -1,0 +1,41 @@
+# ComplianceHub: ongoing operating lifecycle assessment
+
+Assessed 9 September 2026 from starting commit `4b413a0`, the existing fictional local showcase and the isolated team preview. This is a dated assessment; **[release checklist](../../release-checklist.md)** remains the project status source. Current implementation requirements are in the [programme specification](../../superpowers/specs/2026-09-09-operating-lifecycle-quality.md).
+
+## Product direction and what exists
+
+ComplianceHub coordinates a growing company's security and compliance work. Its useful unit is a connected obligation: why it matters, who owns it, the work and supporting records, the authorised review, and the next review date. Onboarding and saved baselines begin and periodically summarise that lifecycle. Mukta and Charlie illustrate coordinator and leadership responsibilities; they do not bound the product or define permissions.
+
+The current modular monolith already connects scope, catalogue-versioned assessments, control decisions and immutable SoA versions; risk treatment and accountable tasks; evidence links and dated freshness; policy versions and employee acceptance; assets and risks; audits, findings and corrective tasks; recurring work; and leadership snapshots. Owner/Admin/Member permissions differ from responsibilities. Assigned Members contribute notes; operators manage the programme and independently review contributions; Members read published/saved summaries and accept approved policies. An employee's job title does not grant review authority.
+
+Task completion, human review, evidence freshness, provider verification and audit finding closure are separate existing concepts and must stay separate. The saved baseline currently covers scope, a selected assessment, tasks/contributions, evidence metadata and risks. It is not a complete archived capture of assets, policies, employee acceptance, audits or provider checks. The leadership readiness snapshot is a different publication; saving a baseline is not leadership approval.
+
+## Material findings and priorities
+
+| Priority / affected user | Exact scenario and observed behaviour | Expected outcome / consequence | Evidence and selected response |
+|---|---|---|---|
+| P1 Coordinator | Edit title of a policy assigned to Alex. The title saves and owner becomes null. | Unchanged ownership must survive ordinary editing; silent loss breaks accountability. | Reproduced with actual policy form in isolated preview and authenticated before/after reads. Policy action regression also red. Ticket01 fixes omitted owner handling and visible owner selector. |
+| P1 Coordinator / recurring owner | Complete monthly task, reopen for correction, complete again. Two future tasks appear. | One successor for one occurrence; duplicate work/reminders distort the programme. | Real authenticated local RPC/pgTAP reproduction:2 vs expected1. Ticket02 records generation atomically and protects it from ordinary edits. Legacy unknown lineage must not be invented. |
+| P1 Policy owner | Finish first policy review; a later scheduled date arrives. Lifetime unique key rejects the next task. | One task for each later cycle, no duplicate for a retry. Otherwise ongoing annual work disappears. | Real local database constraint reproduction plus sweep tests. Ticket02 separates scheduled-cycle identity from editable deadline, retaining history. |
+| P1 Operator / leadership | Generic collector receives a later date and changed count for the same resource. Old observation is retained and newer facts are lost; failure can leave connection healthy. | Preserve known source/date and report failures truthfully; successful attempt must not imply new trustworthy evidence. | Real collector/provider/persistence logic with fictional external/database boundaries: four failing assertions. Separate observation-model decision pending. Official GitHub pipeline is distinct and is not implicated by this evidence. |
+| P2 Employee / coordinator | Open draft policy. It offers “I accept this policy” although acceptance RPC only accepts approved policies. | Clear unavailable-state explanation; no impossible action. | Actual draft screenshot plus page regression. Ticket01 keeps historical acceptance and approval distinct. |
+| P2 Risk reviewer | Follow existing asset→risk link. Risk page does not show the affected asset or a way back to it. | Inspect context already recorded without hunting through the inventory. | Source and red page test; browser journey verifies reverse navigation in ticket03. New read uses existing tenant-scoped relationship; no permission expansion. |
+| P2 Control reviewer | Empty SoA page says assessment answers decide applicability; draft generation actually seeds controls for human decisions. | Explain the human decision required rather than imply automated applicability. | Source trace and rendered page regression. Ticket03 corrects guidance without changing control semantics. |
+| P3 Coordinator exporting assets | Export includes free-text owner/location but omits accountable in-app owner and risk links. | Explain extract limits; full import/export roundtrip is not established. | Source-confirmed export limitation. Additional export columns/import mapping deferred rather than silently broadening this batch. |
+
+## Architecture and quality direction
+
+Keep the existing Next.js/Supabase stack. Put transactional task identity, permission checks and immutable history in the existing database commands; keep form parsing, presentation and domain calculations in their current modules. The demonstrated problems do not justify a framework rewrite or broad service extraction. Matt Pocock's codebase-design vocabulary guides testing at useful existing interfaces. A separate architecture-refactoring exercise would duplicate work without evidence of benefit here.
+
+Build on the current restrained blue/neutral visual system: consistent headings, source context beside decisions, obvious owner fields, wrapping links, clear empty/error states, visible keyboard focus and mobile layouts. Do not turn a missing source into a zero or a failed query into “none”. Existing SoA token/focus test failure was caused by scanning unrelated later CSS sections; its scoped rules already comply, so the test boundary is corrected rather than altering unrelated colours.
+
+## Programme and acceptance boundaries
+
+1. [Policy accountability](issues/01-policy-accountability.md): complete edit→persist→reload→publish→employee acceptance.
+2. [Repeat review cycles](issues/02-repeat-review-cycles.md): next cycle creation and correction/retry safety with real database constraints.
+3. [Connected review context](issues/03-connected-review-polish.md): existing asset/risk navigation, truthful control guidance and scoped visual checks.
+4. [Integrated acceptance](issues/04-integration-acceptance.md): independent standards/spec reviews, affected/full checks and actual desktop/mobile demonstration, then commit/push and updated preview.
+
+These increments have independent implementation work; integration depends on all three. The collector requires an explicit choice about dated observation records versus one resource record, prepared as a concrete recommendation. No historical source rows will be overwritten to simulate fresh evidence.
+
+Read-only source inspection covers the wider modules; it is not fresh end-to-end acceptance of every one. Existing fictional showcase evidence remains historical. The updated journeys will have fresh local proof. Live GitHub fix/recheck, hosted Azure acceptance, measured time savings and intended-user acceptance remain separate dependencies owned by the company/access owner and intended reviewers. Existing Azure access failure is unresolved; this programme does not deploy there or contact other people.

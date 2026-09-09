@@ -196,3 +196,7 @@ certification, readiness, security, or overall-compliance claims.
 - Complete the hosted Supabase migration and Azure secret/registration checkpoints.
 - Run the approved Adtecher one-repository shadow pilot and commit a redacted comparison proof.
 - Add the separately planned Owner-facing mapping approval and official-result UI after the shadow proof passes.
+
+## Ongoing lifecycle quality programme — 9 September 2026
+
+The [evidence-backed assessment and linked tickets](plans/operating-lifecycle-quality/assessment.md) cover policy accountability, repeat review cycles and connected review clarity across the broader company programme. The release checklist remains the sole overall status source. Collector observation semantics and export expansion are separately identified decisions/follow-ups.
