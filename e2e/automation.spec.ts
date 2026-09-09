@@ -76,7 +76,7 @@ test("a workspace turns selected systems into reviewable automation evidence", a
   // The server action response can arrive before the redirect finishes. Wait
   // for the authenticated dashboard before requesting the setup page, or a
   // fast suite run can race the membership cookie/schema write.
-  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Programme overview" })).toBeVisible();
   await page.goto("/app/setup");
   await expect(page.getByRole("heading", { name: "Connect the systems that already know your work" })).toBeVisible();
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);

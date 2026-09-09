@@ -122,7 +122,7 @@ async function createOwnerWorkspace(page: Page, testInfo: TestInfo) {
     page.getByRole("button", { name: "Create workspace" }).click(),
   ]);
   expect(workspaceResponse.status()).toBeLessThan(400);
-  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Programme overview" })).toBeVisible();
 
   const { data: organisation, error } = await serviceClient()
     .from("organisations")

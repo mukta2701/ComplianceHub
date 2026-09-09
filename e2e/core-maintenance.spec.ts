@@ -46,7 +46,7 @@ async function workspace(page: Page, info: TestInfo) {
   const responsePromise = page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname === "/app");
   const [response] = await Promise.all([responsePromise, page.getByRole("button", { name: "Create workspace" }).click()]);
   expect(response.status()).toBeLessThan(400);
-  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Programme overview" })).toBeVisible();
   const db = createClient(env("NEXT_PUBLIC_SUPABASE_URL"), env("NEXT_PUBLIC_SUPABASE_ANON_KEY"), { auth: { persistSession: false } });
   const signIn = await db.auth.signInWithPassword({ email, password: pass });
   expect(signIn.error).toBeNull();

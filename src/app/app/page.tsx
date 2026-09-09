@@ -1,4 +1,6 @@
 import Link from "next/link";
+import type { CSSProperties } from "react";
+import styles from "./overview.module.css";
 import { requireAppContext } from "@/lib/app-context";
 import { summariseSoaReadiness } from "@/features/soa/domain/readiness";
 import type { SoaStatus } from "@/features/soa/domain/soa";
@@ -32,14 +34,14 @@ const SOURCE_LABEL: Record<string, string> = {
 
 // Control maturity buckets for the implementation bar. "pending" (undecided) and
 // "absent" (decided, not implemented) both mean 0% implemented, so they fold into
-// one "Not started" segment; the five blue steps are a validated ordinal ramp.
+// one "Not started" segment; the coloured steps follow the recorded maturity levels.
 const MATURITY: ReadonlyArray<{ key: string; label: string; color: string; statuses: SoaStatus[] }> = [
-  { key: "not_started", label: "Not started", color: "var(--ch-s1)", statuses: ["pending", "absent"] },
-  { key: "in_progress", label: "In progress", color: "var(--ch-s2)", statuses: ["in_progress"] },
-  { key: "established", label: "Established", color: "var(--ch-s3)", statuses: ["established"] },
-  { key: "operational", label: "Operational", color: "var(--ch-s4)", statuses: ["operational"] },
-  { key: "advanced", label: "Advanced", color: "var(--ch-s5)", statuses: ["advanced"] },
-  { key: "not_applicable", label: "Not applicable", color: "var(--ch-sNA)", statuses: ["not_applicable"] },
+  { key: "not_started", label: "Not started", color: "#b9c5d6", statuses: ["pending", "absent"] },
+  { key: "in_progress", label: "In progress", color: "#9fbef5", statuses: ["in_progress"] },
+  { key: "established", label: "Established", color: "#718ce2", statuses: ["established"] },
+  { key: "operational", label: "Operational", color: "#35a69f", statuses: ["operational"] },
+  { key: "advanced", label: "Advanced", color: "#147f79", statuses: ["advanced"] },
+  { key: "not_applicable", label: "Not applicable", color: "#e0e5ee", statuses: ["not_applicable"] },
 ];
 
 const BAND_COLOR: Record<RiskBand, string> = {
@@ -52,9 +54,10 @@ const BAND_COLOR: Record<RiskBand, string> = {
 // The priority reason drives the queue's colour cue — never colour alone (each
 // row also carries the reason as text, per the accessibility gate).
 function toneForAction(action: PrioritisedAction): StatusTone {
+  if (action.kind === "soa_decision") return "attention";
   if (action.severity === "blocker" || action.priorityReason === "Overdue") return "risk";
   if (action.priorityReason === "Due today") return "attention";
-  if (action.kind === "soa_decision" || action.kind === "evidence_review") return "attention";
+  if (action.kind === "evidence_review") return "attention";
   return "neutral";
 }
 
@@ -107,6 +110,10 @@ export default async function AppHome() {
     soaRegisters,
     members,
     invites,
+    openRiskCount,
+    overdueTaskCount,
+    reviewPolicyCount,
+    expiringEvidenceCount,
   ] = await Promise.all([
     register
       ? supabase.from("soa_items").select("id,control_code,control_title").eq("organisation_id", organisation.id).eq("soa_register_id", register.id).eq("status", "pending").order("position").limit(25).then(requireDashboardData)
@@ -132,6 +139,10 @@ export default async function AppHome() {
     supabase.from("soa_registers").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).then(requireDashboardCount),
     supabase.from("memberships").select("user_id", { count: "exact", head: true }).eq("organisation_id", organisation.id).then(requireDashboardCount),
     supabase.from("invitations").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).then(requireDashboardCount),
+    supabase.from("risks").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).neq("status", "closed").then(requireDashboardCount),
+    supabase.from("tasks").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).in("status", ["open", "in_progress"]).lt("due_on", today).then(requireDashboardCount),
+    supabase.from("policies").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).eq("status", "in_review").then(requireDashboardCount),
+    supabase.from("evidence").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).eq("status", "expiring").then(requireDashboardCount),
   ]);
 
   const actionInputs: DashboardActionInput[] = [
@@ -228,63 +239,69 @@ export default async function AppHome() {
     hasTeam: (members ?? 0) > 1 || (invites ?? 0) > 0,
   });
 
-  const primaryHref = topAction?.destination ?? "/app/assessment";
-  const primaryLabel = topAction ? "Start next action" : (assessments ?? 0) > 0 ? "Continue assessment" : "Start assessment";
 
-  const gaugeR = 80;
-  const gaugeC = 2 * Math.PI * gaugeR;
+  const unscoredRisks = (risksForHeat ?? []).length - riskTotal;
+  const upcomingTasks = (dueTasks ?? []).filter((task) => task.due_on && task.due_on >= today).slice(0, 4);
 
-  return <>
+  const attention = [
+    { label: "Open risks", value: openRiskCount, detail: "All risks not closed", href: "/app/risks", icon: "alert", tone: "risk" },
+    { label: "Overdue tasks", value: overdueTaskCount, detail: "Open work past its due date", href: "/app/tasks?filter=overdue", icon: "clipboard", tone: "attention" },
+    { label: "Policies in review", value: reviewPolicyCount, detail: "Policies awaiting a decision", href: "/app/policies", icon: "users", tone: "review" },
+    { label: "Evidence expiring", value: expiringEvidenceCount, detail: "Records marked expiring", href: "/app/evidence", icon: "file", tone: "info" },
+  ];
+
+  return <div className={styles.overview}>
     <PageIntro
       eyebrow={organisation.name.toUpperCase()}
-      title="Readiness dashboard"
-      body="Prioritise decisions and due work, then track control maturity, evidence freshness and open risks."
-      action={<Link className="button primary" href={primaryHref}>{primaryLabel} <Icon name="arrow" /></Link>}
+      title="Programme overview"
+      body="What needs attention, where your programme stands, and what comes next."
+      action={<><Link className="button secondary" href="/app/baseline">Continue your baseline</Link><Link className="button primary" href="/app/reports/readiness"><Icon name="file" />View report</Link></>}
     />
 
-    <p><Link className="button secondary" href="/app/baseline">Continue your baseline</Link></p>
+    <nav aria-label="Programme attention" className={styles.attention}>
+      {attention.map((item) => <Link key={item.label} href={item.href} className={styles.metric}>
+        <span className={styles.metricIcon} data-tone={item.value === 0 ? "neutral" : item.tone}><Icon name={item.icon} /></span>
+        <span className={styles.metricBody}><span>{item.label}</span><strong>{item.value == null ? "—" : item.value.toLocaleString("en-GB")}</strong><small>{item.value == null ? "Count unavailable" : item.detail}</small></span>
+        <Icon name="arrow" className={styles.metricArrow} />
+      </Link>)}
+    </nav>
 
     {/* Hero: readiness gauge + what to do next. */}
     <div className="dash-hero">
-      <Card className="gauge-card">
-        <div className="card-head"><div><h3>Control maturity score</h3><p>Weighted statuses on your latest SoA</p></div></div>
-        <div className="gauge">
-          <div className="gauge-ring">
-            <svg viewBox="0 0 200 200" aria-hidden="true">
-              <circle className="g-track" cx="100" cy="100" r={gaugeR} />
-              <circle className="g-arc" cx="100" cy="100" r={gaugeR} style={{ strokeDasharray: gaugeC, strokeDashoffset: gaugeC * (1 - readiness / 100) }} />
-            </svg>
-            <div className="gauge-center">
-              <div className="g-pct">{readinessSummary.total > 0 ? <>{readiness}<span>%</span></> : "—"}</div>
-              <div className="g-stage">{readinessSummary.total > 0 ? "Weighted maturity" : "No controls to score"}</div>
-            </div>
-          </div>
-          <p className="g-cap">{readinessSummary.total > 0
+      <Card className={styles.positionCard}>
+        <div className="card-head"><div><h3>Control maturity score</h3><p>Current position · latest Statement of Applicability</p></div><Link href={register ? `/app/soa/${register.id}` : "/app/soa"}>View controls <Icon name="arrow" /></Link></div>
+        <div className={styles.positionSummary}>
+          <div><div className={`g-pct ${styles.score}`}>{readinessSummary.total > 0 ? <>{readiness}<span>%</span></> : "—"}</div><p>{readinessSummary.total > 0 ? "Weighted maturity" : "No controls to score"}</p></div>
+          <p>{readinessSummary.total > 0
             ? `${readinessSummary.total} controls scored · ${totalControls - readinessSummary.total} excluded as not applicable.`
             : totalControls > 0 ? "All controls are marked not applicable, so there is no maturity score." : "Add controls to your SoA to start measuring maturity."} Does not verify evidence or audit readiness.</p>
-          <details className="g-cap"><summary>How this score works</summary><p>Latest SoA statuses, including draft decisions: not started 0%, in progress 40%, established 70%, operational 90%, advanced 100%. Pending decisions count as zero; not applicable controls are excluded. The average is rounded to a whole percent.</p></details>
         </div>
-        <div className="card-foot"><Link href={register ? `/app/soa/${register.id}` : "/app/soa"}>Review source SoA</Link><Link href="/app/reports/readiness">Leadership report <Icon name="arrow" /></Link></div>
+        {totalControls > 0 ? <div className={styles.maturityBars} aria-label="Control maturity distribution">
+          {maturityShown.map((bucket) => <div className={styles.maturityRow} key={bucket.key}>
+            <span>{bucket.label}</span><span className={styles.barTrack} aria-hidden="true"><span style={{ width: `${bucket.count / totalControls * 100}%`, background: bucket.color }} /></span><b>{bucket.count}</b>
+          </div>)}
+        </div> : <div className={styles.noControls}><Icon name="clipboard" /><p>Your control picture starts here</p><small>Generate a Statement of Applicability to see how your controls are maturing.</small><Link href="/app/soa">Set up controls <Icon name="arrow" /></Link></div>}
+        <details className={styles.scoreExplanation}><summary>How this score works</summary><p>Latest SoA statuses, including draft decisions: not started 0%, in progress 40%, established 70%, operational 90%, advanced 100%. Pending decisions count as zero; not applicable controls are excluded. The average is rounded to a whole percent.</p></details>
       </Card>
 
       <Card className="action-queue">
-        <div className="card-head"><div><h3>Do this next</h3><p>Blockers first, then decisions to review, then work that is due.</p></div><Link href="/app/tasks">All tasks</Link></div>
+        <div className="card-head"><div><h3>Needs your attention</h3><p>Highest-priority decisions and due work.</p></div><Link href="/app/tasks">All tasks</Link></div>
         {actions.length > 0
           ? <ol className="action-list">
-              {actions.map((action, index) => <li key={action.id}>
+              {actions.slice(0, 3).map((action, index) => <li key={action.id}>
                 <Link href={action.destination}>
                   <b className="action-rank">{index + 1}</b>
                   <span className="action-body">
                     <strong>{action.label}</strong>
-                    {action.explanation !== action.source && <small>{action.explanation}</small>}
                     <span className="action-meta">
-                      <StatusLabel tone={toneForAction(action)}>{action.priorityReason}</StatusLabel>
+                      <StatusLabel tone={toneForAction(action)}>{action.kind === "soa_decision" ? "Decision needed" : action.priorityReason}</StatusLabel>
                       <span>{action.source}</span>
                       <span>{action.dueContext}</span>
                     </span>
                   </span>
                   <Icon name="arrow" />
                 </Link>
+                {action.explanation !== action.source && <details className={styles.actionReason}><summary>Why this needs attention</summary><p>{action.explanation}</p></details>}
               </li>)}
             </ol>
           : <p className="empty-note">No priority items are shown. Review All tasks for the full work list, including tasks without due dates.</p>}
@@ -292,7 +309,7 @@ export default async function AppHome() {
           {topAction
             ? <Link className="button primary" href={topAction.destination}>Start next action <Icon name="arrow" /></Link>
             : <form action={acceptCalendarSeedAction}><button className="button secondary">Add starter calendar</button></form>}
-          <span className="quick-actions"><Link href="/app/evidence/new">Add evidence</Link><Link href="/app/risks">Review risks</Link></span>
+          <span className="quick-actions"><Link href="/app/evidence/new">Add evidence</Link><Link href="/app/assessment">{(assessments ?? 0) > 0 ? "Continue assessment" : "Start assessment"}</Link></span>
         </div>
       </Card>
     </div>
@@ -300,21 +317,7 @@ export default async function AppHome() {
     {/* Charts: control maturity, evidence freshness, risk posture. */}
     <div className="dash-charts">
       <Card>
-        <div className="card-head"><div><h3>Control implementation</h3><p>{totalControls > 0 ? `${totalControls} controls by maturity on your latest SoA` : "Control maturity on your latest SoA"}</p></div><Link href="/app/soa">Open SoA</Link></div>
-        {totalControls > 0
-          ? <>
-              <div className="segbar" role="img" aria-label="Control maturity distribution">
-                {maturityShown.map((bucket) => <span key={bucket.key} title={`${bucket.label} — ${bucket.count}`} style={{ flexGrow: bucket.count, background: bucket.color }} />)}
-              </div>
-              <div className="seg-legend">
-                {maturityShown.map((bucket) => <div key={bucket.key} className="seg-row"><span className="seg-dot" style={{ background: bucket.color }} />{bucket.label}<b>{bucket.count}</b></div>)}
-              </div>
-            </>
-          : <p className="empty-note">Generate a Statement of Applicability to see how your controls are maturing.</p>}
-      </Card>
-
-      <Card>
-        <div className="card-head"><div><h3>Evidence freshness</h3><p>{evidenceTotal} {evidenceTotal === 1 ? "item" : "items"} in your vault</p></div></div>
+        <div className="card-head"><div><h3>Evidence freshness</h3><p>{evidenceTotal} {evidenceTotal === 1 ? "item" : "items"} in your vault{(liveEvidence ?? 0) > evidenceTotal ? ` · showing ${evidenceTotal} of ${liveEvidence}` : ""}</p></div></div>
         <div className="donut">
           <div className="donut-ring">
             <svg viewBox="0 0 120 120" aria-hidden="true">
@@ -339,33 +342,42 @@ export default async function AppHome() {
             <div className="donut-center"><div className="d-count">{evidenceTotal}</div><div className="d-sub">items</div></div>
           </div>
           <div className="donut-legend">
-            <div className="seg-row"><span className="seg-dot" style={{ background: "var(--green)" }} />Current<b>{evidence.current}</b></div>
+            <div className="seg-row"><span className="seg-dot" style={{ background: "#168b83" }} />Current<b>{evidence.current}</b></div>
             <div className="seg-row"><span className="seg-dot" style={{ background: "var(--amber)" }} />Expiring<b>{evidence.expiring}</b></div>
             <div className="seg-row"><span className="seg-dot" style={{ background: "var(--red)" }} />Expired<b>{evidence.expired}</b></div>
           </div>
         </div>
+        <div className="card-foot"><span>Recorded freshness, not human approval</span><Link href="/app/evidence">Open evidence <Icon name="arrow" /></Link></div>
       </Card>
 
       <Card>
-        <div className="card-head"><div><h3>Risk posture</h3><p>{riskTotal > 0 ? "Residual exposure, likelihood × impact" : "Residual exposure — no open risks yet"}</p></div></div>
+        <div className="card-head"><div><h3>Risk posture</h3><p>{(risksForHeat ?? []).length > 0 ? `${riskTotal} scored risks shown · likelihood × impact` : openRiskCount === 0 ? "Residual exposure — no open risks yet" : "Risk scores unavailable"}</p></div></div>
         <div className="heatmap">
-          <div className="heat-axis heat-axis-y">Likelihood →</div>
+          <div className="heat-axis heat-axis-y">Likelihood 1 → 5</div>
           {[5, 4, 3, 2, 1].map((l) => [1, 2, 3, 4, 5].map((i) => {
             const count = grid[l][i];
-            const style = { background: BAND_COLOR[riskBand(l * i, config)] };
+            const style = { "--cell-color": BAND_COLOR[riskBand(l * i, config)] } as CSSProperties;
             const label = `Likelihood ${l} × Impact ${i}${count ? ` — ${count} risk${count > 1 ? "s" : ""}` : ""}`;
             return count > 0
-              ? <Link key={`${l}-${i}`} className="heat-cell" style={style} href="/app/risks" title={label}>{count}</Link>
-              : <span key={`${l}-${i}`} className="heat-cell empty" style={style} title={label} />;
+              ? <Link key={`${l}-${i}`} className="heat-cell" style={style} href="/app/risks" title={label} aria-label={label}>{count}</Link>
+              : <span key={`${l}-${i}`} className="heat-cell empty" style={style} title={label}>0</span>;
           }))}
-          <div className="heat-axis heat-axis-x">Impact →</div>
+          <div className="heat-axis heat-axis-x">Impact 1 → 5</div>
         </div>
+        {unscoredRisks > 0 && <p className={styles.chartNote}>{unscoredRisks} shown {unscoredRisks === 1 ? "risk has" : "risks have"} no complete score</p>}
+        <p className={styles.chartNote}>Residual scores where recorded; otherwise inherent.{(openRiskCount ?? 0) > (risksForHeat ?? []).length ? ` Showing ${(risksForHeat ?? []).length} of ${openRiskCount} open risks.` : ""}</p>
         <div className="heat-legend">
           <span><i style={{ background: "var(--rag-low)" }} />Low</span>
           <span><i style={{ background: "var(--rag-med)" }} />Medium</span>
           <span><i style={{ background: "var(--rag-high)" }} />High</span>
           <span><i style={{ background: "var(--rag-crit)" }} />Critical</span>
         </div>
+        <div className="card-foot"><Link href="/app/risks">Open risk register <Icon name="arrow" /></Link></div>
+      </Card>
+      <Card className={styles.upcomingCard}>
+        <div className="card-head"><div><h3>Coming up</h3><p>Upcoming work from the next 25 dated open tasks</p></div></div>
+        {upcomingTasks.length > 0 ? <ul className={styles.upcomingList}>{upcomingTasks.map((task) => <li key={task.id}><Link href={`/app/tasks/${task.id}`}><span className={styles.dateTile}><b>{task.due_on!.slice(8, 10)}</b><small>{new Date(`${task.due_on}T12:00:00Z`).toLocaleDateString("en-GB", { month: "short", timeZone: "UTC" })}</small></span><span><strong>{task.title}</strong><small>{SOURCE_LABEL[task.source] ?? "Tasks"}</small><time dateTime={task.due_on!}>{task.due_on}</time></span><Icon name="arrow" /></Link></li>)}</ul> : <p className="empty-note">No upcoming dates in this shortlist. Open all tasks to see the full schedule.</p>}
+        <div className="card-foot"><Link href="/app/tasks">Open all tasks <Icon name="arrow" /></Link></div>
       </Card>
     </div>
 
@@ -384,7 +396,7 @@ export default async function AppHome() {
       </Card>
 
       {!checklist.complete && <Card className="onboarding-card">
-        <div className="card-head"><div><h2>Get certification-ready</h2><p>Steps disappear as you complete them.</p></div><Pill tone={checklist.percent === 100 ? "green" : "blue"}>{checklist.doneCount} of {checklist.total} done</Pill></div>
+        <div className="card-head"><div><h2>Build your programme</h2><p>Steps disappear as you complete them.</p></div><Pill tone={checklist.percent === 100 ? "green" : "blue"}>{checklist.doneCount} of {checklist.total} done</Pill></div>
         <div className="onboarding-progress"><Progress value={checklist.percent} tone="green" /></div>
         <ol className="onboarding-steps">
           {checklist.steps.filter((step) => !step.done).map((step, index) => <li key={step.id}>
@@ -399,5 +411,5 @@ export default async function AppHome() {
         <Link className="button secondary" href="/app/setup">Explore integrations <Icon name="arrow" /></Link>
       </Card>}
     </div>
-  </>;
+  </div>;
 }

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 type QueryResult = {
@@ -22,6 +22,7 @@ class Query implements PromiseLike<QueryResult> {
   select(columns: string) { this.selection = columns; return this; }
   eq() { return this; }
   neq() { return this; }
+  lt() { return this; }
   in() { return this; }
   not() { return this; }
   is(column: string, value: unknown) {
@@ -102,15 +103,18 @@ beforeEach(() => {
       },
       { data: [{ status: "expiring" }, { status: "expiring" }] },
       { data: null, count: 2 },
+      { data: null, count: 2 },
     ],
     policies: [
       { data: [] },
       { data: null, count: 0 },
+      { data: null, count: 0 },
     ],
-    tasks: [{ data: [] }],
+    tasks: [{ data: [] }, { data: null, count: 0 }],
     audit_events: [{ data: [] }],
     risks: [
       { data: [] },
+      { data: null, count: 0 },
       { data: null, count: 0 },
     ],
     risk_matrix_config: [{ data: null }],
@@ -150,6 +154,10 @@ describe("Owner dashboard", () => {
     ["policy count", () => { hoisted.responses.policies[1] = { data: null, count: null, error: { message: "private database error" } }; }],
     ["SoA register count", () => { hoisted.responses.soa_registers[1] = { data: null, count: null, error: { message: "private database error" } }; }],
     ["membership count", () => { hoisted.responses.memberships[0] = { data: null, count: null, error: { message: "private database error" } }; }],
+    ["open risk summary", () => { hoisted.responses.risks[2] = { data: null, count: null, error: { message: "private database error" } }; }],
+    ["overdue task summary", () => { hoisted.responses.tasks[1] = { data: null, count: null, error: { message: "private database error" } }; }],
+    ["policy review summary", () => { hoisted.responses.policies[2] = { data: null, count: null, error: { message: "private database error" } }; }],
+    ["expiring evidence summary", () => { hoisted.responses.evidence[3] = { data: null, count: null, error: { message: "private database error" } }; }],
     ["invitation count", () => { hoisted.responses.invitations[0] = { data: null, count: null, error: { message: "private database error" } }; }],
   ])("fails closed when the %s cannot be loaded", async (_label, failQuery) => {
     failQuery();
@@ -161,6 +169,7 @@ describe("Owner dashboard", () => {
     hoisted.responses.evidence = [
       { data: [], projectMachineProvenance: true },
       { data: [] },
+      { data: null, count: 0 },
       { data: null, count: 0 },
     ];
 
@@ -253,7 +262,7 @@ describe("Dashboard maturity clarity", () => {
   });
 
   it("opens the specific stale evidence and presents task provenance once", async () => {
-    hoisted.responses.tasks = [{ data: [{ id: "task-1", title: "Review access", due_on: "2026-01-01", source: "manual", owner_id: null }] }];
+    hoisted.responses.tasks = [{ data: [{ id: "task-1", title: "Review access", due_on: "2026-01-01", source: "manual", owner_id: null }] }, { data: null, count: 1 }];
     render(await AppHome());
     expect(screen.getByText("Refresh evidence: Manual policy proof").closest("a")).toHaveAttribute("href", "/app/evidence?evidence=manual-evidence");
     expect(screen.getAllByText("Added manually")).toHaveLength(1);
@@ -265,4 +274,36 @@ describe("Dashboard maturity clarity", () => {
     expect(screen.getByText("Export generated")).toBeVisible();
     expect(screen.queryByText("export · export")).not.toBeInTheDocument();
   });
+});
+
+
+describe("Programme overview attention summaries", () => {
+  it("uses workspace counts rather than the truncated chart and action rows", async () => {
+    hoisted.responses.risks[2] = { data: null, count: 612 };
+    hoisted.responses.tasks[1] = { data: null, count: 37 };
+    hoisted.responses.policies[2] = { data: null, count: 29 };
+    hoisted.responses.evidence[3] = { data: null, count: 3012 };
+    render(await AppHome());
+    const summary = screen.getByRole("navigation", { name: "Programme attention" });
+    expect(within(summary).getByRole("link", { name: /Open risks/ })).toHaveTextContent("612");
+    expect(within(summary).getByRole("link", { name: /Overdue tasks/ })).toHaveTextContent("37");
+    expect(within(summary).getByRole("link", { name: /Policies in review/ })).toHaveTextContent("29");
+    expect(within(summary).getByRole("link", { name: /Evidence expiring/ })).toHaveTextContent("3,012");
+    expect(within(summary).getByRole("link", { name: /Overdue tasks/ })).toHaveAttribute("href", "/app/tasks?filter=overdue");
+  });
+});
+
+
+it("keeps missing attention counts visibly unknown", async () => {
+  hoisted.responses.tasks[1] = { data: null, count: null };
+  render(await AppHome());
+  expect(screen.getByRole("link", { name: /Overdue tasks/ })).toHaveTextContent("Count unavailable");
+});
+
+it("labels unscored open risks rather than describing the workspace as risk-free", async () => {
+  hoisted.responses.risks[0] = { data: [{ likelihood: null, impact: null, residual_likelihood: null, residual_impact: null }] };
+  hoisted.responses.risks[2] = { data: null, count: 1 };
+  render(await AppHome());
+  expect(screen.getByText("1 shown risk has no complete score")).toBeVisible();
+  expect(screen.queryByText("Residual exposure — no open risks yet")).not.toBeInTheDocument();
 });

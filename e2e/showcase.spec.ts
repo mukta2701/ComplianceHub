@@ -146,7 +146,7 @@ test("all showcase sections load with honest status and readable layouts", async
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
   const sections = [
-    ["/app", "Readiness dashboard"],
+    ["/app", "Programme overview"],
     ["/app/assessment", "Readiness assessments"],
     ["/app/risks", "Risk register"],
     ["/app/soa", "Statement of Applicability"],

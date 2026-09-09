@@ -5,7 +5,7 @@ vi.mock("@/lib/app-context", () => ({ requireAppContext: async () => ({
   supabase: { from: () => {
     let single = false;
     const query: Record<string, unknown> = {};
-    for (const method of ["select", "eq", "neq", "in", "not", "is", "order", "limit"]) query[method] = () => query;
+    for (const method of ["select", "lt", "eq", "neq", "in", "not", "is", "order", "limit"]) query[method] = () => query;
     query.maybeSingle = () => { single = true; return query; };
     query.then = (resolve: (value: unknown) => unknown) => Promise.resolve({ data: single ? null : [], count: 0, error: null }).then(resolve);
     return query;

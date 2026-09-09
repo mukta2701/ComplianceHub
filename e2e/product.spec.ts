@@ -75,7 +75,7 @@ async function createWorkspaceOwner(
   await completeE2eSignUp(page, email, password);
   await page.getByLabel("Organisation name").fill(organisationName);
   await submitServerAction(page, page.getByRole("button", { name: "Create workspace" }), "/app");
-  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Programme overview" })).toBeVisible();
 
   return { suffix, email, password, organisationName };
 }
@@ -336,7 +336,7 @@ test("a treatment plan spawns an owned, dated task", async ({ page }, testInfo) 
   await completeE2eSignUp(page, email, password);
   await page.getByLabel("Organisation name").fill(`RTP Workspace ${suffix}`);
   await page.getByRole("button", { name: "Create workspace" }).click();
-  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Programme overview" })).toBeVisible();
 
   // Create a risk to attach a treatment plan to.
   await page.goto("/app/risks/new");
@@ -378,7 +378,7 @@ test("an audit runs from plan through checklist to a corrective-action task", as
   await completeE2eSignUp(page, email, password);
   await page.getByLabel("Organisation name").fill(`Audit Workspace ${suffix}`);
   await page.getByRole("button", { name: "Create workspace" }).click();
-  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Programme overview" })).toBeVisible();
 
   // Reach the audits module through the workspace nav.
   const navToggle = page.getByRole("button", { name: "Open navigation" });
@@ -648,7 +648,7 @@ test("an asset workbook can be imported through the wizard", async ({ page }, te
   await completeE2eSignUp(page, email, password);
   await page.getByLabel("Organisation name").fill(`Import Workspace ${suffix}`);
   await page.getByRole("button", { name: "Create workspace" }).click();
-  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Programme overview" })).toBeVisible();
 
   await page.goto("/app/assets/import");
   await expect(page.getByRole("heading", { name: "Import asset inventory", level: 1 })).toBeVisible();
@@ -788,7 +788,7 @@ test("a minted auditor link exposes a read-only view to an unauthenticated visit
   await completeE2eSignUp(page, email, password);
   await page.getByLabel("Organisation name").fill(orgName);
   await page.getByRole("button", { name: "Create workspace" }).click();
-  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Programme overview" })).toBeVisible();
 
   // Task 17 (the owner-only mint UI) is not built yet, so seed an auditor token
   // through the SAME owner-only, RLS-enforced path it will use: sign in as the
@@ -971,7 +971,7 @@ test("a task is pushed to a sandbox tracker, polled to In Progress, then the con
   await completeE2eSignUp(page, email, password);
   await page.getByLabel("Organisation name").fill(`Integrations Workspace ${suffix}`);
   await page.getByRole("button", { name: "Create workspace" }).click();
-  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Programme overview" })).toBeVisible();
 
   // Create an owned task and capture its detail URL — this is the existing task
   // that gets pushed to the tracker further down.
@@ -1214,7 +1214,7 @@ test("an owner enables a public Trust Center that leaks nothing sensitive", asyn
   await completeE2eSignUp(page, email, password);
   await page.getByLabel("Organisation name").fill(orgName);
   await page.getByRole("button", { name: "Create workspace" }).click();
-  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Programme overview" })).toBeVisible();
 
   // The owner enables the Trust Center from the owner-only settings page: pick a
   // slug + headline, opt into policy titles, and switch it on.

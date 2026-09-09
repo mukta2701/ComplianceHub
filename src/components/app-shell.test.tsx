@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 const hoisted = vi.hoisted(() => ({ pathname: "/app" }));
 
@@ -34,6 +34,16 @@ describe("AppShell role-specific navigation", () => {
   it("makes the existing asset inventory discoverable for operators", () => {
     renderShell("owner");
     expect(screen.getByRole("link", { name: "Asset inventory" })).toHaveAttribute("href", "/app/assets");
+  });
+
+  it("identifies the workspace and current page in the header breadcrumb", () => {
+    hoisted.pathname = "/app/policies/example-policy";
+    renderShell("owner");
+
+    const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(within(breadcrumb).getByRole("link", { name: "Example Ltd" })).toHaveAttribute("href", "/app");
+    expect(within(breadcrumb).getByRole("heading", { name: "Policies", level: 1 })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Policies" })).toHaveAttribute("aria-current", "page");
   });
 
   it("keeps a closed drawer out of navigation and isolates its open state", () => {

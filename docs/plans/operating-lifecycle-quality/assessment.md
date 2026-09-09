@@ -4,6 +4,8 @@ Assessed 9 September 2026 from starting commit `4b413a0`, the existing fictional
 
 ## Product direction and what exists
 
+Approved visual follow-on: [ticket 13 — programme dashboard and shell](issues/13-programme-dashboard-design.md) applies the owner's chosen product-wide mockup direction to the dashboard and navigation first. Remaining module-specific redesigns remain subsequent increments. Refer to the release checklist for current verification and runtime status.
+
 ComplianceHub coordinates a growing company's security and compliance work. Its useful unit is a connected obligation: why it matters, who owns it, the work and supporting records, the authorised review, and the next review date. Onboarding and saved baselines begin and periodically summarise that lifecycle. Mukta and Charlie illustrate coordinator and leadership responsibilities; they do not bound the product or define permissions.
 
 The current modular monolith already connects scope, catalogue-versioned assessments, control decisions and immutable SoA versions; risk treatment and accountable tasks; evidence links and dated freshness; policy versions and employee acceptance; assets and risks; audits, findings and corrective tasks; recurring work; and leadership snapshots. Owner/Admin/Member permissions differ from responsibilities. Assigned Members contribute notes; operators manage the programme and independently review contributions; Members read published/saved summaries and accept approved policies. An employee's job title does not grant review authority.

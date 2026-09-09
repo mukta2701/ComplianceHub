@@ -79,7 +79,7 @@ async function createOwnerWorkspace(page: Page, testInfo: TestInfo) {
   const userId = await completeLocalSignUp(page, email, password);
   await page.getByLabel("Organisation name").fill(organisationName);
   await submitServerAction(page, page.getByRole("button", { name: "Create workspace" }), "/app");
-  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Programme overview" })).toBeVisible();
 
   return { suffix, email, password, organisationName, userId };
 }

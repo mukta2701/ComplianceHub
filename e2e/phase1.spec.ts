@@ -72,7 +72,7 @@ async function createWorkspace(page: Page, suffix: string) {
     page.getByRole("button", { name: "Create workspace" }).click(),
   ]);
   expect(response.status()).toBeLessThan(400);
-  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Programme overview" })).toBeVisible();
 }
 
 async function activate(button: Locator) {
@@ -229,7 +229,7 @@ test("a user runs the Phase 1 workflow loop", async ({ page, request }, testInfo
   await expect(page.getByText(new RegExp(`Evidence "${staleEvidenceTitle}" is expired`))).toHaveCount(1);
 
   await page.goto("/app");
-  const nextActions = page.getByRole("heading", { name: "Do this next" }).locator("xpath=ancestor::section");
+  const nextActions = page.getByRole("heading", { name: "Needs your attention" }).locator("xpath=ancestor::section");
   await expect(nextActions.getByRole("link", { name: "All tasks" })).toBeVisible();
   await expect(nextActions.getByRole("link", { name: /Decide applicability:/ }).first()).toBeVisible();
   const evidenceFreshness = page.getByRole("heading", { name: "Evidence freshness" }).locator("xpath=ancestor::section");
