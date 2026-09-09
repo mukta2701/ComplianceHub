@@ -4,9 +4,11 @@
 
 **Blocked by:** None
 
-**Status:** ready-for-agent
+**Status:** verified locally
 
-- [ ] Later scheduled policy review creates exactly one task and retains old completed history.
-- [ ] Same-cycle retry creates no duplicate.
-- [ ] Done → reopen → Done on a recurring source creates only one successor.
-- [ ] Existing authority and transactional failure guarantees pass local database tests.
+- [x] Later scheduled policy review creates exactly one task and retains old completed history.
+- [x] Same-cycle retry creates no duplicate.
+- [x] Done → reopen → Done on a recurring source creates only one successor.
+- [x] Existing authority and transactional failure guarantees pass local database tests.
+
+Evidence: [local release verification](../../../evidence/2026-09-09-operating-lifecycle-quality.md). External/provider and historical-data limitations remain explicit there.

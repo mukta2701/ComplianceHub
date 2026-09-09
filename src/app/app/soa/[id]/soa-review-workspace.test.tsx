@@ -667,10 +667,17 @@ describe("SoaReviewWorkspace", () => {
 
   it("keeps the scoped SoA CSS on semantic tokens without clipping outer focus rings", () => {
     const css = readFileSync("src/app/globals.css", "utf8");
-    const soaCss = css.slice(css.indexOf("/* SoA review workspace */"));
+    const start = css.indexOf("/* SoA review workspace */");
+    const end = css.indexOf("/* Guided assessment decision flow */", start);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    // Later modules have their own styling contracts; they are not SoA rules.
+    const soaCss = css.slice(start, end);
     const workspaceRule = soaCss.match(/\.soa-review-workspace\{([^}]*)\}/)?.[1] ?? "";
     const detailRule = soaCss.match(/\.soa-review-detail\{([^}]*)\}/)?.[1] ?? "";
 
+    expect(workspaceRule).not.toBe("");
+    expect(detailRule).not.toBe("");
     expect(soaCss).not.toMatch(/#[0-9a-f]{3,8}\b|rgba?\(/i);
     expect(workspaceRule).not.toContain("overflow:hidden");
     expect(detailRule).not.toContain("overflow:hidden");

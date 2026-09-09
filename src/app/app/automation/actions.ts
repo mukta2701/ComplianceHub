@@ -7,7 +7,7 @@ import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { resolveEvidenceProvider } from "@/features/integrations/application/evidence-registry";
 import type { EvidenceProviderKind } from "@/features/integrations/domain/evidence-provider";
-import { automationConnectionId, persistCollectedAutomation } from "@/features/automation/application/collector-persistence";
+import { automationConnectionId, persistCollectedAutomation, recordCollectionHealth } from "@/features/automation/application/collector-persistence";
 import { purgeContentReference } from "@/features/automation/domain/retention";
 import { configuredAiProvider } from "@/features/ai/application/openai-compatible";
 import { generateAiSuggestion } from "@/features/ai/application/suggestion";
@@ -76,15 +76,26 @@ export async function recollectAutomationProposalAction(formData: FormData) {
   if (proposalError || !proposal || !signal?.connection_id) throw new Error("Automation draft source not found");
   const service = createSupabaseServiceClient();
   const { data: connection, error: connectionError } = await service.from("connector_connections")
-    .select("id,provider,status").eq("id", signal.connection_id).eq("organisation_id", organisation.id).maybeSingle();
-  if (connectionError || !connection || connection.status === "revoked") throw new Error("Automation connection is not available");
+    .select("id,provider,status").eq("id", signal.connection_id).eq("organisation_id", organisation.id).is("revoked_at", null).maybeSingle();
+  if (connectionError || !connection || !["connected", "error"].includes(connection.status)) throw new Error("Automation connection is not available");
   const { data: source, error: sourceError } = await service.from("evidence_sources")
     .select("provider,config,access_token").eq("organisation_id", organisation.id).eq("provider", connection.provider).contains("config", { automationConnectionId: connection.id }).is("revoked_at", null).maybeSingle();
   if (sourceError || !source) throw new Error("No recollection source is configured for this connection");
   const config = (source.config ?? {}) as Record<string, unknown>;
-  const provider = resolveEvidenceProvider(source.provider as EvidenceProviderKind);
-  const collected = await provider.collect({ id: connection.id, provider: source.provider as EvidenceProviderKind, config, accessToken: decryptSecret(source.access_token) ?? "" });
-  for (const item of collected) await persistCollectedAutomation({ supabase: service, organisationId: organisation.id, provider: source.provider as EvidenceProviderKind, config, collected: item });
+  try {
+    const provider = resolveEvidenceProvider(source.provider as EvidenceProviderKind);
+    const collected = await provider.collect({ id: connection.id, provider: source.provider as EvidenceProviderKind, config, accessToken: decryptSecret(source.access_token) ?? "" });
+    for (const item of collected) await persistCollectedAutomation({ supabase: service, organisationId: organisation.id, provider: source.provider as EvidenceProviderKind, config, collected: item });
+    await recordCollectionHealth({ supabase: service, organisationId: organisation.id, provider: source.provider as EvidenceProviderKind, config, succeeded: true });
+  } catch {
+    try {
+      await recordCollectionHealth({ supabase: service, organisationId: organisation.id, provider: source.provider as EvidenceProviderKind, config, succeeded: false });
+    } catch {
+      // Preserve the safe collection failure when health storage is unavailable.
+    }
+    revalidatePath("/app/automation");
+    throw new Error("Collection failed; existing drafts are preserved. Review connection setup and retry.");
+  }
   revalidatePath("/app/automation");
 }
 
@@ -136,10 +147,16 @@ export async function generateAutomationBaselineAction() {
       const provider = resolveEvidenceProvider(source.provider as EvidenceProviderKind);
       const collected = await provider.collect({ id: source.id, provider: source.provider as EvidenceProviderKind, config, accessToken: decryptSecret(source.access_token) ?? "" });
       for (const item of collected) await persistCollectedAutomation({ supabase: service, organisationId: organisation.id, provider: source.provider as EvidenceProviderKind, config, collected: item });
+      await recordCollectionHealth({ supabase: service, organisationId: organisation.id, provider: source.provider as EvidenceProviderKind, config, succeeded: true });
       completed += 1;
     } catch {
       // Keep drafts from healthy sources and report this run as incomplete.
       // Never return raw provider or credential errors to the browser.
+      try {
+        await recordCollectionHealth({ supabase: service, organisationId: organisation.id, provider: source.provider as EvidenceProviderKind, config, succeeded: false });
+      } catch {
+        // A failed health write must not stop the remaining sources.
+      }
     }
   }
   revalidatePath("/app/automation");

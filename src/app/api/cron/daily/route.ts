@@ -166,8 +166,8 @@ async function sweep(request: Request) {
         title: `Review policy ${task.reference}: ${task.title}`.slice(0, 200),
         detail: "Raised automatically because this policy has reached its scheduled review date.",
         source: "policy_review", owner_id: task.ownerId, due_on: task.dueOn,
-        policy_id: task.policyId, created_by: owners[0],
-      }, { onConflict: "organisation_id,policy_id,source", ignoreDuplicates: true }).select("id");
+        policy_id: task.policyId, policy_review_due_on: task.dueOn, created_by: owners[0],
+      }, { onConflict: "organisation_id,policy_id,source,policy_review_due_on", ignoreDuplicates: true }).select("id");
       if (error) throw error;
       return Boolean(data?.length);
     },

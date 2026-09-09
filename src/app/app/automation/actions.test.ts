@@ -12,7 +12,7 @@ vi.mock("@/lib/app-context", () => ({ requireAppContext: () => Promise.resolve(h
 vi.mock("@/lib/security/rate-limit", () => ({ enforceRateLimit: hoisted.enforceRateLimit }));
 vi.mock("@/lib/supabase/service", () => ({ createSupabaseServiceClient: vi.fn() }));
 vi.mock("@/features/integrations/application/evidence-registry", () => ({ resolveEvidenceProvider: vi.fn() }));
-vi.mock("@/features/automation/application/collector-persistence", () => ({ automationConnectionId: vi.fn(), persistCollectedAutomation: vi.fn() }));
+vi.mock("@/features/automation/application/collector-persistence", () => ({ automationConnectionId: vi.fn(), persistCollectedAutomation: vi.fn(), recordCollectionHealth: vi.fn() }));
 vi.mock("@/features/automation/domain/retention", () => ({ purgeContentReference: vi.fn(), shouldPurgeSourceObject: vi.fn() }));
 vi.mock("@/features/ai/application/openai-compatible", () => ({ configuredAiProvider: hoisted.provider }));
 vi.mock("@/features/ai/application/suggestion", () => ({ generateAiSuggestion: hoisted.generate }));

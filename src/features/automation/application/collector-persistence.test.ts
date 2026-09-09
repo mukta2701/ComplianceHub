@@ -59,6 +59,7 @@ function makeSupabase(state: State) {
       const builder: Record<string, unknown> = {
         select() { return builder; },
         eq() { return builder; },
+        is() { return builder; },
         limit() { return builder; },
         insert() { mode = "insert"; return builder; },
         update() { mode = "update"; return builder; },

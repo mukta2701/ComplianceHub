@@ -292,6 +292,18 @@ describe("GET /api/cron/daily", () => {
     expect(policyReviewTasks()).toHaveLength(1);
   });
 
+  it("creates one later policy review after completion and preserves both cycles on retry", async () => {
+    store.policies[0].review_due = "2020-01-01";
+    await GET(request("test-secret"));
+    const prior = policyReviewTasks()[0];
+    prior.status = "done";
+    store.policies[0].review_due = "2020-01-02";
+    await Promise.all([GET(request("test-secret")), GET(request("test-secret"))]);
+    expect(policyReviewTasks()).toHaveLength(2);
+    expect(policyReviewTasks().filter((task) => task.status === "done")).toHaveLength(1);
+    expect(policyReviewTasks().filter((task) => task.due_on === "2020-01-02")).toHaveLength(1);
+  });
+
   it("stays idempotent when two sweeps run concurrently", async () => {
     await Promise.all([GET(request("test-secret")), GET(request("test-secret"))]);
 

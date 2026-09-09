@@ -6,8 +6,9 @@ import { policyAcceptancePresentation, policyPortalAccess } from "@/features/pol
 import { Card, PageIntro, Pill, Progress } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { one } from "@/lib/supabase/one";
-import { updatePolicyAction, approvePolicyAction, setPolicyStatusAction, acceptPolicyAction } from "../actions";
+import { approvePolicyAction, setPolicyStatusAction, acceptPolicyAction } from "../actions";
 import { linkPolicyEvidenceAction, unlinkPolicyEvidenceAction } from "./evidence-actions";
+import { PolicyEditForm } from "../policy-edit-form";
 import { PolicyFeedback, type PolicyFeedbackThread } from "@/features/policies/components/policy-feedback";
 
 export default async function PolicyDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -63,16 +64,17 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
         <Progress value={acceptance.percent} />
         <p style={{ fontSize: "12px", color: "#596273", margin: "8px 0 0" }}>{acceptance.acceptedCurrent} of {acceptance.total} members have accepted version {policy.version} · {acceptance.outstanding} outstanding</p>
       </>}
-      {acceptance.mode === "personal" && <p style={{ fontSize: "13px", color: "#596273", margin: 0 }}>Review the current version and record your own acceptance below.</p>}
+      {acceptance.mode === "personal" && status === "approved" && !acceptedCurrent && <p style={{ fontSize: "13px", color: "#596273", margin: 0 }}>Review the current version and record your own acceptance below.</p>}
+      {status !== "approved" && <p style={{ fontSize: "13px", color: "var(--muted)", margin: "14px 0 0" }}>Personal acceptance is available only while this policy is approved. Previous acceptances remain on record.</p>}
       {acceptedCurrent
         ? <p style={{ display: "flex", alignItems: "center", gap: "8px", margin: "14px 0 0", fontSize: "13px", color: "#596273" }}>
             <Pill tone="green"><span style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}><Icon name="check" />Accepted version {policy.version}</span></Pill>
-            You have accepted the current version.
+            {status === "approved" ? "You have accepted the current version." : "Your earlier acceptance is preserved; this policy is not currently approved."}
           </p>
-        : <form action={acceptPolicyAction} style={{ marginTop: "14px" }}>
+        : status === "approved" ? <form action={acceptPolicyAction} style={{ marginTop: "14px" }}>
             <input type="hidden" name="id" value={id} />
             <button className="button primary">I accept this policy</button>
-          </form>}
+          </form> : null}
     </Card>
 
     <Card style={{ padding: "18px", marginBottom: "16px" }}>
@@ -80,18 +82,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
       <p style={{ whiteSpace: "pre-wrap", margin: 0 }}>{policy.body || "No content yet."}</p>
       {access.canManage && <details style={{ marginTop: "16px", borderTop: "1px solid #edf0f4", paddingTop: "14px" }}>
         <summary style={{ cursor: "pointer", fontSize: "13px", fontWeight: 700, color: "var(--blue)", display: "flex", alignItems: "center", gap: "6px", width: "fit-content" }}><Icon name="file" />Edit policy</summary>
-        <form action={updatePolicyAction} className="app-form" style={{ padding: "16px 0 0" }}>
-          <input type="hidden" name="id" value={id} />
-          <input type="hidden" name="expectedVersion" value={policy.version} />
-          <div className="form-grid">
-            <label>Reference<input name="reference" required maxLength={40} defaultValue={policy.reference} /></label>
-            <label>Title<input name="title" required maxLength={200} defaultValue={policy.title} /></label>
-            <label>Review due<input name="reviewDue" type="date" defaultValue={policy.review_due ?? ""} /></label>
-          </div>
-          <label>Policy content<textarea name="body" maxLength={100000} rows={8} defaultValue={policy.body} /></label>
-          <p style={{ fontSize: "12px", color: "#596273", margin: 0 }}>Changing the content bumps the version and asks members to re-accept.</p>
-          <button className="button primary">Save changes</button>
-        </form>
+        <PolicyEditForm policy={{ id, reference: policy.reference, title: policy.title, body: policy.body, version: policy.version, ownerId: policy.owner_id, reviewDue: policy.review_due }} owners={roster.map((member) => ({ id: member.user_id, name: one(member.profiles)?.display_name || member.user_id }))} />
       </details>}
     </Card>
 

@@ -49,6 +49,12 @@ beforeEach(() => {
 });
 
 describe("SoA index active organisation scope", () => {
+  it("explains that an assessment starts a draft and control applicability still needs review", async () => {
+    const { default: SoaPage } = await import("./page");
+    render(await SoaPage());
+    expect(screen.getByText(/The assessment provides context/)).toHaveTextContent("You still need to review which controls apply and record your reasons.");
+    expect(screen.queryByText(/its answers decide which controls apply/)).not.toBeInTheDocument();
+  });
   it("does not list sibling assessments, drafts, or snapshots", async () => {
     const { default: SoaPage } = await import("./page");
 

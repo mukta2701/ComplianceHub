@@ -27,8 +27,9 @@ export async function persistCollectedAutomation({
   const connectionId = automationConnectionId(config);
   if (!connectionId) return false;
   const { data: connection, error: connectionError } = await supabase.from("connector_connections")
-    .select("id,owner_id,retention_days,status").eq("id", connectionId).eq("organisation_id", organisationId).maybeSingle();
-  if (connectionError || !connection || connection.status === "revoked") return false;
+    .select("id,owner_id,retention_days,status").eq("id", connectionId).eq("organisation_id", organisationId).eq("provider", provider).is("revoked_at", null).maybeSingle();
+  if (connectionError) throw connectionError;
+  if (!connection || !["connected", "error"].includes(connection.status)) return false;
 
   const { data: existingSourceObject, error: sourceError } = await supabase.from("source_objects")
     .select("id").eq("connection_id", connection.id).eq("external_ref", collected.externalRef).maybeSingle();
@@ -121,8 +122,23 @@ export async function persistCollectedAutomation({
     if (linkError?.code !== "23505" && linkError) throw linkError;
     if (!linkError) changed = true;
   }
-  const { error: healthError } = await supabase.from("connector_connections")
-    .update({ last_collected_at: new Date().toISOString(), last_error_at: null, status: "connected" }).eq("id", connection.id).eq("organisation_id", organisationId);
-  if (healthError) throw healthError;
   return changed;
+}
+
+// One health outcome per complete source attempt, never per individual item.
+// Conditional UPDATE keeps a pause/revocation that races with collection intact.
+export async function recordCollectionHealth({ supabase, organisationId, provider, config, succeeded }: {
+  supabase: ServiceClient; organisationId: string; provider: EvidenceProviderKind;
+  config: Record<string, unknown>; succeeded: boolean;
+}) {
+  const connectionId = automationConnectionId(config);
+  if (!connectionId) return;
+  const now = new Date().toISOString();
+  const { error } = await supabase.from("connector_connections")
+    .update(succeeded
+      ? { last_collected_at: now, last_error_at: null, status: "connected" }
+      : { last_error_at: now, status: "error" })
+    .eq("id", connectionId).eq("organisation_id", organisationId).eq("provider", provider)
+    .in("status", ["connected", "error"]).is("revoked_at", null);
+  if (error) throw error;
 }

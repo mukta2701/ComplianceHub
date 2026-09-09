@@ -14,9 +14,10 @@ const hoisted = vi.hoisted(() => ({
 vi.mock("@/lib/app-context", () => ({ requireAppContext: () => Promise.resolve(hoisted.ctx) }));
 vi.mock("@/lib/security/rate-limit", () => ({ enforceRateLimit: hoisted.enforceRateLimit }));
 vi.mock("next/cache", () => ({ revalidatePath: hoisted.revalidatePath }));
-vi.mock("next/navigation", () => ({ redirect: hoisted.redirect }));
+vi.mock("next/navigation", () => ({ redirect: hoisted.redirect, unstable_rethrow: vi.fn() }));
 
 import { approvePolicyAction, createPolicyAction, updatePolicyAction } from "./actions";
+import { savePolicyEditAction } from "./policy-edit-actions";
 
 function policyForm(body = "Current policy text") {
   const form = new FormData();
@@ -71,7 +72,7 @@ describe("policy update concurrency", () => {
     const versionEq = vi.fn(() => ({ select: selectUpdated }));
     const organisationEq = vi.fn(() => ({ eq: versionEq }));
     const idEq = vi.fn(() => ({ eq: organisationEq }));
-    const update = vi.fn(() => ({ eq: idEq }));
+    const update = vi.fn<(values: Record<string, unknown>) => { eq: typeof idEq }>(() => ({ eq: idEq }));
     const rpc = vi.fn().mockResolvedValue({ error: null });
     const from = vi.fn().mockReturnValueOnce(read).mockReturnValueOnce({ update });
     hoisted.ctx = {
@@ -81,12 +82,34 @@ describe("policy update concurrency", () => {
     return { update, versionEq, rpc };
   }
 
+  it("preserves ownership when an edit does not submit an owner field", async () => {
+    const { update } = updateContext({ version: 4 });
+    const form = policyForm("Old text");
+    form.set("expectedVersion", "4");
+    form.delete("ownerId");
+
+    await updatePolicyAction(form);
+
+    expect(update.mock.calls[0][0]).not.toHaveProperty("owner_id");
+  });
+
+  it.each([{ selection: "", expectedOwner: null }, { selection: USER_ID, expectedOwner: USER_ID }])("honours an explicit owner selection $selection", async ({ selection, expectedOwner }) => {
+    const { update } = updateContext({ version: 4 });
+    const form = policyForm("Old text");
+    form.set("expectedVersion", "4");
+    form.set("ownerId", selection);
+
+    await updatePolicyAction(form);
+
+    expect(update.mock.calls[0][0]).toHaveProperty("owner_id", expectedOwner);
+  });
+
   it("uses the expected version and trusts the version returned by the database", async () => {
     const { update, versionEq, rpc } = updateContext({ version: 5 });
     const form = policyForm("New material text");
     form.set("expectedVersion", "4");
 
-    await expect(updatePolicyAction(form)).resolves.toBeUndefined();
+    await expect(updatePolicyAction(form)).resolves.toEqual({ version: 5 });
 
     expect(update).toHaveBeenCalledWith(expect.not.objectContaining({ version: expect.anything() }));
     expect(versionEq).toHaveBeenCalledWith("version", 4);
@@ -94,6 +117,32 @@ describe("policy update concurrency", () => {
       target_policy_id: POLICY_ID,
       note: "Now at version 5.",
     });
+  });
+
+  it("returns visible save confirmation only after the policy update succeeds", async () => {
+    updateContext({ version: 4 });
+    const form = policyForm("Old text");
+    form.set("expectedVersion", "4");
+
+    await expect(savePolicyEditAction({}, form)).resolves.toEqual({ success: "Policy changes saved.", version: 4 });
+  });
+
+  it("distinguishes a saved policy from a failed re-acceptance notification", async () => {
+    const { rpc } = updateContext({ version: 5 });
+    rpc.mockResolvedValueOnce({ error: { message: "unavailable" } });
+    const form = policyForm("New text");
+    form.set("expectedVersion", "4");
+
+    await expect(savePolicyEditAction({}, form)).resolves.toEqual({ error: "The policy was saved, but members could not be notified to re-accept. Check the acceptance roster and follow up with them.", version: 5 });
+    expect(hoisted.revalidatePath).toHaveBeenCalledWith(`/app/policies/${POLICY_ID}`);
+  });
+
+  it("returns recovery guidance when an edit becomes stale", async () => {
+    updateContext(null);
+    const form = policyForm("New text");
+    form.set("expectedVersion", "4");
+
+    await expect(savePolicyEditAction({}, form)).resolves.toEqual({ error: "This policy changed while you were editing it. Your entries are still shown. Copy them before refreshing, then review the latest policy before saving again." });
   });
 
   it("reports a stale edit when the expected version no longer matches", async () => {

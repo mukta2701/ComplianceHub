@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const state = vi.hoisted(() => ({ role: "owner", rows: {} as Record<string, Record<string, unknown>[]>, failUpdate: false, emptyUpdate: false }));
+const state = vi.hoisted(() => ({ role: "owner", rows: {} as Record<string, Record<string, unknown>[]>, failUpdate: false, emptyUpdate: false, failAssets: false }));
 const org = "10000000-0000-4000-8000-000000000001";
 const otherOrg = "10000000-0000-4000-8000-000000000002";
 const riskId = "20000000-0000-4000-8000-000000000001";
@@ -19,6 +19,7 @@ function query(table: string) {
   chain.update = (value: Record<string, unknown>) => { patch = value; return chain; };
   for (const name of ["single", "maybeSingle"]) chain[name] = () => { single = true; return chain; };
   chain.then = (resolve: (value: unknown) => unknown) => {
+    if (table === "asset_risks" && state.failAssets) return Promise.resolve({ data: null, error: { code: "08006" } }).then(resolve);
     let rows = (state.rows[table] ?? []).filter((row) => filters.every((filter) => filter(row)));
     if (patch && (state.failUpdate || state.emptyUpdate)) rows = [];
     if (patch) for (const row of rows) Object.assign(row, patch);
@@ -53,7 +54,7 @@ function form(overrides: Record<string, string> = {}) {
   return data;
 }
 beforeEach(() => {
-  state.role = "owner"; state.failUpdate = false; state.emptyUpdate = false;
+  state.role = "owner"; state.failUpdate = false; state.emptyUpdate = false; state.failAssets = false;
   const risk = { id: riskId, organisation_id: org, reference: "R-001", title: "Supplier risk", description: "Existing exposure", category_id: categoryId, owner_id: ownerId, likelihood: 3, impact: 4, residual_likelihood: 2, residual_impact: 3, treatment: "mitigate", treatment_plan: "Existing plan", status: "open", review_date: "2026-09-20", evidence: "Existing evidence", source_assessment_session_id: "original-assessment", source_soa_register_id: "original-soa", created_by: ownerId, created_at: "2026-09-01" };
   state.rows = {
     risks: [risk, { ...risk, id: otherRiskId, organisation_id: otherOrg, title: "Other company risk" }],
@@ -115,6 +116,32 @@ describe("maintaining risks", () => {
     state.role = role;
     render(await RiskDetailPage({ params: Promise.resolve({ id: riskId }) }));
     expect(screen.getByRole("link", { name: "Edit risk" })).toHaveAttribute("href", `/app/risks/${riskId}/edit`);
+  });
+  it("shows assets already linked to this risk without exposing sibling workspace links", async () => {
+    state.rows.asset_risks = [
+      { risk_id: riskId, organisation_id: org, asset_id: "asset-1", assets: { id: "asset-1", reference: "A-001", description: "Customer database" } },
+      { risk_id: riskId, organisation_id: otherOrg, asset_id: "foreign-asset", assets: { id: "foreign-asset", reference: "A-999", description: "Foreign database" } },
+      { risk_id: otherRiskId, organisation_id: org, asset_id: "unrelated-asset", assets: { id: "unrelated-asset", reference: "A-002", description: "Other risk asset" } },
+    ];
+    render(await RiskDetailPage({ params: Promise.resolve({ id: riskId }) }));
+    expect(screen.getByRole("link", { name: "A-001: Customer database" })).toHaveAttribute("href", "/app/assets/asset-1");
+    expect(screen.queryByText(/Foreign database|Other risk asset/)).not.toBeInTheDocument();
+  });
+  it("does not describe failed asset loading as an empty register", async () => {
+    state.failAssets = true;
+    render(await RiskDetailPage({ params: Promise.resolve({ id: riskId }) }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Linked assets could not be loaded. Reload this page to try again.");
+    expect(screen.queryByText("No assets linked to this risk yet.")).not.toBeInTheDocument();
+  });
+  it("distinguishes no links from an unavailable linked asset", async () => {
+    const page = render(await RiskDetailPage({ params: Promise.resolve({ id: riskId }) }));
+    expect(screen.getByText("No assets linked to this risk yet.")).toBeInTheDocument();
+    page.unmount();
+    state.rows.asset_risks = [{ risk_id: riskId, organisation_id: org, asset_id: "unavailable", assets: null }];
+    render(await RiskDetailPage({ params: Promise.resolve({ id: riskId }) }));
+    expect(screen.getByText("Linked asset unavailable.")).toBeInTheDocument();
+    expect(screen.queryByText("No assets linked to this risk yet.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /undefined/ })).not.toBeInTheDocument();
   });
   it("counts only open exposure in the risk heatmap", async () => {
     state.rows.risks.push({ ...state.rows.risks[0], id: "closed", status: "closed" });

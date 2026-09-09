@@ -4,9 +4,11 @@
 
 **Blocked by:** None
 
-**Status:** ready-for-agent
+**Status:** verified locally
 
-- [ ] Risk detail shows tenant-scoped linked assets with usable navigation.
-- [ ] SoA generation guidance matches actual behavior.
-- [ ] Existing SoA focus/token regression is diagnosed and corrected without unrelated redesign.
-- [ ] Desktop/mobile and keyboard inspection capture before/after evidence.
+- [x] Risk detail shows tenant-scoped linked assets with usable navigation.
+- [x] SoA generation guidance matches actual behavior.
+- [x] Existing SoA focus/token regression is diagnosed and corrected without unrelated redesign.
+- [x] Desktop/mobile and keyboard inspection capture before/after evidence.
+
+Evidence: [local release verification](../../../evidence/2026-09-09-operating-lifecycle-quality.md). External/provider and historical-data limitations remain explicit there.

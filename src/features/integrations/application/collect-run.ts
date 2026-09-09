@@ -4,7 +4,7 @@ import { decryptSecret } from "@/lib/security/secrets";
 import { toEvidenceRow } from "../domain/evidence-collection";
 import type { EvidenceProviderKind } from "../domain/evidence-provider";
 import { collectIdPages } from "@/lib/supabase/paginate";
-import { persistCollectedAutomation } from "@/features/automation/application/collector-persistence";
+import { persistCollectedAutomation, recordCollectionHealth } from "@/features/automation/application/collector-persistence";
 
 export async function collectEvidence(supabase: SupabaseClient): Promise<{ collected: number; refreshed: number; failed: number }> {
   // Active sources across every org — collection is a global sweep, tenant-scoped
@@ -58,21 +58,25 @@ export async function collectEvidence(supabase: SupabaseClient): Promise<{ colle
         collected += 1;
       }
       for (const item of items) {
-        try {
-          await persistCollectedAutomation({
-            supabase,
-            organisationId: source.organisation_id,
-            provider: source.provider as EvidenceProviderKind,
-            config: (source.config ?? {}) as Record<string, unknown>,
-            collected: item,
-          });
-        } catch {
-          // Evidence collection remains useful even if the optional automation
-          // provenance mapping needs attention; the next run can retry it.
-        }
+        await persistCollectedAutomation({
+          supabase, organisationId: source.organisation_id,
+          provider: source.provider as EvidenceProviderKind,
+          config: (source.config ?? {}) as Record<string, unknown>, collected: item,
+        });
       }
+      await recordCollectionHealth({ supabase, organisationId: source.organisation_id,
+        provider: source.provider as EvidenceProviderKind,
+        config: (source.config ?? {}) as Record<string, unknown>, succeeded: true });
     } catch {
       failed += 1;
+      try {
+        await recordCollectionHealth({ supabase, organisationId: source.organisation_id,
+          provider: source.provider as EvidenceProviderKind,
+          config: (source.config ?? {}) as Record<string, unknown>, succeeded: false });
+      } catch {
+        // The source is already reported failed; a database outage must not
+        // prevent another source from completing or count this source twice.
+      }
     }
   }
   return { collected, refreshed, failed };

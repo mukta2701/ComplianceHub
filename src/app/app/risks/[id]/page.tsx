@@ -14,11 +14,12 @@ export default async function RiskDetailPage({ params }: { params: Promise<{ id:
   const canManage = membership.role !== "member";
   const { data: risk } = await supabase.from("risks").select("id,reference,title,description,owner_id,evidence,likelihood,impact,residual_likelihood,residual_impact,status,review_date,treatment,treatment_plan,risk_categories(name)").eq("id", id).eq("organisation_id", organisation.id).maybeSingle();
   if (!risk) notFound();
-  const [{ data: plans }, { data: cfg }, { data: members }, { data: controls }, { data: aiSettings }] = await Promise.all([
+  const [{ data: plans }, { data: cfg }, { data: members }, { data: controls }, { data: linkedAssets, error: linkedAssetsError }, { data: aiSettings }] = await Promise.all([
     supabase.from("risk_treatment_plans").select("id,reference,summary,treatment_measures,status,target_completion,actual_completion,assigned_lead_id").eq("risk_id", id).eq("organisation_id", organisation.id).order("reference"),
     supabase.from("risk_matrix_config").select("low_max,moderate_max,high_max,appetite_threshold").eq("organisation_id", organisation.id).maybeSingle(),
     supabase.from("memberships").select("user_id,profiles(display_name)").eq("organisation_id", organisation.id),
     supabase.from("controls").select("id,code,title").order("position"),
+    supabase.from("asset_risks").select("asset_id,assets(id,reference,description)").eq("risk_id", id).eq("organisation_id", organisation.id).order("asset_id"),
     supabase.from("ai_workspace_settings").select("enabled").eq("organisation_id", organisation.id).maybeSingle(),
   ]);
   const config: RiskMatrixConfig = cfg ? { lowMax: cfg.low_max, moderateMax: cfg.moderate_max, highMax: cfg.high_max, appetite: cfg.appetite_threshold } : DEFAULT_RISK_MATRIX_CONFIG;
@@ -42,6 +43,17 @@ export default async function RiskDetailPage({ params }: { params: Promise<{ id:
     </dl>
       {risk.treatment_plan && <><h3 style={{ fontSize: "14px" }}>Treatment approach</h3><p style={{ whiteSpace: "pre-wrap" }}>{risk.treatment_plan}</p></>}
       {risk.evidence && <><h3 style={{ fontSize: "14px" }}>Evidence references</h3><p style={{ whiteSpace: "pre-wrap" }}>{risk.evidence}</p></>}
+    </Card>
+    <Card style={{ padding: "22px", marginTop: "16px" }}>
+      <h2 style={{ fontSize: "15px", margin: "0 0 8px" }}>Linked assets</h2>
+      <p style={{ color: "var(--ch-text-muted)", fontSize: "13px", margin: "0 0 12px" }}>See the information and systems connected to this exposure. Manage each relationship from its asset record.</p>
+      {linkedAssetsError ? <p role="alert" style={{ color: "var(--ch-risk)", fontSize: "13px" }}>Linked assets could not be loaded. Reload this page to try again.</p> : <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "8px" }}>
+        {(linkedAssets ?? []).map((link) => {
+          const asset = one(link.assets);
+          return <li key={link.asset_id}>{asset ? <Link className="button secondary" style={{ justifyContent: "flex-start", textAlign: "left", whiteSpace: "normal", overflowWrap: "anywhere", maxWidth: "100%" }} href={`/app/assets/${asset.id}`}>{asset.reference}: {asset.description}</Link> : <span>Linked asset unavailable.</span>}</li>;
+        })}
+        {!linkedAssets?.length && <li style={{ color: "var(--ch-text-muted)", fontSize: "13px" }}>No assets linked to this risk yet.</li>}
+      </ul>}
     </Card>
     {aiSettings?.enabled && <AiSuggestionPanel target={{ targetType: "risk", targetId: risk.id }} />}
     <Card style={{ padding: "22px", marginTop: "16px" }}>

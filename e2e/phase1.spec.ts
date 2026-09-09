@@ -142,7 +142,9 @@ test("a user runs the Phase 1 workflow loop", async ({ page, request }, testInfo
   await currentEvidence.getByText("Manage links", { exact: true }).click();
   await currentEvidence.getByLabel(`Link ${currentEvidenceTitle} to a control`).selectOption({ index: 1 });
   await activate(currentEvidence.getByRole("button", { name: "Link", exact: true }));
-  await expect(currentEvidence.locator("span").filter({ hasText: /^CH-001:/ })).toBeVisible();
+  const currentControlLink = currentEvidence.getByRole("listitem").filter({ hasText: /^CH-001:/ });
+  await expect(currentControlLink).toHaveCount(1);
+  await expect(currentControlLink).toBeVisible();
 
   await page.goto("/app/assessment");
   await Promise.all([
@@ -155,7 +157,7 @@ test("a user runs the Phase 1 workflow loop", async ({ page, request }, testInfo
   await expect(page.getByRole("status", { name: "Save status" })).toHaveText("Saved");
 
   await page.goto("/app/risks");
-  const acceptAsTask = page.getByRole("link", { name: "Accept as task" }).first();
+  const acceptAsTask = page.getByRole("link", { name: "Create task", exact: true });
   await expect(acceptAsTask).toBeVisible();
   await acceptAsTask.click();
   const gapTitle = await page.getByRole("textbox", { name: "Title", exact: true }).inputValue();
@@ -211,7 +213,9 @@ test("a user runs the Phase 1 workflow loop", async ({ page, request }, testInfo
   expect(controlLabel).toBeTruthy();
   await staleEvidence.getByLabel(`Link ${staleEvidenceTitle} to a control`).selectOption({ label: controlLabel! });
   await activate(staleEvidence.getByRole("button", { name: "Link", exact: true }));
-  await expect(staleEvidence.locator("span").filter({ hasText: new RegExp(`^${controlCode}:`) })).toBeVisible();
+  const staleControlLink = staleEvidence.getByRole("listitem").filter({ hasText: new RegExp(`^${controlCode}:`) });
+  await expect(staleControlLink).toHaveCount(1);
+  await expect(staleControlLink).toBeVisible();
 
   const headers = { authorization: `Bearer ${localEnvironment("CRON_SECRET")}` };
   const firstSweep = await request.post("/api/cron/daily", { headers });

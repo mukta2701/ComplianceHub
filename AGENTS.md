@@ -28,3 +28,7 @@ Owner instruction confirmed 9 September 2026: after each coherent source or docu
 ## Visible change evidence
 
 Owner instruction confirmed 9 September 2026: explain every meaningful change in plain language, keep the local app running for review, and demonstrate changes in the app where possible. For backend-only work, provide sanitised terminal or test evidence with the behavior it proves and its limits. Clearly distinguish source pushed to GitHub from changes actually running in the local app. Do not present an unchanged build as showing a new feature.
+
+## Local Mac resource protection
+
+After the 9 September full-disk/low-swap failure, use a production-mode preview for extended local app review. Run heavy builds, tests and browser suites sequentially, using `node --import=tsx scripts/local-resource-guard.ts -- <command>` with the supported local environment. Read `docs/local-resource-guard.md` for limits and recovery. A Node heap setting alone does not cap native compiler memory. Preserve database volumes and personal files; clear only identified regenerable caches. Keep the requested preview independent of a temporary terminal session and verify both HTTP/database health and the actual page after recovery.

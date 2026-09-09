@@ -1382,12 +1382,19 @@ test("an invited Member opens Framework Coverage from read-only navigation", asy
 
   // Members use the deliberately reduced portal. Core operator registers must
   // remain inaccessible even when their paths are entered directly.
-  for (const route of ["risks", "assets", "tasks", "evidence", "assessment", "soa", "audits", "kpis"]) {
+  for (const route of ["risks", "assets", "evidence", "assessment", "soa", "audits", "kpis"]) {
     await page.goto(`/app/${route}`);
     await expect(page).toHaveURL(/\/app$/);
     await expect(page.getByRole("button", { name: /^(Save|Delete|Add|Create|New assessment|Generate draft|Seed)/i })).toHaveCount(0);
     await expect(page.getByRole("link", { name: /^(Add|New|Import)/i })).toHaveCount(0);
   }
+  // Assigned contribution access permits the Tasks register, while task
+  // creation and export remain operator-only (access-control matrix).
+  await page.goto("/app/tasks");
+  await expect(page).toHaveURL(/\/app\/tasks$/);
+  await expect(page.getByRole("heading", { name: "Tasks", exact: true, level: 1 })).toBeVisible();
+  await expect(page.getByRole("link", { name: "New task", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Add starter calendar", exact: true })).toHaveCount(0);
   for (const route of ["risks", "assets", "tasks", "evidence"]) {
     await page.goto(`/app/${route}/new`);
     await expect(page).toHaveURL(/\/app$/);

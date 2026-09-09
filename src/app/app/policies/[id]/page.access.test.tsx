@@ -26,17 +26,17 @@ function query<T>(result: T) {
   return builder;
 }
 
-function contextFor(role: "owner" | "admin" | "member", policyStatus: "draft" | "in_review" | "approved" | "archived" = "approved") {
+function contextFor(role: "owner" | "admin" | "member", policyStatus: "draft" | "in_review" | "approved" | "archived" = "approved", hasAccepted = role !== "member") {
   const results = {
     policies: query({
       data: {
         id: POLICY_ID, reference: "POL-001", title: "Security policy", body: "Approved policy text",
-        version: 3, status: policyStatus, review_due: null, owner_id: null,
+        version: 3, status: policyStatus, review_due: null, owner_id: null as string | null,
       },
       error: null,
     }),
     policy_acceptances: query({
-      data: role === "member" ? [] : [{ user_id: USER_ID, accepted_version: 3 }],
+      data: hasAccepted ? [{ user_id: USER_ID, accepted_version: 3 }] : [],
       error: null,
     }),
     memberships: query({
@@ -94,6 +94,46 @@ describe("policy detail role presentation", () => {
     expect(results.policy_acceptances.eq).toHaveBeenCalledWith("organisation_id", "78000000-0000-4000-8000-000000000003");
     expect(results.evidence_links.eq).toHaveBeenCalledWith("organisation_id", "78000000-0000-4000-8000-000000000003");
     expect(results.policy_feedback_threads.eq).toHaveBeenCalledWith("organisation_id", "78000000-0000-4000-8000-000000000003");
+  });
+
+  it("shows completed personal acceptance without asking the employee to repeat it", async () => {
+    contextFor("member", "approved", true);
+    render(await PolicyDetailPage({ params: Promise.resolve({ id: POLICY_ID }) }));
+    expect(screen.getByText("Accepted version 3")).toBeInTheDocument();
+    expect(screen.queryByText("Review the current version and record your own acceptance below.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "I accept this policy" })).not.toBeInTheDocument();
+  });
+
+  it("shows the current policy owner and an explicit unassigned option in the edit form", async () => {
+    const { results } = contextFor("admin");
+    results.policies.maybeSingle.mockResolvedValueOnce({ data: {
+      id: POLICY_ID, reference: "POL-001", title: "Security policy", body: "Approved policy text",
+      version: 3, status: "approved", review_due: null, owner_id: USER_ID,
+    }, error: null });
+
+    render(await PolicyDetailPage({ params: Promise.resolve({ id: POLICY_ID }) }));
+
+    expect(screen.getByLabelText("Policy owner")).toHaveValue(USER_ID);
+    expect(screen.getByRole("option", { name: "Unassigned", hidden: true })).toHaveValue("");
+  });
+
+  it.each(["draft", "in_review", "archived"] as const)("does not offer acceptance before approval when a policy is %s", async (status) => {
+    contextFor("admin", status, false);
+
+    render(await PolicyDetailPage({ params: Promise.resolve({ id: POLICY_ID }) }));
+
+    expect(screen.queryByRole("button", { name: "I accept this policy" })).not.toBeInTheDocument();
+    expect(screen.getByText("Personal acceptance is available only while this policy is approved. Previous acceptances remain on record.")).toBeInTheDocument();
+  });
+
+  it("preserves historical acceptance without implying that a withdrawn policy is approved", async () => {
+    contextFor("admin", "draft");
+
+    render(await PolicyDetailPage({ params: Promise.resolve({ id: POLICY_ID }) }));
+
+    expect(screen.getByText("Accepted version 3")).toBeInTheDocument();
+    expect(screen.getByText("Your earlier acceptance is preserved; this policy is not currently approved.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "I accept this policy" })).not.toBeInTheDocument();
   });
 
   it("shows Admins organisation reporting and policy management controls", async () => {

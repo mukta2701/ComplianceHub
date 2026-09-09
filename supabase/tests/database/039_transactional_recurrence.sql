@@ -1,5 +1,5 @@
 begin;
-select plan(16);
+select plan(24);
 
 insert into auth.users (
   id, instance_id, aud, role, email, encrypted_password, email_confirmed_at,
@@ -123,6 +123,17 @@ select set_config(
   '{"sub":"93000000-0000-4000-8000-000000000001","role":"authenticated"}',
   true
 );
+select throws_ok(
+  $$ update public.tasks set recurrence_generated_at = now() where id = '95000000-0000-4000-8000-000000000001' $$,
+  '42501', null, 'operators cannot forge generation through ordinary task edits');
+select throws_ok(
+  $$ insert into public.tasks (organisation_id, title, recurrence_generated_at, created_by)
+     values ('94000000-0000-4000-8000-000000000001', 'Forged generation', now(), '93000000-0000-4000-8000-000000000001') $$,
+  '42501', null, 'operators cannot forge generation when creating a task');
+select throws_ok(
+  $$ update public.tasks set policy_review_due_on = current_date where id = '95000000-0000-4000-8000-000000000001' $$,
+  '42501', null, 'operators cannot assign a policy cycle through ordinary task edits');
+
 select results_eq(
   $$ select public.complete_recurring_task(
     '95000000-0000-4000-8000-000000000001'
@@ -154,6 +165,19 @@ select is(
   '2026-08-31'::date,
   'the database derives the successor due date from the locked source row'
 );
+
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"93000000-0000-4000-8000-000000000001","role":"authenticated"}', true);
+update public.tasks set status = 'open' where id = '95000000-0000-4000-8000-000000000001';
+select is(public.complete_recurring_task('95000000-0000-4000-8000-000000000001'), true,
+  'a corrected recurring occurrence can be completed again');
+select is((select count(*) from public.tasks where organisation_id = '94000000-0000-4000-8000-000000000001' and id <> '95000000-0000-4000-8000-000000000001'), 1::bigint,
+  'reopening and completing an occurrence preserves exactly one successor');
+select throws_ok(
+  $$ update public.tasks set recurrence_generated_at = null where id = '95000000-0000-4000-8000-000000000001' $$,
+  '42501', null, 'editing cannot erase a generated successor marker');
+
+reset role;
 
 insert into public.tasks (
   id, organisation_id, title, status, due_on, recurrence, source, created_by
@@ -195,6 +219,24 @@ select results_eq(
     ('Weekly rollover'::text, '2027-01-04'::date) $$,
   'database recurrence arithmetic matches weekly and clamped calendar semantics'
 );
+
+-- Removing the actor's membership makes a previously visible task unavailable.
+reset role;
+insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data)
+values ('93000000-0000-4000-8000-000000000003', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'recurrence-removed@example.test', '', now(), '{}', '{}');
+insert into public.memberships (organisation_id, user_id, role)
+values ('94000000-0000-4000-8000-000000000001', '93000000-0000-4000-8000-000000000003', 'admin');
+delete from public.memberships where user_id = '93000000-0000-4000-8000-000000000003';
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"93000000-0000-4000-8000-000000000003","role":"authenticated"}', true);
+select is(public.complete_recurring_task('95000000-0000-4000-8000-000000000001'), false,
+  'removed membership cannot complete a formerly accessible occurrence');
+reset role;
+set local role service_role;
+select throws_ok(
+  $$ update public.tasks set recurrence_generated_at = now() where id = '95000000-0000-4000-8000-000000000002' $$,
+  '42501', null, 'the scheduled service cannot forge user recurrence history');
+reset role;
 
 select * from finish();
 rollback;

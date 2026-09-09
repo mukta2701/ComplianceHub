@@ -38,16 +38,25 @@ export async function updatePolicyAction(formData: FormData) {
   if (readError || !current) throw new Error("Policy not found");
   if (current.version !== expectedVersion) throw new Error("This policy changed while you were editing it. Refresh and try again.");
   const { data: updated, error } = await supabase.from("policies").update({
-    reference: parsed.reference, title: parsed.title, body: parsed.body, owner_id: parsed.ownerId,
+    reference: parsed.reference, title: parsed.title, body: parsed.body,
+    ...(formData.has("ownerId") ? { owner_id: parsed.ownerId } : {}),
     review_due: parsed.reviewDue, updated_at: new Date().toISOString(),
   }).eq("id", id).eq("organisation_id", organisation.id).eq("version", expectedVersion).select("version").maybeSingle();
   if (error) throw new Error("Could not update the policy");
   if (!updated) throw new Error("This policy changed while you were editing it. Refresh and try again.");
+  let notificationFailed = false;
   if (updated.version !== expectedVersion) {
-    const { error: notifyError } = await supabase.rpc("notify_policy_reaccept", { target_policy_id: id, note: `Now at version ${updated.version}.` });
-    if (notifyError) throw new Error("Updated the policy but could not notify members to re-accept");
+    try {
+      const { error: notifyError } = await supabase.rpc("notify_policy_reaccept", { target_policy_id: id, note: `Now at version ${updated.version}.` });
+      notificationFailed = Boolean(notifyError);
+    } catch {
+      // The policy write already committed; a notification transport error
+      // must not discard its confirmed revision or imply the save failed.
+      notificationFailed = true;
+    }
   }
   revalidatePath(`/app/policies/${id}`); revalidatePath("/app/policies");
+  return { version: updated.version, ...(notificationFailed ? { notificationFailed: true } : {}) };
 }
 
 export async function approvePolicyAction(formData: FormData) {

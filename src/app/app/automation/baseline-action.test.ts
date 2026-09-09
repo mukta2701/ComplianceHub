@@ -4,7 +4,7 @@ vi.mock('@/lib/app-context', () => ({ requireAppContext: async () => ({ organisa
 vi.mock('@/lib/security/rate-limit', () => ({ enforceRateLimit: vi.fn() }));
 vi.mock('@/lib/supabase/service', () => ({ createSupabaseServiceClient: () => ({ from: () => { const q = { select: () => q, eq: (...args: unknown[]) => { mocks.filters.push(args); return q; }, is: (...args: unknown[]) => { mocks.filters.push(args); return Promise.resolve({ data: mocks.sources, error: mocks.error }); } }; return q; } }) }));
 vi.mock('@/features/integrations/application/evidence-registry', () => ({ resolveEvidenceProvider: () => ({ collect: mocks.collect }) }));
-vi.mock('@/features/automation/application/collector-persistence', () => ({ automationConnectionId: (config: { automationConnectionId?: string }) => config.automationConnectionId ?? null, persistCollectedAutomation: mocks.persist }));
+vi.mock('@/features/automation/application/collector-persistence', () => ({ automationConnectionId: (config: { automationConnectionId?: string }) => config.automationConnectionId ?? null, persistCollectedAutomation: mocks.persist, recordCollectionHealth: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('@/lib/security/secrets', () => ({ decryptSecret: () => '' }));
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
 vi.mock('next/navigation', () => ({ redirect: (url: string) => { throw new Error(decodeURIComponent(url)); } }));
