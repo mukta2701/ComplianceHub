@@ -24,3 +24,7 @@ The owner is capable but learning and finds technical completion reports confusi
 ## GitHub synchronisation
 
 Owner instruction confirmed 9 September 2026: after each coherent source or documentation change, run the relevant checks, commit the intended changes and push the active feature branch to the existing GitHub origin. Do not leave completed work only on this Mac. This is standing authorisation to commit and push project work; it does not authorise force-pushes, merging to the default branch, deployment, or publishing secrets, private evidence, credentials, runtime logs or generated local artifacts. If a push fails, retain the local commit and report the unsynchronised state clearly.
+
+## Visible change evidence
+
+Owner instruction confirmed 9 September 2026: explain every meaningful change in plain language, keep the local app running for review, and demonstrate changes in the app where possible. For backend-only work, provide sanitised terminal or test evidence with the behavior it proves and its limits. Clearly distinguish source pushed to GitHub from changes actually running in the local app. Do not present an unchanged build as showing a new feature.
