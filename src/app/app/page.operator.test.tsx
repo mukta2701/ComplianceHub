@@ -123,6 +123,55 @@ beforeEach(() => {
 });
 
 describe("Owner dashboard", () => {
+  it("does not present an empty risk posture when open risks cannot be loaded", async () => {
+    hoisted.responses.risks[0] = { data: null, error: { message: "private database error" } };
+
+    await expect(AppHome()).rejects.toThrow("Could not load dashboard");
+  });
+
+  it.each([
+    ["pending SoA decisions", () => {
+      hoisted.responses.soa_registers[0] = { data: { id: "soa-1" } };
+      hoisted.responses.soa_items = [
+        { data: null, error: { message: "private database error" } },
+        { data: [] },
+      ];
+    }],
+    ["stale evidence actions", () => { hoisted.responses.evidence[0] = { data: null, error: { message: "private database error" } }; }],
+    ["policy approvals", () => { hoisted.responses.policies[0] = { data: null, error: { message: "private database error" } }; }],
+    ["due work", () => { hoisted.responses.tasks[0] = { data: null, error: { message: "private database error" } }; }],
+    ["recent activity", () => { hoisted.responses.audit_events[0] = { data: null, error: { message: "private database error" } }; }],
+    ["evidence freshness", () => { hoisted.responses.evidence[1] = { data: null, error: { message: "private database error" } }; }],
+    ["risk configuration", () => { hoisted.responses.risk_matrix_config[0] = { data: null, error: { message: "private database error" } }; }],
+    ["assessment count", () => { hoisted.responses.assessment_sessions[0] = { data: null, count: null, error: { message: "private database error" } }; }],
+    ["SoA snapshot count", () => { hoisted.responses.soa_snapshots[0] = { data: null, count: null, error: { message: "private database error" } }; }],
+    ["risk count", () => { hoisted.responses.risks[1] = { data: null, count: null, error: { message: "private database error" } }; }],
+    ["evidence count", () => { hoisted.responses.evidence[2] = { data: null, count: null, error: { message: "private database error" } }; }],
+    ["policy count", () => { hoisted.responses.policies[1] = { data: null, count: null, error: { message: "private database error" } }; }],
+    ["SoA register count", () => { hoisted.responses.soa_registers[1] = { data: null, count: null, error: { message: "private database error" } }; }],
+    ["membership count", () => { hoisted.responses.memberships[0] = { data: null, count: null, error: { message: "private database error" } }; }],
+    ["invitation count", () => { hoisted.responses.invitations[0] = { data: null, count: null, error: { message: "private database error" } }; }],
+  ])("fails closed when the %s cannot be loaded", async (_label, failQuery) => {
+    failQuery();
+
+    await expect(AppHome()).rejects.toThrow("Could not load dashboard");
+  });
+
+  it("keeps successful empty results and absent optional configuration valid", async () => {
+    hoisted.responses.evidence = [
+      { data: [], projectMachineProvenance: true },
+      { data: [] },
+      { data: null, count: 0 },
+    ];
+
+    render(await AppHome());
+
+    expect(screen.getByText("No priority items are shown. Review All tasks for the full work list, including tasks without due dates.")).toBeVisible();
+    expect(screen.getByText("Residual exposure — no open risks yet")).toBeVisible();
+    expect(screen.getByText("Nothing has changed yet. Activity shows here as you and your team make decisions.")).toBeVisible();
+    expect(screen.getAllByRole("link", { name: "Start assessment" })).toHaveLength(2);
+  });
+
   it("counts GitHub evidence freshness without presenting it as human replacement work", async () => {
     render(await AppHome());
 

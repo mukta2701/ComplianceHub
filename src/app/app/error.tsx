@@ -5,7 +5,7 @@ import { Card } from "@/components/ui";
 
 // Segment error boundary for the authenticated app — renders inside the shell, so
 // the sidebar/header stay put. Reports to the self-hosted sink, offers recovery.
-export default function AppError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
+export default function AppError({ error, retry }: { error: Error & { digest?: string }; retry: () => void }) {
   useEffect(() => {
     fetch("/api/observability", {
       method: "POST", headers: { "content-type": "application/json" }, keepalive: true,
@@ -18,7 +18,7 @@ export default function AppError({ error, reset }: { error: Error & { digest?: s
       <h2 style={{ fontSize: 20, margin: "0 0 8px" }}>This page hit an error</h2>
       <p style={{ fontSize: 14, color: "#596273", lineHeight: 1.55, margin: "0 0 22px" }}>The problem has been logged. Try again — if it keeps happening, come back in a moment.</p>
       <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
-        <button className="button" onClick={reset}>Try again</button>
+        <button className="button" onClick={retry}>Try again</button>
         <a className="button secondary" href="/app">Go to dashboard</a>
       </div>
     </Card>

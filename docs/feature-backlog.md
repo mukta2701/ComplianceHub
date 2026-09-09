@@ -199,4 +199,4 @@ certification, readiness, security, or overall-compliance claims.
 
 ## Ongoing lifecycle quality programme — 9 September 2026
 
-The [evidence-backed assessment and linked tickets](plans/operating-lifecycle-quality/assessment.md) cover policy accountability, repeat review cycles and connected review clarity across the broader company programme. The release checklist remains the sole overall status source. Collector observation semantics and export expansion are separately identified decisions/follow-ups.
+The [evidence-backed assessment and linked tickets](plans/operating-lifecycle-quality/assessment.md) cover policy accountability, repeat review cycles and connected review clarity across the broader company programme. The release checklist remains the sole overall status source. Collector observation semantics and export expansion are separately identified decisions/follow-ups. The next [dashboard/audit availability increment](superpowers/specs/2026-09-09-unavailable-dashboard-data.md) prevents failed reads from appearing as zero work. Asset import ownership inferred from free-text location is also recorded in the assessment for a separate correction.

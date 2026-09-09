@@ -44,8 +44,8 @@ export default async function AuditsPage() {
     ) : (<>
     <div className="stats-grid">
       <Stat label="OPEN AUDITS" value={openAudits} detail="not yet closed" />
-      <Stat label="OPEN FINDINGS" value={f.open} detail="awaiting closure" tone="amber" />
-      <Stat label="NON-CONFORMITIES" value={f.openNonConformities} detail="minor or major, still open" tone="red" />
+      <Stat label="OPEN FINDINGS" value={findingsError ? "Unavailable" : f.open} detail={findingsError ? "Finding data is unavailable." : "awaiting closure"} tone="amber" />
+      <Stat label="NON-CONFORMITIES" value={findingsError ? "Unavailable" : f.openNonConformities} detail={findingsError ? "Finding data is unavailable." : "minor or major, still open"} tone="red" />
     </div>
     <Card><div className="data-table-wrap" role="region" aria-label="Internal audits table" tabIndex={0}><table>
       <thead><tr><th>Ref</th><th>Audit</th><th>Status</th><th>Window</th></tr></thead>

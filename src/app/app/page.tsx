@@ -69,6 +69,14 @@ export default async function AppHome() {
     return <MemberOverview data={overview} />;
   }
   const today = new Date().toISOString().slice(0, 10);
+  const requireDashboardData = <T,>({ data, error }: { data: T; error: unknown }) => {
+    if (error) throw new Error("Could not load dashboard");
+    return data;
+  };
+  const requireDashboardCount = ({ count, error }: { count: number | null; error: unknown }) => {
+    if (error) throw new Error("Could not load dashboard");
+    return count;
+  };
 
   // The latest SoA register anchors readiness, the maturity chart, and the
   // pending applicability decisions that block finalisation.
@@ -91,17 +99,17 @@ export default async function AppHome() {
     evidenceStatuses,
     risksForHeat,
     riskConfigRow,
-    { count: assessments },
-    { count: snapshots },
-    { count: allRisks },
-    { count: liveEvidence },
-    { count: policies },
-    { count: soaRegisters },
-    { count: members },
-    { count: invites },
+    assessments,
+    snapshots,
+    allRisks,
+    liveEvidence,
+    policies,
+    soaRegisters,
+    members,
+    invites,
   ] = await Promise.all([
     register
-      ? supabase.from("soa_items").select("id,control_code,control_title").eq("organisation_id", organisation.id).eq("soa_register_id", register.id).eq("status", "pending").order("position").limit(25).then((r) => r.data)
+      ? supabase.from("soa_items").select("id,control_code,control_title").eq("organisation_id", organisation.id).eq("soa_register_id", register.id).eq("status", "pending").order("position").limit(25).then(requireDashboardData)
       : Promise.resolve([] as { id: string; control_code: string; control_title: string }[]),
     register
       ? supabase.from("soa_items").select("status").eq("organisation_id", organisation.id).eq("soa_register_id", register.id).then((r) => {
@@ -109,21 +117,21 @@ export default async function AppHome() {
           return r.data;
         })
       : Promise.resolve([] as { status: string }[]),
-    supabase.from("evidence").select("id,title,status,valid_until,machine_provenance:github_evidence_provenance!github_evidence_provenance_evidence_tenant_fk()").eq("organisation_id", organisation.id).in("status", ["expiring", "expired"]).is("machine_provenance", null).order("valid_until", { ascending: true, nullsFirst: false }).limit(25).then((r) => r.data),
-    supabase.from("policies").select("id,reference,title,review_due").eq("organisation_id", organisation.id).eq("status", "in_review").order("reference").limit(25).then((r) => r.data),
-    supabase.from("tasks").select("id,title,due_on,source,owner_id").eq("organisation_id", organisation.id).in("status", ["open", "in_progress"]).not("due_on", "is", null).order("due_on", { ascending: true }).limit(25).then((r) => r.data),
-    supabase.from("audit_events").select("action,entity_type,occurred_at").eq("organisation_id", organisation.id).order("occurred_at", { ascending: false }).limit(6).then((r) => r.data),
-    supabase.from("evidence").select("status").eq("organisation_id", organisation.id).in("status", ["current", "expiring", "expired"]).limit(3000).then((r) => r.data),
-    supabase.from("risks").select("likelihood,impact,residual_likelihood,residual_impact").eq("organisation_id", organisation.id).neq("status", "closed").limit(500).then((r) => r.data),
-    supabase.from("risk_matrix_config").select("low_max,moderate_max,high_max,appetite_threshold").eq("organisation_id", organisation.id).maybeSingle().then((r) => r.data),
-    supabase.from("assessment_sessions").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id),
-    supabase.from("soa_snapshots").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id),
-    supabase.from("risks").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id),
-    supabase.from("evidence").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).in("status", ["current", "expiring", "expired"]),
-    supabase.from("policies").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id),
-    supabase.from("soa_registers").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id),
-    supabase.from("memberships").select("user_id", { count: "exact", head: true }).eq("organisation_id", organisation.id),
-    supabase.from("invitations").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id),
+    supabase.from("evidence").select("id,title,status,valid_until,machine_provenance:github_evidence_provenance!github_evidence_provenance_evidence_tenant_fk()").eq("organisation_id", organisation.id).in("status", ["expiring", "expired"]).is("machine_provenance", null).order("valid_until", { ascending: true, nullsFirst: false }).limit(25).then(requireDashboardData),
+    supabase.from("policies").select("id,reference,title,review_due").eq("organisation_id", organisation.id).eq("status", "in_review").order("reference").limit(25).then(requireDashboardData),
+    supabase.from("tasks").select("id,title,due_on,source,owner_id").eq("organisation_id", organisation.id).in("status", ["open", "in_progress"]).not("due_on", "is", null).order("due_on", { ascending: true }).limit(25).then(requireDashboardData),
+    supabase.from("audit_events").select("action,entity_type,occurred_at").eq("organisation_id", organisation.id).order("occurred_at", { ascending: false }).limit(6).then(requireDashboardData),
+    supabase.from("evidence").select("status").eq("organisation_id", organisation.id).in("status", ["current", "expiring", "expired"]).limit(3000).then(requireDashboardData),
+    supabase.from("risks").select("likelihood,impact,residual_likelihood,residual_impact").eq("organisation_id", organisation.id).neq("status", "closed").limit(500).then(requireDashboardData),
+    supabase.from("risk_matrix_config").select("low_max,moderate_max,high_max,appetite_threshold").eq("organisation_id", organisation.id).maybeSingle().then(requireDashboardData),
+    supabase.from("assessment_sessions").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).then(requireDashboardCount),
+    supabase.from("soa_snapshots").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).then(requireDashboardCount),
+    supabase.from("risks").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).then(requireDashboardCount),
+    supabase.from("evidence").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).in("status", ["current", "expiring", "expired"]).then(requireDashboardCount),
+    supabase.from("policies").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).then(requireDashboardCount),
+    supabase.from("soa_registers").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).then(requireDashboardCount),
+    supabase.from("memberships").select("user_id", { count: "exact", head: true }).eq("organisation_id", organisation.id).then(requireDashboardCount),
+    supabase.from("invitations").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).then(requireDashboardCount),
   ]);
 
   const actionInputs: DashboardActionInput[] = [
