@@ -48,6 +48,17 @@ test("assigned owners submit, coordinator reviews, and leadership reads the sepa
     await expect(secondOwner.getByText("Awaiting review", { exact: true }).first()).toBeVisible();
     await secondOwner.screenshot({ path: testInfo.outputPath("owner-awaiting-review.png"), fullPage: true });
 
+    const { error: closeError } = await coordinator.from("tasks").update({ status: "done" }).eq("id", tasks[1].id);
+    expect(closeError).toBeNull();
+    await secondOwner.reload();
+    await expect(secondOwner.getByText("Task closed — no longer reviewable", { exact: true })).toBeVisible();
+    await expect(secondOwner.getByText("Waiting for review.", { exact: true })).toHaveCount(0);
+    await secondOwner.screenshot({ path: testInfo.outputPath("closed-task-pending-history.png"), fullPage: true });
+    const { error: reopenError } = await coordinator.from("tasks").update({ status: "in_progress" }).eq("id", tasks[1].id);
+    expect(reopenError).toBeNull();
+    await secondOwner.reload();
+    await expect(secondOwner.getByText("Awaiting review", { exact: true }).first()).toBeVisible();
+
     await reader.reload();
     await expect(reader.getByRole("heading", { name: "Submission history", exact: true })).toBeVisible();
     await expect(reader.getByText("Accepted", { exact: true }).first()).toBeVisible();
