@@ -42,19 +42,22 @@ function ReviewForm({ taskId, contributionId, requestId }: { taskId: string; con
 }
 export function TaskContributions(props: Props) {
   const { canSubmit, reviewableIds } = contributionPermissions(props);
+  const closed = props.status === "done" || props.status === "cancelled";
   const currentPending = props.contributions.some((c) => c.decision === "pending" && c.assignment_revision === props.assignmentRevision);
   return <Card style={{ padding: "22px", marginTop: "16px" }}>
     <p style={{ marginTop: 0 }}>Submitting or accepting evidence does not complete the task or verify a finding.</p>
     {canSubmit && <SubmitForm key={`${props.assignmentRevision}-${props.contributions.length}`} taskId={props.taskId} assignmentRevision={props.assignmentRevision} requestId={props.requestId} resubmitting={props.contributions.some((c) => c.decision === "changes_requested" && c.assignment_revision === props.assignmentRevision)} />}
-    {!canSubmit && currentPending && props.ownerId === props.userId && <p><strong>Waiting for review.</strong> A different workspace coordinator must review your saved note.</p>}
+    {closed && currentPending && <p>This task is closed. A workspace coordinator must reopen it before this saved note can be reviewed.</p>}
+    {!closed && !canSubmit && currentPending && props.ownerId === props.userId && <p><strong>Waiting for review.</strong> A different workspace coordinator must review your saved note.</p>}
     <h2 style={{ fontSize: "17px", marginTop: "24px" }}>Submission history</h2>
     {!props.contributions.length && <p>No work has been submitted for review yet.</p>}
     <div style={{ display: "grid", gap: "16px" }}>
       {props.contributions.map((c) => {
         const obsolete = c.decision === "pending" && c.assignment_revision !== props.assignmentRevision;
-        const label = obsolete ? "Assignment changed — no longer reviewable" : c.decision === "pending" ? "Awaiting review" : c.decision === "accepted" ? "Accepted" : "Changes requested";
+        const closedPending = c.decision === "pending" && closed;
+        const label = obsolete ? "Assignment changed — no longer reviewable" : closedPending ? "Task closed — no longer reviewable" : c.decision === "pending" ? "Awaiting review" : c.decision === "accepted" ? "Accepted" : "Changes requested";
         return <article key={c.id} style={{ borderTop: "1px solid var(--line, #e0e4ec)", paddingTop: "16px", overflowWrap: "anywhere" }}>
-          <Pill tone={obsolete ? "neutral" : c.decision === "accepted" ? "green" : "amber"}>{label}</Pill>
+          <Pill tone={obsolete || closedPending ? "neutral" : c.decision === "accepted" ? "green" : "amber"}>{label}</Pill>
           <p><strong>{props.names[c.submitter_id] ?? "Former workspace member"}</strong> · Submitted <time dateTime={c.created_at}>{contributionTime(c.created_at)}</time></p>
           <p style={{ whiteSpace: "pre-wrap" }}>{c.note}</p>
           {c.reviewed_at && <div style={{ background: "var(--surface-muted, #f5f7fb)", padding: "12px", borderRadius: "8px" }}>

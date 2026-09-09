@@ -39,6 +39,30 @@ describe("task contributions", () => {
     expect(screen.queryByRole("button", { name: "Submit for review" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Accept evidence" })).not.toBeInTheDocument();
   });
+  it.each(["done", "cancelled"])("explains why an assignee's pending note cannot be reviewed on a %s task", (status) => {
+    render(<TaskContributions {...base} status={status} contributions={[pending]} />);
+    expect(screen.getByText("Task closed — no longer reviewable")).toBeInTheDocument();
+    expect(screen.getByText("This task is closed. A workspace coordinator must reopen it before this saved note can be reviewed.")).toBeInTheDocument();
+    expect(screen.getByText("Restore took 5 minutes")).toBeInTheDocument();
+    expect(screen.queryByText("Waiting for review.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Awaiting review")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Submit for review" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Accept evidence" })).not.toBeInTheDocument();
+  });
+  it.each(["done", "cancelled"])("tells the coordinator to reopen a %s task before reviewing its pending note", (status) => {
+    render(<TaskContributions {...base} userId="reviewer" role="admin" status={status} contributions={[pending]} />);
+    expect(screen.getByText("Task closed — no longer reviewable")).toBeInTheDocument();
+    expect(screen.getByText("This task is closed. A workspace coordinator must reopen it before this saved note can be reviewed.")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Review note" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Request changes" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Awaiting review")).not.toBeInTheDocument();
+  });
+  it.each(["open", "in_progress"])("keeps active waiting guidance for the assignee on an %s task", (status) => {
+    render(<TaskContributions {...base} status={status} contributions={[pending]} />);
+    expect(screen.getByText("Waiting for review.")).toBeInTheDocument();
+    expect(screen.getByText("Awaiting review")).toBeInTheDocument();
+    expect(screen.queryByText(/must reopen/)).not.toBeInTheDocument();
+  });
   it("gives independent coordinator exact-version review controls", () => {
     render(<TaskContributions {...base} userId="reviewer" role="admin" contributions={[pending]} />);
     expect(screen.getByRole("textbox", { name: "Review note" })).toBeInTheDocument();
