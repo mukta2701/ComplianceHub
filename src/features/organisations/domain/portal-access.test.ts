@@ -20,11 +20,15 @@ describe("workspace portal route access", () => {
     "/app/frameworks",
     "/app/reports/readiness",
     "/app/notifications",
+    "/app/baseline",
   ])("allows a Member to open the curated route %s", (pathname) => {
     expect(workspaceRequestAccess(pathname, { authenticated: true, role: "member" })).toBe("allow");
   });
 
   it.each([
+    "/app/baseline/edit",
+    "/app/baseline-evil",
+    "/app/setup",
     "/app/settings",
     "/app/integrations",
     "/app/tasks/new",

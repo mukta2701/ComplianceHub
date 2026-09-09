@@ -30,6 +30,7 @@ describe("MemberOverview", () => {
       "Review policies",
       "View monitoring",
       "Open leadership report",
+      "View saved baseline",
     ]);
   });
 

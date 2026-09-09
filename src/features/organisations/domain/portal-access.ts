@@ -25,6 +25,7 @@ const MEMBER_APP_PATHS = new Set([
   "/app/frameworks",
   "/app/reports/readiness",
   "/app/notifications",
+  "/app/baseline",
 ]);
 
 const MEMBER_API_PATHS = new Set([

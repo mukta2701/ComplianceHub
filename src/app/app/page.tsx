@@ -234,6 +234,8 @@ export default async function AppHome() {
       action={<Link className="button primary" href={primaryHref}>{primaryLabel} <Icon name="arrow" /></Link>}
     />
 
+    <p><Link className="button secondary" href="/app/baseline">Continue your baseline</Link></p>
+
     {/* Hero: readiness gauge + what to do next. */}
     <div className="dash-hero">
       <Card className="gauge-card">

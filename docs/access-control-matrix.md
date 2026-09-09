@@ -36,6 +36,8 @@ policies are reviewed.
 | `auditor_access_tokens` | R/W | — | Bearer-token lifecycle is operator-only. |
 | `audits` | R/W | R | Member receives the curated audit register. |
 | `control_crosswalks` | R/W | R | Organisation-authored mapping notes are read-only for Members. |
+| `baseline_progress` | R | — | Coordinator-only resumable objective and assessment selection. No direct writes; `save_baseline_progress` checks current operator membership, request identity and expected revision. Immediate draft retries replay; an earlier draft retry after a newer save rejects stale. |
+| `baseline_snapshots` | R | R | Immutable dated source copies; coordinator saves through `save_baseline_progress`. Snapshot request replay returns the original record without changing current progress. `/app/baseline` exposes preserved details to Members, with no editing controls or additional live-source route access. This does not publish or replace `leadership_report_snapshots`. |
 | `evidence` | R/W | R | Member can read metadata but cannot add/supersede evidence. |
 | `evidence_links` | R/W | R | Member cannot change evidence/control relationships. |
 | `evidence_sources` | R/W | — | Provider configuration and tokens are operator-only. |
