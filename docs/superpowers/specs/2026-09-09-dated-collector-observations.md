@@ -55,3 +55,9 @@ Official GitHub collection/materialisation, every-poll history, new provider ada
 ## Further Notes
 
 The owner selected dated snapshots rather than change-only storage. The approved scope accepts extra dated records and review drafts; it does not establish a retention redesign. Existing retention rules continue to apply. This increment requires an additive schema change and coordinated application rollout because old lifetime lookups cannot interpret multiple keyed observations. Capture the actual implementation starting commit when work begins; `4fe6d87` is the preparation reference, not a claim that unrelated work must be included in its review.
+
+## Review refinements
+
+Collector provenance is written only by trusted collection/database processes. Adding nullable observation metadata must not let an authenticated person fabricate automatic collection records through table-wide INSERT grants. Ordinary manual evidence remains available through its existing roles; source provenance fields are reserved for collector writes. This enforces the existing separation between manual evidence and provider-sourced records.
+
+Show the recorded result alongside its date/resource so changed same-day observations are distinguishable. Legacy identity warnings qualify known historical dates/references rather than hiding them.

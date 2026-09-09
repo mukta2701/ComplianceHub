@@ -31,16 +31,19 @@ export async function persistCollectedAutomation({
   if (connectionError) throw connectionError;
   if (!connection || !["connected", "error"].includes(connection.status)) return false;
 
+  const initial = mapCollectedEvidenceToAutomation({ organisationId, connectionId: connection.id, connectionOwnerId: connection.owner_id, assignedOwnerId: null, retentionDays: connection.retention_days, provider, collected });
   const { data: existingSourceObject, error: sourceError } = await supabase.from("source_objects")
-    .select("id").eq("connection_id", connection.id).eq("external_ref", collected.externalRef).maybeSingle();
+    .select("id").eq("organisation_id", organisationId).eq("connection_id", connection.id)
+    .eq("external_ref", collected.externalRef).eq("observation_key", initial.sourceObject.observationKey).maybeSingle();
   if (sourceError) throw sourceError;
   let sourceObject = existingSourceObject;
   if (!sourceObject) {
-    const initial = mapCollectedEvidenceToAutomation({ organisationId, connectionId: connection.id, connectionOwnerId: connection.owner_id, assignedOwnerId: null, retentionDays: connection.retention_days, provider, collected });
     const { data, error } = await supabase.from("source_objects").insert({
       organisation_id: organisationId,
       connection_id: connection.id,
       external_ref: initial.sourceObject.externalRef,
+      observation_key: initial.sourceObject.observationKey,
+      collected_on: initial.sourceObject.collectedOn,
       title: initial.sourceObject.title,
       source_url: initial.sourceObject.sourceUrl,
       content_ref: initial.sourceObject.contentRef,
@@ -49,15 +52,22 @@ export async function persistCollectedAutomation({
       status: "pending",
       expires_at: initial.sourceObject.expiresAt,
     }).select("id").single();
-    if (error || !data) throw error ?? new Error("Could not persist automation provenance");
-    sourceObject = data;
+    if (error?.code === "23505") {
+      const { data: concurrentSourceObject, error: concurrentSourceError } = await supabase.from("source_objects")
+        .select("id").eq("organisation_id", organisationId).eq("connection_id", connection.id)
+        .eq("external_ref", collected.externalRef).eq("observation_key", initial.sourceObject.observationKey).maybeSingle();
+      if (concurrentSourceError || !concurrentSourceObject) throw concurrentSourceError ?? error;
+      sourceObject = concurrentSourceObject;
+    } else {
+      if (error || !data) throw error ?? new Error("Could not persist automation provenance");
+      sourceObject = data;
+    }
   }
 
   const { data: existingSignal, error: existingSignalError } = await supabase.from("automation_signals")
     .select("id").eq("organisation_id", organisationId).eq("source_object_id", sourceObject.id).maybeSingle();
   if (existingSignalError) throw existingSignalError;
 
-  const initial = mapCollectedEvidenceToAutomation({ organisationId, connectionId: connection.id, connectionOwnerId: connection.owner_id, assignedOwnerId: null, retentionDays: connection.retention_days, provider, collected });
   const { data: assignment, error: assignmentError } = await supabase.from("automation_assignments")
     .select("owner_id").eq("organisation_id", organisationId).eq("area", initial.signal.area).maybeSingle();
   if (assignmentError) throw assignmentError;

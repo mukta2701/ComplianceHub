@@ -35,18 +35,18 @@ export async function collectEvidence(supabase: SupabaseClient): Promise<{ colle
         accessToken: decryptSecret(source.access_token) ?? "",
       });
       for (const item of items) {
-        const row = toEvidenceRow(item, { organisationId: source.organisation_id, sourceId: source.id });
-        // Dedup by the Stage-1 partial unique index (source_id, external_ref).
+        const row = toEvidenceRow(item, { organisationId: source.organisation_id, sourceId: source.id, provider: source.provider as EvidenceProviderKind });
+        // Reuse an exact observation only. A later collection date or changed
+        // provider result gets its own immutable evidence record.
         // Evidence rows are immutable except for status (DB trigger), so a
         // re-collect of an already-stored item is a no-op refresh rather than a
         // rewrite: look it up first, insert only when absent. This keeps the
         // sweep idempotent — re-running never duplicates a collected item.
-        const { data: existing, error: lookupError } = await supabase.from("evidence")
-          .select("id")
-          .eq("source_id", source.id)
-          .eq("external_ref", row.external_ref)
-          .eq("organisation_id", source.organisation_id)
-          .maybeSingle();
+        const findObservation = () => supabase.from("evidence")
+          .select("id").eq("organisation_id", source.organisation_id)
+          .eq("source_id", source.id).eq("external_ref", row.external_ref)
+          .eq("observation_key", row.observation_key).maybeSingle();
+        const { data: existing, error: lookupError } = await findObservation();
         if (lookupError) throw lookupError;
         if (existing) { refreshed += 1; continue; }
         const { error: insertError } = await supabase.from("evidence").insert({
@@ -54,6 +54,12 @@ export async function collectEvidence(supabase: SupabaseClient): Promise<{ colle
           // The source's connector is recorded as the evidence author.
           created_by: source.connected_by,
         });
+        if (insertError?.code === "23505") {
+          const { data: winner, error: winnerError } = await findObservation();
+          if (winnerError || !winner) throw winnerError ?? insertError;
+          refreshed += 1;
+          continue;
+        }
         if (insertError) throw insertError;
         collected += 1;
       }

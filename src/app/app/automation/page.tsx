@@ -29,7 +29,7 @@ export default async function AutomationPage({ searchParams }: { searchParams: P
   const { message } = await searchParams;
   const [{ data: connections, error: connectionsError }, { data: proposals, error: proposalsError }, { data: aiSettings, error: aiSettingsError }, { data: aiDrafts, error: aiDraftsError }, { data: sources, error: sourcesError }] = await Promise.all([
     supabase.from("connector_connections").select("id,provider,label,status,last_collected_at,last_error_at").eq("organisation_id", organisation.id).order("created_at", { ascending: false }),
-    supabase.from("automation_proposals").select("id,target_type,assigned_to,status,output,source_references,created_at,automation_signals(signal_type,summary,confidence,occurred_at,connector_connections(label,provider)),automation_proposal_sources(source_objects(title,source_url))").eq("organisation_id", organisation.id).order("created_at", { ascending: false }).limit(100),
+    supabase.from("automation_proposals").select("id,target_type,assigned_to,status,output,source_references,created_at,automation_signals(signal_type,summary,confidence,occurred_at,connector_connections(label,provider)),automation_proposal_sources(source_objects(title,source_url,external_ref,observation_key,collected_on))").eq("organisation_id", organisation.id).order("created_at", { ascending: false }).limit(100),
     supabase.from("ai_workspace_settings").select("enabled").eq("organisation_id", organisation.id).maybeSingle(),
     supabase.from("ai_suggestions").select("target_id,output,status,created_at").eq("organisation_id", organisation.id).eq("target_type", "automation_proposal").eq("status", "draft").order("created_at", { ascending: false }),
     supabase.from("evidence_sources").select("config,revoked_at").eq("organisation_id", organisation.id).is("revoked_at", null),
@@ -55,7 +55,7 @@ export default async function AutomationPage({ searchParams }: { searchParams: P
       output: asOutput(proposal.output),
       createdAt: proposal.created_at,
       signal: signal ? { signalType: signal.signal_type, summary: signal.summary, confidence: signal.confidence, occurredAt: signal.occurred_at, provider: connection?.provider, connectionLabel: connection?.label } : null,
-      source: source ? { title: source.title, sourceUrl: source.source_url } : null,
+      source: source ? { title: source.title, sourceUrl: source.source_url, externalRef: source.external_ref, observationKey: source.observation_key, collectedOn: source.collected_on } : null,
       aiDraft: aiDraft ? { explanation: aiOutput.explanation, recommendedAction: aiOutput.recommendedAction } : null,
     };
   });

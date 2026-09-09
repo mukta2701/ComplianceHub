@@ -22,6 +22,8 @@ describe("collected evidence automation mapping", () => {
 
     expect(draft.sourceObject).toMatchObject({
       externalRef: "repo:acme/app:branches",
+      observationKey: expect.stringMatching(/^v1:[0-9a-f]{64}$/),
+      collectedOn: "2026-07-10",
       title: "Branch protection settings",
       classification: "metadata",
       contentRef: "evidence://repo:acme/app:branches",

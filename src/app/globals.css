@@ -550,7 +550,7 @@ a.heat-cell:hover{outline:2px solid var(--ink);outline-offset:-2px}
 .automation-draft-actions .button{min-height:40px}
 .automation-dismiss-form{flex:1 1 280px}
 .automation-dismiss-form input{min-width:0;flex:1 1 200px;min-height:40px}
-@media(max-width:760px){.automation-inbox-toolbar{align-items:stretch;flex-direction:column}.automation-inbox-note{text-align:left}.automation-provenance{grid-template-columns:1fr 1fr}.automation-draft-heading{flex-direction:column}.automation-draft-actions{align-items:stretch;flex-direction:column}.automation-draft-actions form,.automation-draft-actions .button{width:100%}.automation-dismiss-form{align-items:stretch;flex-direction:column}.automation-dismiss-form input{width:100%;flex-basis:auto}}
+@media(max-width:760px){.automation-inbox-toolbar{align-items:stretch;flex-direction:column}.automation-inbox-note{text-align:left}.automation-provenance{grid-template-columns:1fr 1fr}.automation-draft-heading{flex-direction:column}.automation-draft-actions{align-items:stretch;flex-direction:column}.automation-draft-actions form,.automation-draft-actions .button{width:100%}.automation-dismiss-form{flex:0 0 auto;align-items:stretch;flex-direction:column}.automation-dismiss-form input{width:100%;flex-basis:auto}}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
 
 /* Evidence stays scannable; detailed mappings and editing are opt-in. */

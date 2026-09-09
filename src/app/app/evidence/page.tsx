@@ -14,7 +14,7 @@ import { AiSuggestionPanel } from "@/components/ai-suggestion-panel";
 const TONE: Record<string, string> = { current: "green", expiring: "amber", expired: "red", superseded: "neutral", withdrawn: "neutral" };
 const PROVIDER_LABELS: Record<string, string> = { google_workspace: "Google Workspace", github: "GitHub", aws: "AWS" };
 
-const EVIDENCE_COLUMNS = "id,title,description,kind,url,storage_path,status,collected_on,valid_until,source_id,evidence_sources(provider),evidence_links(id,control_id,risk_id,task_id,policy_id,audit_checklist_item_id,audit_checklist_items(audit_id,checklist_item),controls(code,title),risks(reference),tasks(title),policies(reference,title))";
+const EVIDENCE_COLUMNS = "id,title,description,kind,url,storage_path,status,collected_on,valid_until,source_id,observation_key,external_ref,evidence_sources(provider),evidence_links(id,control_id,risk_id,task_id,policy_id,audit_checklist_item_id,audit_checklist_items(audit_id,checklist_item),controls(code,title),risks(reference),tasks(title),policies(reference,title))";
 
 export default async function EvidencePage({
   searchParams,
@@ -93,7 +93,7 @@ export default async function EvidencePage({
       };
       return <Card key={item.id} id={`evidence-${item.id}`} style={{ minWidth: 0, overflow: "hidden", padding: "20px" }}>
       <div style={{ display: "flex", minWidth: 0, flexWrap: "wrap", justifyContent: "space-between", gap: "12px", alignItems: "center" }}>
-        <div style={{ minWidth: 0, flex: "1 1 320px" }}><h2 style={{ fontSize: "15px", margin: 0, overflowWrap: "anywhere" }}>{item.title}</h2><p style={{ fontSize: "12px", color: "#596273", margin: "3px 0 0", overflowWrap: "anywhere" }}>Collected {item.collected_on}{item.valid_until && ` · valid until ${item.valid_until}`}</p></div>
+        <div style={{ minWidth: 0, flex: "1 1 320px" }}><h2 style={{ fontSize: "15px", margin: 0, overflowWrap: "anywhere" }}>{item.title}</h2><p style={{ fontSize: "12px", color: "#596273", margin: "3px 0 0", overflowWrap: "anywhere" }}>Collected {item.collected_on}{item.valid_until && ` · valid until ${item.valid_until}`}{item.source_id && item.observation_key && ` · Resource: ${item.external_ref ?? "reference unavailable"}`}</p>{item.source_id && !item.observation_key && <><p style={{ fontSize: "12px", color: "#596273", margin: "3px 0 0", overflowWrap: "anywhere" }}>Legacy observation identity unknown</p>{item.external_ref && <p style={{ fontSize: "12px", color: "#596273", margin: "3px 0 0", overflowWrap: "anywhere" }}>Resource: {item.external_ref}</p>}</>}</div>
         <div style={{ display: "flex", minWidth: 0, maxWidth: "100%", flexWrap: "wrap", alignItems: "center", gap: "12px" }}>{item.source_id && (() => { const src = one(item.evidence_sources); const provider = src?.provider ? PROVIDER_LABELS[src.provider] ?? src.provider : null; return <Pill tone="neutral">{provider ? `Auto · ${provider}` : "Auto"}</Pill>; })()}<Pill tone={TONE[item.status]}>{item.status}</Pill>
           {item.kind === "link" && item.url && <a style={{ color: "var(--blue)", fontWeight: 700, fontSize: "12px" }} href={item.url} rel="noreferrer" target="_blank">Open link</a>}
           {item.kind === "file" && <form action={downloadEvidenceAction}><input type="hidden" name="id" value={item.id} /><button className="button secondary" style={{ minHeight: "32px", padding: "6px 12px" }}>Download</button></form>}

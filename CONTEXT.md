@@ -41,3 +41,9 @@ _Avoid_: certification, verified effectiveness.
 _Avoid_: current live state, leadership approval.
 
 **Leadership decision**: An authorised person's explicit decision about priorities, resources or accepted exposure. Viewing a report or reading an AI suggestion does not record such a decision.
+
+**Resource reference**: The identity of the thing a connected system reports about. It does not identify every later check of that thing.
+
+**Dated observation**: A preserved normalized result for a resource on its recorded collection date. Later dates or changed facts produce distinct observations; an identical retry reuses one. Generic collection records dates at day precision. An observation is not human acceptance or proof of every polling attempt.
+
+**Legacy observation identity**: An older collected record whose original observation identity cannot be established. Keep its recorded facts, dates and links without inventing missing history.

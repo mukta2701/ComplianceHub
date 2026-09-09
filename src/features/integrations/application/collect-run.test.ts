@@ -23,6 +23,7 @@ function database() {
   };
   let sequence = 0;
   let failProposals = false;
+  let raceEvidence = false;
   const failures = new Set<string>();
   const failAfter = new Map<string, number>();
   let beforeHealth: (() => void) | undefined;
@@ -35,6 +36,11 @@ function database() {
       if (mode === "insert" && (failures.has(table) || tables[table].length >= (failAfter.get(table) ?? Infinity))) return { data: null, error: { message: "fictional storage failure" } };
       const rows = tables[table].filter(row => filters.every(matches => matches(row)));
       if (mode === 'insert') {
+        if (table === 'evidence' && raceEvidence) {
+          raceEvidence = false;
+          tables[table].push({ id: `row-${++sequence}`, ...payload });
+          return { data: null, error: { code: '23505', message: 'fictional concurrent observation' } };
+        }
         if (table === 'automation_proposals' && failProposals) return { data: null, error: { message: 'fictional storage failure' } };
         const inserted = { id: `row-${++sequence}`, ...payload }; tables[table].push(inserted);
         return { data: [inserted], error: null };
@@ -51,7 +57,7 @@ function database() {
     };
     return builder;
   } };
-  return { client: client as never, tables, failProposals() { failProposals = true; }, recover() { failProposals = false; failures.clear(); }, fail(table: string) { failures.add(table); }, failAfter(table: string, count: number) { failAfter.set(table, count); }, beforeHealth(callback: () => void) { beforeHealth = callback; } };
+  return { client: client as never, tables, failProposals() { failProposals = true; }, raceEvidenceOnce() { raceEvidence = true; }, recover() { failProposals = false; failures.clear(); }, fail(table: string) { failures.add(table); }, failAfter(table: string, count: number) { failAfter.set(table, count); }, beforeHealth(callback: () => void) { beforeHealth = callback; } };
 }
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 function providerResponse(count = 1, status = 200) {
@@ -73,6 +79,70 @@ it('reports failed provenance once, retains evidence and last success, then reco
   expect(db.tables.evidence).toHaveLength(1);
   expect(db.tables.connector_connections[0]).toMatchObject({ status: 'connected', last_error_at: null });
   expect(db.tables.connector_connections[0].last_collected_at).not.toBe('2026-07-01T00:00:00Z');
+});
+
+it('preserves a later dated observation and its separate automation review chain', async () => {
+  const db = database();
+  providerResponse(1);
+  await expect(collectEvidence(db.client)).resolves.toEqual({ collected: 1, refreshed: 0, failed: 0 });
+
+  db.tables.evidence_sources[0].config = {
+    ...(db.tables.evidence_sources[0].config as Row),
+    asOf: '2026-09-01',
+  };
+  providerResponse(1);
+  await expect(collectEvidence(db.client)).resolves.toEqual({ collected: 1, refreshed: 0, failed: 0 });
+
+  expect(db.tables.evidence).toHaveLength(2);
+  expect(db.tables.evidence.map((row) => row.collected_on)).toEqual(['2026-08-01', '2026-09-01']);
+  expect(db.tables.source_objects).toHaveLength(2);
+  expect(db.tables.automation_signals).toHaveLength(2);
+  expect(db.tables.automation_proposals).toHaveLength(2);
+  expect(db.tables.automation_proposal_sources).toHaveLength(2);
+
+  providerResponse(1);
+  await expect(collectEvidence(db.client)).resolves.toEqual({ collected: 0, refreshed: 1, failed: 0 });
+  expect(db.tables.evidence).toHaveLength(2);
+  expect(db.tables.source_objects).toHaveLength(2);
+  expect(db.tables.automation_signals).toHaveLength(2);
+  expect(db.tables.automation_proposals).toHaveLength(2);
+  expect(db.tables.automation_proposal_sources).toHaveLength(2);
+});
+
+it('preserves changed facts collected on the same day and reuses their exact retry', async () => {
+  const db = database();
+  providerResponse(1);
+  await expect(collectEvidence(db.client)).resolves.toEqual({ collected: 1, refreshed: 0, failed: 0 });
+
+  providerResponse(2);
+  await expect(collectEvidence(db.client)).resolves.toEqual({ collected: 1, refreshed: 0, failed: 0 });
+  expect(db.tables.evidence).toHaveLength(2);
+  expect(db.tables.evidence.map((row) => row.description)).toEqual([
+    '1 protected branches reported. Repository contents and branch names were not collected.',
+    '2 protected branches reported. Repository contents and branch names were not collected.',
+  ]);
+  expect(db.tables.source_objects).toHaveLength(2);
+  expect(db.tables.automation_signals).toHaveLength(2);
+  expect(db.tables.automation_proposals).toHaveLength(2);
+
+  providerResponse(2);
+  await expect(collectEvidence(db.client)).resolves.toEqual({ collected: 0, refreshed: 1, failed: 0 });
+  expect(db.tables.evidence).toHaveLength(2);
+  expect(db.tables.source_objects).toHaveLength(2);
+  expect(db.tables.automation_signals).toHaveLength(2);
+  expect(db.tables.automation_proposals).toHaveLength(2);
+});
+
+it('reuses only the exact observation that wins an evidence insertion race', async () => {
+  const db = database();
+  db.raceEvidenceOnce();
+  providerResponse(1);
+
+  await expect(collectEvidence(db.client)).resolves.toEqual({ collected: 0, refreshed: 1, failed: 0 });
+  expect(db.tables.evidence).toHaveLength(1);
+  expect(db.tables.source_objects).toHaveLength(1);
+  expect(db.tables.automation_signals).toHaveLength(1);
+  expect(db.tables.automation_proposals).toHaveLength(1);
 });
 
 it('counts a failed evidence write once and continues collecting another source', async () => {
@@ -118,6 +188,28 @@ it('manual baseline records a source failure and recovers only after required pr
   expect(db.tables.connector_connections[0]).toMatchObject({ status: 'connected', last_error_at: null });
   expect(db.tables.connector_connections[0].last_collected_at).not.toBe('2026-07-01T00:00:00Z');
   expect(db.tables.automation_proposals).toHaveLength(1);
+});
+
+it('manual baseline and proposal recollection share dated observation identity', async () => {
+  const db = database(); manualContext(db); providerResponse(1);
+  await expect(generateAutomationBaselineAction()).rejects.toThrow('Baseline collection completed for 1 source');
+  expect(db.tables.evidence).toHaveLength(0);
+  expect(db.tables.source_objects).toHaveLength(1);
+
+  db.tables.evidence_sources[0].config = {
+    ...(db.tables.evidence_sources[0].config as Row),
+    asOf: '2026-09-01',
+  };
+  const form = recollectionForm(db); providerResponse(1);
+  await expect(recollectAutomationProposalAction(form)).resolves.toBeUndefined();
+  expect(db.tables.evidence).toHaveLength(0);
+  expect(db.tables.source_objects).toHaveLength(2);
+  expect(db.tables.automation_signals).toHaveLength(2);
+
+  providerResponse(1);
+  await expect(recollectAutomationProposalAction(form)).resolves.toBeUndefined();
+  expect(db.tables.source_objects).toHaveLength(2);
+  expect(db.tables.automation_signals).toHaveLength(2);
 });
 
 function recollectionForm(db: ReturnType<typeof database>) {

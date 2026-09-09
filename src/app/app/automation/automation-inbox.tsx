@@ -31,7 +31,7 @@ export type AutomationInboxProposal = {
     provider?: string;
     connectionLabel?: string;
   } | null;
-  source?: { title?: string; sourceUrl?: string | null } | null;
+  source?: { title?: string; sourceUrl?: string | null; externalRef?: string | null; observationKey?: string | null; collectedOn?: string | null } | null;
   aiDraft?: { explanation?: string; recommendedAction?: string } | null;
 };
 
@@ -46,10 +46,16 @@ type Props = {
 
 type Confirmation = { proposalId: string; kind: "evidence" | "task" } | null;
 
-function displayDate(value?: string): string {
-  if (!value) return "Unknown";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "Unknown" : date.toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" });
+function displayCollectionDate(value?: string | null): string {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return "date unavailable";
+  const [year, month, day] = value.split("-").map(Number);
+  const monthLabel = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][month - 1];
+  return monthLabel ? `${String(day).padStart(2, "0")} ${monthLabel} ${year}` : "date unavailable";
+}
+
+function displayRecordedDate(value?: string | null): string | null {
+  const day = value?.match(/^\d{4}-\d{2}-\d{2}/)?.[0];
+  return day ? displayCollectionDate(day) : null;
 }
 
 function mappings(value: unknown): string[] {
@@ -85,6 +91,7 @@ export function AutomationInbox({ proposals, currentUserId, canCreateTaskDraft, 
         const title = output.title ?? signal.summary ?? "Automation review";
         const proposalMappings = mappings(output.mappings);
         const limitations = output.limitations ?? "This observation does not prove that every in-scope resource is covered, that the control is effective over time, or that an owner has approved it.";
+        const recordedDate = displayRecordedDate(signal.occurredAt);
         const confirmingEvidence = confirmation?.proposalId === proposal.id && confirmation.kind === "evidence";
         const confirmingTask = confirmation?.proposalId === proposal.id && confirmation.kind === "task";
         return <article className="automation-draft-card" key={proposal.id} aria-label={`Automation draft: ${title}`}>
@@ -96,7 +103,8 @@ export function AutomationInbox({ proposals, currentUserId, canCreateTaskDraft, 
           <p className="automation-draft-only"><b>Draft only.</b> No compliance record changes until an owner confirms an action.</p>
           <dl className="automation-provenance">
             <div><dt>Source</dt><dd>{proposal.source?.title ?? signal.connectionLabel ?? signal.provider ?? "Connected system"}{proposal.source?.sourceUrl && <a href={proposal.source.sourceUrl} target="_blank" rel="noreferrer">Open source</a>}</dd></div>
-            <div><dt>Observed</dt><dd>{displayDate(signal.occurredAt ?? proposal.createdAt)}</dd></div>
+            <div><dt>Observation</dt><dd>{proposal.source?.observationKey ? <><span>Collected {displayCollectionDate(proposal.source.collectedOn)}</span><span>Resource: {proposal.source.externalRef ?? "reference unavailable"}</span></> : proposal.source ? <><span>Legacy observation identity unknown</span>{recordedDate && <span>Recorded date: {recordedDate}</span>}{proposal.source.externalRef && <span>Resource: {proposal.source.externalRef}</span>}</> : "Observation date unavailable"}</dd></div>
+            <div><dt>Recorded result</dt><dd>{signal.summary ?? "No recorded result"}</dd></div>
             <div><dt>Collector</dt><dd>{collectorVersion} · {collectorMode === "live" ? "Live provider" : "Deterministic collection"}</dd></div>
             <div><dt>Signal</dt><dd>{signal.signalType ?? "Unclassified signal"}</dd></div>
           </dl>

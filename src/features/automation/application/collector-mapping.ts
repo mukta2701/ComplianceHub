@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import type { CollectedEvidence } from "@/features/integrations/domain/evidence-provider";
-import { buildBaselineProposal, normaliseEvidenceSignal, type AutomationProvider } from "../domain/baseline";
+import type { CollectedEvidence, EvidenceProviderKind } from "@/features/integrations/domain/evidence-provider";
+import { observationKey } from "@/features/integrations/domain/evidence-collection";
+import { buildBaselineProposal, normaliseEvidenceSignal } from "../domain/baseline";
 
 type Input = {
   organisationId: string;
@@ -8,7 +9,7 @@ type Input = {
   connectionOwnerId: string;
   assignedOwnerId: string | null;
   retentionDays: number;
-  provider: AutomationProvider;
+  provider: EvidenceProviderKind;
   collected: CollectedEvidence;
 };
 
@@ -39,6 +40,8 @@ export function mapCollectedEvidenceToAutomation(input: Input) {
       organisationId: input.organisationId,
       connectionId: input.connectionId,
       externalRef: input.collected.externalRef,
+      observationKey: observationKey(input.provider, input.collected),
+      collectedOn: input.collected.collectedOn,
       title: input.collected.title,
       sourceUrl: input.collected.url ?? null,
       contentRef,

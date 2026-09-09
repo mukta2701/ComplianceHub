@@ -10,6 +10,7 @@ vi.mock("@/lib/app-context", () => ({ requireAppContext: async () => ({
       id: "proposal", target_type: "evidence", assigned_to: "reviewer", status: "draft",
       output: { title: "Review access evidence", why: "A source prepared this evidence" },
       created_at: "2026-09-04T00:00:00Z", source_references: [],
+      automation_proposal_sources: [{ source_objects: { title: "Access review source", source_url: "https://example.test/access", external_ref: "workspace/access-review", observation_key: "observation-1", collected_on: "2026-09-04" } }],
     }] : [];
     const chain: Record<string, unknown> = {};
     for (const method of ["select", "eq", "order", "limit", "is", "contains"]) chain[method] = () => chain;
@@ -59,6 +60,12 @@ describe("automation baseline permissions", () => {
     expect(screen.getByText("AWS")).toBeInTheDocument();
     expect(screen.getByText(/Collection error; needs attention/i)).toBeInTheDocument();
     expect(screen.getByText(/Last collected 04 Sep 2026/i)).toBeInTheDocument();
+  });
+
+  it("shows the keyed collection date and resource reference for an automation draft", async () => {
+    render(await AutomationPage({ searchParams: Promise.resolve({}) }));
+    expect(screen.getByText("Collected 04 Sep 2026")).toBeInTheDocument();
+    expect(screen.getByText("Resource: workspace/access-review")).toBeInTheDocument();
   });
 
   it("does not offer baseline generation when no runnable source is configured", async () => {
