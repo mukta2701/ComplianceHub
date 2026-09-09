@@ -10,6 +10,13 @@ select ok(not has_function_privilege('anon','public.submit_task_contribution(uui
 select ok(not has_function_privilege('anon','public.review_task_contribution(uuid,uuid,text,text,uuid)','execute'),'anonymous review denied');
 select ok((select bool_and(prosecdef and proconfig @> array['search_path=""']) from pg_proc where oid in ('public.submit_task_contribution(uuid,uuid,bigint,text,uuid)'::regprocedure,'public.review_task_contribution(uuid,uuid,text,text,uuid)'::regprocedure)),'guarded RPCs use trusted owner and empty search path');
 select ok(not has_table_privilege('authenticated','public.task_contributions','TRUNCATE'),'authenticated cannot truncate contribution history');
+select ok(not has_table_privilege('service_role','public.task_contributions','SELECT'),'service workers have no direct SELECT privilege on immutable contribution history');
+select ok(not has_table_privilege('service_role','public.task_contributions','INSERT'),'service workers have no direct INSERT privilege on immutable contribution history');
+select ok(not has_table_privilege('service_role','public.task_contributions','UPDATE'),'service workers have no direct UPDATE privilege on immutable contribution history');
+select ok(not has_table_privilege('service_role','public.task_contributions','DELETE'),'service workers have no direct DELETE privilege on immutable contribution history');
+select ok(not has_table_privilege('service_role','public.task_contributions','TRUNCATE'),'service workers have no direct TRUNCATE privilege on immutable contribution history');
+select ok(not has_table_privilege('service_role','public.task_contributions','REFERENCES'),'service workers have no direct REFERENCES privilege on immutable contribution history');
+select ok(not has_table_privilege('service_role','public.task_contributions','TRIGGER'),'service workers have no direct TRIGGER privilege on immutable contribution history');
 
 insert into auth.users(id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data)
 select ('97000000-0000-4000-8000-' || lpad(n::text,12,'0'))::uuid, '00000000-0000-0000-0000-000000000000', 'authenticated','authenticated','contribution-'||n||'@example.test','',now(),'{}','{}' from generate_series(1,4) n;

@@ -41,7 +41,7 @@ create index task_contributions_org_task_created on public.task_contributions(or
 alter table public.task_contributions enable row level security;
 create policy task_contributions_members_read on public.task_contributions for select to authenticated
 using (public.is_organisation_member(organisation_id));
-revoke all on public.task_contributions from public, anon, authenticated;
+revoke all on public.task_contributions from public, anon, authenticated, service_role;
 grant select on public.task_contributions to authenticated;
 
 create function public.task_contribution_guard()
