@@ -1,0 +1,125 @@
+.shell {
+  --ch-canvas: #f5f6f8;
+  --ch-border: #e2e5eb;
+  --ch-ink: #202632;
+  --ch-text: #4c5666;
+  min-width: 0;
+  color: var(--ch-ink);
+  font-size: 14px;
+}
+
+/* A single workspace shell; public/demo pages keep their own presentation. */
+.shell :global(.sidebar) {
+  width: 232px;
+  height: 100dvh;
+  padding: 24px 12px 12px;
+  background: #f9fafb;
+  border-right: 1px solid var(--ch-border);
+  overflow: hidden;
+}
+.shell :global(.sidebar > .brand) { padding: 0 8px; margin-bottom: 24px; font-size: 16px; gap: 9px; }
+.shell :global(.brand-mark) { width: 30px; height: 30px; border-radius: 8px; box-shadow: none; }
+.shell :global(.workspace) { padding: 10px 8px; margin-bottom: 20px; border: 0; background: #eef0f4; border-radius: 8px; flex-shrink: 0; }
+.shell :global(.workspace > span:nth-child(2)) { min-width: 0; font-size: 12px; line-height: 1.5; }
+.shell :global(.workspace b) { overflow-wrap: anywhere; font-weight: 650; }
+.shell :global(.workspace small) { font-size: 12px; color: var(--ch-text-muted); }
+.shell :global(.workspace .avatar) { flex-shrink: 0; margin: 0; width: 30px; height: 30px; font-size: 12px; }
+.shell :global(.sidebar nav) { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 0 2px 12px; }
+.shell :global(.nav-group) { gap: 2px; }
+.shell :global(.nav-group + .nav-group) { margin-top: 17px; }
+.shell :global(.nav-section-label) { padding: 0 10px 7px; font-size: 12px; font-weight: 600; text-transform: none; letter-spacing: .01em; color: #677181; }
+.shell :global(.sidebar nav a) { padding: 8px 10px; min-height: 36px; gap: 10px; border-radius: 7px; font-size: 14px; font-weight: 500; line-height: 1.4; }
+.shell :global(.sidebar nav a svg) { width: 17px; height: 17px; flex-shrink: 0; }
+/* Inherited visibility must change immediately so opening can focus links. */
+.shell :global(.sidebar a), .shell :global(.sidebar button) { transition-property: color, background-color, border-color, box-shadow; }
+.shell :global(.sidebar nav a:hover) { background: #eaeef4; }
+.shell :global(.sidebar nav a.active) { background: #e7edfc; color: #234bb6; font-weight: 650; }
+.shell :global(.sidebar-foot) { flex-shrink: 0; padding: 12px 4px 0; margin-top: 0; }
+.shell :global(.sidebar-foot .button) { min-height: 36px; padding: 7px 12px; justify-content: flex-start; font-size: 14px; background: transparent; box-shadow: none; border-color: transparent; }
+.shell :global(.sidebar-foot p) { display: none; }
+.shell :global(.app-main) { margin-left: 232px; min-width: 0; background: var(--ch-canvas); }
+.shell :global(.app-header) { height: 60px; padding: 0 36px; border-bottom: 1px solid var(--ch-border); gap: 16px; }
+.shell :global(.app-header h1) { min-width: 0; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.shell :global(.header-actions) { gap: 12px; flex-shrink: 0; }
+.shell :global(.user-avatar) { margin-left: 0; }
+.shell :global(.content) { width: 100%; max-width: 1400px; padding: 36px; min-width: 0; }
+.shell :global(.content:focus) { outline: none; }
+.shell :global(.legal) { padding: 24px 36px; text-align: left; font-size: 12px; color: #677181; }
+.shell :global(.page-heading) { align-items: flex-start; flex-wrap: wrap; gap: 16px 24px; margin-bottom: 28px; }
+.shell :global(.page-heading__content) { flex: 1 1 340px; min-width: 0; }
+.shell :global(.page-heading__eyebrow) { font-size: 12px; letter-spacing: .045em; line-height: 1.5; margin-bottom: 7px; }
+.shell :global(.page-heading h1), .shell :global(.page-heading h2) { font-size: 30px; font-weight: 650; letter-spacing: -.035em; line-height: 1.2; }
+.shell :global(.page-heading p) { max-width: 72ch; margin-top: 8px; font-size: 14px; line-height: 1.65; }
+.shell :global(.page-heading__action) { flex-wrap: wrap; max-width: 100%; padding-top: 4px; gap: 8px; }
+.shell :global(.card) { border-color: var(--ch-border); border-radius: 10px; box-shadow: 0 1px 2px #20263204; min-width: 0; }
+.shell :global(.card-head) { gap: 12px; padding: 20px 22px; }
+.shell :global(.card-head h2), .shell :global(.card-head h3) { font-size: 15px; font-weight: 650; line-height: 1.4; }
+.shell :global(.card-head p) { margin-top: 5px; font-size: 12px; line-height: 1.6; }
+.shell :global(.card-head > a), .shell :global(.card-foot a) { font-size: 14px; }
+.shell :global(.card-foot) { padding: 16px 22px; gap: 12px; flex-wrap: wrap; }
+.shell :global(.button) { border-radius: 7px; min-height: 40px; font-size: 14px; font-weight: 600; box-shadow: none; line-height: 1.4; }
+.shell :global(.button.primary) { background: var(--ch-primary); box-shadow: 0 1px 2px #17203318; }
+.shell :global(.button.secondary) { border-color: #d7dce5; }
+.shell :global(.button.ghost:hover) { background: #edf0f5; }
+.shell :global(.app-form) { gap: 20px; padding: 24px; }
+.shell :global(.app-form label), .shell :global(.app-form .form-grid label) { font-size: 14px; line-height: 1.5; }
+.shell :global(.app-form input), .shell :global(.app-form select), .shell :global(.app-form textarea), .shell :global(.field) { min-height: 42px; font-size: 14px; border-color: #d7dce5; }
+.shell :global(.pill), .shell :global(.status-label) { font-size: 12px; font-weight: 600; }
+.shell :global(.segmented) { gap: 4px; padding-bottom: 12px; border-bottom: 1px solid var(--ch-border); }
+.shell :global(.segmented a), .shell :global(.segmented button) { border-color: transparent; background: transparent; border-radius: 6px; min-height: 36px; padding: 8px 12px; font-size: 14px; }
+.shell :global(.segmented .active) { border-color: transparent; color: #234bb6; background: #e7edfc; }
+.shell :global(.table-tools) { padding: 16px 20px; gap: 12px; flex-wrap: wrap; }
+.shell :global(.table-tools input), .shell :global(.table-tools select) { min-height: 40px; font-size: 14px; max-width: 100%; }
+.shell :global(.table-tools > span) { font-size: 12px; }
+.shell :global(.data-table-wrap) { max-width: 100%; min-width: 0; }
+.shell :global(.data-table-wrap th) { padding: 12px 18px; font-size: 12px; font-weight: 600; text-transform: none; letter-spacing: 0; background: #fafbfc; }
+.shell :global(.data-table-wrap td) { padding: 15px 18px; font-size: 14px; line-height: 1.5; }
+.shell :global(.data-table-wrap td b) { font-size: 14px; font-weight: 600; }
+.shell :global(.data-table-wrap td small), .shell :global(.data-table-wrap code) { font-size: 12px; }
+.shell :global(.data-table-wrap tbody tr:hover) { background: #fafbfc; }
+.shell :global(.stat small), .shell :global(.stat p) { font-size: 12px; line-height: 1.5; }
+.shell :global(.action-body strong) { font-size: 14px; font-weight: 600; }
+.shell :global(.action-body small), .shell :global(.action-meta) { font-size: 12px; line-height: 1.5; }
+.shell :global(.action-list > li > a) { padding: 16px 22px; }
+.shell :global(.dash-hero) { margin-top: 18px; gap: 20px; }
+.shell :global(.dash-charts), .shell :global(.dash-bottom) { gap: 20px; }
+.shell :global(.empty-note) { padding: 20px 22px; font-size: 14px; line-height: 1.6; }
+.shell :global(a:focus-visible), .shell :global(button:focus-visible), .shell :global(summary:focus-visible) { outline: 2px solid var(--ch-primary); outline-offset: 3px; }
+.closeNavigation { display: none; }
+.skipLink { position: fixed; z-index: 100; top: 10px; left: 250px; transform: translateY(-150%); padding: 10px 16px; background: white; border: 1px solid var(--ch-border); border-radius: 7px; }
+.skipLink:focus { transform: translateY(0); }
+
+@media (max-width: 1024px) {
+  .shell :global(.sidebar) { width: 272px; max-width: calc(100vw - 48px); transform: translateX(-105%); visibility: hidden; transition: transform .18s; }
+  .shell :global(.sidebar[data-open="true"]) { visibility: visible; transform: translateX(0); box-shadow: 16px 0 48px #17203324; }
+  .shell :global(.sidebar > .brand) { padding-right: 28px; }
+  .shell :global(.app-main) { margin-left: 0; }
+  .shell :global(.app-header) { padding: 0 24px; justify-content: flex-start; }
+  .shell :global(.app-header h1) { flex: 1; }
+  .shell :global(.menu) { display: grid; place-items: center; width: 36px; height: 36px; flex-shrink: 0; border: 0; background: transparent; border-radius: 6px; }
+  .shell :global(.nav-overlay) { position: fixed; z-index: 45; inset: 0; border: 0; background: #17203345; display: none; }
+  .shell :global(.nav-overlay[data-open="true"]) { display: block; }
+  .shell :global(.content) { padding: 28px 24px; }
+  .closeNavigation { display: grid; place-items: center; position: absolute; right: 12px; top: 21px; width: 30px; height: 30px; background: transparent; border: 0; color: var(--ch-text); font-size: 24px; border-radius: 6px; }
+  .skipLink { left: 16px; }
+}
+@media (max-width: 540px) {
+  .shell :global(.content) { padding: 24px 16px; }
+  .shell :global(.app-header) { padding: 0 16px; gap: 8px; }
+  .shell :global(.header-actions) { gap: 6px; }
+  .shell :global(.page-heading__content) { flex-basis: auto; }
+  .shell :global(.page-heading h1), .shell :global(.page-heading h2) { font-size: 25px; }
+  .shell :global(.page-heading__action) { width: 100%; padding-top: 0; }
+  .shell :global(.button) { min-height: 44px; }
+  .shell :global(.card-head), .shell :global(.card-foot) { padding: 16px; }
+  .shell :global(.app-form) { padding: 18px; }
+  .shell :global(.legal) { padding: 20px 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .shell :global(.sidebar) { transition: none; }
+}
+
+.shell :global(.quick-actions) { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.shell :global(.g-cap), .shell :global(.g-stage), .shell :global(.heat-legend), .shell :global(.donut-legend) { font-size: 12px; }
+
+.shell :global(.action-meta) { color: #596273; }

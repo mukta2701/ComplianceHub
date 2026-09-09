@@ -206,3 +206,7 @@ The follow-on [import preview consistency increment](superpowers/specs/2026-09-0
 Owner-approved [explicit asset-import ownership](superpowers/specs/2026-09-09-explicit-asset-import-owner.md) separates descriptive location from assignment and flags uncertain names before import. Existing export format and saved records remain unchanged.
 
 Owner-approved [dated generic collector observations](superpowers/specs/2026-09-09-dated-collector-observations.md) preserve later check dates and changed facts while keeping identical retries and previous reviews stable. Ticket10 is the next complete collection-to-review increment.
+
+## Workspace navigation and Settings polish
+
+The owner requested a visual reorganisation using Mobbin references. [Ticket12](plans/operating-lifecycle-quality/issues/12-workspace-ui.md) covers grouped navigation, readable shared controls and focused Settings sections with keyboard-safe mobile navigation. [Specification](superpowers/specs/2026-09-09-workspace-ui.md). Current acceptance remains in the release checklist.

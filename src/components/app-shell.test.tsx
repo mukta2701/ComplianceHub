@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 const hoisted = vi.hoisted(() => ({ pathname: "/app" }));
 
 vi.mock("next/navigation", () => ({ usePathname: () => hoisted.pathname }));
 vi.mock("@/app/app/actions", () => ({ signOutAction: vi.fn() }));
-vi.mock("./alert-toaster", () => ({ AlertToaster: () => null }));
+vi.mock("./alert-toaster", () => ({ AlertToaster: () => <a href="/app/monitoring">New monitoring alert</a> }));
 
 import { AppShell } from "./app-shell";
 
@@ -26,7 +26,36 @@ function renderShell(role: "owner" | "admin" | "member" | null, jobTitle: string
 }
 
 describe("AppShell role-specific navigation", () => {
-  beforeEach(() => { hoisted.pathname = "/app"; });
+  beforeEach(() => {
+    hoisted.pathname = "/app";
+    vi.stubGlobal("matchMedia", () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+  });
+
+  it("makes the existing asset inventory discoverable for operators", () => {
+    renderShell("owner");
+    expect(screen.getByRole("link", { name: "Asset inventory" })).toHaveAttribute("href", "/app/assets");
+  });
+
+  it("keeps a closed drawer out of navigation and isolates its open state", () => {
+    vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+    renderShell("owner");
+    expect(screen.queryByRole("navigation", { name: "Workspace" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open navigation" }));
+    const drawer = screen.getByRole("dialog", { name: "Workspace navigation" });
+    expect(drawer).toHaveAttribute("aria-modal", "true");
+    expect(screen.getByText("Page content").closest(".app-main")).toHaveAttribute("inert");
+    expect(screen.getByText("New monitoring alert").closest("[inert]")).not.toBeNull();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByText("Page content").closest(".app-main")).not.toHaveAttribute("inert");
+  });
+
+  it("focuses a drawer control before membership exists", async () => {
+    vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+    renderShell(null);
+    fireEvent.click(screen.getByRole("button", { name: "Open navigation" }));
+    await waitFor(() => expect(screen.getByRole("dialog").contains(document.activeElement)).toBe(true));
+  });
 
   it("renders only the curated navigation with assigned work for a Member", () => {
     renderShell("member", "Developer");

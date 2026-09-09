@@ -24,17 +24,27 @@ vi.mock("../actions", () => ({
 vi.mock("./connected-applications", () => ({ ConnectedApplications: () => null }));
 vi.mock("./ai-settings", () => ({ AiWorkspaceSettings: () => null }));
 
-function activeContext() {
+function activeContext(role: "owner" | "member" = "owner") {
   const rows: Record<string, Array<Record<string, unknown>>> = {
     organisations: [{ slug: "active-organisation", created_at: "2026-08-18T00:00:00Z" }],
-    memberships: [{
-      organisation_id: OTHER_ORGANISATION_ID,
-      user_id: "sibling-user",
-      role: "member",
-      job_title: "Sibling-only member",
-      created_at: "2026-08-18T00:00:00Z",
-      profiles: { display_name: "Sibling-only member" },
-    }],
+    memberships: [
+      {
+        organisation_id: ORGANISATION_ID,
+        user_id: "active-user",
+        role: "member",
+        job_title: "Compliance coordinator",
+        created_at: "2026-08-18T00:00:00Z",
+        profiles: { display_name: "Active member" },
+      },
+      {
+        organisation_id: OTHER_ORGANISATION_ID,
+        user_id: "sibling-user",
+        role: "member",
+        job_title: "Sibling-only member",
+        created_at: "2026-08-18T00:00:00Z",
+        profiles: { display_name: "Sibling-only member" },
+      },
+    ],
     invitations: [],
     ai_workspace_settings: [],
   };
@@ -67,12 +77,13 @@ function activeContext() {
   return {
     supabase,
     user: { id: "active-user" },
-    membership: { role: "owner" },
+    membership: { role },
     organisation: { id: ORGANISATION_ID, name: "Active organisation" },
   };
 }
 
 beforeEach(() => {
+  window.history.replaceState({}, "", "/app/settings#team");
   hoisted.queries.length = 0;
   hoisted.requireContext.mockResolvedValue(activeContext());
   hoisted.listUserOAuthGrants.mockResolvedValue({ status: "loaded", grants: [] });
@@ -93,6 +104,37 @@ describe("Settings active organisation scope", () => {
 
     render(await SettingsPage({ searchParams: Promise.resolve({}) }));
 
-    expect(screen.getByRole("link", { name: "Connected assistants" })).toHaveAttribute("href", "#connected-apps");
+    expect(screen.getByRole("link", { name: "Connected assistants" })).toHaveAttribute("href", "/app/settings#connected-apps");
+  });
+
+  it("keeps member management controls out of view for workspace members", async () => {
+    hoisted.requireContext.mockResolvedValue(activeContext("member"));
+    const { default: SettingsPage } = await import("./page");
+
+    render(await SettingsPage({ searchParams: Promise.resolve({}) }));
+
+    expect(screen.getByText("Active member")).toBeVisible();
+    expect(screen.getByText("Member")).toBeVisible();
+    expect(screen.queryByText("Edit details")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create invite" })).not.toBeInTheDocument();
+  });
+
+  it("offers authorised workspace owners a compact member-details disclosure", async () => {
+    const { default: SettingsPage } = await import("./page");
+
+    render(await SettingsPage({ searchParams: Promise.resolve({}) }));
+
+    expect(screen.getByText("Active member")).toBeVisible();
+    expect(screen.getByText("Edit details")).toBeVisible();
+  });
+
+  it("opens team members after an invitation result returns without a hash", async () => {
+    window.history.replaceState({}, "", "/app/settings");
+    const { default: SettingsPage } = await import("./page");
+
+    render(await SettingsPage({ searchParams: Promise.resolve({ inviteStatus: "sent", inviteId: "invite-1" }) }));
+
+    expect(screen.getByRole("status")).toHaveTextContent("Invitation email sent.");
+    expect(screen.getByText("Active member")).toBeVisible();
   });
 });
