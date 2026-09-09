@@ -2,6 +2,8 @@
 
 ## Start here — plain-language project status
 
+**Visual proposal — 9 September 2026:** A [product-wide mockup set](design/2026-09-09-product-mockups/README.md) now illustrates 18 desktop/mobile views across the ongoing lifecycle, with Mobbin, Linear and SaaSFrame references. These are proposed layouts with fictional data, generated and visually inspected; they are not implemented screens or new acceptance evidence. The notes identify generated details that must not become product rules.
+
 Updated 9 September 2026. Historical release evidence below is retained. Fresh checks today confirm that the existing local demo is running and can reach its database. The connected owner-submission, coordinator-review and saved-leadership-baseline workflow has now been demonstrated on a separate local production build. This is fictional local proof, not hosted or stakeholder acceptance.
 
 **Latest recovery and quality batch — 9 September 2026:** The updated app runs independently in the background as a **production preview at http://127.0.0.1:3300/app**, against preserved fictional local data. App/database health, authenticated policy access and restored live-update subscriptions pass. About 12 GiB disk space remains after clearing only regenerable build caches. The low-swap diagnostics implicate a roughly 12 GiB Node process on this 16 GiB Mac; resource protection reduces that risk without proving all shutdown causes resolved. [Recovery evidence](evidence/2026-09-09-mac-recovery.md).
