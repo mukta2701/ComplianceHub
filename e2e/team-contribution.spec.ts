@@ -9,6 +9,7 @@ test("assigned owners submit, coordinator reviews, and leadership reads the sepa
   const { actors, organisationId, coordinator, tasks } = await fixture();
   const contexts = await Promise.all(actors.map(() => browser.newContext({ viewport: testInfo.project.name === "mobile" ? { width: 393, height: 851 } : { width: 1440, height: 1000 } })));
   const pages = await Promise.all(contexts.map((context) => context.newPage()));
+  for (const page of pages) page.setDefaultTimeout(20_000);
   try {
     for (let i = 0; i < actors.length; i++) await signIn(pages[i], actors[i]);
     const [reviewer, firstOwner, secondOwner, reader] = pages;
@@ -67,7 +68,7 @@ test("assigned owners submit, coordinator reviews, and leadership reads the sepa
     const { data: unchangedTask } = await coordinator.from("tasks").select("status").eq("id", tasks[0].id).single();
     expect(unchangedTask?.status).toBe("in_progress");
   } finally {
-    await Promise.all(contexts.map((context) => context.close()));
+    await Promise.allSettled(contexts.map((context) => context.close()));
   }
 });
 
