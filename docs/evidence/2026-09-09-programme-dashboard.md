@@ -37,8 +37,16 @@ All screenshots contain fictional local records. The populated design demonstrat
 
 The familiar baseline workspace is preserved. Its before/after images show the presentation change using the same saved records; no data was added to it to make the graphs look fuller.
 
+[Before — familiar baseline](programme-dashboard-2026-09-09/baseline-before-desktop.png) · [After — same baseline](programme-dashboard-2026-09-09/baseline-after-desktop.png) · [After — tablet](programme-dashboard-2026-09-09/baseline-after-tablet.png) · [After — mobile](programme-dashboard-2026-09-09/baseline-after-mobile.png)
+
+## Running preview
+
+Verified source `cc16bad790702f0d588fbbf2fcaa570bb6e3f841` is committed and pushed to the existing feature branch. The independent background production preview at http://127.0.0.1:3300/app now runs that source; health reports both app and database OK with the matching release identity. Built-source hashes were checked before activation. The previous launcher/runtime is retained for rollback.
+
+All four browser journeys were repeated against the actual background app at port 3300 and passed in 21.1 seconds. Fresh authenticated captures at 1440, 883 and 393px show the actual refreshed preview with the preserved baseline records. The visible in-app browser was also refreshed and inspected for Programme overview, summary cards, context and links. The launcher runs independently of a temporary terminal; this does not configure automatic restart after a full Mac reboot.
+
 ## Limits and next increment
 
-Candidate browser proof is local fictional evidence. Background-preview replacement is recorded separately after source commit and runtime verification. There is no new live-provider verification, hosted release or stakeholder acceptance.
+Browser proof is local fictional evidence. There is no new live-provider verification, hosted release or stakeholder acceptance.
 
 Remaining work includes applying the approved layouts to task/register/detail pages and the other product areas. Historical charts require compatible dated records. Policy-review totals are deliberately not labelled as a combined review queue; contribution-review permissions and assignment revisions remain governed by their existing workflow.

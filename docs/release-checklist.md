@@ -2,6 +2,8 @@
 
 ## Start here — plain-language project status
 
+**Latest dashboard redesign — 9 September 2026:** The approved visual direction is now implemented in the dashboard and shared navigation. Programme overview adds real attention counts, clearer control bars, a compact decision queue, risk/evidence graphics, upcoming work and workspace breadcrumbs. Full and affected checks, independent reviews and production desktop/tablet/mobile demonstrations passed. Source is pushed to GitHub and the refreshed app runs independently at http://127.0.0.1:3300/app with matching app/database health. Existing baseline records are preserved. [Before/after and verification](evidence/2026-09-09-programme-dashboard.md). Remaining page-specific mockups, live-provider work and hosted/human acceptance are unfinished; this is the first implemented redesign increment.
+
 **Visual proposal — 9 September 2026:** A [product-wide mockup set](design/2026-09-09-product-mockups/README.md) now illustrates 18 desktop/mobile views across the ongoing lifecycle, with Mobbin, Linear and SaaSFrame references. These are proposed layouts with fictional data, generated and visually inspected; they are not implemented screens or new acceptance evidence. The notes identify generated details that must not become product rules.
 
 Updated 9 September 2026. Historical release evidence below is retained. Fresh checks today confirm that the existing local demo is running and can reach its database. The connected owner-submission, coordinator-review and saved-leadership-baseline workflow has now been demonstrated on a separate local production build. This is fictional local proof, not hosted or stakeholder acceptance.
