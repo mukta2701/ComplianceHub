@@ -77,6 +77,31 @@ async function memberResolver(supabase: SupabaseClient, organisationId: string) 
   return (name: string | null): string | null => (name ? byName.get(name.trim().toLowerCase()) ?? null : null);
 }
 
+type AssetOwnerResolution = { ownerId: string | null; error: string | null };
+
+async function assetOwnerResolver(supabase: SupabaseClient, organisationId: string) {
+  const { data, error, count } = await supabase.from("memberships").select("user_id,profiles(display_name)", { count: "exact" }).eq("organisation_id", organisationId);
+  const byName = new Map<string, Set<string>>();
+  for (const membership of data ?? []) {
+    const profile = one(membership.profiles);
+    if (!profile?.display_name) continue;
+    const name = String(profile.display_name).trim().toLowerCase();
+    if (!name) continue;
+    const userIds = byName.get(name) ?? new Set<string>();
+    userIds.add(String(membership.user_id));
+    byName.set(name, userIds);
+  }
+  return (name: string | null): AssetOwnerResolution => {
+    const trimmedName = name?.trim();
+    if (!trimmedName) return { ownerId: null, error: null };
+    if (error || (count !== null && count > (data?.length ?? 0))) return { ownerId: null, error: "Could not look up the complete in-app owner list for this workspace." };
+    const userIds = byName.get(trimmedName.toLowerCase());
+    if (!userIds?.size) return { ownerId: null, error: `In-app owner "${trimmedName}" was not found in this workspace.` };
+    if (userIds.size > 1) return { ownerId: null, error: `In-app owner "${trimmedName}" matches more than one member in this workspace.` };
+    return { ownerId: [...userIds][0], error: null };
+  };
+}
+
 // Resolves the SoA register + its control_code -> item id map. Read-only, so it's safe to call from
 // both the dry-run preview and the real commit (Fix 4: keeps the preview's updated/skipped counts honest).
 async function loadSoaRegister(supabase: SupabaseClient, registerId: string | undefined, organisationId: string): Promise<{ registerId: string | null; byCode: Map<string, string> }> {
@@ -120,7 +145,17 @@ export async function runImportAction(input: { module: ImportModule; headers: st
   if (rows.length < input.rows.length) notes.push(`Import is limited to ${MAX_IMPORT_ROWS} rows per file; ${input.rows.length} rows were provided.`);
   let imported = 0, updated = 0, skipped = 0;
   results.forEach((r, i) => { if (!r.ok) rowErrors.push({ row: i + 1, errors: r.errors }); });
-  const valid = results.filter((r) => r.ok).length;
+  const assetOwners = new Map<number, AssetOwnerResolution>();
+  if (input.module === "asset") {
+    const resolveAssetOwner = await assetOwnerResolver(supabase, organisation.id);
+    results.forEach((r, index) => {
+      if (!r.ok) return;
+      const resolution = resolveAssetOwner((r.values as Record<string, string | number | boolean | null>).ownerName as string | null);
+      assetOwners.set(index, resolution);
+      if (resolution.error) rowErrors.push({ row: index + 1, errors: [resolution.error] });
+    });
+  }
+  const valid = results.filter((r, index) => r.ok && !assetOwners.get(index)?.error).length;
   const result: ImportRunResult = { committed: input.commit, total: results.length, valid, invalid: results.length - valid, imported: 0, updated: 0, skipped: 0, rowErrors, notes };
   if (!input.commit) {
     if (input.module === "soa") {
@@ -168,16 +203,17 @@ export async function runImportAction(input: { module: ImportModule; headers: st
     revalidatePath("/app/risks");
   } else if (input.module === "asset") {
     const resolveCategory = await categoryResolver(supabase, "asset_categories", organisation.id);
-    const resolveMember = await memberResolver(supabase, organisation.id);
     const { count } = await supabase.from("assets").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id);
     let n = count ?? 0;
-    for (const r of results) {
+    for (const [index, r] of results.entries()) {
       if (!r.ok) continue;
       const v = r.values as Record<string, string | number | boolean | null>;
       const reference = (v.reference as string) || `AST-${String(++n).padStart(3, "0")}`;
+      const owner = assetOwners.get(index);
+      if (owner?.error) { skipped++; notes.push(`Row ${reference}: ${owner.error}`); continue; }
       const parseResult = assetInputSchema.safeParse({
         organisationId: organisation.id, reference, description: String(v.description), ownerLocation: (v.ownerLocation as string) ?? "",
-        ownerId: resolveMember(v.ownerLocation as string | null) ?? "", classification: v.classification, valueCriticality: v.valueCriticality,
+        ownerId: owner?.ownerId ?? "", classification: v.classification, valueCriticality: v.valueCriticality,
         categoryId: (v.categoryName ? await resolveCategory(String(v.categoryName)) : null) ?? "", securityControls: (v.securityControls as string) ?? "",
         lifespan: (v.lifespan as string) ?? "", lastUpdated: (v.lastUpdated as string) ?? "", remarks: (v.remarks as string) ?? "",
       });
