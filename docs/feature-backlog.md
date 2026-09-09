@@ -204,3 +204,5 @@ The [evidence-backed assessment and linked tickets](plans/operating-lifecycle-qu
 The follow-on [import preview consistency increment](superpowers/specs/2026-09-09-import-preview-consistency.md) prevents an operator confirming a preview whose mappings or target register have changed. Asset-owner inference is a separate pending decision because the original import design explicitly allowed it.
 
 Owner-approved [explicit asset-import ownership](superpowers/specs/2026-09-09-explicit-asset-import-owner.md) separates descriptive location from assignment and flags uncertain names before import. Existing export format and saved records remain unchanged.
+
+Owner-approved [dated generic collector observations](superpowers/specs/2026-09-09-dated-collector-observations.md) preserve later check dates and changed facts while keeping identical retries and previous reviews stable. Ticket10 is the next complete collection-to-review increment.

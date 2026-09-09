@@ -29,3 +29,7 @@ All fixtures are newly created fictional local workspaces. Existing records were
 |---|---|---|
 | Explicit mapping and unsafe-name feedback | [View](explicit-asset-owner-2026-09-09/owner-preview-chromium.png) | [View](explicit-asset-owner-2026-09-09/owner-preview-mobile.png) |
 | Saved explicit owner and descriptive location | [View](explicit-asset-owner-2026-09-09/saved-owner-chromium.png) | [View](explicit-asset-owner-2026-09-09/saved-owner-mobile.png) |
+
+## Git and background closeout
+
+Source `e35112e6c07746defc92e3b82969b9d72a244f59` is committed/pushed to origin/codex/team-baseline. The exact checked package is installed at http://127.0.0.1:3300/app/assets/import. Fresh health returns app/database OK and that source SHA; source fingerprints match the tested page/action/adapter. The launcher runs independently with parent process1 and a1.5GiB Node heap setting. The actual authenticated in-app browser was refreshed and shows the new owner guidance. No database reset, record rewrite or hosted operation occurred.
