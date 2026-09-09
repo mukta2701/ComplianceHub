@@ -32,7 +32,7 @@ The standard migration command found an older missing ledger entry, `20260909152
 
 Independent standards and specification reviews identified provenance-forgery, CI-local-port and legacy-fact-display issues; these were corrected and both re-reviews report no remaining material findings. [Review record](2026-09-09-dated-observations-review.md).
 
-Private runtime logs, fictional login credentials, collection fixtures and fingerprints remain in ignored `artifacts/dated-observations/`. They are not published. This local demonstration does not establish live-provider correctness, hosted deployment acceptance or human stakeholder acceptance. The existing background build remains available until the final candidate is verified and switched explicitly.
+Private runtime logs, fictional login credentials, collection fixtures and fingerprints remain in ignored `artifacts/dated-observations/`. They are not published. This local demonstration does not establish live-provider correctness, hosted deployment acceptance or human stakeholder acceptance. Source `9b831c53ef18e5c15383e88de3060a5065b3fbde` is committed and pushed to `origin/codex/team-baseline`. The verified packaged build now runs independently at http://127.0.0.1:3300/app; fresh health returns app/database OK with that exact source identity. The authenticated fictional desktop journey also passes against this actual background process (1/1), after the separate candidate desktop/mobile acceptance. The original workspace remains intact and correctly shows no configured Automation sources. This is a background process, not automatic startup after a full Mac reboot.
 
 ## Visible comparison
 
