@@ -270,7 +270,7 @@ Azure access and hosted acceptance remain dependencies owned by the owner/compan
 
 ## 12. Delivery sequence and stop conditions
 
-This is a product and architecture delivery plan. It does not authorise application changes or substitute for the detailed implementation specification of each phase. Each phase should reuse the existing modules, introduce only the missing behaviour, and have its own demonstrable outcome. The six phases map directly to the six product gaps discussed with the owner.
+This is a product and architecture delivery plan. Following the discussion on 9 September 2026, the owner authorised implementation of the first connected journey (phases 1–3), followed by visible evidence and GitHub synchronisation. The detailed implementation plan records the bounded changes and tests; later phases remain separate work. Each phase should reuse the existing modules, introduce only the missing behaviour, and have its own demonstrable outcome. The six phases map directly to the six product gaps discussed with the owner.
 
 | Phase | Gap addressed | Outcome |
 |---|---|---|
