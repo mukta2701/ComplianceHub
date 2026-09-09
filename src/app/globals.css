@@ -603,3 +603,17 @@ a.heat-cell:hover{outline:2px solid var(--ink);outline-offset:-2px}
   .settings-content .member-actions input{min-width:0;max-width:100%;flex:1 1 150px}
   .settings-content .fact-grid{min-width:0;overflow-wrap:anywhere}
 }
+
+/* Import mapping keeps each source column beside its editable destination. */
+.import-workbook-input{max-width:100%;min-width:0}
+.import-column-mapping{border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.import-column-header,.import-column-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;padding:12px 14px;align-items:center}
+.import-column-header{background:#f8f9fb;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#596273}
+.import-column-row{border-top:1px solid var(--line);font-size:13px;color:var(--ink)}
+.import-column-row>span{overflow-wrap:anywhere;font-weight:600}
+.import-column-row select{width:100%;min-width:0;max-width:100%}
+@media(max-width:640px){
+  .import-column-header{display:none}
+  .import-column-row{grid-template-columns:minmax(0,1fr);gap:8px}
+  .import-column-row:first-of-type{border-top:0}
+}
