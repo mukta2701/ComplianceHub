@@ -41,3 +41,7 @@ Additional evidence: [mobile error and keyboard focus](data-availability-2026-09
 ## Limits and remaining work
 
 These changes address the recorded failure paths, not every potential failure in the application. Live-provider recovery, hosted release, stakeholder acceptance and measured manual-work savings remain open. Separate asset import/export and collector observation-model findings remain in the programme assessment.
+
+## Release closeout
+
+Application source `5ae6868a433c8a5b4fe877f8cf62839238f96de8` is committed and pushed to the existing feature branch. The source hashes match the packaged production candidate. The ordinary background preview at http://127.0.0.1:3300/app now runs that package independently of the tool terminal; fresh health reports that exact source with database OK. The actual in-app browser was refreshed and the authenticated dashboard and audit register were visibly verified after the switch. Later documentation-only closeout commits do not change this application build.
