@@ -36,6 +36,10 @@ Independent visual review inspected the before image plus production desktop/mob
 
 [Policy before the change](operating-lifecycle-2026-09-09/policy-before.png). All shown accounts, organisations and records are fictional.
 
+## Source and running preview
+
+Application source is committed and pushed as [`1104849`](https://github.com/mukta2701/ComplianceHub/commit/1104849887cceabd47aea45a0cce86a60df615f3) on `codex/team-baseline`. The independently running local production preview reports that source identity from `/api/health`; the subsequent documentation-only closeout does not change application behavior. The generated fixture token correction passed eighteen collector tests and the normal Git privacy gate before the source commit. No provider secret, local credentials, runtime log or raw OS diagnostic was published.
+
 ## Explicit limits and deferred work
 
 Local automated proof does not establish provider verification, hosted deployment or human acceptance. Azure access/deployment approval and live-provider credentials/disposable targets remain external gates. The generic collector still needs an agreed model for repeated observations of the same resource; this increment improves failure truthfulness without silently changing evidence cardinality. Historical recurring tasks without reliable successor lineage remain unknown rather than guessed/backfilled. Long-term Mac stability needs observation; these mitigations do not diagnose every possible shutdown.

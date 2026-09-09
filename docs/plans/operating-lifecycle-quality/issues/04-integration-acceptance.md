@@ -4,11 +4,11 @@
 
 **Blocked by:** 01, 02, 03, 05
 
-**Status:** local verification complete; synchronisation pending
+**Status:** verified locally and source synchronised
 
 - [x] Resolve material independent standards/specification review findings.
 - [x] Run appropriate full and affected checks; record honest limits.
 - [x] Demonstrate fictional workflows in updated running app and save evidence.
-- [ ] Update sole release status, commit and push coherent verified changes.
+- [x] Update sole release status, commit and push coherent verified changes.
 
 Evidence: [local release verification](../../../evidence/2026-09-09-operating-lifecycle-quality.md).
