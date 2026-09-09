@@ -80,4 +80,3 @@ No app source, database, permissions or running build changed in this mockup bat
 Apply the selected visual language to the shared shell and programme dashboard, using existing data and truthful empty states. Demonstrate desktop and mobile behaviour before extending the same patterns to the registers and detail views.
 
 The [release checklist](../../release-checklist.md) remains the project status source. [Generation prompts](prompts.md) record the complete prompt set and built-in generation mode.
-
