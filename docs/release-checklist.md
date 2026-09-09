@@ -1,5 +1,54 @@
 # Public beta release checklist
 
+## Start here — plain-language project status
+
+Updated 6 September 2026 from saved release evidence. This summary is the current reader-facing status; the sections below retain the engineering history. Earlier statements such as “pending” describe their checkpoint, not necessarily today. No application or live connection was re-tested while preparing this summary.
+
+**Overall:** The fictional local showcase has been demonstrated and packaged. The latest release has not been accepted on company staging. The full live GitHub fix-and-recheck journey remains unproven in this showcase.
+
+| Area | Status | What this means for you |
+|---|---|---|
+| Core compliance showcase | Demonstrated locally | Saved browser checks cover assessment, control decisions, risk, task, evidence, audit and report journeys using fictional Northstar data. |
+| Human review of an issue | Demonstrated locally | A separate fictional follow-up shows a task completed, evidence reviewed and an audit finding explicitly closed. Task completion alone does not prove resolution. |
+| GitHub checks and AI read access | Earlier live proof; current use needs verification | Earlier collection and seven MCP read/preparation tools were demonstrated. The current showcase launcher disables provider credentials; saved results do not prove a working live connection today. |
+| Broader company-wide AI assistant | Planned beyond the evidenced tool set | The approved design describes more coverage than has been demonstrated. In-app AI drafting is a separate feature whose current configuration and answer quality have not been established in this review. |
+| Latest company staging release | Blocked / not accepted | Latest recorded Azure target access failed. Access, deployment approval and hosted verification remain outstanding. |
+| Reliability and first-user acceptance | Open | Recovery from a previous app stall is documented; its original cause remains uncertain. Independent acceptance by the intended first user has not been established. |
+
+### Current focus and finish line
+
+Current planning focus, clarified 9 September 2026: define **ComplianceHub's product vision and backend operating workflow** for a software startup with at least around 20 employees, with Mukta coordinating the programme, accountable owners contributing their work, and Charlie reviewing the baseline. The target team-contribution workflow is proposed; current Member permissions do not yet establish it. The [product and architecture draft](superpowers/specs/2026-09-09-compliancehub-focused-architecture-design.md) explains how existing capabilities should reduce manual administration and support evidence-linked leadership decisions. This is planning, not implementation or architecture acceptance. The mAIself staging/Gmail security trace remains deferred by the owner. The longer-term purpose remains establishing a security baseline for **mAIcompany's business and its mAIself product** using the existing ComplianceHub capabilities. Owner-confirmed map: `mAIself` contains the backend; `maiself-web-next` is upcoming design-system/web work; `grove-maiself` is not used. This supersedes earlier company-name and active-Grove assumptions. The owner reports Charlie's backing, internal testing with real Gmail/calendar connections, and Charlie/Aman (CTO) as technical confirmation contacts. No customer users are reported. This does not establish that existing engineering safeguards are absent.
+
+The [draft system inventory](maiself-system-inventory.md) includes read-only observations from the explicit AdTecher Azure subscription, the deployed staging frontend and public mAIself health endpoints, in addition to version-pinned repository sources. The mAIself staging/Gmail trace is now deferred by the owner. The current focus is ComplianceHub itself: define its operating workflow, then use it to establish the first security baseline. No application changes were made and no messages were sent during the architecture planning. Next step: define the first saved-baseline implementation slice and its evidence-linked leadership summary, using the existing local showcase for the acceptance scenario.
+
+The technical fictional-demo milestone is evidenced as complete. The mentoring milestone is complete when the owner can explain that journey and its limitations. This does not close live GitHub, staging or customer-acceptance work.
+
+The first stakeholder is Charlie, for internal mAIcompany business and mAIself product security work. The intended initial direction is ISO 27001 readiness; a release deadline and formal certification commitment remain unconfirmed. Other organisations are a possible later audience. Do not infer a commitment to external launch from completion of the local demo.
+
+Role clarification confirmed by the owner on 9 September 2026: **Mukta operates ComplianceHub; Charlie reviews the baseline.** The architecture draft uses this division for the first-use journey. This documentation update does not change application permissions or establish fresh runtime, provider or stakeholder acceptance evidence.
+
+### How we keep the biggest risks manageable
+
+| Risk | Working rule | What remains unresolved |
+|---|---|---|
+| Work keeps expanding | State one bounded outcome before implementation; park unrelated ideas in existing planning notes. | Charlie is the first stakeholder. Confirm the real testing environment and baseline before choosing further feature work. |
+| Completion reports are confusing | Report changed, verified, unfinished and next; always name local/demo/live environment. | Apply this consistently after each work session. |
+| Status overstates proof | Keep task completion, human review, evidence freshness and fresh provider verification separate. | Live fix-and-recheck rehearsal is outstanding. |
+| Evidence is confused with proof | ComplianceHub may store evidence, its source, date, owner and review decision, but it must not imply that a check happened when no evidence has been supplied or verified. A task marked Done is not proof by itself. | For each control, obtain the actual record and record the human review; until then, keep the status unverified or unknown. |
+| Wrong version or stale proof | Tie demonstrated behavior to its saved release and environment; mark historical checks explicitly. | A saved passing check is not a fresh health check. |
+| External access blocks release | Name the dependency and who must act; continue only independent in-scope work. | Owner/company must resolve Azure access; deployment and live repository scope remain separate decisions. |
+| Product may not fit the first user | Ask the intended user to try the agreed journey and record where they get stuck. | No independent first-user acceptance established. |
+
+### Evidence behind this summary
+
+- Latest packaged release: `27ba366`; functional browser candidate: `16c25f2`. The package records documentation-only differences between them.
+- Saved acceptance: eight desktop/mobile browser checks passed; packaged release sign-in, restart and refresh recorded on 6 September 2026.
+- [Operator guide and demonstration](demo-release.md).
+- [Private local release identity](../artifacts/human-review-2026-09-06/release-package.json), available with this local workspace; not a public artifact.
+- [Earlier GitHub and MCP proof](evidence/phase3-direct-mcp-live-2026-09-04.md).
+
+## Engineering history — dated checkpoints below
+
 ## Active goal — connected remediation rehearsal
 
 - The attached overnight goal resumes the full lifecycle work; the earlier usability-only pause below is historical, not a current instruction. Preserve the polished layout and existing fixtures.
