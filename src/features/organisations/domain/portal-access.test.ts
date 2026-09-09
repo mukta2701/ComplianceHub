@@ -12,6 +12,8 @@ describe("workspace portal route access", () => {
 
   it.each([
     "/app",
+    "/app/tasks",
+    `/app/tasks/${POLICY_ID}`,
     "/app/policies",
     `/app/policies/${POLICY_ID}`,
     "/app/monitoring",
@@ -25,7 +27,10 @@ describe("workspace portal route access", () => {
   it.each([
     "/app/settings",
     "/app/integrations",
-    "/app/tasks",
+    "/app/tasks/new",
+    `/app/tasks/${POLICY_ID}/edit`,
+    "/app/tasks/not-a-task-id",
+    "/app/tasks-evil",
     "/app/policies/new",
     "/app/policies/not-a-policy-id",
     `/app/policies/${POLICY_ID}/edit`,

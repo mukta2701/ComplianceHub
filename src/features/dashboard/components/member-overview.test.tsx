@@ -17,7 +17,7 @@ describe("MemberOverview", () => {
     }} />);
 
     expect(screen.getByRole("heading", { name: "Welcome to Example Ltd" })).toBeInTheDocument();
-    expect(screen.getByText("Developer · Read-only member view")).toBeInTheDocument();
+    expect(screen.getByText("Developer · View workspace records and contribute to assigned tasks")).toBeInTheDocument();
     expect(screen.getByText("3 of 4 current policies accepted")).toBeInTheDocument();
     expect(screen.getByText("Production GitHub, Delivery Jira")).toBeInTheDocument();
     expect(screen.getByText("2 active findings · 1 high or critical")).toBeInTheDocument();

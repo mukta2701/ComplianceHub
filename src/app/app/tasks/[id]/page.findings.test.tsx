@@ -7,9 +7,9 @@ const state = vi.hoisted(() => ({
   filters: [] as Array<[string, string, unknown]>,
 }));
 vi.mock("@/lib/app-context", () => ({ requireAppContext: async () => ({
-  organisation: { id: "org-1" }, membership: { role: state.role },
+  organisation: { id: "org-1" }, user: { id: "user-1" }, membership: { role: state.role },
   supabase: { from(table: string) {
-    const data = table === "tasks" ? { id: "task-1", title: "Review access", status: "done", source: "monitoring", detail: null, due_on: "2026-12-31", owner_id: null, control_id: null, risk_id: null }
+    const data = table === "tasks" ? { id: "task-1", title: "Review access", status: "done", source: "monitoring", detail: null, due_on: "2026-12-31", assignment_revision: 0, owner_id: null, control_id: null, risk_id: null }
       : table === "monitoring_findings" ? state.monitoring : table === "audit_findings" ? state.audit
       : table === "evidence_links" || table === "integration_connections" ? [] : null;
     const q = {

@@ -28,17 +28,17 @@ function renderShell(role: "owner" | "admin" | "member" | null, jobTitle: string
 describe("AppShell role-specific navigation", () => {
   beforeEach(() => { hoisted.pathname = "/app"; });
 
-  it("renders only the curated read-only navigation for a Member", () => {
+  it("renders only the curated navigation with assigned work for a Member", () => {
     renderShell("member", "Developer");
 
     const navigation = screen.getByRole("navigation", { name: "Workspace" });
-    expect(navigation).toHaveTextContent("OverviewCompliancePoliciesFramework coverageMonitoringLeadership report");
-    expect(navigation.querySelectorAll("a")).toHaveLength(5);
+    expect(navigation).toHaveTextContent("OverviewComplianceAssigned tasksPoliciesFramework coverageMonitoringLeadership report");
+    expect(navigation.querySelectorAll("a")).toHaveLength(6);
     expect(screen.getByRole("link", { name: "Framework coverage" })).toHaveAttribute("href", "/app/frameworks");
-    expect(screen.getByText("Developer · Read only")).toBeInTheDocument();
+    expect(screen.getByText("Developer · Assigned work access")).toBeInTheDocument();
     expect(screen.getByText("Member view", { selector: "span" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Tasks" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Assigned tasks" })).toHaveAttribute("href", "/app/tasks?filter=assigned");
     expect(screen.queryByRole("link", { name: "Trust Center" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Notifications, 2 unread" })).toHaveAttribute("href", "/app/notifications");
   });

@@ -17,7 +17,7 @@ export function MemberOverview({ data }: { data: MemberOverviewData }) {
     <PageIntro
       eyebrow="MEMBER OVERVIEW"
       title={`Welcome to ${data.organisationName}`}
-      body={`${data.jobTitle?.trim() || "Member"} · Read-only member view`}
+      body={`${data.jobTitle?.trim() || "Member"} · View workspace records and contribute to assigned tasks`}
     />
 
     <div className="stats-grid">

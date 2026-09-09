@@ -35,6 +35,7 @@ const navGroups = [
 const memberNavGroups = [
   { label: null, items: [["/app", "home", "Overview"]] },
   { label: "Compliance", items: [
+    ["/app/tasks?filter=assigned", "check", "Assigned tasks"],
     ["/app/policies", "file", "Policies"],
     ["/app/frameworks", "file", "Framework coverage"],
   ] },
@@ -68,6 +69,7 @@ const TITLE_ROUTES: Array<[string, string]> = [
 ].sort((a, b) => b[0].length - a[0].length);
 
 function isActive(path: string, href: string) {
+  href = href.split("?")[0];
   if (href === "/app") return path === "/app";
   if (href === "/app/settings" && (path === "/app/integrations" || path.startsWith("/app/integrations/"))) return true;
   return path === href || path.startsWith(`${href}/`);
@@ -92,7 +94,7 @@ export function AppShell({ organisationId, orgName, orgInitials, userInitials, u
     : TITLE_ROUTES.find(([href]) => isActive(path, href))?.[1] ?? "ComplianceHub";
   const accessCue = isMember ? "Member view" : role ? roleLabel(role) : "Workspace setup";
   const workspaceSubtitle = isMember
-    ? `${jobTitle?.trim() || "Member"} · Read only`
+    ? `${jobTitle?.trim() || "Member"} · Assigned work access`
     : role ? roleLabel(role) : "Workspace setup";
   return <div className="app-shell">
     <button className="nav-overlay" data-open={open} onClick={() => setOpen(false)} aria-label="Close navigation" />

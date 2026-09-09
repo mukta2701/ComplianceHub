@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireAppContext } from "@/lib/app-context";
@@ -9,13 +10,16 @@ import { updateTaskStatusAction } from "../actions";
 import { pushTaskToTrackerAction } from "./tracker-actions";
 import { AiSuggestionPanel } from "@/components/ai-suggestion-panel";
 
+import { TaskContributions } from "../task-contributions";
+import type { Contribution } from "@/features/tasks/domain/contributions";
+
 const EVIDENCE_TONE: Record<string, string> = { current: "green", expiring: "amber", expired: "red", superseded: "neutral", withdrawn: "neutral" };
 
 export default async function TaskDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { supabase, organisation, membership } = await requireAppContext();
+  const { supabase, organisation, membership, user } = await requireAppContext();
   const canManage = membership.role !== "member";
-  const { data: task } = await supabase.from("tasks").select("id,title,detail,status,due_on,recurrence,source,owner_id,control_id,risk_id,created_at,updated_at").eq("id", id).eq("organisation_id", organisation.id).maybeSingle();
+  const { data: task } = await supabase.from("tasks").select("id,title,detail,status,due_on,recurrence,source,owner_id,control_id,risk_id,created_at,updated_at,assignment_revision").eq("id", id).eq("organisation_id", organisation.id).maybeSingle();
   if (!task) notFound();
   const [monitoringResult, auditResult] = await Promise.all([
     supabase.from("monitoring_findings").select("id,title,status,finding_origin,resolved_at")
@@ -39,6 +43,14 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
       .eq("organisation_id", organisation.id).eq("enabled", true).is("revoked_at", null).order("created_at"),
     supabase.from("ai_workspace_settings").select("enabled").eq("organisation_id", organisation.id).maybeSingle(),
   ]);
+  const { data: contributionRows, error: contributionError } = await supabase.from("task_contributions")
+    .select("id,submitter_id,assignment_revision,note,created_at,decision,reviewer_id,reviewed_at,rationale,evidence_id")
+    .eq("organisation_id", organisation.id).eq("task_id", id).order("created_at", { ascending: false }).order("id");
+  if (contributionError) throw new Error("Could not load submission history");
+  const contributions = (contributionRows ?? []) as Contribution[];
+  const peopleIds = [...new Set(contributions.flatMap((c) => [c.submitter_id, c.reviewer_id]).filter((value): value is string => Boolean(value)))];
+  const { data: people } = peopleIds.length ? await supabase.from("profiles").select("id,display_name").in("id", peopleIds) : { data: [] };
+  const names = Object.fromEntries((people ?? []).map((person) => [person.id, person.display_name ?? "Workspace member"]));
   const today = new Date().toISOString().slice(0, 10);
   const overdue = isOverdue({ status: task.status as TaskStatus, dueOn: task.due_on }, today);
   const facts: Array<[string, React.ReactNode]> = [
@@ -80,7 +92,9 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
     </Card>}
     {aiSettings?.enabled && <AiSuggestionPanel target={{ targetType: "task", targetId: task.id }} />}
     {task.detail && <Card style={{ padding: "22px", marginTop: "16px" }}><h2 style={{ fontSize: "12px", color: "#596273", margin: 0 }}>Detail</h2><p style={{ whiteSpace: "pre-wrap", marginTop: "6px" }}>{task.detail}</p></Card>}
-    {evidence.length > 0 && <Card style={{ padding: "22px", marginTop: "16px" }}><h2 style={{ fontSize: "12px", color: "#596273", margin: "0 0 10px" }}>Linked evidence</h2><ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "8px" }}>{evidence.map((e) => <li key={e.id} style={{ display: "flex", justifyContent: "space-between", gap: "12px" }}><Link href={`/app/evidence?evidence=${e.id}#evidence-${e.id}`}>{e.title}</Link><Pill tone={EVIDENCE_TONE[e.status] ?? "neutral"}>{e.status}</Pill></li>)}</ul></Card>}
+    <TaskContributions taskId={task.id} ownerId={task.owner_id} userId={user.id} role={membership.role} status={task.status} assignmentRevision={task.assignment_revision}
+      requestId={randomUUID()} names={names} contributions={contributions.map((c) => ({ ...c, reviewRequestId: randomUUID() }))} />
+    {evidence.length > 0 && <Card style={{ padding: "22px", marginTop: "16px" }}><h2 style={{ fontSize: "12px", color: "#596273", margin: "0 0 10px" }}>Linked evidence</h2><ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "8px" }}>{evidence.map((e) => <li key={e.id} style={{ display: "flex", justifyContent: "space-between", gap: "12px" }}>{canManage ? <Link href={`/app/evidence?evidence=${e.id}#evidence-${e.id}`}>{e.title}</Link> : <span>{e.title}</span>}<Pill tone={EVIDENCE_TONE[e.status] ?? "neutral"}>{e.status}</Pill></li>)}</ul></Card>}
     {canManage && <form action={updateTaskStatusAction} className="card" style={{ padding: "18px", marginTop: "16px", display: "flex", gap: "10px", alignItems: "center" }}><input type="hidden" name="id" value={task.id} /><label style={{ fontWeight: 700, fontSize: "12px" }}>Update status <select name="status" defaultValue={task.status} style={{ marginLeft: "6px" }}><option value="open">Open</option><option value="in_progress">In progress</option><option value="done">Done</option><option value="cancelled">Cancelled</option></select></label><button className="button primary">Save</button></form>}
     {canManage && !ticket && (connections?.length ?? 0) > 0 && <form action={pushTaskToTrackerAction} className="card" style={{ padding: "18px", marginTop: "16px", display: "flex", gap: "10px", alignItems: "center" }}>
       <input type="hidden" name="taskId" value={task.id} />

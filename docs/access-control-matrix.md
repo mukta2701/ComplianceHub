@@ -59,6 +59,7 @@ policies are reviewed.
 | `soa_items` | R/W | R | Member receives read-only Statement of Applicability items. |
 | `soa_registers` | R/W | R | Draft/successor creation is operator-only. |
 | `soa_snapshots` | R/W* | R | Created by `finalise_soa`; finalised snapshots remain immutable. |
+| `task_contributions` | R | R | Immutable note payload and final review; no direct writes. Current assignee submits via guarded RPC; independent coordinator reviews exact version. Old assignment history remains readable but cannot be reviewed. |
 | `task_tickets` | R/W | R | External ticket state is read-only for Members. |
 | `tasks` | R/C/U | R | Member cannot create, complete, or revise tasks. |
 | `trust_center_settings` | R/W | — | Publishing configuration remains operator-only. |
@@ -108,6 +109,8 @@ depth for security-invoker functions.
 | `publish_leadership_report(uuid,jsonb)` | Operator | Derives organisation name, publisher, and time; rejects any payload outside the exact bounded `ReadinessReport` shape and inserts an immutable snapshot. |
 | `reply_policy_feedback(uuid,text)` | Any current member on an approved policy | Locks the open thread and policy lifecycle, derives author/time, and appends an immutable comment. |
 | `save_assessment_response(uuid,uuid,assessment_answer,text,bigint)` | Operator | Assessment must belong to an operated organisation; revision conflict protection remains. |
+| `submit_task_contribution(uuid,uuid,bigint,text,uuid)` | Current task assignee | Locks live membership and open task; checks database-owned assignment revision, tenant, bounded note and actor/request idempotency. One pending submission per current assignment; historical pending notes remain visibly obsolete after reassignment. |
+| `review_task_contribution(uuid,uuid,text,text,uuid)` | Independent Operator | Locks current memberships and task; rechecks assignment and open state, rejects self-review, binds retry to exact submission/decision/rationale, and atomically creates linked note evidence on acceptance. Does not change task or finding status. |
 | `set_policy_feedback_status(uuid,boolean)` | Operator | Locks the thread and atomically resolves or reopens it with trusted resolver metadata. |
 
 ### Lifecycle/self-service exceptions
@@ -135,3 +138,16 @@ the lifecycle assertions in `047`.
 - `increment_rate_limit(text,integer)` is executable only by `service_role`.
 - Trigger functions (`capture_audit_event`, immutable guards, seed triggers) are
   internal mutation mechanisms, not authenticated application APIs.
+
+## Assigned contribution portal (9 September 2026)
+
+Members can open the Tasks list and UUID task details; the Assigned tasks link
+filters to their current work. Only the current assignee can submit notes through
+the guarded RPC. Member task creation/edit routes, task exports and the Evidence
+vault route remain unavailable. Accepted note and coordinator review history are
+visible on the task; Members see evidence titles as text rather than vault links.
+Operator acceptance creates evidence without completing a task or verifying a
+finding. Reassignment invalidates prior pending submissions without rewriting
+history, and assignment revisions also change when membership removal clears an
+owner. Reviewed note evidence has no mutable member owner reference, so accepted
+history does not prevent ordinary member offboarding.
