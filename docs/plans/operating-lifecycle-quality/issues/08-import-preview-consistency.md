@@ -4,7 +4,7 @@
 
 **Blocked by:** None; independent of the pending asset-owner semantics decision.
 
-**Status:** verified locally; Git/background closeout pending
+**Status:** verified locally, committed/pushed and running in the background preview
 
 - [x] Mapping/register changes invalidate confirmation; a fresh preview restores it.
 - [x] Pending inputs cannot change; confirmation consumes its preview.

@@ -41,3 +41,9 @@ These checks establish local behaviour with fictional data. No database schema, 
 ## Separate decision
 
 The original phase-B.5 design explicitly permits resolving an asset owner from Owner & Location. A private action regression reproduced an assignment to a member named London from the location London. The owner has been asked whether to replace that rule with a distinct In-app owner column; no such semantics change is included here. The failing ownership regression and its raw evidence remain in ignored local artifacts pending that decision.
+
+## Git and background-app closeout
+
+Application source `165f975c5755ef8628521f740fab68310f015174` is committed and pushed to `origin/codex/team-baseline`. The checked packaged build is now running independently in the background at http://127.0.0.1:3300/app; its launcher has parent process1 and a1.5GiB Node heap limit. Fresh health reports `status: ok`, `db: ok`, and that exact source SHA. Source fingerprints still match the tested wizard and stylesheet. The existing authenticated fictional session opens the import page in the actual in-app browser after the switch. No database restart or reset was needed.
+
+This is a local background process, not automatic startup after a complete Mac reboot. Approximately12GiB disk remains. Full provider, hosted and human acceptance gates remain open.
