@@ -27,6 +27,7 @@ Starting commit: `c4b2d2434593189ff68b46bd7f7e34784f00efdf`. [Specification](../
 
 - Production browser acceptance: **4/4 pass**, zero retries, 34.1 seconds. Desktop Chromium and mobile browser contexts cover 1440px, 883px and 393px layouts, actual owner job-title save/reload, hash/back/forward/legacy invitation navigation, Settings sections, Member navigation, drawer focus containment, Escape/overlay close and desktop resize. Dashboard, Tasks, Risks, Evidence and Policies contain fictional saved records and have no horizontal document overflow. Wide tables retain internal scrolling.
 - Axe WCAG 2 A/AA scans report zero violations in the demonstrated Settings sections, and no serious/critical violations in the open drawer or five representative desktop/mobile routes. These scans supplement actual keyboard/visual checks and do not establish complete accessibility certification.
+- Actual background preview: **2/2 browser journeys pass** with the same functional and accessibility checks. Final affected component/Settings/Risks check: **5 files / 38 tests pass**.
 - Full unit suite: **308 files pass, 2,655 tests pass and 3 explicitly skipped**. Typecheck and full lint pass. Production build passes. Final affected component/Settings/Risks tests, typecheck and lint pass after the last accessibility corrections.
 - Existing server actions, database policies and provider behavior were not changed. Fictional UI fixtures and a new fictional member title were saved locally; existing records were preserved. No invitation was sent, AI enabled or external assistant connected during this demonstration.
 
@@ -44,4 +45,8 @@ AI and connected-assistant empty-state text failed contrast scans at 9.5px/3.3:1
 
 This is a local production demonstration with fictional records. It does not establish live-provider operation, hosted acceptance or stakeholder approval. No permissions or review/evidence meanings were redesigned. Mobile registers retain keyboard-accessible horizontal tables; separate detail-page simplification is a further visual increment.
 
-Private local logs, fixture credentials and runtime packages remain under ignored `artifacts/ui-overhaul/`; only sanitised descriptions and fictional screenshots are committed. Source synchronisation and final running-version identity are recorded in the release checklist after verification.
+Private local logs, fixture credentials and runtime packages remain under ignored `artifacts/ui-overhaul/`; only sanitised descriptions and fictional screenshots are committed. Application source `d5cd2f1079e1b062c7fafc8728259ef3143dbfc9` is pushed to `origin/codex/team-baseline` and running independently at http://127.0.0.1:3300/app. The packaged source fingerprints match all six changed production files. Fresh health reports app/database OK and that exact source. Both browser journeys pass against the actual background process (2/2, 16.5 seconds); the in-app browser also shows the new Settings/Team screen with retained demo records. This final follow-up changes documentation/screenshots only.
+
+### Actual background screenshots, matching the original fictional workspace
+
+[Running Settings at 883px](workspace-ui-2026-09-09/running-settings-883.png) · [Running Tasks](workspace-ui-2026-09-09/running-tasks-1440.png) · [Running Dashboard](workspace-ui-2026-09-09/running-dashboard-1440.png). These use the same retained workspace as the before screenshots.

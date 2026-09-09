@@ -8,7 +8,7 @@ Initial independent review found two documented-standard problems: faint Setting
 
 ## Specification
 
-Initial independent review found two P2 gaps in modal isolation: live monitoring notifications remained interactive outside the drawer, and the workspace-setup state had no initial focus target. Both were reproduced with focused tests, fixed and independently rechecked. Subsequent source review accepted the framework-aware history integration and corrected drawer visibility/focus behavior. Final functional source recheck found no remaining defects. It requested broader accessibility evidence beyond Settings; scans were added for the open drawer and representative routes before final acceptance.
+Initial independent review found two P2 gaps in modal isolation: live monitoring notifications remained interactive outside the drawer, and the workspace-setup state had no initial focus target. Both were reproduced with focused tests, fixed and independently rechecked. Subsequent source review accepted the framework-aware history integration and corrected drawer visibility/focus behavior. Final functional source recheck found no remaining defects. It requested broader accessibility evidence beyond Settings; scans were added for the open drawer and representative routes before final acceptance. They found faint dashboard metadata and an unlabeled Risk status selector, now corrected. Final independent narrow standards/specification reviews found no remaining material issues; all four production candidate and two actual-background browser journeys pass.
 
 ## Visual review
 
