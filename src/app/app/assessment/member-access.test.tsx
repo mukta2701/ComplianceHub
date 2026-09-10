@@ -6,7 +6,9 @@ vi.mock("@/lib/app-context", () => ({
   requireAppContext: async () => ({
     organisation: { id: "org-1" }, membership: { role: state.role },
     supabase: { from: () => {
-      const query = { select: () => query, eq: () => query, order: () => Promise.resolve({ data: state.rows, error: null }) };
+      const query: Record<string, unknown> = {};
+      for (const method of ["select", "eq", "order", "limit"]) query[method] = () => query;
+      query.then = (resolve: (value: unknown) => unknown) => Promise.resolve({ data: state.rows, count: state.rows.length, error: null }).then(resolve);
       return query;
     } },
   }),

@@ -39,6 +39,7 @@ export function AssessmentResponseList({ sessionId, questions, initialRevision, 
   responses: Response[];
   readOnly?: boolean;
   aiEnabled?: boolean;
+  controlReviewHref?: string;
 }) {
   const router = useRouter();
   const [activeIndex, setActiveIndex] = useState(0);
@@ -221,7 +222,7 @@ export function AssessmentResponseList({ sessionId, questions, initialRevision, 
           }
           return;
         }
-        router.push("/app/assessment");
+        router.push(`/app/assessment/${sessionId}?completed=1`);
       } catch {
         setValidationMessage("Could not complete the assessment. Your saved answers are retained; please retry.");
       } finally {

@@ -17,7 +17,7 @@ const navGroups = [
   ] },
   { label: "Programme", items: [
     ["/app/assessment", "clipboard", "Gap assessment"],
-    ["/app/soa", "file", "Statement of Applicability"],
+    ["/app/soa", "file", "Controls & applicability"],
     ["/app/policies", "file", "Policies"],
     ["/app/assets", "file", "Asset inventory"],
   ] },

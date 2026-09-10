@@ -262,7 +262,7 @@ describe("assessment completion", () => {
     yesSave.resolve(ok(3));
     await screen.findByRole("heading", { name: /GOV-02/ });
     await userEvent.click(screen.getByRole("button", { name: "Save and complete" }));
-    await waitFor(() => expect(navigation.push).toHaveBeenCalledWith("/app/assessment"));
+    await waitFor(() => expect(navigation.push).toHaveBeenCalledWith("/app/assessment/s1?completed=1"));
     expect(fetchMock.mock.calls[2][0]).toBe("/api/app/assessment/complete");
     expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toEqual({ sessionId: "s1", expectedRevision: 3 });
   });
@@ -306,7 +306,7 @@ describe("assessment completion", () => {
     expect(navigation.push).not.toHaveBeenCalled();
     retrySave.resolve(result === "saved" ? ok(3) : { ok: false, status: result === "conflict" ? 409 : 500 } as Response);
     if (result === "saved") {
-      await waitFor(() => expect(navigation.push).toHaveBeenCalledWith("/app/assessment"));
+      await waitFor(() => expect(navigation.push).toHaveBeenCalledWith("/app/assessment/s1?completed=1"));
       expect(fetchMock.mock.calls[3][0]).toBe("/api/app/assessment/complete");
       expect(JSON.parse(fetchMock.mock.calls[3][1].body)).toEqual({ sessionId: "s1", expectedRevision: 3 });
     } else {
@@ -335,7 +335,7 @@ describe("assessment completion", () => {
     expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ sessionId: "s1", expectedRevision: 2 });
     expect(navigation.push).not.toHaveBeenCalled();
     complete.resolve({ ok: true, status: 200, json: async () => ({ revision: 2, state: "completed" }) } as Response);
-    await waitFor(() => expect(navigation.push).toHaveBeenCalledWith("/app/assessment"));
+    await waitFor(() => expect(navigation.push).toHaveBeenCalledWith("/app/assessment/s1?completed=1"));
   });
   it("keeps the draft on screen when completion fails and allows retry", async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(ok(2))
@@ -348,7 +348,7 @@ describe("assessment completion", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not complete");
     expect(navigation.push).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole("button", { name: "Save and complete" }));
-    await waitFor(() => expect(navigation.push).toHaveBeenCalledWith("/app/assessment"));
+    await waitFor(() => expect(navigation.push).toHaveBeenCalledWith("/app/assessment/s1?completed=1"));
     expect(fetchMock.mock.calls.filter(([url]) => url === "/api/app/assessment/response")).toHaveLength(1);
   });
   it("keeps finish-later as a draft operation even on the last question", async () => {

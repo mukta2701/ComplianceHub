@@ -36,6 +36,13 @@ describe("AppShell role-specific navigation", () => {
     expect(screen.getByRole("link", { name: "Asset inventory" })).toHaveAttribute("href", "/app/assets");
   });
 
+  it("names the working control area while preserving its existing route", () => {
+    renderShell("owner");
+
+    expect(screen.getByRole("link", { name: "Controls & applicability" })).toHaveAttribute("href", "/app/soa");
+    expect(screen.queryByRole("link", { name: "Statement of Applicability" })).not.toBeInTheDocument();
+  });
+
   it("identifies the workspace and current page in the header breadcrumb", () => {
     hoisted.pathname = "/app/policies/example-policy";
     renderShell("owner");
