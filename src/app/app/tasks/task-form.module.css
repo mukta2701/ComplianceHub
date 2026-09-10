@@ -1,0 +1,52 @@
+.pageBack { display: inline-flex; align-items: center; gap: 4px; margin-bottom: 18px; color: var(--blue); font-size: 13px; font-weight: 750; }
+.introGrid { display: grid; grid-template-columns: minmax(0, 1fr) 286px; gap: 24px; align-items: start; }
+.guidance { padding: 18px; margin-bottom: 24px; }
+.guidance h2 { margin: 0 0 12px; font-size: 15px; }
+.guidance ul { display: grid; gap: 9px; list-style: none; margin: 0; padding: 0; color: var(--muted); font-size: 13px; }
+.guidance li::before { content: "✓"; display: inline-grid; place-items: center; width: 18px; height: 18px; margin-right: 8px; border-radius: 999px; background: #e8f0ff; color: var(--blue); font-weight: 800; }
+.form { overflow: hidden; border: 1px solid var(--border); border-radius: 14px; background: #fff; box-shadow: 0 12px 28px rgba(15, 37, 70, .04); }
+.section { min-width: 0; margin: 0; padding: 24px; border: 0; border-bottom: 1px solid var(--border); }
+.section legend { display: block; width: 100%; padding: 0; color: var(--ink); font-size: 17px; font-weight: 760; }
+.sectionHelp { margin: 4px 0 18px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.field { display: grid; gap: 7px; color: var(--ink); font-size: 12px; font-weight: 720; }
+.field + .field { margin-top: 18px; }
+.fieldLabel { display: flex; align-items: baseline; gap: 5px; }
+.field input, .field select, .field textarea { width: 100%; min-width: 0; min-height: 43px; border: 1px solid #d7deea; border-radius: 9px; background: #fff; padding: 10px 12px; font: inherit; font-size: 14px; font-weight: 450; color: var(--ink); outline: none; transition: border-color .16s ease, box-shadow .16s ease, background .16s ease; }
+.field input:hover, .field select:hover, .field textarea:hover { border-color: #b7c2d4; }
+.field input:focus-visible, .field select:focus-visible, .field textarea:focus-visible { border-color: #6f94ec; box-shadow: 0 0 0 3px rgba(47, 107, 237, .13); }
+.field input[aria-invalid="true"], .field textarea[aria-invalid="true"] { border-color: #c95b54; box-shadow: 0 0 0 3px rgba(201, 91, 84, .1); }
+.field textarea { min-height: 126px; resize: vertical; line-height: 1.5; }
+.field small { color: var(--muted); font-size: 12px; font-weight: 450; line-height: 1.45; }
+.required, .optional { color: var(--muted); font-size: 10px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; }
+.required { color: #b4443d; }
+.twoColumns, .threeColumns { display: grid; gap: 14px; }
+.twoColumns { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.threeColumns { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.twoColumns .field + .field, .threeColumns .field + .field { margin-top: 0; }
+.ownerNotice { margin: 16px 0 0; padding: 11px 13px; border: 1px solid #f0d49d; border-radius: 9px; background: #fff8e8; color: #72531b; font-size: 12px; line-height: 1.5; }
+.recurrenceHelp { margin: 12px 0 0; color: var(--muted); font-size: 12px; }
+.actions { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 18px 24px; background: #fbfcff; }
+.actions p { margin: 0; color: var(--muted); font-size: 12px; }
+.actions > div { display: flex; gap: 10px; }
+.error, .conflict { margin: 0 24px 20px; padding: 12px 14px; border-radius: 9px; font-size: 13px; }
+.error { border: 1px solid #efc5c2; background: #fff1f0; color: #8f302b; }
+.conflict { border: 1px solid #f0d49d; background: #fff8e8; color: #72531b; }
+.fieldError { color: #a4312b !important; }
+
+@media (max-width: 840px) {
+  .introGrid { grid-template-columns: 1fr; gap: 0; }
+  .guidance { margin-top: -4px; }
+  .threeColumns { grid-template-columns: 1fr 1fr; }
+}
+
+@media (max-width: 620px) {
+  .pageBack { margin-bottom: 12px; }
+  .section { padding: 20px 16px; }
+  .twoColumns, .threeColumns { grid-template-columns: 1fr; }
+  .twoColumns .field + .field, .threeColumns .field + .field { margin-top: 4px; }
+  .field textarea { min-height: 156px; }
+  .actions { flex-direction: column; align-items: stretch; padding: 16px; }
+  .actions > div { flex-direction: column-reverse; }
+  .actions a, .actions button { width: 100%; justify-content: center; }
+  .error, .conflict { margin: 0 16px 16px; }
+}

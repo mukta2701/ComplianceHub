@@ -35,8 +35,9 @@ describe("updateTaskAction", () => {
     taskQuery.update.mockReturnValue(updateQuery);
     hoisted.ctx = { supabase: { from }, user: { id: "10000000-0000-4000-8000-000000000002" }, organisation: { id: "20000000-0000-4000-8000-000000000001" }, membership: { role: "admin" } };
     const { updateTaskAction } = await import("./actions");
-    await updateTaskAction(form({ id: task.id, title: "Updated", detail: "New detail", ownerId: "10000000-0000-4000-8000-000000000001", dueOn: "2026-10-01", recurrence: "monthly", controlId: "40000000-0000-4000-8000-000000000001", riskId: "50000000-0000-4000-8000-000000000001" }));
+    await updateTaskAction(form({ id: task.id, expectedUpdatedAt: "2026-09-10T00:00:00+00:00", title: "Updated", detail: "New detail", ownerId: "10000000-0000-4000-8000-000000000001", dueOn: "2026-10-01", recurrence: "monthly", controlId: "40000000-0000-4000-8000-000000000001", riskId: "50000000-0000-4000-8000-000000000001" }));
     expect(taskQuery.update).toHaveBeenCalledWith({ title: "Updated", detail: "New detail", owner_id: "10000000-0000-4000-8000-000000000001", due_on: "2026-10-01", recurrence: "monthly", control_id: "40000000-0000-4000-8000-000000000001", risk_id: "50000000-0000-4000-8000-000000000001", updated_at: expect.any(String) });
+    expect(updateQuery.eq).toHaveBeenCalledWith("updated_at", "2026-09-10T00:00:00+00:00");
     expect(hoisted.revalidatePath).toHaveBeenCalledWith("/app/tasks");
   });
 
@@ -45,6 +46,6 @@ describe("updateTaskAction", () => {
     const from = vi.fn(() => taskQuery);
     hoisted.ctx = { supabase: { from }, user: { id: "10000000-0000-4000-8000-000000000002" }, organisation: { id: "20000000-0000-4000-8000-000000000001" }, membership: { role: "owner" } };
     const { updateTaskAction } = await import("./actions");
-    await expect(updateTaskAction(form({ id: "30000000-0000-4000-8000-000000000001", title: "Updated" }))).rejects.toThrow("Task not found");
+    await expect(updateTaskAction(form({ id: "30000000-0000-4000-8000-000000000001", expectedUpdatedAt: "2026-09-10T00:00:00.000Z", title: "Updated" }))).rejects.toThrow("This task changed or is no longer available");
   });
 });

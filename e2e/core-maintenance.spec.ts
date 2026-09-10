@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
 
 function env(name: string) {
   if (process.env[name]) return process.env[name]!;
@@ -86,6 +87,12 @@ test("risk and task metadata edits persist without changing status or source", a
   expect(risk?.owner_id).toBeTruthy();
 
   await page.goto("/app/tasks/new");
+  await expect(page.getByRole("group", { name: "Task brief" })).toBeVisible();
+  await expect(page.getByRole("group", { name: "Ownership and timing" })).toBeVisible();
+  await expect(page.getByRole("group", { name: "Linked records" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Cancel" })).toHaveAttribute("href", "/app/tasks");
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await page.screenshot({ animations: "disabled", path: info.outputPath("task-new.png"), fullPage: true });
   await page.getByLabel("Title", { exact: true }).fill("Original task");
   await page.getByLabel("Detail", { exact: true }).fill("Original detail");
   await page.getByLabel("Owner").selectOption({ label: ownerName });
@@ -98,6 +105,8 @@ test("risk and task metadata edits persist without changing status or source", a
   await page.goto(`/app/tasks/${taskId}`);
   await page.getByRole("link", { name: "Edit task" }).click();
   await expect(page).toHaveURL(new RegExp(`/app/tasks/${taskId}/edit$`));
+  await expect(page.getByText(/Changing the owner preserves earlier submissions/)).toBeVisible();
+  await page.screenshot({ animations: "disabled", path: info.outputPath("task-edit.png"), fullPage: true });
   await page.getByRole("textbox", { name: "Title", exact: true }).fill("Updated task");
   await page.getByRole("textbox", { name: "Detail", exact: true }).fill("Updated detail");
   await page.getByLabel("Due date").fill("2026-12-31");
@@ -107,6 +116,21 @@ test("risk and task metadata edits persist without changing status or source", a
   const { data: task } = await db.from("tasks").select("title,detail,owner_id,due_on,recurrence,status,source").eq("id", taskId).eq("organisation_id", orgId).single();
   expect(task).toMatchObject({ title: "Updated task", detail: "Updated detail", due_on: "2026-12-31", recurrence: "monthly", status: "open", source: "manual" });
   expect(task?.owner_id).toBeTruthy();
+
+  await page.goto(`/app/tasks/${taskId}/edit`);
+  const stalePage = await page.context().newPage();
+  await stalePage.goto(`/app/tasks/${taskId}/edit`);
+  await page.getByRole("textbox", { name: "Title", exact: true }).fill("Latest task title");
+  await page.getByRole("button", { name: "Save task" }).click();
+  await expect(page).toHaveURL(new RegExp(`/app/tasks/${taskId}$`));
+  await stalePage.getByRole("textbox", { name: "Detail", exact: true }).fill("Stale unsaved detail");
+  await stalePage.getByRole("button", { name: "Save task" }).click();
+  await expect(stalePage.locator("form").getByRole("alert")).toContainText("This task changed");
+  await expect(stalePage.getByRole("textbox", { name: "Detail", exact: true })).toHaveValue("Stale unsaved detail");
+  await stalePage.screenshot({ animations: "disabled", path: info.outputPath("task-stale-save.png"), fullPage: true });
+  const latest = await db.from("tasks").select("title,detail").eq("id", taskId).eq("organisation_id", orgId).single();
+  expect(latest.data).toEqual({ title: "Latest task title", detail: "Updated detail" });
+  await stalePage.close();
 });
 
 test("assessment completion becomes read-only and remains available for SoA draft", async ({ page }, info) => {
