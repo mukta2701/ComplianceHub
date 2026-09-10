@@ -12,7 +12,7 @@ const reviewedItem: SoaFinalisationItem = {
 
 describe("collectSoaFinalisationBlockers", () => {
   it("returns no blockers for reviewed items with live linked evidence", () => {
-    expect(collectSoaFinalisationBlockers([reviewedItem], new Set(["requirement-1"]))).toEqual({
+    expect(collectSoaFinalisationBlockers([reviewedItem], new Set(["requirement-1"]))).toMatchObject({
       pending: [],
       missingRationale: [],
       unassigned: [],
@@ -28,7 +28,7 @@ describe("collectSoaFinalisationBlockers", () => {
       ownerId: null,
     };
 
-    expect(collectSoaFinalisationBlockers([item], new Set())).toEqual({
+    expect(collectSoaFinalisationBlockers([item], new Set())).toMatchObject({
       pending: ["item-1"],
       missingRationale: ["item-1"],
       unassigned: ["item-1"],
@@ -41,11 +41,27 @@ describe("collectSoaFinalisationBlockers", () => {
       ...reviewedItem,
       applicable: false,
       status: "not_applicable",
-    }], new Set())).toEqual({
+    }], new Set())).toMatchObject({
       pending: [],
       missingRationale: [],
       unassigned: [],
       missingEvidence: [],
     });
+  });
+});
+
+
+describe("database finalisation parity", () => {
+  it("does not require owners or resolved pending status for excluded controls", () => {
+    const result = collectSoaFinalisationBlockers([{ ...reviewedItem, applicable: false, status: "pending", ownerId: null }], new Set());
+    expect(result.pending).toEqual([]);
+    expect(result.unassigned).toEqual([]);
+  });
+  it("requires exactly 93 decisions and blocks expired stored evidence even beside current evidence", () => {
+    const result = collectSoaFinalisationBlockers([reviewedItem], new Set(["requirement-1"]), new Set(["requirement-1"]));
+    expect(result.incompleteCatalogue).toBe(true);
+    expect(result.expiredEvidence).toEqual(["item-1"]);
+    const complete = Array.from({ length: 93 }, (_, i) => ({ ...reviewedItem, id: `item-${i}`, controlId: `control-${i}`, applicable: false, ownerId: null }));
+    expect(collectSoaFinalisationBlockers(complete, new Set()).incompleteCatalogue).toBe(false);
   });
 });

@@ -315,10 +315,6 @@ export async function finaliseSoaAction(formData: FormData) {
     }
   }
 
-  for (const requirementId of requirementIdsWithExpiredEvidence) {
-    requirementIdsWithLiveEvidence.delete(requirementId);
-  }
-
   const blockers = collectSoaFinalisationBlockers((itemRows ?? []).map((item) => ({
     id: item.id,
     controlId: item.control_id,
@@ -326,9 +322,11 @@ export async function finaliseSoaAction(formData: FormData) {
     status: item.status as SoaStatus,
     justification: item.justification,
     ownerId: item.owner_id,
-  })), requirementIdsWithLiveEvidence);
+  })), requirementIdsWithLiveEvidence, requirementIdsWithExpiredEvidence);
   if (countSoaFinalisationBlockers(blockers) > 0) {
     const details = [
+      blockers.incompleteCatalogue ? "the complete 93-control catalogue is required" : null,
+      blockers.expiredEvidence.length ? `${blockers.expiredEvidence.length} with expired evidence` : null,
       blockers.pending.length ? `${blockers.pending.length} pending` : null,
       blockers.missingRationale.length ? `${blockers.missingRationale.length} missing rationale` : null,
       blockers.unassigned.length ? `${blockers.unassigned.length} unassigned` : null,

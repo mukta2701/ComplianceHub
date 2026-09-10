@@ -10,6 +10,8 @@ export type SoaFinalisationItem = {
 };
 
 export type SoaFinalisationBlockers = {
+  incompleteCatalogue: boolean;
+  expiredEvidence: string[];
   pending: string[];
   missingRationale: string[];
   unassigned: string[];
@@ -19,8 +21,11 @@ export type SoaFinalisationBlockers = {
 export function collectSoaFinalisationBlockers(
   items: readonly SoaFinalisationItem[],
   requirementIdsWithLiveEvidence: ReadonlySet<string>,
+  requirementIdsWithExpiredEvidence: ReadonlySet<string> = new Set(),
 ): SoaFinalisationBlockers {
   const blockers: SoaFinalisationBlockers = {
+    incompleteCatalogue: items.length !== 93,
+    expiredEvidence: [],
     pending: [],
     missingRationale: [],
     unassigned: [],
@@ -28,9 +33,10 @@ export function collectSoaFinalisationBlockers(
   };
 
   for (const item of items) {
-    if (item.status === "pending") blockers.pending.push(item.id);
+    if (item.applicable && item.status === "pending") blockers.pending.push(item.id);
     if (!item.justification.trim()) blockers.missingRationale.push(item.id);
-    if (!item.ownerId) blockers.unassigned.push(item.id);
+    if (item.applicable && !item.ownerId) blockers.unassigned.push(item.id);
+    if (item.applicable && requirementIdsWithExpiredEvidence.has(item.controlId)) blockers.expiredEvidence.push(item.id);
     if (item.applicable && !requirementIdsWithLiveEvidence.has(item.controlId)) blockers.missingEvidence.push(item.id);
   }
 
@@ -38,7 +44,9 @@ export function collectSoaFinalisationBlockers(
 }
 
 export function countSoaFinalisationBlockers(blockers: SoaFinalisationBlockers): number {
-  return blockers.pending.length
+  return Number(blockers.incompleteCatalogue)
+    + blockers.expiredEvidence.length
+    + blockers.pending.length
     + blockers.missingRationale.length
     + blockers.unassigned.length
     + blockers.missingEvidence.length;

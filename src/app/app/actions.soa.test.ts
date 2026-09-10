@@ -160,7 +160,11 @@ function reviewedStore(): Store {
       justification: "Reviewed rationale",
       owner_id: OWNER_ID,
       decision_revision: 0,
-    }],
+    }, ...Array.from({ length: 92 }, (_, i) => ({
+      id: `excluded-${i}`, organisation_id: ORG_ID, soa_register_id: REGISTER_ID,
+      control_id: `requirement-${i}`, applicable: false, status: "not_applicable",
+      justification: "Outside the recorded scope", owner_id: null, decision_revision: 0,
+    }))],
     requirement_control_mappings: [{ requirement_id: REQUIREMENT_ID, control_id: CONTROL_ID }],
     evidence_links: [{
       organisation_id: ORG_ID,
@@ -238,6 +242,16 @@ describe("createSoaSuccessorAction", () => {
 describe("finaliseSoaAction preflight", () => {
   beforeEach(() => {
     hoisted.redirect.mockClear();
+  });
+
+  it("reports an incomplete catalogue before calling the finalisation RPC", async () => {
+    const store = reviewedStore();
+    store.soa_items = store.soa_items.slice(0, 1);
+    const fake = fakeSupabase(store);
+    hoisted.ctx = context(fake.client);
+    const { finaliseSoaAction } = await import("./actions");
+    await expect(finaliseSoaAction(formData())).rejects.toThrow("the complete 93-control catalogue is required");
+    expect(fake.rpc).not.toHaveBeenCalled();
   });
 
   it("rejects review blockers before calling the finalisation RPC", async () => {

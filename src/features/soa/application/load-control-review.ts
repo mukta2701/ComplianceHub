@@ -1,0 +1,220 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { one } from "@/lib/supabase/one";
+import { deriveEvidenceStatus, summariseEvidenceFreshness, type EvidenceKind, type EvidenceStatus } from "@/features/evidence/domain/evidence";
+import type { TaskStatus } from "@/features/tasks/domain/tasks";
+import { SOA_STATUS_LABEL, type SoaStatus } from "../domain/soa";
+import { collectSoaFinalisationBlockers, countSoaFinalisationBlockers, type SoaFinalisationBlockers } from "./finalisation";
+import { deriveSoaReviewState, type SoaDomain, type SoaQueueItem } from "./review-queue";
+
+export type ControlSourceAnswer = {
+  questionId: string; code: string; prompt: string;
+  answer: "yes" | "partially" | "no" | "not_applicable" | null;
+  evidenceNote: string; updatedAt: string | null;
+};
+export type ReviewListMetadata = { total: number | null; shown: number; limit: number; truncated: boolean };
+export type ControlReviewItem = SoaQueueItem & {
+  decisionRevision: number;
+  sourceAnswers: ControlSourceAnswer[];
+  linkedTasks: Array<{ id: string; reference: string; title: string; status: TaskStatus; dueOn: string | null }>;
+  evidence: Array<{ id: string; title: string; storedStatus: EvidenceStatus; validUntil: string | null }>;
+  linkedEvidence: Array<{ id: string; title: string; status: EvidenceStatus; storedStatus: EvidenceStatus; validUntil: string | null; kind: EvidenceKind }>;
+  recentAuditEvents: Array<{ action: string; occurredAt: string }>;
+  lists: { tasks: ReviewListMetadata; evidence: ReviewListMetadata; history: ReviewListMetadata };
+};
+export type ControlReviewLoadResult = {
+  register: null | {
+    id: string; title: string; version: number; updatedAt: string;
+    sourceAssessment: { id: string; title: string; state: string; revision: number; catalogueVersionId: string };
+    finalisedSnapshotId: string | null;
+  };
+  items: ControlReviewItem[];
+  members: Array<{ id: string; name: string }>;
+  relatedRisks: Array<{ id: string; reference: string; title: string; status: string; relationship: "assessment" | "register" }>;
+  riskLists: { assessment: ReviewListMetadata; register: ReviewListMetadata };
+  finalisation: { readiness: "ready" | "blocked" | "could_not_verify"; blockers: SoaFinalisationBlockers; unavailableInputs: string[] };
+  optionalUnavailable: string[];
+  aiEnabled: boolean;
+};
+
+type RegisterRow = { id: string; title: string; version: number; updated_at: string; assessment_session_id: string; control_catalogue_version_id: string };
+type AssessmentRow = { id: string; title: string; state: string; revision: number; catalogue_version_id: string };
+type ItemRow = { id: string; control_id: string; control_code: string; control_title: string; applicable: boolean; status: SoaStatus; justification: string; evidence: string; owner_id: string | null; position: number; decision_revision: number };
+type QuestionRow = { id: string; code: string; prompt: string; position: number };
+type ResponseRow = { question_id: string; answer: ControlSourceAnswer["answer"]; evidence_note: string; updated_at: string };
+type MemberRow = { user_id: string; profiles: { display_name: string | null } | { display_name: string | null }[] | null };
+type EvidenceRow = { id: string; organisation_id: string; title: string; status: EvidenceStatus; valid_until: string | null; kind: EvidenceKind };
+type EvidenceLinkRow = { control_id: string; evidence_id: string; evidence: EvidenceRow | EvidenceRow[] | null };
+type TaskRow = { id: string; title: string; status: TaskStatus; due_on: string | null };
+type RiskRow = { id: string; reference: string; title: string; status: string };
+const COMPLETE_LIMIT = 5000;
+const DISPLAY_LIMIT = 20;
+const HISTORY_LIMIT = 5;
+const RISK_LIMIT = 50;
+const domains = new Set(["organisational", "people", "physical", "technological"]);
+function metadata(total: number | null, shown: number, limit: number): ReviewListMetadata {
+  return { total, shown, limit, truncated: total !== null && total > shown };
+}
+class UnavailableInput extends Error {
+  constructor(readonly input: string) { super(`Could not verify ${input}`); }
+}
+async function readRows<T>(input: string, query: PromiseLike<{ data: T[] | null; error: unknown; count: number | null }>, limited = false) {
+  try {
+    const result = await query;
+    if (result.error || !result.data || result.count === null || (!limited && result.count !== result.data.length)) throw new UnavailableInput(input);
+    return { rows: result.data, total: result.count };
+  } catch { throw new UnavailableInput(input); }
+}
+function first<T>(rows: T[], input: string): T {
+  if (rows.length !== 1) throw new UnavailableInput(input);
+  return rows[0];
+}
+
+type ReviewContext = { organisationId: string; registerId: string; today?: string };
+/** Reads current context; it does not preserve answers seen at decision-save time. */
+export async function loadControlReview(supabase: SupabaseClient, context: ReviewContext): Promise<ControlReviewLoadResult> {
+  try { return await readControlReview(supabase, context); }
+  catch (error) {
+    return {
+      register: null, items: [], members: [], relatedRisks: [], aiEnabled: false,
+      riskLists: { assessment: metadata(null, 0, RISK_LIMIT), register: metadata(null, 0, RISK_LIMIT) },
+      finalisation: { readiness: "could_not_verify", blockers: collectSoaFinalisationBlockers([], new Set()), unavailableInputs: [error instanceof UnavailableInput ? error.input : "review data"] },
+      optionalUnavailable: [],
+    };
+  }
+}
+async function readControlReview(supabase: SupabaseClient, context: ReviewContext): Promise<ControlReviewLoadResult> {
+  const { organisationId, registerId } = context;
+  const today = context.today ?? new Date().toISOString().slice(0, 10);
+  const register = first((await readRows("register", supabase.from("soa_registers")
+    .select("id,title,version,updated_at,assessment_session_id,control_catalogue_version_id", { count: "exact" })
+    .eq("organisation_id", organisationId).eq("id", registerId).limit(1).returns<RegisterRow[]>())).rows, "register");
+  const [assessmentResult, itemResult, memberResult, snapshotResult, catalogueResult] = await Promise.all([
+    readRows("source assessment", supabase.from("assessment_sessions").select("id,title,state,revision,catalogue_version_id", { count: "exact" }).eq("organisation_id", organisationId).eq("id", register.assessment_session_id).limit(1).returns<AssessmentRow[]>()),
+    readRows("decisions", supabase.from("soa_items").select("id,control_id,control_code,control_title,applicable,status,justification,evidence,owner_id,position,decision_revision", { count: "exact" }).eq("organisation_id", organisationId).eq("soa_register_id", registerId).order("position").limit(COMPLETE_LIMIT).returns<ItemRow[]>()),
+    readRows("membership", supabase.from("memberships").select("user_id,profiles(display_name)", { count: "exact" }).eq("organisation_id", organisationId).order("user_id").limit(COMPLETE_LIMIT).returns<MemberRow[]>()),
+    readRows("final statement", supabase.from("soa_snapshots").select("id", { count: "exact" }).eq("organisation_id", organisationId).eq("soa_register_id", registerId).limit(1).returns<Array<{ id: string }>>()),
+    readRows("control catalogue", supabase.from("control_catalogue_controls").select("id,theme", { count: "exact" }).eq("catalogue_version_id", register.control_catalogue_version_id).order("position").limit(COMPLETE_LIMIT).returns<Array<{ id: string; theme: SoaDomain }>>()),
+  ]);
+  const assessment = first(assessmentResult.rows, "source assessment");
+  const [questionResult, responseResult, sourceMappingResult, workMappingResult] = await Promise.all([
+    readRows("assessment catalogue", supabase.from("catalogue_questions").select("id,code,prompt,position", { count: "exact" }).eq("catalogue_version_id", assessment.catalogue_version_id).order("position").limit(COMPLETE_LIMIT).returns<QuestionRow[]>()),
+    readRows("assessment answers", supabase.from("assessment_responses").select("question_id,answer,evidence_note,updated_at", { count: "exact" }).eq("organisation_id", organisationId).eq("session_id", assessment.id).order("question_id").limit(COMPLETE_LIMIT).returns<ResponseRow[]>()),
+    readRows("assessment mappings", supabase.from("assessment_control_mappings").select("catalogue_question_id,control_id", { count: "exact" }).in("control_id", itemResult.rows.map((item) => item.control_id)).order("catalogue_question_id").order("control_id").limit(COMPLETE_LIMIT).returns<Array<{ catalogue_question_id: string; control_id: string }>>()),
+    readRows("evidence mappings", supabase.from("requirement_control_mappings").select("requirement_id,control_id", { count: "exact" }).in("requirement_id", itemResult.rows.map((item) => item.control_id)).order("requirement_id").order("control_id").limit(COMPLETE_LIMIT).returns<Array<{ requirement_id: string; control_id: string }>>()),
+  ]);
+  if (!questionResult.rows.length) throw new UnavailableInput("assessment catalogue");
+  if (!memberResult.rows.length) throw new UnavailableInput("membership");
+  const members = memberResult.rows.map((member) => ({ id: member.user_id, name: one(member.profiles)?.display_name?.trim() || "Workspace member" }));
+  const memberNames = new Map(members.map((member) => [member.id, member.name]));
+  const catalogue = new Map(catalogueResult.rows.map((control) => [control.id, control.theme]));
+  const responses = new Map(responseResult.rows.map((response) => [response.question_id, response]));
+  const items: ControlReviewItem[] = itemResult.rows.map((item) => {
+    const domain = catalogue.get(item.control_id);
+    if (!domain || !domains.has(domain)) throw new UnavailableInput("control catalogue");
+    if (!(item.status in SOA_STATUS_LABEL)) throw new UnavailableInput("decisions");
+    const mappedIds = new Set(sourceMappingResult.rows.filter((mapping) => mapping.control_id === item.control_id).map((mapping) => mapping.catalogue_question_id));
+    const sourceAnswers = questionResult.rows.filter((question) => mappedIds.has(question.id)).map((question) => {
+      const response = responses.get(question.id);
+      return { questionId: question.id, code: question.code, prompt: question.prompt, answer: response?.answer ?? null, evidenceNote: response?.evidence_note ?? "", updatedAt: response?.updated_at ?? null };
+    });
+    const projected = {
+      id: item.id, controlId: item.control_id, code: item.control_code, title: item.control_title,
+      domain, applicable: item.applicable, status: item.status, justification: item.justification,
+      evidenceText: item.evidence,
+      ownerId: item.owner_id && memberNames.has(item.owner_id) ? item.owner_id : null,
+      ownerName: item.owner_id ? memberNames.get(item.owner_id) ?? "Former workspace member" : null,
+      evidenceTotal: 0, evidenceExpiring: 0, evidenceExpired: 0, openTaskCount: 0, position: item.position,
+    };
+    return {
+      ...projected, reviewState: deriveSoaReviewState(projected), decisionRevision: Number(item.decision_revision),
+      sourceAnswers, evidence: [], linkedEvidence: [], linkedTasks: [], recentAuditEvents: [],
+      lists: { tasks: metadata(0, 0, DISPLAY_LIMIT), evidence: metadata(0, 0, DISPLAY_LIMIT), history: metadata(0, 0, HISTORY_LIMIT) },
+    };
+  });
+  const sharedIds = [...new Set(workMappingResult.rows.map((mapping) => mapping.control_id))];
+  const evidenceLinks = sharedIds.length ? (await readRows("evidence", supabase.from("evidence_links")
+    .select("control_id,evidence_id,evidence(id,organisation_id,title,status,valid_until,kind)", { count: "exact" })
+    .eq("organisation_id", organisationId).in("control_id", sharedIds).order("evidence_id").order("control_id").limit(COMPLETE_LIMIT).returns<EvidenceLinkRow[]>())).rows : [];
+  const liveRequirements = new Set<string>();
+  const expiredRequirements = new Set<string>();
+  const optionalUnavailable = new Set<string>();
+  const relatedRisks: ControlReviewLoadResult["relatedRisks"] = [];
+  const riskLists = { assessment: metadata(0, 0, RISK_LIMIT), register: metadata(0, 0, RISK_LIMIT) };
+  for (const relationship of ["assessment", "register"] as const) {
+    try {
+      const risks = await readRows("related risks", supabase.from("risks").select("id,reference,title,status", { count: "exact" })
+        .eq("organisation_id", organisationId).eq(relationship === "assessment" ? "source_assessment_session_id" : "source_soa_register_id", relationship === "assessment" ? assessment.id : registerId)
+        .order("reference").order("id").limit(RISK_LIMIT).returns<RiskRow[]>(), true);
+      relatedRisks.push(...risks.rows.map((risk) => ({ id: risk.id, reference: risk.reference, title: risk.title, status: risk.status, relationship })));
+      riskLists[relationship] = metadata(risks.total, risks.rows.length, RISK_LIMIT);
+    } catch {
+      optionalUnavailable.add(`${relationship === "assessment" ? "Assessment" : "Register"} related risks`);
+      riskLists[relationship] = metadata(null, 0, RISK_LIMIT);
+    }
+  }
+  // Bound concurrent per-decision reads; a busy control cannot consume another's history allowance.
+  for (let offset = 0; offset < items.length; offset += 8) {
+    await Promise.all(items.slice(offset, offset + 8).map(async (item) => {
+      const controlIds = workMappingResult.rows.filter((mapping) => mapping.requirement_id === item.controlId).map((mapping) => mapping.control_id);
+      const records = new Map<string, EvidenceRow>();
+      for (const link of evidenceLinks.filter((link) => controlIds.includes(link.control_id))) {
+        const evidence = one(link.evidence);
+        if (!evidence || evidence.organisation_id !== organisationId) throw new UnavailableInput("evidence");
+        records.set(evidence.id, evidence);
+      }
+      const allEvidence = [...records.values()].map((evidence) => {
+        if (evidence.status === "current" || evidence.status === "expiring") liveRequirements.add(item.controlId);
+        if (evidence.status === "expired") expiredRequirements.add(item.controlId);
+        return { id: evidence.id, title: evidence.title, storedStatus: evidence.status, status: evidence.status === "current" || evidence.status === "expiring" ? deriveEvidenceStatus(evidence.valid_until, today) : evidence.status, validUntil: evidence.valid_until, kind: evidence.kind };
+      });
+      const freshness = summariseEvidenceFreshness(allEvidence);
+      Object.assign(item, { evidenceTotal: freshness.total, evidenceExpiring: freshness.expiring, evidenceExpired: freshness.expired });
+      item.linkedEvidence = allEvidence.slice(0, DISPLAY_LIMIT);
+      item.evidence = item.linkedEvidence.map(({ id, title, storedStatus, validUntil }) => ({ id, title, storedStatus, validUntil }));
+      item.lists.evidence = metadata(allEvidence.length, item.linkedEvidence.length, DISPLAY_LIMIT);
+      item.reviewState = deriveSoaReviewState(item);
+      try {
+        const history = await readRows("audit history", supabase.from("audit_events").select("action,occurred_at", { count: "exact" })
+          .eq("organisation_id", organisationId).eq("entity_type", "soa_items").eq("entity_id", item.id).order("occurred_at", { ascending: false }).order("id", { ascending: false }).limit(HISTORY_LIMIT).returns<Array<{ action: string; occurred_at: string }>>(), true);
+        item.recentAuditEvents = history.rows.map((event) => ({ action: event.action, occurredAt: event.occurred_at }));
+        item.lists.history = metadata(history.total, history.rows.length, HISTORY_LIMIT);
+      } catch {
+        optionalUnavailable.add("Audit history");
+        item.lists.history = metadata(null, 0, HISTORY_LIMIT);
+      }
+      if (controlIds.length) {
+        try {
+          const tasks = await readRows("linked tasks", supabase.from("tasks").select("id,title,status,due_on", { count: "exact" }).eq("organisation_id", organisationId).in("control_id", controlIds).order("id").limit(DISPLAY_LIMIT).returns<TaskRow[]>(), true);
+          const open = await supabase.from("tasks").select("id", { count: "exact", head: true }).eq("organisation_id", organisationId).in("control_id", controlIds).in("status", ["open", "in_progress"]);
+          if (open.error || open.count === null) throw new UnavailableInput("linked tasks");
+          item.openTaskCount = open.count;
+          // Tasks have no human reference field in the existing schema; use their record identity.
+          item.linkedTasks = tasks.rows.map((task) => ({ id: task.id, reference: task.id, title: task.title, status: task.status, dueOn: task.due_on }));
+          item.lists.tasks = metadata(tasks.total, tasks.rows.length, DISPLAY_LIMIT);
+        } catch {
+          optionalUnavailable.add("Linked tasks");
+          item.lists.tasks = metadata(null, 0, DISPLAY_LIMIT);
+        }
+      }
+    }));
+  }
+  let aiEnabled = false;
+  try {
+    const settings = await readRows("AI settings", supabase.from("ai_workspace_settings").select("enabled", { count: "exact" }).eq("organisation_id", organisationId).limit(1).returns<Array<{ enabled: boolean }>>());
+    aiEnabled = settings.rows[0]?.enabled === true;
+  } catch { optionalUnavailable.add("AI settings"); }
+  const blockers = collectSoaFinalisationBlockers(items, liveRequirements, expiredRequirements);
+  return {
+    register: {
+      id: register.id, title: register.title, version: register.version, updatedAt: register.updated_at,
+      sourceAssessment: {
+        id: assessment.id, title: assessment.title, state: assessment.state,
+        revision: Number(assessment.revision), catalogueVersionId: assessment.catalogue_version_id,
+      },
+      finalisedSnapshotId: snapshotResult.rows[0]?.id ?? null,
+    },
+    items, members, relatedRisks, riskLists,
+    finalisation: { readiness: countSoaFinalisationBlockers(blockers) ? "blocked" : "ready", blockers, unavailableInputs: [] },
+    optionalUnavailable: [...optionalUnavailable], aiEnabled,
+  };
+}

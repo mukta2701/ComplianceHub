@@ -74,9 +74,9 @@ export function deriveSoaReviewState(item: ReviewStateInput): SoaReviewState {
     throw new RangeError("Evidence status counters cannot exceed the evidence total");
   }
 
-  if (item.status === "pending") return "missing_decision";
+  if (item.applicable && item.status === "pending") return "missing_decision";
   if (!item.justification.trim()) return "missing_rationale";
-  if (!item.ownerId) return "missing_owner";
+  if (item.applicable && !item.ownerId) return "missing_owner";
   if (item.applicable && item.evidenceTotal === 0) return "missing_evidence";
   if (item.applicable && item.evidenceExpired > 0) return "stale_evidence";
   return "reviewed";
@@ -117,8 +117,8 @@ export function summariseSoaQueue(items: readonly SoaQueueItem[]): SoaQueueSumma
 
     if (!item.justification.trim()) summary.missingRationale += 1;
     if (item.applicable && (item.evidenceTotal === 0 || item.evidenceExpired > 0)) summary.evidenceGaps += 1;
-    if (!item.ownerId) summary.unassigned += 1;
-    if (item.status === "pending") summary.undecided += 1;
+    if (item.applicable && !item.ownerId) summary.unassigned += 1;
+    if (item.applicable && item.status === "pending") summary.undecided += 1;
   }
 
   return summary;

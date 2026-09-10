@@ -245,3 +245,10 @@ describe("summariseSoaQueue", () => {
     });
   });
 });
+
+
+it("excludes non-applicable controls from owner and pending review guidance", () => {
+  const item = queueItem({ applicable: false, status: "pending", ownerId: null, evidenceTotal: 0 });
+  expect(deriveSoaReviewState(item)).toBe("reviewed");
+  expect(summariseSoaQueue([{ ...item, reviewState: "reviewed" }])).toMatchObject({ unassigned: 0, undecided: 0, needsAttention: 0 });
+});

@@ -1,224 +1,70 @@
-import { notFound } from "next/navigation";
+import Link from "next/link";
 import { PageIntro } from "@/components/ui";
-import { summariseEvidenceFreshness, type EvidenceKind, type EvidenceStatus } from "@/features/evidence/domain/evidence";
-import {
-  deriveSoaReviewState,
-  summariseSoaQueue,
-  type SoaDomain,
-} from "@/features/soa/application/review-queue";
-import { SOA_STATUS_LABEL, type SoaStatus } from "@/features/soa/domain/soa";
-import type { TaskStatus } from "@/features/tasks/domain/tasks";
+import { loadControlReview } from "@/features/soa/application/load-control-review";
+import { summariseSoaQueue } from "@/features/soa/application/review-queue";
 import { requireAppContext } from "@/lib/app-context";
-import { one } from "@/lib/supabase/one";
 import { finaliseSoaAction, reviewSoaItemAction } from "../../actions";
-import { SoaReviewWorkspace, type SoaReviewWorkspaceItem } from "./soa-review-workspace";
-
-const SOA_DOMAINS = new Set<SoaDomain>(["organisational", "people", "physical", "technological"]);
-
-function isSoaDomain(value: unknown): value is SoaDomain {
-  return typeof value === "string" && SOA_DOMAINS.has(value as SoaDomain);
-}
-
-function isSoaStatus(value: unknown): value is SoaStatus {
-  return typeof value === "string" && value in SOA_STATUS_LABEL;
-}
+import { SoaReviewWorkspace } from "./soa-review-workspace";
 
 export default async function SoaReviewPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { supabase, user, organisation, membership } = await requireAppContext();
-  const { data: register, error: registerError } = await supabase
-    .from("soa_registers")
-    .select("id,title,version")
-    .eq("id", id)
-    .eq("organisation_id", organisation.id)
-    .single();
+  const review = await loadControlReview(supabase, { organisationId: organisation.id, registerId: id });
+  const { register, finalisation } = review;
 
-  if (registerError || !register) notFound();
+  if (!register || finalisation.readiness === "could_not_verify") return <>
+    <PageIntro eyebrow="CONTROL REVIEW" title="Controls & applicability" body="Readiness could not be checked." />
+    <section className="panel" role="alert">
+      <h2>Could not verify</h2>
+      <p>Could not verify {finalisation.unavailableInputs.join(", ")}. Finalisation is unavailable until these records can be checked.</p>
+      <a className="button secondary" href={`/app/soa/${id}`}>Try again</a>
+    </section>
+  </>;
 
-  const [itemResult, memberResult, aiSettingsResult] = await Promise.all([
-    supabase
-      .from("soa_items")
-      .select("id,control_id,control_code,control_title,applicable,status,justification,evidence,owner_id,position,decision_revision")
-      .eq("soa_register_id", id)
-      .eq("organisation_id", organisation.id)
-      .order("position"),
-    supabase
-      .from("memberships")
-      .select("user_id,profiles(display_name)")
-      .eq("organisation_id", organisation.id),
-    supabase.from("ai_workspace_settings").select("enabled").eq("organisation_id", organisation.id).maybeSingle(),
-  ]);
-
-  if (itemResult.error || memberResult.error) throw new Error("Could not load the SoA review queue");
-
-  const itemRows = itemResult.data ?? [];
-  const itemIds = itemRows.map((item) => item.id);
-  const requirementIds = itemRows.map((item) => item.control_id).filter((value): value is string => Boolean(value));
-  const domainByRequirement = new Map<string, SoaDomain>();
-  const linkedEvidenceByRequirement = new Map<string, SoaReviewWorkspaceItem["linkedEvidence"]>();
-  const linkedTasksByRequirement = new Map<string, SoaReviewWorkspaceItem["linkedTasks"]>();
-  const auditEventsByItem = new Map<string, SoaReviewWorkspaceItem["recentAuditEvents"]>();
-
-  if (itemIds.length) {
-    const { data: auditEvents, error: auditError } = await supabase
-      .from("audit_events")
-      .select("entity_id,action,occurred_at")
-      .eq("organisation_id", organisation.id)
-      .eq("entity_type", "soa_items")
-      .in("entity_id", itemIds)
-      .order("occurred_at", { ascending: false })
-      .limit(500);
-    if (auditError) throw new Error("Could not load SoA item history");
-    for (const event of auditEvents ?? []) {
-      const events = auditEventsByItem.get(event.entity_id) ?? [];
-      if (events.length >= 5) continue;
-      events.push({ action: event.action, occurredAt: event.occurred_at });
-      auditEventsByItem.set(event.entity_id, events);
-    }
-  }
-
-  if (requirementIds.length) {
-    const [catalogueResult, mappingResult] = await Promise.all([
-      supabase.from("control_catalogue_controls").select("id,theme").in("id", requirementIds),
-      supabase.from("requirement_control_mappings").select("requirement_id,control_id").in("requirement_id", requirementIds),
-    ]);
-    if (catalogueResult.error || mappingResult.error) throw new Error("Could not load SoA control mappings");
-
-    for (const control of catalogueResult.data ?? []) {
-      if (!isSoaDomain(control.theme)) throw new Error("Control catalogue contains an invalid theme");
-      domainByRequirement.set(control.id, control.theme);
-    }
-
-    const controlsByRequirement = new Map<string, Set<string>>();
-    for (const mapping of mappingResult.data ?? []) {
-      const controls = controlsByRequirement.get(mapping.requirement_id) ?? new Set<string>();
-      controls.add(mapping.control_id);
-      controlsByRequirement.set(mapping.requirement_id, controls);
-    }
-
-    const sharedControlIds = [...new Set([...controlsByRequirement.values()].flatMap((controls) => [...controls]))];
-    const tasksByControl = new Map<string, Map<string, SoaReviewWorkspaceItem["linkedTasks"][number]>>();
-    const evidenceByControl = new Map<string, Map<string, SoaReviewWorkspaceItem["linkedEvidence"][number]>>();
-
-    if (sharedControlIds.length) {
-      const [taskResult, evidenceResult] = await Promise.all([
-        supabase
-          .from("tasks")
-          .select("id,control_id,title,status,due_on")
-          .eq("organisation_id", organisation.id)
-          .in("status", ["open", "in_progress"])
-          .in("control_id", sharedControlIds),
-        supabase
-          .from("evidence_links")
-          .select("evidence_id,control_id,evidence(id,title,status,valid_until,kind)")
-          .eq("organisation_id", organisation.id)
-          .in("control_id", sharedControlIds),
-      ]);
-      if (taskResult.error || evidenceResult.error) throw new Error("Could not load SoA evidence and linked work");
-
-      for (const task of taskResult.data ?? []) {
-        if (!task.control_id) continue;
-        const controlTasks = tasksByControl.get(task.control_id) ?? new Map<string, SoaReviewWorkspaceItem["linkedTasks"][number]>();
-        controlTasks.set(task.id, {
-          id: task.id,
-          title: task.title,
-          status: task.status as TaskStatus,
-          dueOn: task.due_on,
-        });
-        tasksByControl.set(task.control_id, controlTasks);
-      }
-      for (const link of evidenceResult.data ?? []) {
-        if (!link.control_id) continue;
-        const evidence = one(link.evidence);
-        if (!evidence) continue;
-        const controlEvidence = evidenceByControl.get(link.control_id) ?? new Map<string, SoaReviewWorkspaceItem["linkedEvidence"][number]>();
-        controlEvidence.set(link.evidence_id, {
-          id: evidence.id,
-          title: evidence.title,
-          status: evidence.status as EvidenceStatus,
-          validUntil: evidence.valid_until,
-          kind: evidence.kind as EvidenceKind,
-        });
-        evidenceByControl.set(link.control_id, controlEvidence);
-      }
-    }
-
-    for (const requirementId of requirementIds) {
-      const evidence = new Map<string, SoaReviewWorkspaceItem["linkedEvidence"][number]>();
-      const tasks = new Map<string, SoaReviewWorkspaceItem["linkedTasks"][number]>();
-      for (const controlId of controlsByRequirement.get(requirementId) ?? []) {
-        for (const [evidenceId, record] of evidenceByControl.get(controlId) ?? []) evidence.set(evidenceId, record);
-        for (const [taskId, record] of tasksByControl.get(controlId) ?? []) tasks.set(taskId, record);
-      }
-      linkedEvidenceByRequirement.set(requirementId, [...evidence.values()]);
-      linkedTasksByRequirement.set(requirementId, [...tasks.values()]);
-    }
-  }
-
-  const memberOptions = (memberResult.data ?? []).map((member) => {
-    const profile = one(member.profiles);
-    return { id: member.user_id, name: profile?.display_name ?? member.user_id };
-  });
-  const ownerNameById = new Map(memberOptions.map((member) => [member.id, member.name]));
-
-  const queueItems: SoaReviewWorkspaceItem[] = itemRows.map((item) => {
-    const controlId = item.control_id;
-    const domain = domainByRequirement.get(controlId);
-    if (!domain) throw new Error("SoA item is missing its authoritative control theme");
-    if (!isSoaStatus(item.status)) throw new Error("SoA item contains an invalid status");
-    const linkedEvidence = linkedEvidenceByRequirement.get(controlId) ?? [];
-    const linkedTasks = linkedTasksByRequirement.get(controlId) ?? [];
-    const freshness = summariseEvidenceFreshness(linkedEvidence);
-    const projected = {
-      id: item.id,
-      decisionRevision: Number(item.decision_revision),
-      controlId,
-      code: item.control_code,
-      title: item.control_title,
-      domain,
-      applicable: item.applicable,
-      status: item.status,
-      justification: item.justification,
-      evidenceText: item.evidence,
-      ownerId: item.owner_id,
-      ownerName: item.owner_id ? ownerNameById.get(item.owner_id) ?? item.owner_id : null,
-      evidenceTotal: freshness.total,
-      evidenceExpiring: freshness.expiring,
-      evidenceExpired: freshness.expired,
-      openTaskCount: linkedTasks.length,
-      position: item.position,
-      linkedEvidence,
-      linkedTasks,
-      recentAuditEvents: auditEventsByItem.get(item.id) ?? [],
-    };
-    return { ...projected, reviewState: deriveSoaReviewState(projected) };
-  });
-
-  const summary = summariseSoaQueue(queueItems);
-  const canFinalise = summary.total > 0 && summary.needsAttention === 0;
-  const preflight = summary.total === 0
-    ? "No controls are available for review."
-    : `${summary.needsAttention} need attention: ${summary.missingRationale} missing rationale, ${summary.evidenceGaps} evidence gaps, ${summary.unassigned} unassigned, ${summary.undecided} undecided.`;
+  const summary = summariseSoaQueue(review.items);
+  const canFinalise = finalisation.readiness === "ready" && !register.finalisedSnapshotId;
+  const blockers = finalisation.blockers;
+  const preflight = canFinalise
+    ? `Finalisation checks passed for all ${summary.total} controls. Date-based evidence freshness remains separate review guidance.`
+    : [
+      blockers.incompleteCatalogue ? `The review must contain all 93 controls; ${summary.total} are present.` : null,
+      `${blockers.pending.length} pending, ${blockers.missingRationale.length} missing rationale, ${blockers.unassigned.length} unassigned, ${blockers.missingEvidence.length} missing live evidence, ${blockers.expiredEvidence.length} with stored expired evidence.`,
+    ].filter(Boolean).join(" ");
+  const source = register.sourceAssessment;
 
   return <>
     <PageIntro
-      eyebrow={`SOA REVIEW - DRAFT V${register.version}`}
+      eyebrow={`CONTROL REVIEW - V${register.version}`}
       title={register.title}
-      body={canFinalise ? `Preflight complete. All ${summary.total} controls have been reviewed.` : preflight}
+      body={register.finalisedSnapshotId ? "This review has a finalised Statement of Applicability. Its saved statement is immutable." : preflight}
       action={canFinalise && membership.role !== "member" ? (
         <form action={finaliseSoaAction} data-soa-finalise-form>
           <input type="hidden" name="registerId" value={id} />
           <button className="button primary">Finalise immutable v{register.version}</button>
         </form>
-      ) : (
-        <a className="button secondary" href="#soa-review-blockers">Review {summary.needsAttention} attention items</a>
-      )}
+      ) : <Link className="button secondary" href="/app/soa">Controls & applicability</Link>}
     />
+    <section className="panel" aria-label="Source assessment">
+      <h2>Source assessment: <Link href={`/app/assessment/${source.id}`}>{source.title}</Link></h2>
+      <p>Current assessment context — {source.state}, revision {source.revision}. Answers can change after a control decision is saved.</p>
+      {source.state !== "completed" && <p>This assessment is incomplete. Its recorded answers provide context; they do not decide applicability or establish effectiveness.</p>}
+      {register.finalisedSnapshotId && <p>The source link opens its current record. Later answers are not part of the immutable statement.</p>}
+    </section>
+    {review.optionalUnavailable.length > 0 && <p role="status">Unavailable context: {review.optionalUnavailable.join(", ")}. The remaining review is available.</p>}
+    {review.relatedRisks.length > 0 && <section className="panel" aria-label="Related risks">
+      <h2>Related risks</h2>
+      <p>These links describe the assessment or register as a whole.</p>
+      <ul>{review.relatedRisks.map((risk) => <li key={`${risk.relationship}-${risk.id}`}><Link href={`/app/risks/${risk.id}`}>{risk.reference}: {risk.title}</Link> — {risk.relationship === "assessment" ? "Assessment" : "Register"} context, {risk.status}</li>)}</ul>
+      {(["assessment", "register"] as const).map((relationship) => {
+        const list = review.riskLists[relationship];
+        return list.truncated ? <p key={relationship}>Showing {list.shown} of {list.total} {relationship}-related risks (limit {list.limit}).</p> : null;
+      })}
+    </section>}
     <SoaReviewWorkspace
-      aiEnabled={!aiSettingsResult.error && aiSettingsResult.data?.enabled === true}
-      readOnly={membership.role === "member"}
-      items={queueItems}
-      members={memberOptions}
+      aiEnabled={review.aiEnabled}
+      readOnly={membership.role === "member" || Boolean(register.finalisedSnapshotId)}
+      items={review.items}
+      members={review.members}
       currentUserId={user.id}
       registerId={id}
       saveAction={reviewSoaItemAction}
