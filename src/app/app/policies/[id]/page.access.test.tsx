@@ -15,6 +15,7 @@ function query<T>(result: T) {
   const promise = Promise.resolve(result);
   const builder = {
     select: vi.fn(),
+    range: vi.fn((from: number, to: number) => promise.then((value) => { const row = value as {data?: unknown[]}; return { ...value, data: Array.isArray(row.data) ? row.data.slice(from, to + 1) : row.data }; })),
     eq: vi.fn(),
     order: vi.fn(),
     maybeSingle: vi.fn(() => promise),
@@ -31,7 +32,7 @@ function contextFor(role: "owner" | "admin" | "member", policyStatus: "draft" | 
     policies: query({
       data: {
         id: POLICY_ID, reference: "POL-001", title: "Security policy", body: "Approved policy text",
-        version: 3, status: policyStatus, review_due: null, owner_id: null as string | null,
+        version: 3, edit_revision: 7, status: policyStatus, review_due: null, owner_id: null as string | null,
       },
       error: null,
     }),
@@ -47,7 +48,8 @@ function contextFor(role: "owner" | "admin" | "member", policyStatus: "draft" | 
       data: [{ id: "link-1", evidence: { id: "evidence-1", title: "SOC 2 report" } }],
       error: null,
     }),
-    evidence: query({ data: [{ id: "evidence-1", title: "SOC 2 report" }], error: null }),
+    evidence: query({ data: [{ id: "evidence-1", title: "SOC 2 report" }, { id: "evidence-2", title: "Access review" }], error: null }),
+    policy_feedback_comments: query({ data: [{ id: "comment-1", thread_id: "feedback-1", body: "Does this include contractors?", created_at: "2026-07-14T08:00:00Z", author: { display_name: "Alex Member" } }], error: null }),
     policy_feedback_threads: query({
       data: [{
         id: "feedback-1", subject: "Clarify contractors", status: "open", policy_version: 3,
@@ -108,7 +110,7 @@ describe("policy detail role presentation", () => {
     const { results } = contextFor("admin");
     results.policies.maybeSingle.mockResolvedValueOnce({ data: {
       id: POLICY_ID, reference: "POL-001", title: "Security policy", body: "Approved policy text",
-      version: 3, status: "approved", review_due: null, owner_id: USER_ID,
+      version: 3, edit_revision: 7, status: "approved", review_due: null, owner_id: USER_ID,
     }, error: null });
 
     render(await PolicyDetailPage({ params: Promise.resolve({ id: POLICY_ID }) }));
@@ -123,6 +125,7 @@ describe("policy detail role presentation", () => {
     render(await PolicyDetailPage({ params: Promise.resolve({ id: POLICY_ID }) }));
 
     expect(screen.queryByRole("button", { name: "I accept this policy" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/outstanding/i)).not.toBeInTheDocument();
     expect(screen.getByText("Personal acceptance is available only while this policy is approved. Previous acceptances remain on record.")).toBeInTheDocument();
   });
 
@@ -162,4 +165,15 @@ describe("policy detail role presentation", () => {
     expect(screen.queryByRole("button", { name: "Reply" })).not.toBeInTheDocument();
     expect(screen.getByText(/Feedback opens after this policy is approved/i)).toBeInTheDocument();
   });
+  it("places readable content before acceptance and binds the accepted version", async () => {
+    contextFor("member", "approved", false);
+    render(await PolicyDetailPage({ params: Promise.resolve({ id: POLICY_ID }) }));
+    const document = screen.getByText("Approved policy text");
+    const accept = screen.getByRole("button", { name: "I accept this policy" });
+    expect(document.compareDocumentPosition(accept) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(accept.closest("form")?.querySelector('[name="expectedVersion"]')).toHaveValue("3");
+    expect(screen.getByText("SOC 2 report")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "SOC 2 report" })).not.toBeInTheDocument();
+  });
+
 });

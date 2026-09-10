@@ -13,7 +13,7 @@ insert into public.policies(id,organisation_id,reference,title,body,version,stat
 values('7a000000-0000-4000-8000-000000000101',current_setting('app.version_org')::uuid,'VER-1','Versioned policy','Original body',1,'approved','7a000000-0000-4000-8000-000000000001');
 
 select set_config('request.jwt.claims','{"sub":"7a000000-0000-4000-8000-000000000002","email":"version-member@example.test","role":"authenticated"}',true);
-select lives_ok($$ select public.accept_policy('7a000000-0000-4000-8000-000000000101') $$,'member accepts the original content');
+select lives_ok($$ select public.accept_policy('7a000000-0000-4000-8000-000000000101',1) $$,'member accepts the original content');
 
 select set_config('request.jwt.claims','{"sub":"7a000000-0000-4000-8000-000000000001","email":"version-owner@example.test","role":"authenticated"}',true);
 select lives_ok($$ update public.policies set body='Changed body', version=1 where id='7a000000-0000-4000-8000-000000000101' $$,'direct material edit is accepted and database-managed');

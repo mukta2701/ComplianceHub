@@ -27,6 +27,7 @@ function policyForm(body = "Current policy text") {
   form.set("body", body);
   form.set("ownerId", "");
   form.set("reviewDue", "");
+  form.set("expectedRevision", "8");
   return form;
 }
 
@@ -45,13 +46,16 @@ describe("policy management access", () => {
   });
 
   it("allows admins to approve policies", async () => {
-    const update = vi.fn(() => ({ eq: vi.fn(() => ({ eq: vi.fn().mockResolvedValue({ error: null }) })) }));
+    const query = { eq: vi.fn(() => query), select: vi.fn(() => query), maybeSingle: vi.fn().mockResolvedValue({ data: { id: POLICY_ID }, error: null }) };
+    const update = vi.fn(() => query);
     hoisted.ctx = {
       supabase: { from: vi.fn(() => ({ update })) }, user: { id: USER_ID },
       organisation: { id: ORGANISATION_ID }, membership: { role: "admin" },
     };
     const form = new FormData();
     form.set("id", POLICY_ID);
+    form.set("expectedVersion", "4");
+    form.set("expectedRevision", "8");
 
     await expect(approvePolicyAction(form)).resolves.toBeUndefined();
     expect(update).toHaveBeenCalledOnce();
@@ -64,12 +68,13 @@ describe("policy update concurrency", () => {
   function updateContext(returnedPolicy: { version: number } | null) {
     const read = {
       select: vi.fn(() => ({
-        eq: vi.fn(() => ({ eq: vi.fn(() => ({ single: vi.fn().mockResolvedValue({ data: { body: "Old text", version: 4, owner_id: null }, error: null }) })) })),
+        eq: vi.fn(() => ({ eq: vi.fn(() => ({ single: vi.fn().mockResolvedValue({ data: { body: "Old text", version: 4, edit_revision: 8, owner_id: null }, error: null }) })) })),
       })),
     };
-    const maybeSingle = vi.fn().mockResolvedValue({ data: returnedPolicy, error: null });
+    const maybeSingle = vi.fn().mockResolvedValue({ data: returnedPolicy ? { ...returnedPolicy, edit_revision: 9 } : null, error: null });
     const selectUpdated = vi.fn(() => ({ maybeSingle }));
-    const versionEq = vi.fn(() => ({ select: selectUpdated }));
+    const revisionEq = vi.fn(() => ({ select: selectUpdated }));
+    const versionEq = vi.fn(() => ({ eq: revisionEq }));
     const organisationEq = vi.fn(() => ({ eq: versionEq }));
     const idEq = vi.fn(() => ({ eq: organisationEq }));
     const update = vi.fn<(values: Record<string, unknown>) => { eq: typeof idEq }>(() => ({ eq: idEq }));
@@ -109,7 +114,7 @@ describe("policy update concurrency", () => {
     const form = policyForm("New material text");
     form.set("expectedVersion", "4");
 
-    await expect(updatePolicyAction(form)).resolves.toEqual({ version: 5 });
+    await expect(updatePolicyAction(form)).resolves.toEqual({ version: 5, revision: 9 });
 
     expect(update).toHaveBeenCalledWith(expect.not.objectContaining({ version: expect.anything() }));
     expect(versionEq).toHaveBeenCalledWith("version", 4);
@@ -124,7 +129,7 @@ describe("policy update concurrency", () => {
     const form = policyForm("Old text");
     form.set("expectedVersion", "4");
 
-    await expect(savePolicyEditAction({}, form)).resolves.toEqual({ success: "Policy changes saved.", version: 4 });
+    await expect(savePolicyEditAction({}, form)).resolves.toEqual({ success: "Policy changes saved.", version: 4, revision: 9 });
   });
 
   it("distinguishes a saved policy from a failed re-acceptance notification", async () => {
@@ -133,7 +138,7 @@ describe("policy update concurrency", () => {
     const form = policyForm("New text");
     form.set("expectedVersion", "4");
 
-    await expect(savePolicyEditAction({}, form)).resolves.toEqual({ error: "The policy was saved, but members could not be notified to re-accept. Check the acceptance roster and follow up with them.", version: 5 });
+    await expect(savePolicyEditAction({}, form)).resolves.toEqual({ error: "The policy was saved, but members could not be notified to re-accept. Check the acceptance roster and follow up with them.", version: 5, revision: 9 });
     expect(hoisted.revalidatePath).toHaveBeenCalledWith(`/app/policies/${POLICY_ID}`);
   });
 

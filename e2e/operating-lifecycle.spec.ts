@@ -18,7 +18,7 @@ test("policy ownership survives editing and employees accept only published vers
     await operator.goto("/app/policies/new");
     await operator.getByRole("textbox", { name: "Reference", exact: true }).fill("POL-CYCLE-01");
     await operator.getByRole("textbox", { name: "Title", exact: true }).fill("Quarterly access policy — fictional");
-    await operator.getByRole("combobox", { name: "Owner", exact: true }).selectOption(actors[1].id);
+    await operator.getByRole("combobox", { name: "Policy owner", exact: true }).selectOption(actors[1].id);
     await operator.getByRole("textbox", { name: "Policy content", exact: true }).fill("Fictional access review responsibilities for the company.");
     await operator.getByRole("button", { name: "Create policy", exact: true }).click();
     await expect(operator).toHaveURL(/\/app\/policies\/[0-9a-f-]+$/);
@@ -68,6 +68,45 @@ test("policy ownership survives editing and employees accept only published vers
     expect(accessibility.violations.filter((item) => item.impact === "critical" || item.impact === "serious")).toEqual([]);
     const { data: saved, error } = await coordinator.from("policies").select("owner_id").eq("organisation_id", organisationId).eq("reference", "POL-CYCLE-01").single();
     expect(error).toBeNull(); expect(saved?.owner_id).toBe(actors[1].id);
+  } finally {
+    await Promise.allSettled([operatorContext.close(), employeeContext.close()]);
+  }
+});
+
+test("stale policy approval and acceptance stay on the document with recovery guidance", async ({ browser }, testInfo) => {
+  test.setTimeout(90_000);
+  const { actors, organisationId, coordinator } = await createTeamFixture();
+  const viewport = testInfo.project.name === "mobile" ? { width: 393, height: 851 } : { width: 1440, height: 1000 };
+  const operatorContext = await browser.newContext({ viewport });
+  const employeeContext = await browser.newContext({ viewport });
+  const operator = await operatorContext.newPage();
+  const employee = await employeeContext.newPage();
+  try {
+    const { data: policy, error } = await coordinator.from("policies").insert({ organisation_id: organisationId, reference: "POL-STALE-01", title: "Displayed policy — fictional", body: "Version one shown to the reader.", status: "draft", owner_id: actors[1].id, created_by: actors[0].id }).select("id").single();
+    expect(error).toBeNull();
+    await signIn(operator, actors[0]);
+    await operator.goto(`/app/policies/${policy!.id}`);
+    const { error: metadataError } = await coordinator.from("policies").update({ title: "Newer saved title — fictional" }).eq("id", policy!.id).eq("organisation_id", organisationId);
+    expect(metadataError).toBeNull();
+    await operator.getByRole("button", { name: "Approve policy", exact: true }).click();
+    await expect(operator.locator("p[role='alert']")).toContainText("This policy changed while you were editing it");
+    await expect(operator.getByText("Version one shown to the reader.").first()).toBeVisible();
+    const { data: stillDraft } = await coordinator.from("policies").select("status").eq("id", policy!.id).single();
+    expect(stillDraft?.status).toBe("draft");
+
+    await operator.reload();
+    await operator.getByRole("button", { name: "Approve policy", exact: true }).click();
+    await expect(operator.getByText("This policy is approved and published to members.")).toBeVisible();
+    await signIn(employee, actors[1]);
+    await employee.goto(`/app/policies/${policy!.id}`);
+    await expect(employee.getByText("Version one shown to the reader.").first()).toBeVisible();
+    const { error: contentError } = await coordinator.from("policies").update({ body: "Version two has not been read yet." }).eq("id", policy!.id).eq("organisation_id", organisationId);
+    expect(contentError).toBeNull();
+    await employee.getByRole("button", { name: "I accept this policy", exact: true }).click();
+    await expect(employee.locator("p[role='alert']")).toContainText("Refresh and read the current version before accepting it");
+    await expect(employee.getByText("Version one shown to the reader.").first()).toBeVisible();
+    const { count } = await coordinator.from("policy_acceptances").select("id", { count: "exact", head: true }).eq("policy_id", policy!.id);
+    expect(count).toBe(0);
   } finally {
     await Promise.allSettled([operatorContext.close(), employeeContext.close()]);
   }

@@ -139,22 +139,22 @@ select is(
   'authenticated operational mutation RPCs perform an operator check'
 );
 
-select function_returns('public', 'accept_policy', array['uuid'], 'uuid');
+select function_returns('public', 'accept_policy', array['uuid','integer'], 'uuid');
 select ok(
-  (select p.prosecdef from pg_catalog.pg_proc p where p.oid = pg_catalog.to_regprocedure('public.accept_policy(uuid)')),
+  (select p.prosecdef from pg_catalog.pg_proc p where p.oid = pg_catalog.to_regprocedure('public.accept_policy(uuid,integer)')),
   'accept_policy is SECURITY DEFINER'
 );
 select is(
-  (select pg_catalog.pg_get_userbyid(p.proowner) from pg_catalog.pg_proc p where p.oid = pg_catalog.to_regprocedure('public.accept_policy(uuid)')),
+  (select pg_catalog.pg_get_userbyid(p.proowner) from pg_catalog.pg_proc p where p.oid = pg_catalog.to_regprocedure('public.accept_policy(uuid,integer)')),
   'postgres',
   'accept_policy has the expected trusted owner'
 );
 select ok(
-  (select p.proconfig @> array['search_path=""'] from pg_catalog.pg_proc p where p.oid = pg_catalog.to_regprocedure('public.accept_policy(uuid)')),
+  (select p.proconfig @> array['search_path=""'] from pg_catalog.pg_proc p where p.oid = pg_catalog.to_regprocedure('public.accept_policy(uuid,integer)')),
   'accept_policy pins an empty search path'
 );
-select ok(not pg_catalog.has_function_privilege('anon', pg_catalog.to_regprocedure('public.accept_policy(uuid)'), 'execute'), 'anon cannot execute accept_policy');
-select ok(pg_catalog.has_function_privilege('authenticated', pg_catalog.to_regprocedure('public.accept_policy(uuid)'), 'execute'), 'authenticated may invoke the guarded accept_policy RPC');
+select ok(not pg_catalog.has_function_privilege('anon', pg_catalog.to_regprocedure('public.accept_policy(uuid,integer)'), 'execute'), 'anon cannot execute accept_policy');
+select ok(pg_catalog.has_function_privilege('authenticated', pg_catalog.to_regprocedure('public.accept_policy(uuid,integer)'), 'execute'), 'authenticated may invoke the guarded accept_policy RPC');
 select ok(pg_catalog.has_table_privilege('authenticated', 'public.policy_acceptances', 'select'), 'authenticated can select policy acceptances through RLS');
 select ok(not pg_catalog.has_table_privilege('anon', 'public.policy_acceptances', 'insert'), 'anon cannot insert policy acceptances directly');
 select ok(not pg_catalog.has_table_privilege('authenticated', 'public.policy_acceptances', 'insert'), 'authenticated cannot insert policy acceptances directly');
@@ -259,7 +259,7 @@ select throws_ok(
 );
 select throws_ok($$ update public.policy_acceptances set accepted_version = 999 $$, '42501', null, 'a member cannot forge a direct acceptance update');
 select throws_ok($$ delete from public.policy_acceptances $$, '42501', null, 'a member cannot delete acceptance history directly');
-select lives_ok($$ select public.accept_policy('77000000-0000-4000-8000-000000000101') $$, 'a verified member can accept an approved policy');
+select lives_ok($$ select public.accept_policy('77000000-0000-4000-8000-000000000101',3) $$, 'a verified member can accept an approved policy');
 select results_eq(
   $$ select organisation_id, policy_id, user_id, accepted_version from public.policy_acceptances $$,
   $$ values (
@@ -276,14 +276,14 @@ select set_config('request.jwt.claims', '{"sub":"77000000-0000-4000-8000-0000000
 update public.policies set body = 'approved body, revised' where id = '77000000-0000-4000-8000-000000000101';
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub":"77000000-0000-4000-8000-000000000003","email":"access-member-a@example.test","role":"authenticated"}', true);
-select lives_ok($$ select public.accept_policy('77000000-0000-4000-8000-000000000101') $$, 're-accepting is idempotent and refreshes the authoritative version');
+select lives_ok($$ select public.accept_policy('77000000-0000-4000-8000-000000000101',4) $$, 're-accepting is idempotent and refreshes the authoritative version');
 select results_eq(
   $$ select count(*)::bigint, max(accepted_version)::integer from public.policy_acceptances $$,
   $$ values (1::bigint, 4::integer) $$,
   're-accept uses one row and the current authoritative policy version'
 );
-select throws_ok($$ select public.accept_policy('77000000-0000-4000-8000-000000000102') $$, '42501', 'policy is not available for acceptance', 'a member cannot accept a draft policy');
-select throws_ok($$ select public.accept_policy('77000000-0000-4000-8000-000000000103') $$, '42501', 'policy is not available for acceptance', 'a member cannot accept another tenant policy');
+select throws_ok($$ select public.accept_policy('77000000-0000-4000-8000-000000000102',1) $$, '42501', 'policy is not available for acceptance', 'a member cannot accept a draft policy');
+select throws_ok($$ select public.accept_policy('77000000-0000-4000-8000-000000000103',1) $$, '42501', 'policy is not available for acceptance', 'a member cannot accept another tenant policy');
 select throws_ok($$ select public.notify_policy_reaccept('77000000-0000-4000-8000-000000000101', '') $$, '42501', 'not an operator of the policy organisation', 'member cannot bypass policy notification writes');
 select throws_ok($$ select public.create_soa_draft('77000000-0000-4000-8000-000000000302', 'Bypass') $$, '42501', 'assessment not found', 'member cannot bypass SoA writes through create_soa_draft');
 select throws_ok(
@@ -309,13 +309,13 @@ select throws_ok(
 );
 
 select set_config('request.jwt.claims', '{"sub":"77000000-0000-4000-8000-000000000005","email":"access-unverified@example.test","role":"authenticated"}', true);
-select throws_ok($$ select public.accept_policy('77000000-0000-4000-8000-000000000101') $$, '42501', 'verified authentication required', 'an unverified member cannot accept a policy');
+select throws_ok($$ select public.accept_policy('77000000-0000-4000-8000-000000000101',4) $$, '42501', 'verified authentication required', 'an unverified member cannot accept a policy');
 
 select set_config('request.jwt.claims', '{"role":"authenticated"}', true);
-select throws_ok($$ select public.accept_policy('77000000-0000-4000-8000-000000000101') $$, '42501', 'verified authentication required', 'an authenticated request without a user cannot accept a policy');
+select throws_ok($$ select public.accept_policy('77000000-0000-4000-8000-000000000101',4) $$, '42501', 'verified authentication required', 'an authenticated request without a user cannot accept a policy');
 
 select set_config('request.jwt.claims', '{"sub":"77000000-0000-4000-8000-000000000001","email":"access-owner-a@example.test","role":"authenticated"}', true);
-select lives_ok($$ select public.accept_policy('77000000-0000-4000-8000-000000000101') $$, 'an operator can also acknowledge an approved policy');
+select lives_ok($$ select public.accept_policy('77000000-0000-4000-8000-000000000101',4) $$, 'an operator can also acknowledge an approved policy');
 select is((select count(*) from public.policy_acceptances), 2::bigint, 'operators can read organisation-wide acceptance reporting');
 
 select set_config('request.jwt.claims', '{"sub":"77000000-0000-4000-8000-000000000003","email":"access-member-a@example.test","role":"authenticated"}', true);

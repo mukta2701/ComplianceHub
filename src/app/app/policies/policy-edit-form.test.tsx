@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({ save: vi.fn() }));
 vi.mock("./actions", () => ({ updatePolicyAction: mocks.save }));
 vi.mock("./policy-edit-actions", () => ({ savePolicyEditAction: mocks.save }));
 import { PolicyEditForm } from "./policy-edit-form";
-const policy = { id: "policy-1", reference: "POL-1", title: "Security policy", body: "Original content", ownerId: "alex", reviewDue: "2026-10-01", version: 3 };
+const policy = { id: "policy-1", reference: "POL-1", title: "Security policy", body: "Original content", ownerId: "alex", reviewDue: "2026-10-01", version: 3, revision: 7 };
 const owners = [{ id: "alex", name: "Alex" }, { id: "blair", name: "Blair" }];
 beforeEach(() => { vi.clearAllMocks(); });
 it("prevents repeated saves while pending and announces success only after the save finishes", async () => {
@@ -91,4 +91,18 @@ it("keeps the committed revision after a notification warning so the next edit c
   await user.click(screen.getByRole("button", { name: "Save changes" }));
   await screen.findByRole("status");
   expect(mocks.save.mock.calls[1][1].get("expectedVersion")).toBe("4");
+});
+
+it("preserves its original edit revision across a remote rerender and advances only after its own save", async () => {
+  mocks.save.mockResolvedValue({ success: "Policy changes saved.", version: 3, revision: 8 });
+  const view = render(<PolicyEditForm policy={policy} owners={owners} />);
+  const user = userEvent.setup();
+  view.rerender(<PolicyEditForm policy={{ ...policy, revision: 9 }} owners={owners} />);
+  await user.click(screen.getByRole("button", { name: "Save changes" }));
+  await screen.findByRole("status");
+  expect(mocks.save.mock.calls[0][1].get("expectedRevision")).toBe("7");
+  await user.type(screen.getByRole("textbox", { name: "Title" }), " amendment");
+  await user.click(screen.getByRole("button", { name: "Save changes" }));
+  await screen.findByRole("status");
+  expect(mocks.save.mock.calls[1][1].get("expectedRevision")).toBe("8");
 });

@@ -35,6 +35,7 @@ function policyForm() {
   form.set("ownerId", "");
   form.set("reviewDue", "");
   form.set("expectedVersion", "1");
+  form.set("expectedRevision", "1");
   return form;
 }
 
@@ -100,21 +101,27 @@ describe("policy mutations stay in the active workspace", () => {
   it("does not approve a sibling policy", async () => {
     const form = new FormData();
     form.set("id", POLICY_ID);
-    await expect(approvePolicyAction(form)).resolves.toBeUndefined();
+    form.set("expectedVersion", "1");
+    form.set("expectedRevision", "1");
+    await expect(approvePolicyAction(form)).rejects.toThrow("This policy changed");
     expect(hoisted.writes).toEqual([]);
   });
 
   it("does not change the status of a sibling policy", async () => {
     const form = new FormData();
     form.set("id", POLICY_ID);
-    form.set("status", "approved");
-    await expect(setPolicyStatusAction(form)).resolves.toBeUndefined();
+    form.set("expectedVersion", "1");
+    form.set("expectedRevision", "1");
+    form.set("status", "archived");
+    await expect(setPolicyStatusAction(form)).rejects.toThrow("This policy changed");
     expect(hoisted.writes).toEqual([]);
   });
 
   it("does not accept a sibling policy", async () => {
     const form = new FormData();
     form.set("id", POLICY_ID);
+    form.set("expectedVersion", "1");
+    form.set("expectedRevision", "1");
     await expect(acceptPolicyAction(form)).rejects.toThrow("Policy not found");
     const context = hoisted.ctx as { supabase: { rpc: ReturnType<typeof vi.fn> } };
     expect(context.supabase.rpc).not.toHaveBeenCalled();

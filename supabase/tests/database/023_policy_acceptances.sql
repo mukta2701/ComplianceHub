@@ -19,14 +19,14 @@ insert into public.policies (id, organisation_id, reference, title, body, status
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated"}', true);
 select lives_ok(
-  $$ select public.accept_policy('50000000-0000-4000-8000-000000000001') $$,
+  $$ select public.accept_policy('50000000-0000-4000-8000-000000000001',1) $$,
   'members record their own acceptance through the narrow RPC');
 select throws_ok(
   $$ insert into public.policy_acceptances (organisation_id, policy_id, user_id, accepted_version)
      values ('20000000-0000-4000-8000-000000000001', '50000000-0000-4000-8000-000000000002', '10000000-0000-4000-8000-000000000001', 1) $$,
   '42501', null, 'a member cannot write acceptance rows directly');
 select throws_ok(
-  $$ select public.accept_policy('50000000-0000-4000-8000-000000000002') $$,
+  $$ select public.accept_policy('50000000-0000-4000-8000-000000000002',1) $$,
   '42501', 'policy is not available for acceptance', 'members cannot accept another tenant''s policy');
 
 set local role authenticated;

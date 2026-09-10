@@ -42,12 +42,13 @@ describe("acceptPolicyAction", () => {
     };
     const form = new FormData();
     form.set("id", POLICY_ID);
+    form.set("expectedVersion", "3");
     form.set("acceptedVersion", "999");
     form.set("acceptedAt", "2000-01-01T00:00:00Z");
 
     await expect(acceptPolicyAction(form)).resolves.toBeUndefined();
 
-    expect(rpc).toHaveBeenCalledWith("accept_policy", { target_policy_id: POLICY_ID });
+    expect(rpc).toHaveBeenCalledWith("accept_policy", { target_policy_id: POLICY_ID, expected_version: 3 });
     expect(from).toHaveBeenCalledWith("policies");
     expect(hoisted.revalidatePath).toHaveBeenCalledWith(`/app/policies/${POLICY_ID}`);
   });
@@ -61,8 +62,18 @@ describe("acceptPolicyAction", () => {
     };
     const form = new FormData();
     form.set("id", POLICY_ID);
+    form.set("expectedVersion", "3");
 
     await expect(acceptPolicyAction(form)).rejects.toThrow("Could not record your acceptance");
+    expect(hoisted.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("explains that the displayed policy must be read again after a version conflict", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data:null,error:{code:"22023",message:"policy version changed; private details omitted"} });
+    const chain = {select:()=>chain,eq:()=>chain,maybeSingle:async()=>({data:{id:POLICY_ID},error:null})};
+    hoisted.ctx = {supabase:{rpc,from:()=>chain},user:{id:POLICY_ID},organisation:{id:POLICY_ID}};
+    const form=new FormData();form.set("id",POLICY_ID);form.set("expectedVersion","3");
+    await expect(acceptPolicyAction(form)).rejects.toThrow("This policy changed. Refresh and read the current version before accepting it.");
     expect(hoisted.revalidatePath).not.toHaveBeenCalled();
   });
 });
