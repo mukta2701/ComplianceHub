@@ -11,7 +11,7 @@ const hoisted = vi.hoisted(() => ({
 
 function query(table: string, data: unknown[]) {
   const chain: Record<string, unknown> = {};
-  for (const method of ["select", "order", "limit", "maybeSingle"]) chain[method] = vi.fn(() => chain);
+  for (const method of ["select", "order", "range", "limit", "maybeSingle"]) chain[method] = vi.fn(() => chain);
   chain.eq = vi.fn((column: string, value: unknown) => {
     if (column === "organisation_id") hoisted.organisationFilters.push({ table, value });
     return chain;

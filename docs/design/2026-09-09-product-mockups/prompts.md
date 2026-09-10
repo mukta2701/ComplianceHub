@@ -54,3 +54,9 @@ Generated 10 September 2026 using the built-in image-generation tool in two pass
 **Product-truth correction prompt:** Preserve the refined visual design while changing the large panel to the application's current `Control maturity score`, weighted maturity percentage and five labelled horizontal maturity bars. Add `Review programme scope` beside the programme basis. Replace unsupported work-by-team content with `Coming up`, and use the full-width lower panel for recent activity. Keep the four exact attention labels and the `Needs your attention` queue. No historical trend, fake search, fictional certification score or watermark.
 
 The resulting image is an implementation target with fictional values. It does not prove runtime behavior or establish new product rules.
+
+## 07-proof-to-audit-oversight-feasible
+
+**Visual direction prompt:** Create a high-fidelity 2x2 ComplianceHub product board for Evidence vault, Continuous monitoring, Audit register and Audit workspace. Reuse the approved cool-gray canvas, white surfaces, deep navy typography, cobalt actions, teal current/confirmed state, amber attention, coral risk and violet review accent. Keep restrained borders and shadows, readable charts, compact metrics, strong list/detail hierarchy and realistic desktop application density. Preserve the existing left navigation and top bar. Use fictional Northstar data and label it as a design concept.
+
+**Product-truth correction prompt:** Keep the visual composition but change Monitoring's primary action to Manage connections, replace the unsupported Slack monitoring source with AWS not connected, make the evidence total 46, and add a distinct finding-status column. Do not add a historical monitoring chart, certification percentage, evidence approval state or automatic audit conclusion. Keep Share with auditor inside the Audit workspace only.

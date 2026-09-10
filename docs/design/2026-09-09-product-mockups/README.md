@@ -86,3 +86,11 @@ No app source, database, permissions or running build changed in this mockup bat
 Apply the selected visual language to the shared shell and programme dashboard, using existing data and truthful empty states. Demonstrate desktop and mobile behaviour before extending the same patterns to the registers and detail views.
 
 The [release checklist](../../release-checklist.md) remains the project status source. [Generation prompts](prompts.md) record the complete prompt set and built-in generation mode.
+
+## 07 — Proof-to-audit oversight refinement
+
+Generated 10 September 2026 after inspecting the current Evidence, Monitoring and Internal Audit routes and correcting the first generated draft against implemented product behavior.
+
+The four-screen board connects the Evidence vault, Continuous monitoring, Audit register and Audit workspace. It uses exact or explicitly scoped counts, keeps evidence freshness separate from review, represents an unconnected AWS source honestly, gives monitoring findings their own state, and avoids unsupported historical trends or audit success scores. The second pass corrected a misplaced auditor-sharing action and a malformed evidence total.
+
+The image is a visual implementation target using fictional values. It does not prove authorization, database calculations, provider access, audit conclusions or runtime behavior.

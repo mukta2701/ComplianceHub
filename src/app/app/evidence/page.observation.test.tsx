@@ -21,7 +21,7 @@ const rows = [
 
 function query(table: string) {
   const chain: Record<string, unknown> = {};
-  for (const method of ["select", "eq", "in", "order", "limit", "maybeSingle"]) chain[method] = vi.fn(() => chain);
+  for (const method of ["select", "eq", "in", "order", "range", "limit", "maybeSingle"]) chain[method] = vi.fn(() => chain);
   chain.then = (resolve: (value: unknown) => unknown) => Promise.resolve({
     data: table === "evidence" ? rows : table === "ai_workspace_settings" ? null : [],
     error: null,
@@ -46,10 +46,10 @@ describe("EvidencePage observation identity", () => {
   it("shows keyed collection metadata and labels legacy automation identity without changing manual evidence", async () => {
     render(await EvidencePage());
 
-    expect(screen.getByText(/Collected 2026-09-08/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Collected 8 Sept 2026/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Resource: repo\/example\/main/)).toHaveLength(2);
     expect(screen.getByText("Legacy observation identity unknown")).toBeInTheDocument();
-    expect(screen.getByText("Collected 2026-09-07")).toBeInTheDocument();
+    expect(screen.getByText("Collected 7 Sept 2026")).toBeInTheDocument();
     expect(screen.queryByText(/Observed .*00:00/)).not.toBeInTheDocument();
   });
 });

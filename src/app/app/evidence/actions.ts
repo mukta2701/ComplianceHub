@@ -8,8 +8,15 @@ import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { ALLOWED_EVIDENCE_MIME_TYPES, MAX_EVIDENCE_FILE_BYTES, evidenceInputSchema, persistEvidenceWithCompensation } from "@/features/evidence/application/evidence";
 import { deriveEvidenceStatus } from "@/features/evidence/domain/evidence";
 
+function requireEvidenceOperator(membership: { role: string }) {
+  if (membership.role !== "owner" && membership.role !== "admin") {
+    throw new Error("Only workspace operators can manage evidence");
+  }
+}
+
 export async function createEvidenceAction(formData: FormData) {
-  const { supabase, user, organisation } = await requireAppContext();
+  const { supabase, user, organisation, membership } = await requireAppContext();
+  requireEvidenceOperator(membership);
   await enforceRateLimit(`evidence:${user.id}`, { limit: 20, windowMs: 60_000 });
   const parsed = evidenceInputSchema.parse({ ...Object.fromEntries(formData), organisationId: organisation.id });
   let storagePath: string | null = null;
@@ -43,7 +50,8 @@ export async function createEvidenceAction(formData: FormData) {
 }
 
 export async function linkEvidenceAction(formData: FormData) {
-  const { supabase, user, organisation } = await requireAppContext();
+  const { supabase, user, organisation, membership } = await requireAppContext();
+  requireEvidenceOperator(membership);
   const evidenceId = String(formData.get("evidenceId"));
   const target = String(formData.get("target")); // "control:<id>" | "risk:<id>" | "task:<id>" | "policy:<id>"
   const [kind, id] = target.split(":");
@@ -59,13 +67,15 @@ export async function linkEvidenceAction(formData: FormData) {
 }
 
 export async function unlinkEvidenceAction(formData: FormData) {
-  const { supabase, organisation } = await requireAppContext();
+  const { supabase, organisation, membership } = await requireAppContext();
+  requireEvidenceOperator(membership);
   const { error } = await supabase.from("evidence_links").delete().eq("id", String(formData.get("linkId"))).eq("organisation_id", organisation.id); if (error) throw new Error("Could not remove the evidence link");
   revalidatePath("/app/evidence");
 }
 
 export async function withdrawEvidenceAction(formData: FormData) {
-  const { supabase, organisation } = await requireAppContext();
+  const { supabase, organisation, membership } = await requireAppContext();
+  requireEvidenceOperator(membership);
   const { error } = await supabase.from("evidence").update({ status: "withdrawn" }).eq("id", String(formData.get("id"))).eq("organisation_id", organisation.id);
   if (error) throw new Error("Could not withdraw evidence");
   revalidatePath("/app/evidence");

@@ -716,32 +716,11 @@ a.heat-cell:hover{outline:2px solid var(--ink);outline-offset:-2px}
 
 /* Evidence stays scannable; detailed mappings and editing are opt-in. */
 .evidence-disclosure{margin-top:12px;font-size:12px}
-.evidence-disclosure>summary{min-height:36px;padding:8px 0;cursor:pointer;color:var(--blue);font-weight:700}
+.evidence-disclosure>summary{min-height:44px;padding:12px 0;cursor:pointer;color:var(--blue);font-weight:700}
 .evidence-disclosure>summary:focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:4px}
 .evidence-disclosure>p{color:var(--ch-text);line-height:1.6}
-.evidence-linked-records{margin-top:12px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;min-width:0}
-.evidence-link-form{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:8px;min-width:0}
-.evidence-link-form select{min-width:0;max-width:100%;flex:1 1 220px}
-.evidence-link-management{list-style:none;padding:0;margin:12px 0 0;display:grid;gap:8px}
-.evidence-link-management li{display:flex;gap:12px;justify-content:space-between;align-items:center;border-top:1px solid var(--ch-border);padding-top:8px;min-width:0}
-.evidence-link-management .button{min-height:32px;padding:6px 12px;font-size:11px}
-
-.evidence-vault .page-heading{flex-wrap:wrap;align-items:flex-start}
-.evidence-vault .page-heading__content{flex:1 1 320px}
-.evidence-vault .page-heading__action{max-width:100%}
-.evidence-vault .stats-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
-.evidence-vault .stat{min-width:0;padding:16px;gap:10px}
-@media(max-width:1050px){.evidence-vault .stat-icon{display:none}}
-@media(max-width:540px){.evidence-vault .page-heading__content{flex-basis:auto}.evidence-vault .stat{padding:12px}.evidence-vault .stat p{display:none}}
-
-/* Evidence prioritises reading; record maintenance stays available on demand. */
-.evidence-preview{font-size:13px;line-height:1.65;color:var(--ch-text);margin:14px 0 2px;overflow-wrap:anywhere}
-.evidence-actions{font-size:12px;max-width:300px}
-.evidence-actions>summary{cursor:pointer;color:var(--blue);padding:8px 0;font-weight:600}
-.evidence-record-actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding-top:8px}
-.evidence-actions>p,.metric-explanation{font-size:12px;line-height:1.6;color:var(--ch-text-muted,#596273)}
+.metric-explanation{font-size:12px;line-height:1.6;color:var(--ch-text-muted,#596273)}
 .metric-explanation{text-align:center;margin:8px 0 0;max-width:260px}
-.evidence-actions>summary:focus-visible{outline:2px solid var(--blue);outline-offset:3px}
 
 .section-guide{margin:0 0 18px;border-bottom:1px solid var(--line);padding-bottom:10px}
 .section-guide>summary{font-size:13px;font-weight:600;color:var(--blue);cursor:pointer;padding:8px 0}
