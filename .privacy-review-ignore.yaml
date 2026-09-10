@@ -4,6 +4,12 @@
 max_ttl_days: 14
 require_github_issue: false
 entries:
+  - id: "233734437dc5e586"
+    reason: "Assessment detail reads the fixed catalogue question prompt column from the local database for ordinary UI rendering; no model call, external transfer, or personal data occurs on this line"
+    privacy_approver: "Codex Astra release review"
+    security_approver: "Codex Astra release review"
+    created_on: "2026-09-10"
+    expires_on: "2026-09-24"
   - id: "986963883ca064c9"
     reason: "Names of environment settings explicitly blanked by the local launcher to disable outbound providers; no data transfer"
     privacy_approver: "Codex Astra release review"

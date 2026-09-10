@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-const state = vi.hoisted(() => ({ status: "completed", role: "owner", activeReview: false, reviewError: false }));
+const state = vi.hoisted(() => ({ status: "completed", role: "owner", activeReview: false, reviewError: false, truncatedTable: "" }));
 vi.mock("next/navigation", () => ({ notFound: () => { throw new Error("NOT_FOUND"); }, useRouter: () => ({ push: vi.fn() }) }));
 vi.mock("../../actions", () => ({ createSoaAction: vi.fn() }));
 vi.mock("@/lib/app-context", () => ({ requireAppContext: async () => ({
@@ -17,13 +17,13 @@ vi.mock("@/lib/app-context", () => ({ requireAppContext: async () => ({
     const chain: Record<string, unknown> = {};
     for (const method of ["select", "eq", "order", "limit"]) chain[method] = () => chain;
     chain.single = chain.maybeSingle = () => Promise.resolve({ data: rows[table][0], error: null });
-    chain.then = (resolve: (value: unknown) => unknown) => Promise.resolve({ data: rows[table], count: rows[table].length, error: table === "soa_registers" && state.reviewError ? { message: "private error" } : null }).then(resolve);
+    chain.then = (resolve: (value: unknown) => unknown) => Promise.resolve({ data: rows[table], count: rows[table].length + (state.truncatedTable === table ? 1 : 0), error: table === "soa_registers" && state.reviewError ? { message: "private error" } : null }).then(resolve);
     return chain;
   } },
 }) }));
 import AssessmentPage from "./page";
 describe("completed assessment display", () => {
-  beforeEach(() => { state.status = "completed"; state.role = "owner"; state.activeReview = false; state.reviewError = false; });
+  beforeEach(() => { state.status = "completed"; state.role = "owner"; state.activeReview = false; state.reviewError = false; state.truncatedTable = ""; });
   it.each(["owner", "admin", "member"])("renders completed answers read-only for %s", async (role) => {
     state.role = role; state.status = "completed";
     render(await AssessmentPage({ params: Promise.resolve({ id: "session" }) }));
@@ -64,5 +64,13 @@ describe("completed assessment display", () => {
     expect(screen.getByRole("heading", { name: "Control review status unavailable" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Retry" })).toHaveAttribute("href", "/app/assessment/session");
     expect(screen.queryByRole("button", { name: "Review controls" })).not.toBeInTheDocument();
+  });
+  it.each(["catalogue_categories", "catalogue_questions", "assessment_responses"])("does not render partial assessment content when %s is truncated", async (table) => {
+    state.truncatedTable = table;
+    render(await AssessmentPage({ params: Promise.resolve({ id: "session" }) }));
+    expect(screen.getByRole("heading", { name: "Assessment details unavailable" })).toBeInTheDocument();
+    expect(screen.getByText(/could not verify the complete question and response set/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Retry" })).toHaveAttribute("href", "/app/assessment/session");
+    expect(screen.queryByRole("radio", { name: "Yes" })).not.toBeInTheDocument();
   });
 });

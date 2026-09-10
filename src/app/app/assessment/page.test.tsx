@@ -6,6 +6,7 @@ type QueryRecord = { table: string; operations: Array<{ name: string; args: unkn
 const fixture = vi.hoisted(() => ({
   role: "owner",
   failTable: "",
+  countMismatchTable: "",
   sessionCount: 2,
   queries: [] as QueryRecord[],
   sessions: [
@@ -46,7 +47,7 @@ function query(table: string) {
       : table === "assessment_responses" ? fixture.responses
       : table === "soa_registers" ? fixture.reviews
       : [];
-    const count = table === "assessment_sessions" ? fixture.sessionCount : data.length;
+    const count = (table === "assessment_sessions" ? fixture.sessionCount : data.length) + (fixture.countMismatchTable === table ? 1 : 0);
     return Promise.resolve({ data, count, error: fixture.failTable === table ? { message: "private read error" } : null }).then(resolve);
   };
   return chain;
@@ -62,6 +63,7 @@ describe("assessment register journey", () => {
   beforeEach(() => {
     fixture.role = "owner";
     fixture.failTable = "";
+    fixture.countMismatchTable = "";
     fixture.sessionCount = 2;
     fixture.queries = [];
     fixture.reviews = [
@@ -114,6 +116,15 @@ describe("assessment register journey", () => {
     expect(screen.getByText(/could not verify assessment progress and control review links/i)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Retry" })).toHaveAttribute("href", "/app/assessment");
     expect(screen.queryByText("No assessments are available yet")).not.toBeInTheDocument();
+  });
+
+  it("shows the unavailable panel when a related result is truncated", async () => {
+    fixture.countMismatchTable = "assessment_responses";
+    render(await AssessmentsPage({ searchParams: Promise.resolve({}) }));
+
+    expect(screen.getByRole("heading", { name: "Assessment register unavailable" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Retry" })).toHaveAttribute("href", "/app/assessment");
+    expect(screen.queryByRole("article")).not.toBeInTheDocument();
   });
 
   it("limits the displayed register while keeping the complete count explicit", async () => {

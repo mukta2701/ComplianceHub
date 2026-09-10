@@ -11,7 +11,7 @@ vi.mock("@/lib/app-context", () => ({ requireAppContext: async () => ({
       catalogue_categories: [{ id: "category", catalogue_version_id: "catalogue", code: "GOV", title: "Governance", position: 0 }],
       catalogue_questions: [{ id: "question", catalogue_version_id: "catalogue", category_id: "category", code: "GOV-01", prompt: "Have leaders approved security objectives?", position: 0 }],
       assessment_responses: [{ session_id: "session", organisation_id: "org", question_id: "question", answer: "no", evidence_note: "" }],
-      soa_registers: [{ id: "register", organisation_id: "org", title: "SoA", version: 1 }],
+      soa_registers: [{ id: "register", organisation_id: "org", assessment_session_id: "session", title: "SoA", version: 1, soa_snapshots: [] }],
       soa_items: [{ id: "item", organisation_id: "org", soa_register_id: "register", control_id: "control", control_code: "A.5.1", control_title: "Security policies", applicable: true, status: "pending", justification: "", evidence: "", owner_id: null, position: 0 }],
       control_catalogue_controls: [{ id: "control", theme: "organisational" }],
       ai_workspace_settings: [{ organisation_id: "sibling", enabled: !state.enabled }, { organisation_id: "org", enabled: state.enabled }],
@@ -23,7 +23,10 @@ vi.mock("@/lib/app-context", () => ({ requireAppContext: async () => ({
     for (const method of ["select", "order", "in", "limit"]) chain[method] = () => chain;
     chain.eq = (column: string, value: unknown) => { filters.push([column, value]); return chain; };
     chain.single = chain.maybeSingle = () => Promise.resolve({ data: data()[0] ?? null, error: error() });
-    chain.then = (resolve: (value: unknown) => unknown) => Promise.resolve({ data: data(), error: error() }).then(resolve);
+    chain.then = (resolve: (value: unknown) => unknown) => {
+      const result = data();
+      return Promise.resolve({ data: result, count: result.length, error: error() }).then(resolve);
+    };
     return chain;
   } },
 }) }));

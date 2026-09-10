@@ -6,6 +6,11 @@ import { AssessmentResponseList } from "@/components/assessment-response-form";
 import { createSoaAction } from "../../actions";
 
 const REVIEW_READ_LIMIT = 100;
+const RELATED_READ_LIMIT = 5_000;
+
+function isCompleteResult<T>(result: { data: T[] | null; error: unknown; count: number | null }): result is { data: T[]; error: null; count: number } {
+  return !result.error && result.data !== null && result.count !== null && result.count === result.data.length;
+}
 
 export default async function AssessmentPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: Promise<{ completed?: string }> }) {
   const { id } = await params;
@@ -18,13 +23,19 @@ export default async function AssessmentPage({ params, searchParams }: { params:
   }
   if (!session) notFound();
   const [categoryResult, questionResult, responseResult, aiSettingsResult, reviewResult] = await Promise.all([
-    supabase.from("catalogue_categories").select("id,code,title,position").eq("catalogue_version_id", session.catalogue_version_id).order("position"),
-    supabase.from("catalogue_questions").select("id,category_id,code,prompt,position").eq("catalogue_version_id", session.catalogue_version_id).order("position"),
-    supabase.from("assessment_responses").select("question_id,answer,evidence_note").eq("session_id", id).eq("organisation_id", organisation.id),
+    supabase.from("catalogue_categories").select("id,code,title,position", { count: "exact" }).eq("catalogue_version_id", session.catalogue_version_id).order("position").limit(RELATED_READ_LIMIT),
+    supabase.from("catalogue_questions").select("id,category_id,code,prompt,position", { count: "exact" }).eq("catalogue_version_id", session.catalogue_version_id).order("position").limit(RELATED_READ_LIMIT),
+    supabase.from("assessment_responses").select("question_id,answer,evidence_note", { count: "exact" }).eq("session_id", id).eq("organisation_id", organisation.id).limit(RELATED_READ_LIMIT),
     supabase.from("ai_workspace_settings").select("enabled").eq("organisation_id", organisation.id).maybeSingle(),
     supabase.from("soa_registers").select("id,assessment_session_id,version,updated_at,soa_snapshots(id)", { count: "exact" }).eq("assessment_session_id", id).eq("organisation_id", organisation.id).order("updated_at", { ascending: false }).order("version", { ascending: false }).order("id", { ascending: false }).limit(REVIEW_READ_LIMIT),
   ]);
-  if (categoryResult.error || questionResult.error || responseResult.error) throw new Error("Could not load assessment questions and responses");
+  if (!isCompleteResult(categoryResult) || !isCompleteResult(questionResult) || !isCompleteResult(responseResult)) return <>
+    <PageIntro eyebrow="GAP ASSESSMENT" title={session.title} body="The complete assessment record could not be loaded." />
+    <section className="assessment-unavailable" aria-labelledby="assessment-detail-unavailable-title">
+      <div><h2 id="assessment-detail-unavailable-title">Assessment details unavailable</h2><p>We could not verify the complete question and response set. No partial totals or answers are shown.</p></div>
+      <Link className="button secondary" href={`/app/assessment/${id}`}>Retry</Link>
+    </section>
+  </>;
   const questionsByCategory = new Map<string, typeof questionResult.data>();
   for (const question of questionResult.data) questionsByCategory.set(question.category_id, [...(questionsByCategory.get(question.category_id) ?? []), question]);
   const questions = categoryResult.data.flatMap((category) => (questionsByCategory.get(category.id) ?? [])
@@ -53,6 +64,6 @@ export default async function AssessmentPage({ params, searchParams }: { params:
           : <><p>{session.state === "completed" ? "Use these answers as source context. They have not made any control decisions." : "You can start now, but the control review will use incomplete source context until every assessment question is answered."}</p><form action={createSoaAction}><input type="hidden" name="assessmentId" value={id} /><button className="button primary">Review controls</button></form></>}
       </div>
     </section>
-    <AssessmentResponseList controlReviewHref={controlReviewHref} aiEnabled={!aiSettingsResult.error && aiSettingsResult.data?.enabled === true} readOnly={session.state === "completed" || isMember} sessionId={id} questions={questions} initialRevision={session.revision} responses={responseResult.data} />
+    <AssessmentResponseList aiEnabled={!aiSettingsResult.error && aiSettingsResult.data?.enabled === true} readOnly={session.state === "completed" || isMember} sessionId={id} questions={questions} initialRevision={session.revision} responses={responseResult.data} />
   </>;
 }

@@ -39,7 +39,6 @@ export function AssessmentResponseList({ sessionId, questions, initialRevision, 
   responses: Response[];
   readOnly?: boolean;
   aiEnabled?: boolean;
-  controlReviewHref?: string;
 }) {
   const router = useRouter();
   const [activeIndex, setActiveIndex] = useState(0);
