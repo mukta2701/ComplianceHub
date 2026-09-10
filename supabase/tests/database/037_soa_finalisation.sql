@@ -34,7 +34,9 @@ select set_config('app.register_expired', public.create_soa_draft(current_settin
 select set_config('app.register_mixed', public.create_soa_draft(current_setting('app.session_a')::uuid, 'Mixed evidence')::text, true);
 select set_config('app.register_valid', public.create_soa_draft(current_setting('app.session_a')::uuid, 'Valid review')::text, true);
 
-set local role authenticated;
+-- Arrange the legacy invalid states as the test harness. Authenticated users
+-- must use update_soa_decisions_guarded and cannot update soa_items directly.
+reset role;
 
 update public.soa_items
 set applicable = false,
@@ -97,6 +99,8 @@ update public.soa_items set applicable = true, status = 'operational'
 where soa_register_id = current_setting('app.register_mixed')::uuid and position = 0;
 update public.soa_items set applicable = true, status = 'operational'
 where soa_register_id = current_setting('app.register_valid')::uuid and position = 3;
+
+set local role authenticated;
 
 select throws_ok(
   format($$ select public.finalise_soa(%L) $$, current_setting('app.register_pending')),

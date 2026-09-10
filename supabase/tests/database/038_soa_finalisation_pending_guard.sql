@@ -10,7 +10,9 @@ insert into public.assessment_sessions(organisation_id,catalogue_version_id,titl
 values(current_setting('app.pending_org')::uuid,'00000000-0000-4000-8000-000000000001','Pending test assessment','50000000-0000-4000-8000-000000000201');
 select set_config('app.pending_session',(select id::text from public.assessment_sessions where organisation_id=current_setting('app.pending_org')::uuid),true);
 select set_config('app.pending_register',public.create_or_reuse_soa_review(current_setting('app.pending_session')::uuid)::text,true);
+reset role;
 update public.soa_items set justification = 'Documented for review' where soa_register_id = current_setting('app.pending_register')::uuid;
+set local role authenticated;
 
 select throws_ok(
   format($$ select public.finalise_soa(%L) $$, current_setting('app.pending_register')),
