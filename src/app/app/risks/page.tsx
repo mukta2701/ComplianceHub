@@ -2,7 +2,7 @@ import Link from "next/link";
 import { requireAppContext } from "@/lib/app-context";
 import { acceptRiskSuggestionAction, deleteRiskAction } from "../actions";
 import { RiskStatusSelect } from "./risk-status-select";
-import { calculateRiskScore, riskBand, exceedsAppetite, RISK_BAND_LABEL, DEFAULT_RISK_MATRIX_CONFIG, type RiskMatrixConfig } from "@/features/risks/domain/risks";
+import { calculateRiskScore, riskBand, exceedsAppetite, RISK_BAND_LABEL, RISK_STATUS_LABEL, DEFAULT_RISK_MATRIX_CONFIG, type RiskMatrixConfig, type RiskStatus } from "@/features/risks/domain/risks";
 import { updateRiskMatrixConfigAction } from "./config-actions";
 import { summariseEvidenceFreshness, type EvidenceStatus } from "@/features/evidence/domain/evidence";
 import { Card, EmptyState, ModuleExplainer, PageIntro, Pill } from "@/components/ui";
@@ -15,7 +15,6 @@ import styles from "./risk-workspace.module.css";
 
 const BAND_TONE: Record<string, string> = { low:"green",moderate:"amber",high:"red",very_high:"critical" };
 const BAND_COLOR: Record<string, string> = { low:"var(--rag-low)",moderate:"var(--rag-med)",high:"var(--rag-high)",very_high:"var(--rag-crit)" };
-const STATUS_LABEL: Record<string, string> = { open:"Open",treating:"Treating",accepted:"Accepted",closed:"Closed" };
 
 export default async function RisksPage() {
   const { supabase, organisation, membership } = await requireAppContext();
@@ -118,7 +117,7 @@ export default async function RisksPage() {
         <div className={styles.desktopTable}><div className="data-table-wrap" role="region" aria-label="Risk register table" tabIndex={0}><table className={styles.table}><thead><tr><th>Reference</th><th>Risk</th><th>Owner</th><th>Inherent</th><th>Residual</th><th>Status</th><th>Next review</th><th></th></tr></thead><tbody>
           {data.map((risk) => <RiskRow key={risk.id} risk={risk} config={config} owner={ownerName.get(risk.owner_id)} tasks={tasksByRisk.get(risk.id) ?? []} evidence={evidenceByRisk.get(risk.id) ?? []} canManage={canManage} />)}
         </tbody></table></div></div>
-        <ul className={styles.mobileList}>{data.map((risk) => <RiskCard key={risk.id} risk={risk} config={config} owner={ownerName.get(risk.owner_id)} canManage={canManage} />)}</ul>
+        <ul className={styles.mobileList} aria-label="Risk register cards">{data.map((risk) => <RiskCard key={risk.id} risk={risk} config={config} owner={ownerName.get(risk.owner_id)} tasks={tasksByRisk.get(risk.id) ?? []} evidence={evidenceByRisk.get(risk.id) ?? []} canManage={canManage} />)}</ul>
       </Card>
 
       <details className={styles.config}>
@@ -157,13 +156,14 @@ function RiskRow({ risk,config,owner,tasks,evidence,canManage }: { risk:Register
     <td className={styles.riskCell}><strong><Link href={`/app/risks/${risk.id}`}>{risk.title}</Link></strong><small>{one(risk.risk_categories)?.name ?? "Uncategorised"}</small>{tasks.length > 0 && <small>Open work: {tasks.map((task,index) => <span key={task.id}>{index ? ", " : ""}<Link href={`/app/tasks/${task.id}`}>{task.title}</Link></span>)}</small>}{freshness.total > 0 && <small>Evidence: {freshness.total}{freshness.expiring ? ` · ${freshness.expiring} expiring` : ""}{freshness.expired ? ` · ${freshness.expired} expired` : ""}</small>}</td>
     <td className={styles.ownerCell}><span className={owner ? undefined : styles.missing}>{owner ?? "Unassigned"}</span></td>
     <td>{scorePill(inherent,config)}</td><td>{scorePill(residual,config)}</td>
-    <td>{canManage ? <RiskStatusSelect id={risk.id} status={risk.status} title={risk.title} /> : <span className={styles.statusText}>{STATUS_LABEL[risk.status] ?? risk.status}</span>}</td>
+    <td>{canManage ? <RiskStatusSelect id={risk.id} status={risk.status} title={risk.title} /> : <span className={styles.statusText}>{RISK_STATUS_LABEL[risk.status as RiskStatus] ?? risk.status}</span>}</td>
     <td><span className={risk.review_date ? undefined : styles.missing}>{risk.review_date ?? "Not scheduled"}</span></td>
     <td>{canManage && <form action={deleteRiskAction}><input type="hidden" name="id" value={risk.id} /><button className={styles.deleteAction} aria-label={`Delete ${risk.title}`}>Delete</button></form>}</td>
   </tr>;
 }
-function RiskCard({ risk,config,owner,canManage }: { risk:RegisterRisk;config:RiskMatrixConfig;owner?:string;canManage:boolean }) {
+function RiskCard({ risk,config,owner,tasks,evidence,canManage }: { risk:RegisterRisk;config:RiskMatrixConfig;owner?:string;tasks:{id:string;title:string}[];evidence:{status:EvidenceStatus}[];canManage:boolean }) {
   const inherent = calculateRiskScore(risk.likelihood,risk.impact);
   const residual = calculateRiskScore(risk.residual_likelihood,risk.residual_impact);
-  return <li className={styles.mobileCard}><div className={styles.mobileTop}><span><small>{risk.reference}</small><strong><Link href={`/app/risks/${risk.id}`}>{risk.title}</Link></strong></span>{scorePill(residual,config)}</div><div className={styles.mobileScores}><span><small>Inherent</small>{scorePill(inherent,config)}</span><span><small>Residual</small>{scorePill(residual,config)}</span></div><dl className={styles.mobileMeta}><div><dt>Owner</dt><dd className={owner ? undefined : styles.missing}>{owner ?? "Unassigned"}</dd></div><div><dt>Next review</dt><dd className={risk.review_date ? undefined : styles.missing}>{risk.review_date ?? "Not scheduled"}</dd></div><div><dt>Status</dt><dd>{canManage ? <RiskStatusSelect id={risk.id} status={risk.status} title={risk.title} /> : STATUS_LABEL[risk.status] ?? risk.status}</dd></div><div><dt>Category</dt><dd>{one(risk.risk_categories)?.name ?? "Uncategorised"}</dd></div></dl></li>;
+  const freshness = summariseEvidenceFreshness(evidence);
+  return <li className={styles.mobileCard}><div className={styles.mobileTop}><span><small>{risk.reference}</small><strong><Link href={`/app/risks/${risk.id}`}>{risk.title}</Link></strong></span>{scorePill(residual,config)}</div><div className={styles.mobileScores}><span><small>Inherent</small>{scorePill(inherent,config)}</span><span><small>Residual</small>{scorePill(residual,config)}</span></div><dl className={styles.mobileMeta}><div><dt>Owner</dt><dd className={owner ? undefined : styles.missing}>{owner ?? "Unassigned"}</dd></div><div><dt>Next review</dt><dd className={risk.review_date ? undefined : styles.missing}>{risk.review_date ?? "Not scheduled"}</dd></div><div><dt>Status</dt><dd>{canManage ? <RiskStatusSelect id={risk.id} status={risk.status} title={risk.title} /> : RISK_STATUS_LABEL[risk.status as RiskStatus] ?? risk.status}</dd></div><div><dt>Category</dt><dd>{one(risk.risk_categories)?.name ?? "Uncategorised"}</dd></div></dl><div className={styles.mobileConnections}>{tasks.length > 0 && <p><strong>Open work</strong>{tasks.map((task,index) => <span key={task.id}>{index ? ", " : ""}<Link href={`/app/tasks/${task.id}`}>{task.title}</Link></span>)}</p>}{freshness.total > 0 && <p><strong>Evidence</strong>{freshness.total} linked{freshness.expiring ? ` · ${freshness.expiring} expiring` : ""}{freshness.expired ? ` · ${freshness.expired} expired` : ""}</p>}{canManage && <form action={deleteRiskAction}><input type="hidden" name="id" value={risk.id} /><button className={styles.deleteAction} aria-label={`Delete ${risk.title}`}>Delete risk</button></form>}</div></li>;
 }

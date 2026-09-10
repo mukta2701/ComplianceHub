@@ -55,6 +55,11 @@
 .mobileMeta { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:0; }
 .mobileMeta div { min-width:0; }
 .mobileMeta dd { margin:3px 0 0; color:var(--ink); font-size:12px; overflow-wrap:anywhere; }
+.mobileConnections { display:grid; gap:8px; margin-top:14px; padding-top:13px; border-top:1px solid var(--border); }
+.mobileConnections p { margin:0; color:var(--muted); font-size:11px; line-height:1.5; }
+.mobileConnections p strong { display:block; margin-bottom:2px; color:var(--ink); font-size:10px; letter-spacing:.04em; text-transform:uppercase; }
+.mobileConnections a { color:var(--blue); font-weight:700; }
+.mobileConnections form { justify-self:start; }
 .config { margin-top:16px; border:1px solid var(--border); border-radius:12px; background:#fff; }
 .config summary { cursor:pointer; padding:16px 18px; color:var(--ink); font-size:14px; font-weight:760; }
 .configBody { padding:0 18px 18px; }

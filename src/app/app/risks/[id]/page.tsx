@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireAppContext } from "@/lib/app-context";
-import { calculateRiskScore, riskBand, RISK_BAND_LABEL, DEFAULT_RISK_MATRIX_CONFIG, type RiskMatrixConfig } from "@/features/risks/domain/risks";
+import { calculateRiskScore, riskBand, RISK_BAND_LABEL, RISK_STATUS_LABEL, DEFAULT_RISK_MATRIX_CONFIG, type RiskMatrixConfig, type RiskStatus } from "@/features/risks/domain/risks";
 import { nextRtpReference, summariseRtpProgress, RTP_STATUS_LABEL, RTP_STATUS_TONE, type RtpStatus } from "@/features/risks/domain/rtp";
 import { Card, PageIntro, Pill } from "@/components/ui";
 import { one } from "@/lib/supabase/one";
@@ -9,7 +9,6 @@ import { createRtpAction, updateRtpStatusAction, deleteRtpAction } from "../rtp-
 import { AiSuggestionPanel } from "@/components/ai-suggestion-panel";
 import styles from "../risk-workspace.module.css";
 
-const RISK_STATUS_LABEL: Record<string, string> = { open: "Open", treating: "Treating", accepted: "Accepted", closed: "Closed" };
 const TREATMENT_LABEL: Record<string, string> = { mitigate: "Mitigate", avoid: "Avoid", transfer: "Transfer", accept: "Accept" };
 const EVIDENCE_TONE: Record<string, string> = { current: "green", expiring: "amber", expired: "red", withdrawn: "neutral" };
 
@@ -21,6 +20,17 @@ export default async function RiskDetailPage({ params }: { params: Promise<{ id:
   if (riskError) throw new Error("Could not load the risk");
   if (!risk) notFound();
 
+  const referencesPromise = (async () => {
+    const references: string[] = [];
+    const pageSize = 1000;
+    for (let from = 0; ; from += pageSize) {
+      const result = await supabase.from("risk_treatment_plans").select("reference").eq("organisation_id", organisation.id).order("reference").range(from, from + pageSize - 1);
+      if (result.error) return { data: null, error: result.error };
+      references.push(...(result.data ?? []).map((item) => item.reference));
+      if ((result.data?.length ?? 0) < pageSize) return { data: references, error: null };
+    }
+  })();
+
   const [plansResult, configResult, membersResult, controlsResult, assetsResult, tasksResult, evidenceResult, referencesResult, aiResult] = await Promise.all([
     supabase.from("risk_treatment_plans").select("id,reference,summary,treatment_measures,status,target_completion,actual_completion,assigned_lead_id").eq("risk_id", id).eq("organisation_id", organisation.id).order("reference"),
     supabase.from("risk_matrix_config").select("low_max,moderate_max,high_max,appetite_threshold").eq("organisation_id", organisation.id).maybeSingle(),
@@ -29,7 +39,7 @@ export default async function RiskDetailPage({ params }: { params: Promise<{ id:
     supabase.from("asset_risks").select("asset_id,assets(id,reference,description)").eq("risk_id", id).eq("organisation_id", organisation.id).order("asset_id"),
     supabase.from("tasks").select("id,title,status,due_on").eq("risk_id", id).eq("organisation_id", organisation.id).order("due_on"),
     supabase.from("evidence_links").select("id,evidence(id,title,status,kind)").eq("risk_id", id).eq("organisation_id", organisation.id),
-    supabase.from("risk_treatment_plans").select("reference").eq("organisation_id", organisation.id),
+    referencesPromise,
     supabase.from("ai_workspace_settings").select("enabled").eq("organisation_id", organisation.id).maybeSingle(),
   ]);
   if (configResult.error) throw new Error("Could not load the risk scoring thresholds");
@@ -46,7 +56,7 @@ export default async function RiskDetailPage({ params }: { params: Promise<{ id:
   const residualBand = riskBand(residual, config);
   const plans = plansResult.data ?? [];
   const progress = plansResult.error ? null : summariseRtpProgress(plans.map((plan) => ({ status: plan.status as RtpStatus })));
-  const nextRef = referencesResult.error ? "" : nextRtpReference((referencesResult.data ?? []).map((item) => item.reference));
+  const nextRef = referencesResult.error ? "" : nextRtpReference(referencesResult.data ?? []);
 
   return <>
     <Link href="/app/risks" className={styles.pageBack}><span aria-hidden="true">←</span> Back to risk register</Link>
@@ -67,7 +77,7 @@ export default async function RiskDetailPage({ params }: { params: Promise<{ id:
         <dl className={styles.decisionGrid}>
           <div><dt>Owner</dt><dd className={risk.owner_id ? undefined : styles.missing}>{leadName.get(risk.owner_id) ?? "Unassigned"}</dd></div>
           <div><dt>Next review</dt><dd className={risk.review_date ? undefined : styles.missing}>{risk.review_date ?? "Not scheduled"}</dd></div>
-          <div><dt>Status</dt><dd>{RISK_STATUS_LABEL[risk.status] ?? risk.status}</dd></div>
+          <div><dt>Status</dt><dd>{RISK_STATUS_LABEL[risk.status as RiskStatus] ?? risk.status}</dd></div>
           <div><dt>Treatment</dt><dd>{TREATMENT_LABEL[risk.treatment] ?? risk.treatment}</dd></div>
           <div><dt>Category</dt><dd>{category?.name ?? "Not recorded"}</dd></div>
         </dl>
@@ -93,7 +103,7 @@ export default async function RiskDetailPage({ params }: { params: Promise<{ id:
             <h2>Linked tasks</h2>
             <p>Accountable work created to reduce or review this exposure.</p>
             {tasksResult.error ? <p role="alert">Linked tasks could not be loaded. Reload this page to try again.</p> : <ul className={styles.linkedList}>
-              {(tasksResult.data ?? []).map((task) => <li className={styles.linkedItem} key={task.id}><Link href={`/app/tasks/${task.id}`}>{task.title}</Link><small>{task.due_on ?? "No due date"} · {RISK_STATUS_LABEL[task.status] ?? task.status.replaceAll("_", " ")}</small></li>)}
+              {(tasksResult.data ?? []).map((task) => <li className={styles.linkedItem} key={task.id}><Link href={`/app/tasks/${task.id}`}>{task.title}</Link><small>{task.due_on ?? "No due date"} · {RISK_STATUS_LABEL[task.status as RiskStatus] ?? task.status.replaceAll("_", " ")}</small></li>)}
               {!tasksResult.data?.length && <li className={styles.emptyLine}>No tasks linked to this risk yet.</li>}
             </ul>}
           </section>
@@ -101,7 +111,7 @@ export default async function RiskDetailPage({ params }: { params: Promise<{ id:
             <h2>Linked evidence</h2>
             <p>Managed evidence records; freshness remains separate from human review.</p>
             {evidenceResult.error ? <p role="alert">Linked evidence could not be loaded. Reload this page to try again.</p> : <ul className={styles.linkedList}>
-              {(evidenceResult.data ?? []).map((link) => { const evidence = one(link.evidence); return <li className={styles.linkedItem} key={link.id}>{evidence ? <><Link href={`/app/evidence/${evidence.id}`}>{evidence.title}</Link><Pill tone={EVIDENCE_TONE[evidence.status] ?? "neutral"}>{evidence.status}</Pill></> : <span>Linked evidence unavailable.</span>}</li>; })}
+              {(evidenceResult.data ?? []).map((link) => { const evidence = one(link.evidence); return <li className={styles.linkedItem} key={link.id}>{evidence ? <><Link href={`/app/evidence?evidence=${evidence.id}#evidence-${evidence.id}`}>{evidence.title}</Link><Pill tone={EVIDENCE_TONE[evidence.status] ?? "neutral"}>{evidence.status}</Pill></> : <span>Linked evidence unavailable.</span>}</li>; })}
               {!evidenceResult.data?.length && <li className={styles.emptyLine}>No managed evidence linked to this risk yet.</li>}
             </ul>}
           </section>

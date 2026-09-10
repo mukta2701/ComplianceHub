@@ -12,16 +12,19 @@ const foreignOwnerId = "40000000-0000-4000-8000-000000000002";
 function query(table: string) {
   let single = false;
   let patch: Record<string, unknown> | null = null;
+  let range: [number, number] | null = null;
   const filters: ((row: Record<string, unknown>) => boolean)[] = [];
   const chain: Record<string, unknown> = {};
   chain.eq = (key: string, value: unknown) => { filters.push((row) => row[key] === value); return chain; };
   for (const name of ["select", "order", "limit", "in", "not"]) chain[name] = () => chain;
+  chain.range = (from: number, to: number) => { range = [from, to]; return chain; };
   chain.update = (value: Record<string, unknown>) => { patch = value; return chain; };
   for (const name of ["single", "maybeSingle"]) chain[name] = () => { single = true; return chain; };
   chain.then = (resolve: (value: unknown) => unknown) => {
     if (state.failTables.has(table)) return Promise.resolve({ data: null, error: { code: "08006" } }).then(resolve);
     if (table === "asset_risks" && state.failAssets) return Promise.resolve({ data: null, error: { code: "08006" } }).then(resolve);
     let rows = (state.rows[table] ?? []).filter((row) => filters.every((filter) => filter(row)));
+    if (range) rows = rows.slice(range[0], range[1] + 1);
     if (patch && (state.failUpdate || state.emptyUpdate)) rows = [];
     if (patch) for (const row of rows) Object.assign(row, patch);
     return Promise.resolve({ data: single ? rows[0] ?? null : rows, error: patch && state.failUpdate ? { code: "42501" } : null }).then(resolve);
@@ -175,7 +178,7 @@ describe("maintaining risks", () => {
     state.rows.evidence_links = [{ id: "link-1", organisation_id: org, risk_id: riskId, evidence: { id: "evidence-1", title: "Access export", status: "current", kind: "document" } }];
     render(await RiskDetailPage({ params: Promise.resolve({ id: riskId }) }));
     expect(screen.getByRole("link", { name: "Review supplier access" })).toHaveAttribute("href", "/app/tasks/task-1");
-    expect(screen.getByRole("link", { name: "Access export" })).toHaveAttribute("href", "/app/evidence/evidence-1");
+    expect(screen.getByRole("link", { name: "Access export" })).toHaveAttribute("href", "/app/evidence?evidence=evidence-1#evidence-evidence-1");
     expect(screen.getByText(/Free-text references are supporting notes/)).toBeInTheDocument();
   });
   it("does not describe cancelled-only treatment work as complete", async () => {
@@ -188,6 +191,22 @@ describe("maintaining risks", () => {
     state.rows.risk_treatment_plans = [{ id: "plan-1", risk_id: "another-risk", organisation_id: org, reference: "RTP-001", status: "planned" }];
     render(await RiskDetailPage({ params: Promise.resolve({ id: riskId }) }));
     expect(screen.getByRole("textbox", { name: "Reference" })).toHaveValue("RTP-002");
+  });
+  it("paginates the whole workspace when suggesting a treatment reference", async () => {
+    state.rows.risk_treatment_plans = Array.from({ length: 1001 }, (_, index) => ({
+      id: `plan-${index + 1}`, risk_id: "another-risk", organisation_id: org,
+      reference: `RTP-${String(index + 1).padStart(3, "0")}`, status: "planned",
+    }));
+    render(await RiskDetailPage({ params: Promise.resolve({ id: riskId }) }));
+    expect(screen.getByRole("textbox", { name: "Reference" })).toHaveValue("RTP-1002");
+  });
+  it("keeps linked work, evidence state and authorised actions in responsive risk cards", async () => {
+    state.rows.tasks = [{ id: "task-1", organisation_id: org, risk_id: riskId, title: "Review supplier access", status: "open" }];
+    state.rows.evidence_links = [{ id: "link-1", organisation_id: org, risk_id: riskId, evidence: { status: "expired" } }];
+    render(await RisksPage());
+    expect(screen.getAllByRole("link", { name: "Review supplier access" })).toHaveLength(2);
+    expect(screen.getAllByText(/Evidence: 1|1 linked · 1 expired/)).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "Delete Supplier risk" })).toHaveLength(2);
   });
   it("lets Members read ownership, treatment instructions and evidence references", async () => {
     state.role = "member";

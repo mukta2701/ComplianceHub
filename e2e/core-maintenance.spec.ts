@@ -156,12 +156,37 @@ test("risk and task metadata edits persist without changing status or source", a
   expect(task).toMatchObject({ title: "Updated task", detail: "Updated detail", due_on: "2026-12-31", recurrence: "monthly", status: "open", source: "manual" });
   expect(task?.owner_id).toBeTruthy();
 
+  if (!risk?.owner_id) throw new Error("E2E risk owner was not saved");
+  const evidenceInsert = await db.from("evidence").insert({
+    organisation_id: orgId, title: "Access review evidence", kind: "note",
+    description: "Fictional evidence linked to the maintained risk.", status: "current", created_by: risk.owner_id,
+  }).select("id").single();
+  expect(evidenceInsert.error).toBeNull();
+  if (!evidenceInsert.data) throw new Error("E2E evidence fixture was not created");
+  const evidenceId = evidenceInsert.data.id;
+  const evidenceLinkInsert = await db.from("evidence_links").insert({ organisation_id: orgId, evidence_id: evidenceId, risk_id: riskId, created_by: risk.owner_id });
+  expect(evidenceLinkInsert.error).toBeNull();
+
+  if (info.project.name === "mobile") {
+    await page.goto("/app/risks");
+    const cards = page.getByRole("list", { name: "Risk register cards" });
+    await expect(cards.getByRole("link", { name: "Updated task", exact: true })).toBeVisible();
+    await expect(cards.getByText("1 linked", { exact: false })).toBeVisible();
+    await expect(cards.getByRole("button", { name: "Delete Latest risk title" })).toBeVisible();
+    await page.screenshot({ animations: "disabled", path: info.outputPath("risk-register-connected-mobile.png"), fullPage: true });
+  }
+
   await page.goto(`/app/risks/${riskId}`);
   await expect(page.getByRole("heading", { name: "Exposure decision" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Updated task" })).toHaveAttribute("href", `/app/tasks/${taskId}`);
+  const linkedEvidence = page.getByRole("link", { name: "Access review evidence" });
+  await expect(linkedEvidence).toHaveAttribute("href", `/app/evidence?evidence=${evidenceId}#evidence-${evidenceId}`);
   await expect(page.getByText("Free-text references are supporting notes.")).toBeVisible();
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await page.screenshot({ animations: "disabled", path: info.outputPath("risk-detail-connected.png"), fullPage: true });
+  await linkedEvidence.click();
+  await expect(page).toHaveURL(new RegExp(`/app/evidence\\?evidence=${evidenceId}#evidence-${evidenceId}$`));
+  await expect(page.locator(`#evidence-${evidenceId}`).getByRole("heading", { name: "Access review evidence" })).toBeVisible();
 
   await page.goto(`/app/tasks/${taskId}/edit`);
   const stalePage = await page.context().newPage();
