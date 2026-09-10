@@ -6,11 +6,11 @@
 
 **Blocked by:** None.
 
-**Status:** in progress
+**Status:** verified locally
 
-- [ ] Risk register prioritises exposure and attention with equivalent desktop/mobile information.
-- [ ] Risk detail connects ownership, exposure, assets, tasks, linked evidence and accurate treatment progress.
-- [ ] Risk create/edit preserve drafts, surface field/save errors and reject stale overwrites.
-- [ ] Material read failures remain visibly unavailable instead of becoming empty, default or missing states.
-- [ ] Focused, full and production-browser checks pass with independent standards and specification reviews.
-- [ ] Verified source and evidence are committed and pushed; the local review app runs the accepted build.
+- [x] Risk register prioritises exposure and attention with equivalent desktop/mobile information.
+- [x] Risk detail connects ownership, exposure, assets, tasks, linked evidence and accurate treatment progress.
+- [x] Risk create/edit preserve drafts, surface field/save errors and reject stale overwrites.
+- [x] Material read failures remain visibly unavailable instead of becoming empty, default or missing states.
+- [x] Focused, full and production-browser checks pass with independent standards and specification reviews.
+- [x] Verified source and evidence are committed and pushed; the local review app runs the accepted build.
