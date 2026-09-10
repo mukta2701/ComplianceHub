@@ -168,6 +168,8 @@ describe("connected control review choices", () => {
     expect(screen.queryAllByRole("link", { name: /Export XLSX|CSV|Download PDF|Download DOCX/ })).toHaveLength(0);
     expect(screen.getByText(/You can open control reviews and finalised statements/i)).toBeInTheDocument();
     expect(screen.queryByText(/download finalised statements/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Assess current practices|Source assessment/i })).not.toBeInTheDocument();
+    expect(screen.getAllByText("Source assessment").length).toBeGreaterThan(0);
   });
 
   it.each(["assessment_sessions", "soa_registers", "soa_snapshots"])("reports failed %s reads without claiming records are missing", async (table) => {

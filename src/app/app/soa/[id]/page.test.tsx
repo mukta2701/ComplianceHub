@@ -33,6 +33,8 @@ describe("control review page loading", () => {
     state.role = "member";
     render(await SoaReviewPage({ params: Promise.resolve({ id: "register" }) }));
     expect(screen.queryByRole("button", { name: /Finalise/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Recorded practices" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Related risk/i })).not.toBeInTheDocument();
   });
   it("states every exact finalisation blocker without requiring an owner for exclusions", async () => {
     const first = state.fixture!.tables.soa_items[1];
@@ -71,7 +73,8 @@ it("keeps saved statements readable for Members without exposing export links", 
   render(await SoaReviewPage({ params: Promise.resolve({ id: "register" }) }));
 
   expect(screen.getByRole("heading", { name: "Saved statement" })).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "Open current source assessment" })).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Open current source assessment" })).not.toBeInTheDocument();
+  expect(screen.getByText(/Current source assessment access is limited by your workspace role/i)).toBeInTheDocument();
   expect(screen.queryAllByRole("link", { name: /Download saved/ })).toHaveLength(0);
 });
 

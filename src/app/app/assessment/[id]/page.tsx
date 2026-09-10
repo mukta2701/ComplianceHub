@@ -54,7 +54,7 @@ export default async function AssessmentPage({ params, searchParams }: { params:
     <section className="assessment-journey" aria-label="Assessment to controls journey">
       <ol>
         <li data-current="true"><span>1</span><div><h2>Gap assessment</h2><p>{answered} of {questions.length} answered · {missingNotes} {missingNotes === 1 ? "supporting note missing" : "supporting notes missing"}</p></div></li>
-        <li><span>2</span><div><h2>Control review</h2><p>A reviewer still decides applicability, implementation status, ownership and rationale.</p></div></li>
+        <li><span>2</span><div><h2>Control review</h2><p>Work through the 93 ISO controls. For each one, a reviewer records whether it applies, its progress, owner, reason and evidence.</p></div></li>
         <li><span>3</span><div><h2>Statement of Applicability</h2><p>A formal version is created only after the control decisions pass review.</p></div></li>
       </ol>
       <div className="assessment-journey-action">

@@ -193,8 +193,8 @@ function applyBlockerFilter<T extends SoaQueueItem>(items: T[], blocker: Blocker
   if (blocker === "evidence_gaps") {
     return items.filter((item) => item.applicable && (item.evidenceTotal === 0 || item.evidenceExpired > 0));
   }
-  if (blocker === "unassigned") return items.filter((item) => !item.ownerId);
-  if (blocker === "undecided") return items.filter((item) => item.status === "pending");
+  if (blocker === "unassigned") return items.filter((item) => item.applicable && !item.ownerId);
+  if (blocker === "undecided") return items.filter((item) => item.applicable && item.status === "pending");
   return items;
 }
 
@@ -672,7 +672,7 @@ export function SoaReviewWorkspace({ items, members, currentUserId, registerId, 
             </ol>
 
             <section className="soa-source-context" aria-label={`Assessment context for ${selectedItem.code}`}>
-              <header><div><span className="eyebrow">CURRENT SOURCE CONTEXT</span><h3>{sourceAssessment?.title ?? "Source assessment"}</h3></div>{sourceAssessment ? <Link href={`/app/assessment/${sourceAssessment.id}`}>Open source assessment</Link> : null}</header>
+              <header><div><span className="eyebrow">CURRENT SOURCE CONTEXT</span><h3>{sourceAssessment?.title ?? "Source assessment"}</h3></div>{sourceAssessment && !readOnly ? <Link href={`/app/assessment/${sourceAssessment.id}`}>Open source assessment</Link> : null}</header>
               <p className="soa-current-context-warning">Current assessment context guides this review; it does not decide applicability and is not frozen with each saved decision.{sourceAssessment ? ` Displaying revision ${sourceAssessment.revision ?? "unavailable"}${sourceAssessment.state ? `, ${titleCase(sourceAssessment.state)}` : ""}.` : ""}</p>
               {selectedItem.sourceAnswers.length ? <ul className="soa-source-answers">{selectedItem.sourceAnswers.map((answer) => <li key={answer.questionId}>
                 <div><code>{answer.code}</code><strong>{answer.prompt}</strong></div>
@@ -718,19 +718,23 @@ export function SoaReviewWorkspace({ items, members, currentUserId, registerId, 
                 <div className="soa-evidence-health"><strong>Evidence health</strong><p>{evidenceHealth(selectedItem)}</p>{selectedItem.evidenceExpiring > 0 ? <small>{selectedItem.evidenceExpiring} item{selectedItem.evidenceExpiring === 1 ? " is" : "s are"} nearing expiry.</small> : null}{selectedItem.evidenceExpired > 0 ? <small>{selectedItem.evidenceExpired} item{selectedItem.evidenceExpired === 1 ? " has" : "s have"} expired.</small> : null}</div>
                 {selectedItem.linkedEvidence.length ? <ul className="soa-linked-records">{selectedItem.linkedEvidence.map((evidence) => <li key={evidence.id}><span><strong>{evidence.title}</strong><small>{titleCase(evidence.kind)}{evidence.validUntil ? ` - valid until ${formatDate(evidence.validUntil)}` : " - no expiry date"}</small></span><StatusLabel tone={evidenceTone(evidence.status)}>{titleCase(evidence.status)}</StatusLabel></li>)}</ul> : <p className="soa-record-empty"><strong>No linked evidence</strong><span>No evidence records are currently mapped to this control.</span></p>}
                 <label>Evidence references<textarea readOnly={readOnly} value={selectedDraft.evidenceText} onChange={(event) => updateDraft({ ...selectedDraft, evidenceText: event.target.value })} /></label>
-                <Link href="/app/evidence">Open evidence library</Link>
+                {!readOnly && <Link href="/app/evidence">Open evidence library</Link>}
                 {selectedItem.lists.evidence.truncated ? <p className="soa-list-limit">Showing {selectedItem.lists.evidence.shown} of {selectedItem.lists.evidence.total} linked evidence records (limit {selectedItem.lists.evidence.limit}).</p> : null}
               </div> : null}
 
               {activeTab === "work" ? <div className="soa-work-panel">
-                {selectedItem.linkedTasks.length ? <ul className="soa-linked-records">{selectedItem.linkedTasks.map((task) => <li key={task.id}><span><Link href={`/app/tasks/${task.id}`}>{task.title}</Link><small>{task.dueOn ? `Due ${formatDate(task.dueOn)}` : "No due date"}</small></span><StatusLabel tone={taskTone(task.status)}>{titleCase(task.status)}</StatusLabel></li>)}</ul> : <p className="soa-record-empty"><strong>No linked open work</strong><span>There are no open or in-progress tasks currently mapped to this control.</span></p>}
+                {selectedItem.lists.tasks.total === null
+                  ? <p className="soa-record-empty"><strong>Linked work unavailable</strong><span>We could not verify the linked task records for this control.</span></p>
+                  : selectedItem.linkedTasks.length ? <ul className="soa-linked-records">{selectedItem.linkedTasks.map((task) => <li key={task.id}><span><Link href={`/app/tasks/${task.id}`}>{task.title}</Link><small>{task.dueOn ? `Due ${formatDate(task.dueOn)}` : "No due date"}</small></span><StatusLabel tone={taskTone(task.status)}>{titleCase(task.status)}</StatusLabel></li>)}</ul> : <p className="soa-record-empty"><strong>No linked open work</strong><span>There are no open or in-progress tasks currently mapped to this control.</span></p>}
                 <Link href="/app/tasks">Open task queue</Link>
                 {selectedItem.lists.tasks.truncated ? <p className="soa-list-limit">Showing {selectedItem.lists.tasks.shown} of {selectedItem.lists.tasks.total} linked tasks (limit {selectedItem.lists.tasks.limit}).</p> : null}
               </div> : null}
 
               {activeTab === "history" ? <div className="soa-history-panel">
-                {selectedItem.recentAuditEvents.length ? <ul className="soa-history-list">{selectedItem.recentAuditEvents.map((event, index) => <li key={`${event.occurredAt}-${index}`}><strong>{auditActionLabel(event.action)}</strong><time dateTime={event.occurredAt}>{formatAuditTime(event.occurredAt)}</time></li>)}</ul> : <p className="soa-record-empty"><strong>No recent item history</strong><span>No item-level audit events are available for this control yet.</span></p>}
-                <Link href="/app/activity">View audit trail</Link>
+                {selectedItem.lists.history.total === null
+                  ? <p className="soa-record-empty"><strong>Item history unavailable</strong><span>We could not verify the recent item history for this control.</span></p>
+                  : selectedItem.recentAuditEvents.length ? <ul className="soa-history-list">{selectedItem.recentAuditEvents.map((event, index) => <li key={`${event.occurredAt}-${index}`}><strong>{auditActionLabel(event.action)}</strong><time dateTime={event.occurredAt}>{formatAuditTime(event.occurredAt)}</time></li>)}</ul> : <p className="soa-record-empty"><strong>No recent item history</strong><span>No item-level audit events are available for this control yet.</span></p>}
+                {!readOnly && <Link href="/app/activity">View audit trail</Link>}
                 {selectedItem.lists.history.truncated ? <p className="soa-list-limit">Showing {selectedItem.lists.history.shown} of {selectedItem.lists.history.total} history events (limit {selectedItem.lists.history.limit}).</p> : null}
               </div> : null}
             </div>

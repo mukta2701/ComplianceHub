@@ -29,7 +29,16 @@ describe("assessment and SoA authoring access", () => {
     expect(screen.getByText(/No assessments are available yet/)).toBeVisible();
   });
   it("does not offer SoA imports or creation to Members with assessments", async () => {
-    state.rows = [{ id: "record-1", title: "Readiness", version: 1 }];
+    state.rows = [{
+      id: "record-1",
+      title: "Readiness",
+      version: 1,
+      assessment_session_id: "assessment-1",
+      soa_register_id: "record-1",
+      soa_snapshots: [],
+      updated_at: "2026-09-10T12:00:00.000Z",
+      finalised_at: "2026-09-10T12:00:00.000Z",
+    }];
     render(await SoaPage());
     expect(screen.queryByRole("button", { name: "Start control review" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Create next version" })).not.toBeInTheDocument();

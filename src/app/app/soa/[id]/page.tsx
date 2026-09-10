@@ -41,7 +41,9 @@ export default async function SoaReviewPage({ params }: { params: Promise<{ id: 
         <h2>Saved statement provenance</h2>
         <p>Source assessment ID: {register.sourceAssessment.id}</p>
         <CatalogueContext catalogues={review.catalogues} />
-        <p><Link href={`/app/assessment/${register.sourceAssessment.id}`}>Open current source assessment</Link>. Its current answers, state and revision are not part of this saved statement.</p>
+        {membership.role === "member"
+          ? <p>Current source assessment access is limited by your workspace role. Its current answers, state and revision are not part of this saved statement.</p>
+          : <p><Link href={`/app/assessment/${register.sourceAssessment.id}`}>Open current source assessment</Link>. Its current answers, state and revision are not part of this saved statement.</p>}
         <p>Current owners, linked work and evidence freshness are not re-evaluated here. The evidence notes below are the notes saved at finalisation.</p>
         {membership.role !== "member" && <p><a href={`/api/app/soa/${statement.id}/pdf`}>Download saved PDF</a> · <a href={`/api/app/soa/${statement.id}/docx`}>Download saved DOCX</a></p>}
       </section>
@@ -74,7 +76,7 @@ export default async function SoaReviewPage({ params }: { params: Promise<{ id: 
     <PageIntro
       eyebrow={`CONTROL REVIEW - V${register.version}`}
       title={register.title}
-      body="Active working register. Decisions remain editable until you create the immutable formal statement."
+      body="Work through the 93 ISO controls and record applicability, progress, ownership, rationale and evidence. Decisions remain editable until you create the formal statement."
       action={canFinalise && membership.role !== "member" ? (
         <form action={finaliseSoaAction} data-soa-finalise-form>
           <input type="hidden" name="registerId" value={id} />
@@ -83,7 +85,7 @@ export default async function SoaReviewPage({ params }: { params: Promise<{ id: 
       ) : <Link className="button secondary" href="/app/soa">Controls & applicability</Link>}
     />
     <section className="soa-review-header" aria-label="Control review context">
-      <div><span className="eyebrow">SOURCE ASSESSMENT</span><strong><Link href={`/app/assessment/${source.id}`}>{source.title}</Link></strong><small>Revision {source.revision} · {source.state}</small></div>
+      <div><span className="eyebrow">SOURCE ASSESSMENT</span><strong>{membership.role === "member" ? source.title : <Link href={`/app/assessment/${source.id}`}>{source.title}</Link>}</strong><small>Revision {source.revision} · {source.state}</small></div>
       <div><span className="eyebrow">REVIEW STATE</span><strong>Active and editable</strong><small>Version {register.version}</small></div>
       <div><span className="eyebrow">LAST ACTIVITY</span><strong><time dateTime={register.updatedAt}>{new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(register.updatedAt))}</time></strong><small>Register activity</small></div>
       <div><span className="eyebrow">FORMAL OUTPUT</span><strong>Not finalised</strong><small>Finalisation creates an immutable Statement of Applicability.</small></div>
@@ -98,7 +100,7 @@ export default async function SoaReviewPage({ params }: { params: Promise<{ id: 
     {review.relatedRisks.length > 0 && <section className="panel" aria-label="Related risks">
       <h2>Related risks</h2>
       <p>These links describe the assessment or register as a whole.</p>
-      <ul>{review.relatedRisks.map((risk) => <li key={`${risk.relationship}-${risk.id}`}><Link href={`/app/risks/${risk.id}`}>{risk.reference}: {risk.title}</Link> — {risk.relationship === "assessment" ? "Assessment" : "Register"} context, {risk.status}</li>)}</ul>
+      <ul>{review.relatedRisks.map((risk) => <li key={`${risk.relationship}-${risk.id}`}>{membership.role === "member" ? <span>{risk.reference}: {risk.title}</span> : <Link href={`/app/risks/${risk.id}`}>{risk.reference}: {risk.title}</Link>} — {risk.relationship === "assessment" ? "Assessment" : "Register"} context, {risk.status}</li>)}</ul>
       {(["assessment", "register"] as const).map((relationship) => {
         const list = review.riskLists[relationship];
         return list.truncated ? <p key={relationship}>Showing {list.shown} of {list.total} {relationship}-related risks (limit {list.limit}).</p> : null;

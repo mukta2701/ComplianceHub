@@ -226,13 +226,17 @@ describe("SoaReviewWorkspace", () => {
   });
   it("keeps Member review navigation available without editable decisions", async () => {
     const saveAction = vi.fn();
-    render(<SoaReviewWorkspace items={items} members={members} currentUserId={CURRENT_USER_ID} registerId={REGISTER_ID} saveAction={saveAction} readOnly />);
+    render(<SoaReviewWorkspace items={items} members={members} currentUserId={CURRENT_USER_ID} registerId={REGISTER_ID} saveAction={saveAction} sourceAssessment={{ id: "assessment-1", title: "Recorded practices", state: "draft", revision: 7 }} readOnly />);
     expect(screen.getByLabelText("Applicability decision")).toBeDisabled();
     expect(screen.getByLabelText("Owner assignment")).toBeDisabled();
     expect(screen.getByLabelText("Rationale")).toHaveAttribute("readonly");
     expect(screen.queryByRole("button", { name: "Save draft" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Open source assessment" })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("tab", { name: "Evidence" }));
     expect(screen.getByLabelText("Evidence references")).toHaveAttribute("readonly");
+    expect(screen.queryByRole("link", { name: "Open evidence library" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("tab", { name: "History" }));
+    expect(screen.queryByRole("link", { name: "View audit trail" })).not.toBeInTheDocument();
     expect(saveAction).not.toHaveBeenCalled();
   });
   beforeEach(() => {
@@ -281,6 +285,22 @@ describe("SoaReviewWorkspace", () => {
       expect(queue().getAllByRole("listitem")).toHaveLength(expectedTitles.length);
       for (const title of expectedTitles) expect(queue().getByText(title)).toBeInTheDocument();
     }
+  });
+
+  it("keeps justified exclusions out of applicable-only owner and decision blockers", async () => {
+    const user = userEvent.setup();
+    renderWorkspace(undefined, [
+      workspaceItem({ id: "excluded", code: "X1", title: "Justified exclusion", applicable: false, status: "not_applicable", justification: "Outside scope.", ownerId: null, reviewState: "reviewed" }),
+      workspaceItem({ id: "included", code: "X2", title: "Applicable gap", applicable: true, status: "pending", justification: "", ownerId: null, reviewState: "missing_decision", position: 2 }),
+    ]);
+
+    await user.click(screen.getByRole("button", { name: "Unassigned 1" }));
+    expect(queue().getByText("Applicable gap")).toBeInTheDocument();
+    expect(queue().queryByText("Justified exclusion")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Undecided 1" }));
+    expect(queue().getByText("Applicable gap")).toBeInTheDocument();
+    expect(queue().queryByText("Justified exclusion")).not.toBeInTheDocument();
   });
 
   it("filters by every implementation status", async () => {
@@ -805,6 +825,25 @@ describe("SoaReviewWorkspace", () => {
     await user.click(screen.getByRole("tab", { name: "History" }));
     expect(screen.getByText("No recent item history")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "View audit trail" })).toHaveAttribute("href", "/app/activity");
+  });
+
+  it("labels optional linked-work and history failures instead of claiming empty records", async () => {
+    const user = userEvent.setup();
+    renderWorkspace(undefined, [workspaceItem({
+      lists: {
+        tasks: { total: null, shown: 0, limit: 20, truncated: false },
+        evidence: { total: 0, shown: 0, limit: 20, truncated: false },
+        history: { total: null, shown: 0, limit: 5, truncated: false },
+      },
+    })]);
+
+    await user.click(screen.getByRole("tab", { name: "Linked work" }));
+    expect(screen.getByText("Linked work unavailable")).toBeInTheDocument();
+    expect(screen.queryByText("No linked open work")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "History" }));
+    expect(screen.getByText("Item history unavailable")).toBeInTheDocument();
+    expect(screen.queryByText("No recent item history")).not.toBeInTheDocument();
   });
 
   it("renders real linked evidence, task records, and recent item audit events", async () => {

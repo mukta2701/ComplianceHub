@@ -42,7 +42,7 @@ describe("completed assessment display", () => {
     state.role = "owner"; state.status = "completed"; state.activeReview = false;
     render(await AssessmentPage({ params: Promise.resolve({ id: "session" }), searchParams: Promise.resolve({ completed: "1" }) }));
     expect(screen.getByRole("status", { name: "Completion status" })).toHaveTextContent(/assessment completed/i);
-    expect(screen.getByText(/reviewer still decides applicability, implementation status, ownership and rationale/i)).toBeInTheDocument();
+    expect(screen.getByText(/work through the 93 ISO controls.*whether it applies.*owner.*evidence/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Review controls" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Control review" })).toBeInTheDocument();
   });

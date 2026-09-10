@@ -236,7 +236,7 @@ test("assessment completion hands off to a read-only control review", async ({ p
   expect(session.data?.completed_at).toBeTruthy();
   await expect(page.getByRole("status", { name: "Completion status" })).toContainText("Assessment completed.");
   await expect(page.getByRole("heading", { name: "Control review", exact: true })).toBeVisible();
-  await expect(page.getByText(/reviewer still decides applicability, implementation status, ownership and rationale/i)).toBeVisible();
+  await expect(page.getByText(/work through the 93 ISO controls.*whether it applies.*owner.*evidence/i)).toBeVisible();
   await expect(page.getByText("Read-only assessment", { exact: true })).toBeVisible();
   await expect(page.getByRole("radio", { name: "Yes", exact: true })).toBeDisabled();
   await expect(page.getByRole("radio", { name: "Yes", exact: true })).toBeChecked();
