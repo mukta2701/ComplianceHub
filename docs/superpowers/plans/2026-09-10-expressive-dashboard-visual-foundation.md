@@ -1,6 +1,6 @@
 # Expressive Dashboard and Shared Visual Foundation Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Make the operator dashboard closely follow the approved expressive mock-up and introduce a restrained shared colour and interaction foundation without inventing data or changing product behavior.
 
@@ -39,7 +39,7 @@
 - Consumes: existing root `--ch-*` variables and compatibility aliases in `src/app/globals.css`.
 - Produces: root custom properties `--ch-surface-raised`, `--ch-surface-tint`, `--ch-border-strong`, `--ch-primary-hover`, `--ch-info`, `--ch-info-soft`, `--ch-review`, `--ch-review-soft`, `--ch-chart-blue`, `--ch-chart-teal`, `--ch-chart-amber`, `--ch-chart-coral`, `--ch-chart-violet`, `--ch-shadow-sm`, `--ch-shadow-hover`, `--ch-radius-card`, `--ch-motion-fast`, `--ch-motion-base` and `--ch-ease-out` for the shell and dashboard.
 
-- [ ] **Step 1: Read the framework and existing visual contracts**
+- [x] **Step 1: Read the framework and existing visual contracts**
 
 Run:
 
@@ -51,7 +51,7 @@ sed -n '1,150p' e2e/visual-system.spec.ts
 
 Expected: the Next.js CSS guide confirms global CSS ownership through the root layout, and the test shows the exact existing custom-property contract.
 
-- [ ] **Step 2: Write the failing token and reduced-motion checks**
+- [x] **Step 2: Write the failing token and reduced-motion checks**
 
 Update changed existing entries, retain unchanged entries and extend `expectedTokens` in `e2e/visual-system.spec.ts` with the exact new values:
 
@@ -134,7 +134,7 @@ test("keeps shared interaction motion restrained and removable", async ({ browse
 });
 ```
 
-- [ ] **Step 3: Run the visual-system spec and confirm the new contract fails**
+- [x] **Step 3: Run the visual-system spec and confirm the new contract fails**
 
 Run:
 
@@ -144,7 +144,7 @@ node --import=tsx scripts/local-resource-guard.ts -- npx playwright test e2e/vis
 
 Expected: FAIL because the new custom properties and explicit interaction behavior do not exist yet.
 
-- [ ] **Step 4: Add the token values and replace the catch-all transition**
+- [x] **Step 4: Add the token values and replace the catch-all transition**
 
 Update the existing `:root` block in `src/app/globals.css`; keep the existing aliases and define the new properties in the same block:
 
@@ -228,7 +228,7 @@ Retain the existing global reduced-motion block and make its final state explici
 }
 ```
 
-- [ ] **Step 5: Run the focused visual contract**
+- [x] **Step 5: Run the focused visual contract**
 
 Run:
 
@@ -238,7 +238,7 @@ node --import=tsx scripts/local-resource-guard.ts -- npx playwright test e2e/vis
 
 Expected: PASS for exact root/shell token values, status semantics and reduced-motion behavior.
 
-- [ ] **Step 6: Commit and push the foundation**
+- [x] **Step 6: Commit and push the foundation**
 
 ```bash
 git add src/app/globals.css e2e/visual-system.spec.ts
@@ -261,7 +261,7 @@ Expected: the commit and active feature branch are present on the existing origi
 - Consumes: Task 1's semantic surface, border, shadow, radius and motion tokens.
 - Produces: the authenticated sidebar/header/content presentation and the `.shell` scoped hover/focus behavior used by all `/app` pages.
 
-- [ ] **Step 1: Protect the current shell semantics with focused tests**
+- [x] **Step 1: Protect the current shell semantics with focused tests**
 
 Keep every current `app-shell.test.tsx` expectation and add this assertion to the operator navigation test:
 
@@ -298,7 +298,7 @@ expect(shellContract).toEqual({
 });
 ```
 
-- [ ] **Step 2: Run the focused tests and confirm the visual contract fails**
+- [x] **Step 2: Run the focused tests and confirm the visual contract fails**
 
 Run unit tests first:
 
@@ -316,7 +316,7 @@ COMPLIANCEHUB_UI_DEMO=1 node --import=tsx scripts/local-resource-guard.ts -- npx
 
 Expected: FAIL on the new active/background visual contract before the shell CSS is aligned.
 
-- [ ] **Step 3: Rebase authenticated shell overrides on the shared tokens**
+- [x] **Step 3: Rebase authenticated shell overrides on the shared tokens**
 
 In `src/components/app-shell.module.css`, remove the local canvas/border/ink/text value fork and reference Task 1 tokens. Keep layout dimensions and update visual values through variables:
 
@@ -373,7 +373,7 @@ Keep card corners, buttons, fields and table rows understated but visibly respon
 
 Do not change `DRAWER_QUERY` or the 1024px media block. Keep the module's reduced-motion sidebar override.
 
-- [ ] **Step 4: Run shell unit and populated dashboard browser checks**
+- [x] **Step 4: Run shell unit and populated dashboard browser checks**
 
 ```bash
 node --import=tsx scripts/local-resource-guard.ts -- npm test -- src/components/app-shell.test.tsx --maxWorkers=1
@@ -382,7 +382,7 @@ COMPLIANCEHUB_UI_DEMO=1 node --import=tsx scripts/local-resource-guard.ts -- npx
 
 Expected: role navigation, drawer isolation and shell visual contract PASS. Browser execution remains sequential after the unit process exits.
 
-- [ ] **Step 5: Commit and push the shell refinement**
+- [x] **Step 5: Commit and push the shell refinement**
 
 ```bash
 git add src/components/app-shell.module.css src/components/app-shell.test.tsx e2e/programme-dashboard.spec.ts
@@ -404,7 +404,7 @@ Expected: the shell refinement is committed and pushed without changes to routes
 - Consumes: existing control-maturity summary, dashboard destinations and `Card`, `PageIntro` and `Icon` components.
 - Produces: one header action (`View report`) and an always-rendered `Programme basis` context that links `/app/baseline` as `Review programme scope`.
 
-- [ ] **Step 1: Write failing baseline-placement tests**
+- [x] **Step 1: Write failing baseline-placement tests**
 
 Add this test to `page.operator.test.tsx`:
 
@@ -436,7 +436,7 @@ it("keeps programme-scope access visible after the onboarding checklist is compl
 });
 ```
 
-- [ ] **Step 2: Run the focused dashboard render test and confirm failure**
+- [x] **Step 2: Run the focused dashboard render test and confirm failure**
 
 ```bash
 node --import=tsx scripts/local-resource-guard.ts -- npm test -- src/app/app/page.operator.test.tsx --maxWorkers=1
@@ -444,7 +444,7 @@ node --import=tsx scripts/local-resource-guard.ts -- npm test -- src/app/app/pag
 
 Expected: FAIL because the baseline link is still in the heading and there is no `Programme basis` context.
 
-- [ ] **Step 3: Make the minimal server-rendered markup change**
+- [x] **Step 3: Make the minimal server-rendered markup change**
 
 Change the heading action in `src/app/app/page.tsx`:
 
@@ -469,7 +469,7 @@ Add this context between the current maturity summary and maturity-distribution 
 
 Leave the existing conditional onboarding and integration cards in place. Do not change the query block, count meanings, maturity calculation, action prioritisation, risk matrix or Member branch.
 
-- [ ] **Step 4: Run dashboard and heading component tests**
+- [x] **Step 4: Run dashboard and heading component tests**
 
 ```bash
 node --import=tsx scripts/local-resource-guard.ts -- npm test -- src/app/app/page.operator.test.tsx src/components/page-heading.test.tsx src/features/onboarding/domain/checklist.test.ts --maxWorkers=1
@@ -477,7 +477,7 @@ node --import=tsx scripts/local-resource-guard.ts -- npm test -- src/app/app/pag
 
 Expected: PASS, including existing fail-closed and truthful empty-state checks.
 
-- [ ] **Step 5: Commit and push the dashboard structure**
+- [x] **Step 5: Commit and push the dashboard structure**
 
 ```bash
 git add src/app/app/page.tsx src/app/app/page.operator.test.tsx
@@ -500,7 +500,7 @@ Expected: the structural change is committed and pushed with no data or permissi
 - Consumes: Task 1 tokens and Task 3's `Programme basis` context.
 - Produces: dashboard CSS Module classes for tone-aware metrics, graphical panels, interactive links, responsive grids and the one-time `panelEnter`, `barReveal` and `chartReveal` effects.
 
-- [ ] **Step 1: Add failing responsive and interaction assertions**
+- [x] **Step 1: Add failing responsive and interaction assertions**
 
 Expand the existing viewport loop in `e2e/programme-dashboard.spec.ts` to use 1440, 883 and 390px and assert layout contracts:
 
@@ -555,7 +555,7 @@ const entranceDuration = await page.getByRole("navigation", { name: "Programme a
 expect(entranceDuration).toBeLessThanOrEqual(0.01);
 ```
 
-- [ ] **Step 2: Run the programme dashboard spec and confirm the new layout contract fails**
+- [x] **Step 2: Run the programme dashboard spec and confirm the new layout contract fails**
 
 ```bash
 COMPLIANCEHUB_UI_DEMO=1 node --import=tsx scripts/local-resource-guard.ts -- npx playwright test e2e/programme-dashboard.spec.ts --project=chromium --workers=1
@@ -563,7 +563,7 @@ COMPLIANCEHUB_UI_DEMO=1 node --import=tsx scripts/local-resource-guard.ts -- npx
 
 Expected: FAIL because the exact responsive layout contract, tone-aware linked surfaces, fully opaque transform animation and interactive lift are not implemented.
 
-- [ ] **Step 3: Add the metric tone hook without changing data**
+- [x] **Step 3: Add the metric tone hook without changing data**
 
 In `src/app/app/page.tsx`, keep the existing dashboard structures and add the metric's tone to the linked surface as well as its icon:
 
@@ -588,7 +588,7 @@ In `src/app/app/page.tsx`, keep the existing dashboard structures and add the me
 
 Keep all user-visible copy and destinations from Task 3. Do not add mock-up figures, deltas or chart series.
 
-- [ ] **Step 4: Rebuild `overview.module.css` around scoped tokens and established breakpoints**
+- [x] **Step 4: Rebuild `overview.module.css` around scoped tokens and established breakpoints**
 
 Replace dashboard colour literals with semantic tokens and add restrained interaction states. The critical rules are:
 
@@ -740,7 +740,7 @@ Use the approved dashboard-local 1100, 960, 920, 760 and 540 rules, with these o
 
 Retain all chart labels, chart-foot explanations and current empty-state copy. Use `font-variant-numeric: tabular-nums` for counts and dates.
 
-- [ ] **Step 5: Run the focused render and browser checks**
+- [x] **Step 5: Run the focused render and browser checks**
 
 ```bash
 node --import=tsx scripts/local-resource-guard.ts -- npm test -- src/app/app/page.operator.test.tsx src/components/app-shell.test.tsx --maxWorkers=1
@@ -749,7 +749,7 @@ COMPLIANCEHUB_UI_DEMO=1 node --import=tsx scripts/local-resource-guard.ts -- npx
 
 Expected: unit tests PASS; desktop/tablet/phone layout, hover/focus, reduced motion, routes, no overflow and axe checks PASS.
 
-- [ ] **Step 6: Visually inspect deterministic screenshots**
+- [x] **Step 6: Visually inspect deterministic screenshots**
 
 Open the existing Playwright output images beside:
 
@@ -769,7 +769,7 @@ Confirm at 1440, 883 and 390px:
 
 If a visual defect is found, adjust only `overview.module.css` or `app-shell.module.css`, rerun the two focused browser specs and capture the three screenshots again.
 
-- [ ] **Step 7: Commit and push the dashboard presentation**
+- [x] **Step 7: Commit and push the dashboard presentation**
 
 ```bash
 git add src/app/app/page.tsx src/app/app/overview.module.css e2e/programme-dashboard.spec.ts
@@ -794,7 +794,7 @@ Expected: the dashboard presentation is committed and pushed with all original d
 - Consumes: the source commits from Tasks 1-4 and the existing production-preview launcher/health workflow.
 - Produces: a pushed evidence record distinguishing automated checks, local fictional browser proof, running-preview identity and remaining hosted/provider/human gates.
 
-- [ ] **Step 1: Run focused unit coverage once more**
+- [x] **Step 1: Run focused unit coverage once more**
 
 ```bash
 node --import=tsx scripts/local-resource-guard.ts -- npm test -- src/app/app/page.operator.test.tsx src/components/app-shell.test.tsx src/components/page-heading.test.tsx src/components/status-label.test.tsx src/features/onboarding/domain/checklist.test.ts --maxWorkers=1
@@ -802,7 +802,7 @@ node --import=tsx scripts/local-resource-guard.ts -- npm test -- src/app/app/pag
 
 Expected: all focused tests PASS.
 
-- [ ] **Step 2: Run lint and type checking sequentially**
+- [x] **Step 2: Run lint and type checking sequentially**
 
 ```bash
 node --import=tsx scripts/local-resource-guard.ts -- npm run lint
@@ -811,7 +811,7 @@ node --import=tsx scripts/local-resource-guard.ts -- npm run typecheck
 
 Expected: both commands exit 0 with no errors.
 
-- [ ] **Step 3: Run the full unit suite**
+- [x] **Step 3: Run the full unit suite**
 
 ```bash
 node --import=tsx scripts/local-resource-guard.ts -- npm run test -- --maxWorkers=1
@@ -819,7 +819,7 @@ node --import=tsx scripts/local-resource-guard.ts -- npm run test -- --maxWorker
 
 Expected: the full Vitest suite exits 0. Record the exact passed and skipped counts in the evidence document.
 
-- [ ] **Step 4: Build the production application**
+- [x] **Step 4: Build the production application**
 
 ```bash
 node --import=tsx scripts/local-resource-guard.ts -- npm run build
@@ -827,7 +827,7 @@ node --import=tsx scripts/local-resource-guard.ts -- npm run build
 
 Expected: the Next.js production build exits 0. Record that this proves compilation, not browser or hosted behavior.
 
-- [ ] **Step 5: Run final browser checks sequentially**
+- [x] **Step 5: Run final browser checks sequentially**
 
 ```bash
 COMPLIANCEHUB_UI_DEMO=1 node --import=tsx scripts/local-resource-guard.ts -- npx playwright test e2e/programme-dashboard.spec.ts --project=chromium --workers=1
@@ -836,7 +836,7 @@ node --import=tsx scripts/local-resource-guard.ts -- npx playwright test e2e/vis
 
 Expected: populated/empty/member dashboard, token/motion contract and representative shared-shell regressions PASS. Record exact project and test counts.
 
-- [ ] **Step 6: Capture and inspect the local production preview**
+- [x] **Step 6: Capture and inspect the local production preview**
 
 Use the repository's existing immutable production-preview workflow to run the verified commit on port 3300. Verify `/api/health` reports application and database OK with the expected source identity, then capture authenticated fictional dashboard screenshots at:
 
@@ -848,7 +848,7 @@ Use the repository's existing immutable production-preview workflow to run the v
 
 Expected: the running preview matches the verified source, database health is OK, screenshots contain only fictional local records and the browser shows no horizontal overflow or serious/critical axe findings.
 
-- [ ] **Step 7: Write the evidence and update the single project status source**
+- [x] **Step 7: Write the evidence and update the single project status source**
 
 Create `docs/evidence/2026-09-10-expressive-dashboard-visual-foundation.md` with these sections and fill them only from outputs captured in Steps 1-6:
 
@@ -872,7 +872,7 @@ At the top of `docs/release-checklist.md`, add one plain-language status entry t
 
 Do not duplicate the release checklist in another tracker.
 
-- [ ] **Step 8: Review the final diff for scope and placeholders**
+- [x] **Step 8: Review the final diff for scope and placeholders**
 
 ```bash
 git diff --check
@@ -883,7 +883,7 @@ rg -n "TBD|TODO|placeholder|fake search|work by team|month from last" docs/evide
 
 Expected: no whitespace errors, no unrelated files, and no invented dashboard capability or unfinished evidence marker. References explaining excluded fake features are acceptable only in the evidence limits section.
 
-- [ ] **Step 9: Commit and push final evidence**
+- [x] **Step 9: Commit and push final evidence**
 
 ```bash
 git add docs/evidence/2026-09-10-expressive-dashboard-visual-foundation.md docs/evidence/expressive-dashboard-visual-foundation-2026-09-10 docs/release-checklist.md
