@@ -24,7 +24,7 @@ The verified source starts at `6fb6a9166d38969fa9de8d0886abfda45a82d078` and is 
 - Production browser import: explicit owner, descriptive location, ambiguous/unknown-owner rejection and persisted results passed on desktop and mobile.
 - Member access: direct operator registers including Assets and new routes still redirect to the curated Member portal; desktop and mobile checks passed.
 - Independent specification and standards re-reviews found no remaining material issue. A separate visual reviewer inspected register, detail, new and edit at 1440, 883 and 393 pixels; the final spacing and mobile criticality wording were refined afterwards and the affected browser journey passed again.
-- Permanent local preview: the immutable package for source `3a050a0` runs at `http://127.0.0.1:3300/app/assets`. Fresh health reports application and database OK with the exact source SHA. An actual in-app-browser screenshot shows the preserved fictional workspace and its asset record.
+- Permanent local preview: the immutable package for source `3a050a0` runs at `http://127.0.0.1:3300/app/assets`. Fresh health reports application and database OK with the exact source SHA. The complete create/edit/stale-save, export and linked-risk journey passed again on desktop and mobile against this exact background process. An actual in-app-browser screenshot shows the preserved fictional workspace and its asset record.
 
 This proves local code, automated checks and fictional local production behaviour. It does not prove a hosted release, live-provider operation or human stakeholder acceptance.
 
