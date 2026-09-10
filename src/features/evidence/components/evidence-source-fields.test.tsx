@@ -8,12 +8,12 @@ it("shows only the input used by the selected evidence source type", async () =>
   const user = userEvent.setup();
   render(<EvidenceSourceFields />);
 
-  expect(screen.getByLabelText(/^File/)).toBeInTheDocument();
+  expect(screen.getByLabelText("File (required)")).toBeRequired();
   expect(screen.queryByLabelText(/^Web address/)).not.toBeInTheDocument();
 
   await user.selectOptions(screen.getByLabelText("Evidence type"), "link");
   expect(screen.queryByLabelText(/^File/)).not.toBeInTheDocument();
-  expect(screen.getByLabelText(/^Web address/)).toBeInTheDocument();
+  expect(screen.getByLabelText("Web address (required)")).toBeRequired();
 
   await user.selectOptions(screen.getByLabelText("Evidence type"), "note");
   expect(screen.queryByLabelText(/^File/)).not.toBeInTheDocument();

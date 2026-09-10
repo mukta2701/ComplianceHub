@@ -69,15 +69,16 @@ export async function linkEvidenceAction(formData: FormData) {
 export async function unlinkEvidenceAction(formData: FormData) {
   const { supabase, organisation, membership } = await requireAppContext();
   requireEvidenceOperator(membership);
-  const { error } = await supabase.from("evidence_links").delete().eq("id", String(formData.get("linkId"))).eq("organisation_id", organisation.id); if (error) throw new Error("Could not remove the evidence link");
+  const { data, error } = await supabase.from("evidence_links").delete().eq("id", String(formData.get("linkId"))).eq("organisation_id", organisation.id).select("id").maybeSingle();
+  if (error || !data) throw new Error("Could not remove the evidence link");
   revalidatePath("/app/evidence");
 }
 
 export async function withdrawEvidenceAction(formData: FormData) {
   const { supabase, organisation, membership } = await requireAppContext();
   requireEvidenceOperator(membership);
-  const { error } = await supabase.from("evidence").update({ status: "withdrawn" }).eq("id", String(formData.get("id"))).eq("organisation_id", organisation.id);
-  if (error) throw new Error("Could not withdraw evidence");
+  const { data, error } = await supabase.from("evidence").update({ status: "withdrawn" }).eq("id", String(formData.get("id"))).eq("organisation_id", organisation.id).select("id").maybeSingle();
+  if (error || !data) throw new Error("Could not withdraw evidence");
   revalidatePath("/app/evidence");
 }
 

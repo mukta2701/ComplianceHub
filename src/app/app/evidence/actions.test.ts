@@ -53,9 +53,9 @@ describe("evidence management access", () => {
   it("lets an Owner reach the existing create, link, unlink and withdrawal interfaces", async () => {
     const rpc = vi.fn().mockResolvedValue({ data: "evidence-1", error: null });
     const insert = vi.fn().mockResolvedValue({ error: null });
-    const terminal = { then: (resolve: (value: unknown) => unknown) => Promise.resolve({ error: null }).then(resolve) };
-    const deleteEq = vi.fn(() => terminal);
-    const updateEq = vi.fn(() => terminal);
+    const matched = { select: vi.fn(() => ({ maybeSingle: vi.fn().mockResolvedValue({ data: { id: "matched-1" }, error: null }) })) };
+    const deleteEq = vi.fn(() => matched);
+    const updateEq = vi.fn(() => matched);
     const from = vi.fn((table: string) => table === "evidence_links"
       ? { insert, delete: vi.fn(() => ({ eq: vi.fn(() => ({ eq: deleteEq })) })) }
       : { update: vi.fn(() => ({ eq: vi.fn(() => ({ eq: updateEq })) })) });
@@ -74,5 +74,20 @@ describe("evidence management access", () => {
     expect(insert).toHaveBeenCalledWith(expect.objectContaining({ organisation_id: "00000000-0000-4000-8000-000000000001", evidence_id: "evidence-1", control_id: "control-1" }));
     expect(deleteEq).toHaveBeenCalledWith("organisation_id", "00000000-0000-4000-8000-000000000001");
     expect(updateEq).toHaveBeenCalledWith("organisation_id", "00000000-0000-4000-8000-000000000001");
+  });
+
+  it.each([
+    ["unlink", unlinkEvidenceAction, { linkId: "missing-link" }, "Could not remove the evidence link"],
+    ["withdraw", withdrawEvidenceAction, { id: "missing-evidence" }, "Could not withdraw evidence"],
+  ])("rejects a stale %s request when the organisation-scoped mutation matches no record", async (_label, action, values, message) => {
+    const unmatched = { select: vi.fn(() => ({ maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }) })) };
+    const from = vi.fn((table: string) => table === "evidence_links"
+      ? { delete: vi.fn(() => ({ eq: vi.fn(() => ({ eq: vi.fn(() => unmatched) })) })) }
+      : { update: vi.fn(() => ({ eq: vi.fn(() => ({ eq: vi.fn(() => unmatched) })) })) });
+    hoisted.ctx = {
+      supabase: { from }, user: { id: "user-1" }, organisation: { id: "org-1" }, membership: { role: "owner" },
+    };
+
+    await expect(action(form(values))).rejects.toThrow(message);
   });
 });

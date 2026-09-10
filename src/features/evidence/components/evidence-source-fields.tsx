@@ -15,12 +15,12 @@ export function EvidenceSourceFields({ helpClassName }: { helpClassName?: string
         <option value="note">Recorded note</option>
       </select>
     </label>
-    {kind === "file" && <label>File
-      <input name="file" type="file" accept=".pdf,.png,.jpg,.jpeg,.docx,.xlsx,.csv,.txt" />
+    {kind === "file" && <label>File (required)
+      <input name="file" type="file" required aria-label="File (required)" accept=".pdf,.png,.jpg,.jpeg,.docx,.xlsx,.csv,.txt" />
       <small className={helpClassName}>PDF, PNG, JPG, DOCX, XLSX, CSV or TXT. Maximum 25 MB.</small>
     </label>}
-    {kind === "link" && <label>Web address
-      <input name="url" type="url" placeholder="https://" />
+    {kind === "link" && <label>Web address (required)
+      <input name="url" type="url" required aria-label="Web address (required)" placeholder="https://" />
       <small className={helpClassName}>The saved record opens this source in a separate browser tab.</small>
     </label>}
     {kind === "note" && <p className={helpClassName} role="note">The proof is recorded in the description above. Include the check performed, result and any limits.</p>}
