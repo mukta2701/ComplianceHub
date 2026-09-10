@@ -64,6 +64,17 @@ it("renders saved statement decisions and snapshot provenance without using late
   expect(screen.getByRole("link", { name: "Download saved PDF" })).toHaveAttribute("href", "/api/app/soa/snapshot/pdf");
 });
 
+it("keeps saved statements readable for Members without exposing export links", async () => {
+  state.fixture = controlReviewFixture();
+  state.role = "member";
+  finaliseControlReviewFixture(state.fixture);
+  render(await SoaReviewPage({ params: Promise.resolve({ id: "register" }) }));
+
+  expect(screen.getByRole("heading", { name: "Saved statement" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Open current source assessment" })).toBeInTheDocument();
+  expect(screen.queryAllByRole("link", { name: /Download saved/ })).toHaveLength(0);
+});
+
 
 it("shows both labelled catalogue versions in the editable source provenance", async () => {
   state.fixture = controlReviewFixture();

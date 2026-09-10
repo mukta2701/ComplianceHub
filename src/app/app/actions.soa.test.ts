@@ -2,13 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const hoisted = vi.hoisted(() => ({
   ctx: null as unknown,
+  enforceRateLimit: vi.fn(() => Promise.resolve()),
   redirect: vi.fn((url: string) => {
     throw new Error(`REDIRECT:${url}`);
   }),
 }));
 
 vi.mock("@/lib/app-context", () => ({ requireAppContext: () => Promise.resolve(hoisted.ctx) }));
-vi.mock("@/lib/security/rate-limit", () => ({ enforceRateLimit: () => Promise.resolve() }));
+vi.mock("@/lib/security/rate-limit", () => ({ enforceRateLimit: hoisted.enforceRateLimit }));
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 vi.mock("next/navigation", () => ({ redirect: hoisted.redirect }));
 
@@ -136,12 +137,12 @@ function reviewFormData(itemId = ITEM_ID) {
   return data;
 }
 
-function context(client: ReturnType<typeof fakeSupabase>["client"]) {
+function context(client: ReturnType<typeof fakeSupabase>["client"], role = "owner") {
   return {
     supabase: client,
     user: { id: USER_ID },
     organisation: { id: ORG_ID, name: "Tenant A" },
-    membership: { role: "owner" },
+    membership: { role },
   };
 }
 
@@ -242,6 +243,18 @@ describe("createSoaSuccessorAction", () => {
 describe("finaliseSoaAction preflight", () => {
   beforeEach(() => {
     hoisted.redirect.mockClear();
+    hoisted.enforceRateLimit.mockClear();
+  });
+
+  it("rejects Members before rate limiting or reading finalisation data", async () => {
+    const fake = fakeSupabase(reviewedStore());
+    hoisted.ctx = context(fake.client, "member");
+    const { finaliseSoaAction } = await import("./actions");
+
+    await expect(finaliseSoaAction(formData())).rejects.toThrow("Only workspace Owners and Admins can finalise a Statement of Applicability");
+    expect(hoisted.enforceRateLimit).not.toHaveBeenCalled();
+    expect(fake.queries).toEqual([]);
+    expect(fake.rpc).not.toHaveBeenCalled();
   });
 
   it("reports an incomplete catalogue before calling the finalisation RPC", async () => {

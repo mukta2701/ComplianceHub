@@ -91,3 +91,15 @@ The browser and screenshots use local fictional data. They do not prove hosted b
 - `src/components/app-shell.test.tsx`
 
 The release checklist was intentionally not updated for this delegated task.
+
+## Product review corrections after `e78123b`
+
+A focused product-code review found five boundary and scale issues, now corrected without changing the database schema or browser test file.
+
+- `finaliseSoaAction` explicitly rejects Members with the stable operator-only message before parsing, rate limiting, data reads or the finalisation RPC. The authoritative `20260901000000` database function already checks `is_organisation_operator`; no duplicate migration was added.
+- Member pages retain their existing read boundary. Members can open active and finalised statements, but the landing XLSX/CSV links and finalised PDF/DOCX links are absent. The read-only copy no longer promises downloads.
+- Each operator source option now states the assessment state, revision, complete answered/question count and assessment catalogue. The nearby limitation says incomplete answers provide current context and never decide applicability.
+- Landing reads now display at most 50 recent assessments, registers and statements while retaining exact totals when more exist. A count larger than the displayed rows no longer hides the page. Displayed registers are classified with `soa_snapshots!soa_snapshots_register_tenant_fk(id)`, and cap notes point operators back to the assessment register or source assessment for older records.
+- Complete bounded catalogue-question and assessment-response reads are required before enabling review creation. If those supporting counts cannot be verified, creation is withheld while the existing review and statement histories remain readable.
+
+Review-fix TDD RED was 6 intended failures with 35 passes: Member finalisation reached the RPC, Member exports remained visible, source choices lacked provenance/progress, and oversized landing histories were treated as unavailable. Focused GREEN is 43 of 43 tests. The broader fresh regression passed 243 of 243 tests across 15 files in 12.37 seconds. Full ESLint, `tsc --noEmit`, and the Next.js 16.3 production build also pass. Browser updates and reruns are handled separately and are not evidence for this product-only correction yet.

@@ -256,7 +256,8 @@ export async function reviewSoaItemAction(formData: FormData): Promise<SaveSoaDe
 }
 
 export async function finaliseSoaAction(formData: FormData) {
-  const { supabase, user, organisation } = await requireAppContext();
+  const { supabase, user, organisation, membership } = await requireAppContext();
+  if (membership.role === "member") throw new Error("Only workspace Owners and Admins can finalise a Statement of Applicability");
   await enforceRateLimit(`soa-finalise:${user.id}`, { limit: 5, windowMs: 60_000 });
   const requestedRegisterId = z.uuid().parse(formData.get("registerId"));
   const { data: register, error: registerError } = await supabase

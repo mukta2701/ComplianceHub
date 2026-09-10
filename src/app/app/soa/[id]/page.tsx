@@ -43,7 +43,7 @@ export default async function SoaReviewPage({ params }: { params: Promise<{ id: 
         <CatalogueContext catalogues={review.catalogues} />
         <p><Link href={`/app/assessment/${register.sourceAssessment.id}`}>Open current source assessment</Link>. Its current answers, state and revision are not part of this saved statement.</p>
         <p>Current owners, linked work and evidence freshness are not re-evaluated here. The evidence notes below are the notes saved at finalisation.</p>
-        <p><a href={`/api/app/soa/${statement.id}/pdf`}>Download saved PDF</a> · <a href={`/api/app/soa/${statement.id}/docx`}>Download saved DOCX</a></p>
+        {membership.role !== "member" && <p><a href={`/api/app/soa/${statement.id}/pdf`}>Download saved PDF</a> · <a href={`/api/app/soa/${statement.id}/docx`}>Download saved DOCX</a></p>}
       </section>
       {review.optionalUnavailable.length > 0 && <p role="status">Unavailable labels: {review.optionalUnavailable.join(", ")}. Saved identities and decisions remain available.</p>}
       <section aria-label="Saved control decisions">
