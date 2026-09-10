@@ -1,6 +1,6 @@
 begin;
 
-select plan(52);
+select plan(55);
 
 -- The inventory is intentionally explicit. Adding an organisation-scoped public
 -- table without classifying it here must fail this suite instead of silently
@@ -155,6 +155,10 @@ select ok(
 );
 select ok(not pg_catalog.has_function_privilege('anon', pg_catalog.to_regprocedure('public.accept_policy(uuid,integer)'), 'execute'), 'anon cannot execute accept_policy');
 select ok(pg_catalog.has_function_privilege('authenticated', pg_catalog.to_regprocedure('public.accept_policy(uuid,integer)'), 'execute'), 'authenticated may invoke the guarded accept_policy RPC');
+select ok(not pg_catalog.has_any_column_privilege('authenticated', 'public.soa_registers', 'insert'), 'authenticated register inserts require the atomic review RPC');
+select ok(not pg_catalog.has_any_column_privilege('anon', 'public.soa_registers', 'insert'), 'anon cannot insert registers directly or inherit a PUBLIC insert grant');
+select ok(pg_catalog.has_table_privilege('authenticated', 'public.soa_registers', 'select'), 'authenticated callers retain RLS-scoped register reads');
+
 select ok(pg_catalog.has_table_privilege('authenticated', 'public.policy_acceptances', 'select'), 'authenticated can select policy acceptances through RLS');
 select ok(not pg_catalog.has_table_privilege('anon', 'public.policy_acceptances', 'insert'), 'anon cannot insert policy acceptances directly');
 select ok(not pg_catalog.has_table_privilege('authenticated', 'public.policy_acceptances', 'insert'), 'authenticated cannot insert policy acceptances directly');

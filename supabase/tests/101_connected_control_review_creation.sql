@@ -99,5 +99,28 @@ select ok(not has_function_privilege('service_role','public.create_or_reuse_soa_
 select ok(not has_function_privilege('service_role','public.create_or_reuse_soa_successor(uuid)','execute'),'new successor RPC grants execute only to authenticated');
 select is((select count(*)::integer from pg_proc where oid in ('public.create_or_reuse_soa_review(uuid)'::regprocedure,'public.create_or_reuse_soa_successor(uuid)'::regprocedure) and proconfig @> array['search_path=""']),2,'both RPCs fix the empty search path');
 
+-- Review creation must be the sole authenticated insert path, even for an owner.
+set local role authenticated;
+select set_config('request.jwt.claims','{"sub":"a1010000-0000-4000-8000-000000000001","role":"authenticated"}',true);
+select throws_ok(format($$ insert into public.soa_registers(organisation_id,assessment_session_id,control_catalogue_version_id,version,title,created_by)
+  values(%L,'a1010000-0000-4000-8000-000000000011','40000000-0000-4000-8000-000000000001',999,'Direct insert bypass','a1010000-0000-4000-8000-000000000001') $$,current_setting('app.review_org')),
+  '42501','permission denied for table soa_registers','same-workspace operators cannot bypass review creation with a direct insert');
+insert into public.assessment_sessions(id,organisation_id,catalogue_version_id,title,created_by) values
+  ('a1010000-0000-4000-8000-000000000014',current_setting('app.review_org')::uuid,'00000000-0000-4000-8000-000000000001','RPC-only assessment','a1010000-0000-4000-8000-000000000001');
+select lives_ok($$ select public.create_or_reuse_soa_review('a1010000-0000-4000-8000-000000000014') $$,'authorised RPC creation still succeeds without direct register insert privilege');
+select is((select count(*)::integer from public.soa_items i join public.soa_registers r on r.id=i.soa_register_id
+  where r.assessment_session_id='a1010000-0000-4000-8000-000000000014'),93,'the authorised RPC still creates its complete decision set');
+reset role;
+-- The lock may wait. Inspect only the source/authentication checks between lock
+-- acquisition and active-review lookup, not an earlier preflight check.
+select ok((select split_part(split_part(prosrc,'perform pg_catalog.pg_advisory_xact_lock',2),'select r.id into result_id',1)
+  ~ 'from public.assessment_sessions[\s\S]*public.is_organisation_operator'
+  from pg_proc where oid='public.create_or_reuse_soa_review(uuid)'::regprocedure),
+  'review creation re-reads assessment provenance and checks operator authority after the lock before reuse');
+select ok((select split_part(split_part(prosrc,'perform pg_catalog.pg_advisory_xact_lock',2),'select r.id into result_id',1)
+  ~ 'from public.soa_registers[\s\S]*join public.soa_snapshots[\s\S]*public.is_organisation_operator'
+  from pg_proc where oid='public.create_or_reuse_soa_successor(uuid)'::regprocedure),
+  'successor re-reads the finalised source and checks operator authority after the lock before reuse');
+
 select * from finish();
 rollback;

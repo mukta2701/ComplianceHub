@@ -6,6 +6,7 @@ as $$
 declare
   actor uuid := (select auth.uid());
   target_org uuid;
+  current_org uuid;
   result_id uuid;
   next_version integer;
   inserted_count integer;
@@ -19,6 +20,12 @@ begin
 
   -- Reuse the original draft/successor lock key across every assessment.
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(target_org::text, 0));
+  -- Permission or assessment scope may have changed while the lock waited.
+  select organisation_id into current_org
+  from public.assessment_sessions where id = target_assessment_session_id;
+  if current_org is distinct from target_org or not public.is_organisation_operator(current_org) then
+    raise exception 'Assessment unavailable' using errcode = '42501';
+  end if;
   select r.id into result_id
   from public.soa_registers r
   where r.organisation_id = target_org and r.assessment_session_id = target_assessment_session_id
@@ -69,7 +76,7 @@ begin
   from public.soa_registers r
   join public.soa_snapshots s on s.soa_register_id = r.id and s.organisation_id = r.organisation_id
   where r.id = source_register_id and r.organisation_id = target_org;
-  if not found then
+  if not found or not public.is_organisation_operator(target_org) then
     raise exception 'Finalised statement unavailable' using errcode = '42501';
   end if;
   select r.id into result_id
@@ -107,3 +114,6 @@ grant execute on function public.create_or_reuse_soa_successor(uuid) to authenti
 -- Keep existing service-role maintenance grants; ordinary callers must use the atomic APIs.
 revoke all on function public.create_soa_draft(uuid, text) from public, anon, authenticated;
 revoke all on function public.create_soa_successor(uuid, text) from public, anon, authenticated;
+
+-- A same-workspace operator must not bypass locking, reuse or decision seeding.
+revoke insert on table public.soa_registers from public, anon, authenticated;
