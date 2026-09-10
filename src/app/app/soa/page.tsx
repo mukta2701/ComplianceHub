@@ -98,9 +98,7 @@ export default async function SoaPage() {
     />
     <SubTabs tabs={[{ href: "/app/soa", label: "Controls & applicability" }, { href: "/app/frameworks", label: "Framework coverage" }]} />
     <nav className="soa-programme-steps" aria-label="Programme steps">
-      {membership.role === "member"
-        ? <span className="soa-programme-step" aria-disabled="true"><span>1</span><small>Assessment</small><strong>Assess current practices</strong></span>
-        : <Link href="/app/assessment"><span>1</span><small>Assessment</small><strong>Assess current practices</strong></Link>}
+      <Link href="/app/assessment"><span>1</span><small>Assessment</small><strong>Assess current practices</strong></Link>
       <a href="#active-control-reviews" aria-current="step"><span>2</span><small>Control review</small><strong>Review control decisions</strong></a>
       <a href="#finalised-statements"><span>3</span><small>Formal output</small><strong>Finalise formal statement</strong></a>
     </nav>
@@ -141,7 +139,7 @@ export default async function SoaPage() {
           const recommended = recommendedByAssessment.get(review.assessment_session_id) === review.id;
           return <article key={review.id}>
             <div className="soa-record-title"><div><small>CONTROL REVIEW · VERSION {review.version}</small><h3>{review.title}</h3></div>{recommended && <span className="pill">Recommended</span>}</div>
-            <dl><div><dt>Source</dt><dd>{membership.role === "member" ? (sourceAssessment?.title ?? "Source assessment") : <Link href={`/app/assessment/${review.assessment_session_id}`}>{sourceAssessment?.title ?? "Open source assessment"}</Link>}</dd></div><div><dt>Last activity</dt><dd><time dateTime={review.updated_at}>{formatActivity(review.updated_at)}</time></dd></div><div><dt>State</dt><dd>Active and editable</dd></div></dl>
+            <dl><div><dt>Source</dt><dd><Link href={`/app/assessment/${review.assessment_session_id}`}>{sourceAssessment?.title ?? "Source assessment"}</Link></dd></div><div><dt>Last activity</dt><dd><time dateTime={review.updated_at}>{formatActivity(review.updated_at)}</time></dd></div><div><dt>State</dt><dd>Active and editable</dd></div></dl>
             <Link className={`button ${recommended ? "primary" : "secondary"}`} href={`/app/soa/${review.id}`}>Continue active review</Link>
           </article>;
         }) : <p className="soa-list-empty">{activeReviewTotal ? "No active reviews appear in the latest register records. Open the source assessment to find an older review." : "No active control reviews yet."}</p>}</Card>
@@ -153,7 +151,7 @@ export default async function SoaPage() {
         <header className="soa-section-heading"><div><span className="eyebrow">SAVED RECORD</span><h2 id="finalised-heading">Finalised statements</h2><p>Immutable formal outputs</p></div><strong>{snapshotTotal}</strong></header>
         <Card className="soa-record-list soa-formal-list">{snapshots.length ? snapshots.map((snapshot) => <article key={snapshot.id}>
           <div className="soa-record-title"><div><small>STATEMENT OF APPLICABILITY · VERSION {snapshot.version}</small><h3>{snapshot.title}</h3></div><span className="pill green">Finalised</span></div>
-          <dl><div><dt>Finalised</dt><dd><time dateTime={snapshot.finalised_at}>{formatActivity(snapshot.finalised_at)}</time></dd></div><div><dt>Source</dt><dd>{membership.role === "member" ? (assessments.find((assessment) => assessment.id === snapshot.assessment_session_id)?.title ?? "Source assessment") : <Link href={`/app/assessment/${snapshot.assessment_session_id}`}>{assessments.find((assessment) => assessment.id === snapshot.assessment_session_id)?.title ?? "Open source assessment"}</Link>}</dd></div><div><dt>State</dt><dd>Saved and immutable</dd></div></dl>
+          <dl><div><dt>Finalised</dt><dd><time dateTime={snapshot.finalised_at}>{formatActivity(snapshot.finalised_at)}</time></dd></div><div><dt>Source</dt><dd><Link href={`/app/assessment/${snapshot.assessment_session_id}`}>{assessments.find((assessment) => assessment.id === snapshot.assessment_session_id)?.title ?? "Source assessment"}</Link></dd></div><div><dt>State</dt><dd>Saved and immutable</dd></div></dl>
           <div className="soa-record-actions"><Link className="button secondary" href={`/app/soa/${snapshot.soa_register_id}`}>Review finalised statement</Link>{membership.role !== "member" && <><a href={`/api/app/soa/${snapshot.id}/pdf`}>Download PDF</a><a href={`/api/app/soa/${snapshot.id}/docx`}>Download DOCX</a><form action={createSoaSuccessorAction}><input type="hidden" name="registerId" value={snapshot.soa_register_id} /><button className="button secondary">Create next version</button></form></>}</div>
         </article>) : <p className="soa-list-empty">No finalised statements yet. Finalise a reviewed control review when its decisions and evidence references are ready.</p>}</Card>
         {snapshotTotal > snapshots.length && <p className="soa-list-note">Showing {snapshots.length} of {snapshotTotal} finalised statements. Open the source assessment to locate an older statement or review.</p>}

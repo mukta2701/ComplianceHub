@@ -672,7 +672,7 @@ export function SoaReviewWorkspace({ items, members, currentUserId, registerId, 
             </ol>
 
             <section className="soa-source-context" aria-label={`Assessment context for ${selectedItem.code}`}>
-              <header><div><span className="eyebrow">CURRENT SOURCE CONTEXT</span><h3>{sourceAssessment?.title ?? "Source assessment"}</h3></div>{sourceAssessment && !readOnly ? <Link href={`/app/assessment/${sourceAssessment.id}`}>Open source assessment</Link> : null}</header>
+              <header><div><span className="eyebrow">CURRENT SOURCE CONTEXT</span><h3>{sourceAssessment?.title ?? "Source assessment"}</h3></div>{sourceAssessment ? <Link href={`/app/assessment/${sourceAssessment.id}`}>Open source assessment</Link> : null}</header>
               <p className="soa-current-context-warning">Current assessment context guides this review; it does not decide applicability and is not frozen with each saved decision.{sourceAssessment ? ` Displaying revision ${sourceAssessment.revision ?? "unavailable"}${sourceAssessment.state ? `, ${titleCase(sourceAssessment.state)}` : ""}.` : ""}</p>
               {selectedItem.sourceAnswers.length ? <ul className="soa-source-answers">{selectedItem.sourceAnswers.map((answer) => <li key={answer.questionId}>
                 <div><code>{answer.code}</code><strong>{answer.prompt}</strong></div>

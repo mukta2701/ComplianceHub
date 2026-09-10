@@ -231,7 +231,7 @@ describe("SoaReviewWorkspace", () => {
     expect(screen.getByLabelText("Owner assignment")).toBeDisabled();
     expect(screen.getByLabelText("Rationale")).toHaveAttribute("readonly");
     expect(screen.queryByRole("button", { name: "Save draft" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Open source assessment" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open source assessment" })).toHaveAttribute("href", "/app/assessment/assessment-1");
     await userEvent.click(screen.getByRole("tab", { name: "Evidence" }));
     expect(screen.getByLabelText("Evidence references")).toHaveAttribute("readonly");
     expect(screen.queryByRole("link", { name: "Open evidence library" })).not.toBeInTheDocument();
