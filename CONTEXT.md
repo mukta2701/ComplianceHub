@@ -23,6 +23,12 @@ _Avoid_: treating assignment as permission to change every compliance record.
 **Control decision**: The recorded applicability, implementation state, rationale and accountability for a security control.
 _Avoid_: certification, verified effectiveness.
 
+**Control review**: The editable working set of control decisions connected to a source assessment and its recorded context.
+_Avoid_: treating assessment answers as automatic control decisions.
+
+**Statement of Applicability**: The versioned formal output produced from a reviewed set of control decisions. A finalised statement is immutable.
+_Avoid_: using the term for the entire working controls area.
+
 **Risk**: A recorded exposure with likelihood, impact, treatment and an accountable decision about residual exposure.
 
 **Task completion**: A recorded decision that an assigned unit of work is done. It does not independently establish evidence freshness, successful technical resolution or finding closure.
