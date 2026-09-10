@@ -78,6 +78,8 @@ test.describe.serial("connected controls workspace", () => {
     await page.getByRole("button", { name: "Review controls" }).click();
     await page.waitForURL(/\/app\/soa\/[0-9a-f-]+$/);
     registerUrl = new URL(page.url()).pathname;
+    await expect(page.getByRole("heading", { name: "Work remains before finalisation", exact: true })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Finalisation readiness" })).toContainText("93 pending");
     const registerId = registerUrl.split("/").pop()!;
     const { data: mappedItem, error: itemError } = await fixture.coordinator.from("soa_items")
       .select("id,control_title").eq("soa_register_id", registerId).eq("control_id", mappedControlId).single();
@@ -144,6 +146,97 @@ test.describe.serial("connected controls workspace", () => {
     await page.getByLabel("Source assessment").selectOption(assessmentId);
     await page.getByRole("button", { name: "Start control review" }).click();
     await expect(page).toHaveURL(new RegExp(`${registerUrl}$`));
+  });
+
+  test("a reviewed control workspace becomes an immutable Statement of Applicability", async ({ page }) => {
+    await signIn(page, fixture.actors[0]);
+    const registerId = registerUrl.split("/").pop()!;
+    const { data: items, error: itemsError } = await fixture.coordinator.from("soa_items")
+      .select("id,control_id,decision_revision,applicable,status,justification,evidence,owner_id")
+      .eq("soa_register_id", registerId).order("position");
+    expect(itemsError).toBeNull();
+    expect(items).toHaveLength(93);
+
+    const { data: requirementMapping, error: mappingError } = await fixture.coordinator.from("requirement_control_mappings")
+      .select("control_id").eq("requirement_id", items?.find((item) => item.id === mappedItemId)?.control_id).single();
+    expect(mappingError).toBeNull();
+    if (!requirementMapping) throw new Error("Fictional control evidence mapping is unavailable");
+
+    const evidence = await fixture.coordinator.rpc("create_evidence_record", {
+      payload: {
+        organisation_id: fixture.organisationId,
+        title: "Fictional current control evidence",
+        kind: "note",
+        storage_path: null,
+        url: null,
+        description: "Fictional evidence created to demonstrate finalisation preconditions.",
+        owner_id: fixture.actors[0].id,
+        collected_on: new Date().toISOString().slice(0, 10),
+        valid_until: null,
+        review_interval: null,
+        status: "current",
+        replaces_evidence_id: null,
+      },
+    });
+    expect(evidence.error).toBeNull();
+    expect(evidence.data).toBeTruthy();
+    const evidenceLink = await fixture.coordinator.from("evidence_links").insert({
+      organisation_id: fixture.organisationId,
+      evidence_id: evidence.data,
+      control_id: requirementMapping.control_id,
+      created_by: fixture.actors[0].id,
+    });
+    expect(evidenceLink.error).toBeNull();
+
+    const finalisable = (items ?? []).map((item) => ({
+      itemId: item.id,
+      expectedRevision: item.decision_revision,
+      applicable: item.id === mappedItemId,
+      status: item.id === mappedItemId ? "operational" : "not_applicable",
+      justification: item.id === mappedItemId ? "Fictional reviewed control with current evidence." : "Outside the fictional demonstration scope.",
+      evidence: item.id === mappedItemId ? "Fictional current control evidence" : "",
+      ownerId: item.id === mappedItemId ? fixture.actors[0].id : null,
+    }));
+    for (let start = 0; start < finalisable.length; start += 25) {
+      const changes = finalisable.slice(start, start + 25);
+      const result = await fixture.coordinator.rpc("update_soa_decisions_guarded", { target_register_id: registerId, changes });
+      expect(result.error).toBeNull();
+      expect(result.data).toHaveLength(changes.length);
+    }
+
+    await page.goto(registerUrl);
+    await expect(page.getByRole("heading", { name: "Ready to create the formal statement", exact: true })).toBeVisible();
+    const finalise = page.getByRole("button", { name: /Finalise immutable/ });
+    await expect(finalise).toBeVisible();
+    await finalise.click();
+    await expect(page.getByRole("heading", { name: "Statement of Applicability", exact: true })).toBeVisible();
+    await expect(page.getByText("These saved decisions are immutable.", { exact: false })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Saved statement provenance", exact: true })).toBeVisible();
+    await expect(page.getByText(/current answers, state and revision are not part of this saved statement/i)).toBeVisible();
+    await expect(page.getByRole("heading", { name: "93 saved control decisions", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Finalise immutable/ })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Save draft" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Save and next" })).toHaveCount(0);
+    await expect(page.getByRole("combobox", { name: "Applicability decision", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("region", { name: "SoA review queue" })).toHaveCount(0);
+
+    const { data: snapshot, error: snapshotError } = await fixture.coordinator.from("soa_snapshots")
+      .select("items").eq("soa_register_id", registerId).single();
+    expect(snapshotError).toBeNull();
+    expect(snapshot?.items).toEqual(expect.arrayContaining([expect.objectContaining({
+      applicable: true,
+      status: "operational",
+      justification: "Fictional reviewed control with current evidence.",
+      evidence: "Fictional current control evidence",
+    })]));
+
+    await page.goto("/app/soa");
+    await expect(page.getByRole("heading", { name: "Finalised statements", exact: true })).toBeVisible();
+    await expect(page.getByText("Immutable formal outputs", { exact: true })).toBeVisible();
+    const formalOutput = page.locator(".soa-formal-list article").filter({ hasText: "STATEMENT OF APPLICABILITY" });
+    await expect(formalOutput.getByText("Finalised", { exact: true })).toBeVisible();
+    await expect(formalOutput.getByRole("link", { name: "Review finalised statement" })).toBeVisible();
+    await expect(formalOutput.getByRole("button", { name: /Edit|Save|Finalise/ })).toHaveCount(0);
   });
 
   test("the review workspace remains accessible at each target width", async ({ page }, testInfo) => {

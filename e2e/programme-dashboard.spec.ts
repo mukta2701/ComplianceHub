@@ -20,11 +20,14 @@ test("programme overview shows real counts, source links and readable charts acr
     title: "Fictional dashboard assessment", created_by: actors[0].id,
   }).select("id").single();
   expect(sessionError).toBeNull();
-  const { data: registerId, error: registerError } = await coordinator.rpc("create_soa_draft", {
-    target_assessment_id: session!.id, draft_title: "Fictional programme controls",
+  const { data: registerId, error: registerError } = await coordinator.rpc("create_or_reuse_soa_review", {
+    target_assessment_session_id: session!.id,
   });
   expect(registerError).toBeNull();
-  const { data: controls, error: controlsError } = await coordinator.from("soa_items").select("id").eq("soa_register_id", registerId).order("position");
+  expect(registerId).toBeTruthy();
+  const { data: controls, error: controlsError } = await coordinator.from("soa_items")
+    .select("id,decision_revision,applicable,status,justification,evidence,owner_id")
+    .eq("soa_register_id", registerId).order("position");
   expect(controlsError).toBeNull();
   const bands = [
     { start: 0, end: 21, status: "advanced" },
@@ -33,10 +36,22 @@ test("programme overview shows real counts, source links and readable charts acr
     { start: 66, end: 79, status: "in_progress" },
   ];
   for (const band of bands) {
-    const ids = (controls ?? []).slice(band.start, band.end).map((item) => item.id);
-    if (!ids.length) continue;
-    const result = await coordinator.from("soa_items").update({ status: band.status, justification: "Fictional visual demonstration only." }).in("id", ids);
+    const changes = (controls ?? []).slice(band.start, band.end).map((item) => ({
+      itemId: item.id,
+      expectedRevision: item.decision_revision,
+      applicable: item.applicable,
+      status: band.status,
+      justification: "Fictional visual demonstration only.",
+      evidence: item.evidence ?? "",
+      ownerId: item.owner_id,
+    }));
+    if (!changes.length) continue;
+    const result = await coordinator.rpc("update_soa_decisions_guarded", {
+      target_register_id: registerId,
+      changes,
+    });
     expect(result.error).toBeNull();
+    expect(result.data).toHaveLength(changes.length);
   }
   const results = await Promise.all([
     coordinator.from("tasks").update({ due_on: future }).eq("organisation_id", organisationId),

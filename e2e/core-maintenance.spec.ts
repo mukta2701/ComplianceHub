@@ -204,7 +204,7 @@ test("risk and task metadata edits persist without changing status or source", a
   await stalePage.close();
 });
 
-test("assessment completion becomes read-only and remains available for SoA draft", async ({ page }, info) => {
+test("assessment completion hands off to a read-only control review", async ({ page }, info) => {
   test.setTimeout(90_000);
   const { db, orgId } = await workspace(page, info);
   await page.goto("/app/assessment");
@@ -229,23 +229,25 @@ test("assessment completion becomes read-only and remains available for SoA draf
   const complete = page.waitForResponse((response) => response.url().includes("/api/app/assessment/complete") && response.request().method() === "POST");
   await page.getByRole("button", { name: "Save and complete", exact: true }).click();
   expect((await complete).status()).toBe(200);
-  await expect(page).toHaveURL(/\/app\/assessment(?:\?.*)?$/);
+  await expect(page).toHaveURL(new RegExp(`/app/assessment/${assessmentId}\\?completed=1$`));
   const session = await db.from("assessment_sessions").select("state,completed_at").eq("id", assessmentId).eq("organisation_id", orgId).single();
   expect(session.error).toBeNull();
   expect(session.data?.state).toBe("completed");
   expect(session.data?.completed_at).toBeTruthy();
-  await page.goto(assessmentUrl);
+  await expect(page.getByRole("status", { name: "Completion status" })).toContainText("Assessment completed.");
+  await expect(page.getByRole("heading", { name: "Control review", exact: true })).toBeVisible();
+  await expect(page.getByText(/reviewer still decides applicability, implementation status, ownership and rationale/i)).toBeVisible();
   await expect(page.getByText("Read-only assessment", { exact: true })).toBeVisible();
   await expect(page.getByRole("radio", { name: "Yes", exact: true })).toBeDisabled();
   await expect(page.getByRole("radio", { name: "Yes", exact: true })).toBeChecked();
-  await page.goto("/app/soa");
-  const select = page.locator('select[name="assessmentId"]');
-  await select.selectOption(assessmentId);
-  await page.getByRole("button", { name: "Generate draft" }).click();
+
+  await page.getByRole("button", { name: "Review controls", exact: true }).click();
   await expect(page).toHaveURL(/\/app\/soa\/[0-9a-f-]+$/);
   const registerId = new URL(page.url()).pathname.split("/").pop()!;
   const register = await db.from("soa_registers").select("assessment_session_id").eq("id", registerId).eq("organisation_id", orgId).single();
   expect(register.error).toBeNull();
   expect(register.data?.assessment_session_id).toBe(assessmentId);
+  await expect(page.getByRole("heading", { name: "Statement of Applicability", exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Control review context" })).toContainText("Active and editable");
   await expect(page.getByRole("heading", { name: "Review queue", exact: true })).toBeVisible();
 });
