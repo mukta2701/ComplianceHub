@@ -9,7 +9,7 @@ select set_config('app.pending_org',public.create_organisation_with_owner('Pendi
 insert into public.assessment_sessions(organisation_id,catalogue_version_id,title,created_by)
 values(current_setting('app.pending_org')::uuid,'00000000-0000-4000-8000-000000000001','Pending test assessment','50000000-0000-4000-8000-000000000201');
 select set_config('app.pending_session',(select id::text from public.assessment_sessions where organisation_id=current_setting('app.pending_org')::uuid),true);
-select set_config('app.pending_register',public.create_soa_draft(current_setting('app.pending_session')::uuid,'Pending control SoA')::text,true);
+select set_config('app.pending_register',public.create_or_reuse_soa_review(current_setting('app.pending_session')::uuid)::text,true);
 update public.soa_items set justification = 'Documented for review' where soa_register_id = current_setting('app.pending_register')::uuid;
 
 select throws_ok(

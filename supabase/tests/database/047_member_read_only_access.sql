@@ -129,8 +129,8 @@ select is(
     join pg_catalog.pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public'
       and p.proname = any(array[
-        'complete_recurring_task', 'create_evidence_record', 'create_soa_draft',
-        'create_soa_successor', 'finalise_soa', 'notify_policy_reaccept',
+        'complete_recurring_task', 'create_evidence_record', 'create_or_reuse_soa_review',
+        'create_or_reuse_soa_successor', 'finalise_soa', 'notify_policy_reaccept',
         'save_assessment_response'
       ])
       and pg_catalog.pg_get_functiondef(p.oid) not like '%is_organisation_operator%'
@@ -285,7 +285,7 @@ select results_eq(
 select throws_ok($$ select public.accept_policy('77000000-0000-4000-8000-000000000102',1) $$, '42501', 'policy is not available for acceptance', 'a member cannot accept a draft policy');
 select throws_ok($$ select public.accept_policy('77000000-0000-4000-8000-000000000103',1) $$, '42501', 'policy is not available for acceptance', 'a member cannot accept another tenant policy');
 select throws_ok($$ select public.notify_policy_reaccept('77000000-0000-4000-8000-000000000101', '') $$, '42501', 'not an operator of the policy organisation', 'member cannot bypass policy notification writes');
-select throws_ok($$ select public.create_soa_draft('77000000-0000-4000-8000-000000000302', 'Bypass') $$, '42501', 'assessment not found', 'member cannot bypass SoA writes through create_soa_draft');
+select throws_ok($$ select public.create_or_reuse_soa_review('77000000-0000-4000-8000-000000000302') $$, '42501', 'Assessment unavailable', 'member cannot bypass SoA writes through create_or_reuse_soa_review');
 select throws_ok(
   $$ select public.save_assessment_response(
        '77000000-0000-4000-8000-000000000302',

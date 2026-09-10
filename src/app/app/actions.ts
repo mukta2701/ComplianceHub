@@ -156,7 +156,7 @@ export async function acceptRiskSuggestionAction(formData: FormData) {
 
 export async function createSoaAction(formData: FormData) {
   const { supabase, organisation } = await requireAppContext();
-  const assessmentId = String(formData.get("assessmentId"));
+  const assessmentId = z.uuid().parse(formData.get("assessmentId"));
   const { data: assessment, error: assessmentError } = await supabase
     .from("assessment_sessions")
     .select("id")
@@ -164,11 +164,31 @@ export async function createSoaAction(formData: FormData) {
     .eq("organisation_id", organisation.id)
     .maybeSingle();
   if (assessmentError || !assessment) throw new Error("Assessment not found in the active workspace");
-  const { data: registerId, error } = await supabase.rpc("create_soa_draft", {
-    target_assessment_id: assessmentId,
-    draft_title: "Statement of Applicability",
+  const { data: registerId, error } = await supabase.rpc("create_or_reuse_soa_review", {
+    target_assessment_session_id: assessmentId,
   });
-  if (error) throw new Error("Could not create SoA");
+  if (error || !registerId) throw new Error("Could not start control review");
+  revalidatePath("/app/assessment");
+  revalidatePath("/app/soa");
+  redirect(`/app/soa/${registerId}`);
+}
+
+export async function createSoaSuccessorAction(formData: FormData) {
+  const { supabase, organisation } = await requireAppContext();
+  const sourceRegisterId = z.uuid().parse(formData.get("registerId"));
+  const { data: source, error: sourceError } = await supabase
+    .from("soa_registers")
+    .select("id")
+    .eq("id", sourceRegisterId)
+    .eq("organisation_id", organisation.id)
+    .maybeSingle();
+  if (sourceError || !source) throw new Error("Finalised statement not found in the active workspace");
+  const { data: registerId, error } = await supabase.rpc("create_or_reuse_soa_successor", {
+    source_register_id: sourceRegisterId,
+  });
+  if (error || !registerId) throw new Error("Could not create next control review version");
+  revalidatePath("/app/assessment");
+  revalidatePath("/app/soa");
   redirect(`/app/soa/${registerId}`);
 }
 

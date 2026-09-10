@@ -13,7 +13,7 @@ vi.mock("@/lib/app-context", () => ({
     } },
   }),
 }));
-vi.mock("../actions", () => ({ createAssessmentAction: vi.fn(), createSoaAction: vi.fn() }));
+vi.mock("../actions", () => ({ createAssessmentAction: vi.fn(), createSoaAction: vi.fn(), createSoaSuccessorAction: vi.fn() }));
 vi.mock("next/navigation", () => ({ usePathname: () => "/app/soa", redirect: (url: string) => { throw new Error(`redirect:${url}`); } }));
 import AssessmentsPage from "./page";
 import SoaPage from "../soa/page";
@@ -31,9 +31,10 @@ describe("assessment and SoA authoring access", () => {
   it("does not offer SoA imports or creation to Members with assessments", async () => {
     state.rows = [{ id: "record-1", title: "Readiness", version: 1 }];
     render(await SoaPage());
-    expect(screen.queryByRole("button", { name: "Generate draft" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Start control review" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create next version" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Import" })).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Readiness v1" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "Continue active review" })).toBeVisible();
   });
   it("redirects Members away from direct SoA import entry", async () => {
     await expect(SoaImportPage()).rejects.toThrow("redirect:/app/soa");

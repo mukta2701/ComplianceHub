@@ -140,6 +140,7 @@ function context(client: ReturnType<typeof fakeSupabase>["client"]) {
     supabase: client,
     user: { id: USER_ID },
     organisation: { id: ORG_ID, name: "Tenant A" },
+    membership: { role: "owner" },
   };
 }
 
@@ -168,6 +169,23 @@ function reviewedStore(): Store {
 }
 
 describe("createSoaAction active workspace scope", () => {
+  it("opens the workspace returned by the atomic review RPC without direct inserts", async () => {
+    const fake = fakeSupabase(reviewedStore());
+    fake.rpc.mockResolvedValue({ data: REGISTER_ID, error: null });
+    hoisted.ctx = context(fake.client);
+    const { createSoaAction } = await import("./actions");
+    await expect(createSoaAction(assessmentFormData())).rejects.toThrow(`REDIRECT:/app/soa/${REGISTER_ID}`);
+    expect(fake.rpc).toHaveBeenCalledExactlyOnceWith("create_or_reuse_soa_review", { target_assessment_session_id: ASSESSMENT_ID });
+  });
+
+  it("does not redirect when the RPC fails or returns no workspace", async () => {
+    const fake = fakeSupabase(reviewedStore());
+    fake.rpc.mockResolvedValue({ data: null, error: null });
+    hoisted.ctx = context(fake.client);
+    const { createSoaAction } = await import("./actions");
+    await expect(createSoaAction(assessmentFormData())).rejects.toThrow("Could not start control review");
+  });
+
   it("rejects an assessment id belonging to another organisation before calling the draft RPC", async () => {
     const store = reviewedStore();
     store.assessment_sessions[0] = { id: ASSESSMENT_ID, organisation_id: OTHER_ORG_ID };
@@ -183,6 +201,35 @@ describe("createSoaAction active workspace scope", () => {
       column: "organisation_id",
       value: ORG_ID,
     });
+  });
+});
+
+describe("createSoaSuccessorAction", () => {
+  it("uses the source register contract and opens the returned active workspace", async () => {
+    const fake = fakeSupabase(reviewedStore());
+    fake.rpc.mockResolvedValue({ data: ASSESSMENT_ID, error: null });
+    hoisted.ctx = context(fake.client);
+    const { createSoaSuccessorAction } = await import("./actions");
+    await expect(createSoaSuccessorAction(formData())).rejects.toThrow(`REDIRECT:/app/soa/${ASSESSMENT_ID}`);
+    expect(fake.rpc).toHaveBeenCalledExactlyOnceWith("create_or_reuse_soa_successor", { source_register_id: REGISTER_ID });
+  });
+
+  it("rejects a source register from another active workspace before invoking the RPC", async () => {
+    const store = reviewedStore();
+    store.soa_registers[0].organisation_id = OTHER_ORG_ID;
+    const fake = fakeSupabase(store);
+    hoisted.ctx = context(fake.client);
+    const { createSoaSuccessorAction } = await import("./actions");
+    await expect(createSoaSuccessorAction(formData())).rejects.toThrow("Finalised statement not found in the active workspace");
+    expect(fake.rpc).not.toHaveBeenCalled();
+  });
+
+  it.each([{ data: null, error: null }, { data: null, error: { message: "private database detail" } }])("handles an unavailable successor without a success redirect", async (result) => {
+    const fake = fakeSupabase(reviewedStore());
+    fake.rpc.mockResolvedValue(result);
+    hoisted.ctx = context(fake.client);
+    const { createSoaSuccessorAction } = await import("./actions");
+    await expect(createSoaSuccessorAction(formData())).rejects.toThrow("Could not create next control review version");
   });
 });
 

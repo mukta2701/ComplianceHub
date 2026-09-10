@@ -21,7 +21,7 @@ insert into public.assessment_sessions(organisation_id,catalogue_version_id,titl
 values(current_setting('app.org_a')::uuid,'00000000-0000-4000-8000-000000000001','Tenant A assessment','50000000-0000-4000-8000-000000000001');
 select set_config('app.session_a',(select id::text from public.assessment_sessions where organisation_id=current_setting('app.org_a')::uuid),true);
 select public.save_assessment_response(current_setting('app.session_a')::uuid,(select id from public.catalogue_questions where code='GOV-01'),'partially','Tenant A evidence',0);
-select set_config('app.register_a',public.create_soa_draft(current_setting('app.session_a')::uuid,'Tenant A SoA')::text,true);
+select set_config('app.register_a',public.create_or_reuse_soa_review(current_setting('app.session_a')::uuid)::text,true);
 update public.soa_items
 set applicable=false,
     status='not_applicable',
@@ -65,9 +65,9 @@ select results_eq(format($$ update public.organisations set name='Tampered' wher
 select results_eq(format($$ delete from public.risks where organisation_id=%L returning id $$,current_setting('app.org_a')),$$ select null::uuid where false $$,'cross-tenant deletes affect no rows');
 
 select throws_ok(format($$ select public.save_assessment_response(%L,(select id from public.catalogue_questions where code='GOV-01'),'yes','Attack',1) $$,current_setting('app.session_a')),'42501','assessment not found','assessment response RPC rejects another tenant');
-select throws_ok(format($$ select public.create_soa_draft(%L,'Attack') $$,current_setting('app.session_a')),'42501','assessment not found','SoA draft RPC rejects another tenant');
+select throws_ok(format($$ select public.create_or_reuse_soa_review(%L) $$,current_setting('app.session_a')),'42501','Assessment unavailable','control review RPC rejects another tenant');
 select throws_ok(format($$ select public.finalise_soa(%L) $$,current_setting('app.register_a')),'42501','SoA register not found','finalisation RPC rejects another tenant');
-select throws_ok(format($$ select public.create_soa_successor(%L,'Attack') $$,current_setting('app.snapshot_a')),'42501','SoA snapshot not found','successor RPC rejects another tenant');
+select throws_ok(format($$ select public.create_or_reuse_soa_successor(%L) $$,current_setting('app.register_a')),'42501','Finalised statement unavailable','successor RPC rejects another tenant');
 
 select * from finish();
 rollback;

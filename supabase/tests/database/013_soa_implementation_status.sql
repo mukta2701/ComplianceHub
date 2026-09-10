@@ -10,7 +10,7 @@ select set_config('app.org_a',public.create_organisation_with_owner('SoA Status 
 insert into public.assessment_sessions(organisation_id,catalogue_version_id,title,created_by)
 values(current_setting('app.org_a')::uuid,'00000000-0000-4000-8000-000000000001','Tenant A assessment','50000000-0000-4000-8000-000000000101');
 select set_config('app.session_a',(select id::text from public.assessment_sessions where organisation_id=current_setting('app.org_a')::uuid),true);
-select set_config('app.reg_a',public.create_soa_draft(current_setting('app.session_a')::uuid,'Tenant A SoA')::text,true);
+select set_config('app.reg_a',public.create_or_reuse_soa_review(current_setting('app.session_a')::uuid)::text,true);
 
 -- (after building a draft register for tenant A whose id is in current_setting('app.reg_a'))
 select is(
