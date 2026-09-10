@@ -178,6 +178,10 @@ test.describe.serial("connected controls workspace", () => {
     const memberContext = await browser.newContext({ baseURL: testInfo.project.use.baseURL as string, viewport: { width: 390, height: 844 } });
     const memberPage = await memberContext.newPage();
     await signIn(memberPage, fixture.actors[1]);
+    await memberPage.goto(`/app/assessment/${assessmentId}`);
+    await expect(memberPage.getByRole("heading", { name: "Fictional connected controls assessment", exact: true })).toBeVisible();
+    await expect(memberPage.getByRole("link", { name: "View control review" })).toBeVisible();
+    await expect(memberPage.getByRole("button", { name: "Review controls" })).toHaveCount(0);
     await memberPage.goto(registerUrl);
     await openControl(memberPage, mappedControlTitle);
     await expect(memberPage.getByRole("combobox", { name: "Applicability decision", exact: true })).toBeDisabled();

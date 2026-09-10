@@ -104,8 +104,8 @@ depth for security-invoker functions.
 | `create_policy_feedback(uuid,text,text)` | Any current member on an approved policy | Derives the organisation, policy version, author, and time and creates the thread and first immutable comment atomically. |
 | `complete_recurring_task(uuid)` | Operator | Checks the operator before locking/completing and creating the successor. |
 | `create_evidence_record(jsonb)` | Operator | Derives the target organisation from the validated payload and checks operator before insert/supersession. |
-| `create_soa_draft(uuid,text)` | Operator | Target assessment must belong to an operated organisation. |
-| `create_soa_successor(uuid,text)` | Operator | Source snapshot must belong to an operated organisation. |
+| `create_or_reuse_soa_review(uuid)` | Operator | Locks and rechecks the source assessment, reuses an existing active review when present, or creates one complete 93-control working register atomically. |
+| `create_or_reuse_soa_successor(uuid)` | Operator | Locks and rechecks a finalised source register, reuses an existing successor when present, or creates a complete editable successor while removing unavailable owner assignments. |
 | `finalise_soa(uuid)` | Operator | Register must belong to an operated organisation; existing completeness/concurrency checks remain. |
 | `notify_policy_reaccept(uuid,text)` | Operator | Policy must belong to an operated organisation. |
 | `publish_leadership_report(uuid,jsonb)` | Operator | Derives organisation name, publisher, and time; rejects any payload outside the exact bounded `ReadinessReport` shape and inserts an immutable snapshot. |
@@ -114,6 +114,7 @@ depth for security-invoker functions.
 | `submit_task_contribution(uuid,uuid,bigint,text,uuid)` | Current task assignee | Locks live membership and open task; checks database-owned assignment revision, tenant, bounded note and actor/request idempotency. One pending submission per current assignment; historical pending notes remain visibly obsolete after reassignment. |
 | `review_task_contribution(uuid,uuid,text,text,uuid)` | Independent Operator | Locks current memberships and task; rechecks assignment and open state, rejects self-review, binds retry to exact submission/decision/rationale, and atomically creates linked note evidence on acceptance. Does not change task or finding status. |
 | `set_policy_feedback_status(uuid,boolean)` | Operator | Locks the thread and atomically resolves or reopens it with trusted resolver metadata. |
+| `update_soa_decisions_guarded(uuid,jsonb)` | Operator | Locks the active register and each requested decision, rejects stale revisions and invalid owners or state combinations, and saves the whole batch or nothing. Direct authenticated edits to `soa_items` are revoked. |
 
 ### Lifecycle/self-service exceptions
 
