@@ -6,6 +6,7 @@ test.skip(!teamTestEnabled || process.env.COMPLIANCEHUB_UI_DEMO !== "1", "Isolat
 
 test("programme overview shows real counts, source links and readable charts across screen sizes", async ({ page }, testInfo) => {
   test.setTimeout(120_000);
+  await page.emulateMedia({ reducedMotion: "reduce" });
   const fixture = await createTeamFixture();
   const { coordinator, organisationId, actors } = fixture;
   const today = new Date().toISOString().slice(0, 10);
@@ -75,8 +76,8 @@ test("programme overview shows real counts, source links and readable charts acr
   await page.getByText("Why this needs attention", { exact: true }).first().click();
   await expect(page.getByText(/still needs an applicability decision before/).first()).toBeVisible();
   await page.getByText("Why this needs attention", { exact: true }).first().click();
-  for (const width of [1440, 883, 393]) {
-    await page.setViewportSize({ width, height: width === 393 ? 851 : 1000 });
+  for (const width of [1440, 883, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 });
     await page.goto("/app");
     await expect(page.getByRole("heading", { name: "Programme overview", exact: true })).toBeVisible();
     const attention = page.getByRole("navigation", { name: "Programme attention" });
@@ -84,14 +85,63 @@ test("programme overview shows real counts, source links and readable charts acr
     await expect(attention.getByRole("link", { name: /Overdue tasks/ })).toContainText("1");
     await expect(attention.getByRole("link", { name: /Policies in review/ })).toContainText("1");
     await expect(attention.getByRole("link", { name: /Evidence expiring/ })).toContainText("1");
+    const metricPositions = await attention.getByRole("link").evaluateAll((links) => links.map((link) => {
+      const box = link.getBoundingClientRect();
+      return { left: Math.round(box.left), top: Math.round(box.top) };
+    }));
+    if (width === 1440) {
+      const tops = metricPositions.map(({ top }) => top);
+      expect(Math.max(...tops) - Math.min(...tops)).toBeLessThanOrEqual(1);
+      const firstMetric = attention.getByRole("link").first();
+      await firstMetric.hover();
+      await expect(firstMetric).not.toHaveCSS("transform", "none");
+      await page.mouse.move(0, 0);
+    } else {
+      expect(Math.abs(metricPositions[0].top - metricPositions[1].top)).toBeLessThanOrEqual(1);
+      expect(metricPositions[2].top).toBeGreaterThan(metricPositions[0].top + 20);
+    }
     await expect(page.getByText("Current position · latest Statement of Applicability")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Review programme scope" })).toHaveAttribute("href", "/app/baseline");
+    await expect(page.getByRole("link", { name: "Continue your baseline" })).toHaveCount(0);
     await expect(page.getByRole("heading", { name: "Coming up", exact: true })).toBeVisible();
+    if (width === 390) {
+      for (const control of [
+        page.getByRole("button", { name: "Open navigation" }),
+        page.getByRole("link", { name: "View report" }),
+        page.getByRole("link", { name: "View controls" }),
+        page.getByRole("link", { name: "Review programme scope" }),
+      ]) {
+        const box = await control.boundingBox();
+        expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+      }
+    }
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
     expect(overflow).toBe(false);
     const scan = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze();
     expect(scan.violations.filter((item) => item.impact === "serious" || item.impact === "critical")).toEqual([]);
     await page.screenshot({ animations: "disabled", path: testInfo.outputPath(`dashboard-${width}.png`), fullPage: true });
   }
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/app");
+  const firstMetric = page.getByRole("navigation", { name: "Programme attention" }).getByRole("link").first();
+  await firstMetric.focus();
+  await expect(firstMetric).toBeFocused();
+  const motionContract = await firstMetric.evaluate((node) => {
+    const style = getComputedStyle(node);
+    return {
+      animationName: style.animationName,
+      duration: Number.parseFloat(style.animationDuration) * 1000,
+      opacity: style.opacity,
+      outlineWidth: Number.parseFloat(style.outlineWidth),
+      transitionProperties: style.transitionProperty.split(",").map((property) => property.trim()),
+    };
+  });
+  expect(motionContract.animationName).not.toBe("none");
+  expect(motionContract.duration).toBeLessThanOrEqual(440);
+  expect(motionContract.opacity).toBe("1");
+  expect(motionContract.outlineWidth).toBeGreaterThanOrEqual(2);
+  expect(motionContract.transitionProperties).not.toContain("opacity");
   await page.getByText("How this score works", { exact: true }).click();
   await expect(page.getByText(/Pending decisions count as zero/)).toBeVisible();
   await page.getByRole("navigation", { name: "Programme attention" }).getByRole("link", { name: /Overdue tasks/ }).click();
@@ -105,7 +155,7 @@ test("empty programme shows measured zeros, absent controls and the existing mem
   const result = await coordinator.from("tasks").update({ due_on: null }).eq("organisation_id", organisationId);
   expect(result.error).toBeNull();
   await signIn(page, actors[0]);
-  await page.setViewportSize({ width: 393, height: 851 });
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/app");
   const attention = page.getByRole("navigation", { name: "Programme attention" });
   for (const label of ["Open risks", "Overdue tasks", "Policies in review", "Evidence expiring"]) {

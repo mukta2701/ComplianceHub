@@ -23,6 +23,12 @@ These are proposed layouts for existing product areas. New graphs, report blocks
 
 The overview gives equal prominence to what changed and what needs a decision. It separates risks, overdue tasks, pending reviews and expiring evidence. Chart panels cover reviewed controls, risk distribution, evidence freshness and team work.
 
+### Feasible dashboard refinement — 10 September 2026
+
+![Feasible programme dashboard refinement](06-dashboard-refinement-feasible.png)
+
+This refined target adds the stronger cobalt, teal, amber, coral and violet treatment approved after the first implementation review. It also removes unsupported concepts: the large panel uses the application's current five-state control maturity data, `Programme basis` gives the saved scope a clear home, and upcoming work replaces the unimplemented work-by-team chart. Counts and dates in the image remain fictional; the running interface must always use workspace records.
+
 ## 2. Work, evidence and review
 
 ![Work and review concepts](02-work-and-review.png)

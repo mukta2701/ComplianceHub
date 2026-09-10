@@ -278,6 +278,13 @@ describe("Dashboard maturity clarity", () => {
 
 
 describe("Programme overview attention summaries", () => {
+  it("keeps programme setup contextual instead of presenting baseline jargon as a top-level action", async () => {
+    render(await AppHome());
+    expect(screen.queryByRole("link", { name: "Continue your baseline" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Review programme scope" })).toHaveAttribute("href", "/app/baseline");
+    expect(screen.getByRole("link", { name: "View report" })).toHaveAttribute("href", "/app/reports/readiness");
+  });
+
   it("uses workspace counts rather than the truncated chart and action rows", async () => {
     hoisted.responses.risks[2] = { data: null, count: 612 };
     hoisted.responses.tasks[1] = { data: null, count: 37 };

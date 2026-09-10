@@ -113,6 +113,7 @@
 .planActions form { display:flex; align-items:center; gap:6px; }
 .planActions select { min-height:34px; }
 .deleteAction { border:0; background:none; color:var(--red); }
+.table td:last-child .deleteAction { color:var(--red); }
 .addPlan { margin-top:16px; border-top:1px solid var(--border); }
 .addPlan summary { cursor:pointer; padding:16px 0 0; color:var(--blue); font-size:13px; font-weight:750; }
 .addPlan form { max-width:none; padding:18px 0 0; }

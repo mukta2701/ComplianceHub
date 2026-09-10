@@ -191,7 +191,7 @@ test("fictional workspace remains keyboard-operable and contained at desktop, ta
   const accessibilityFindings: unknown[] = [];
   const routes = [
     { path: "/app", heading: "Programme overview", screenshot: "dashboard" },
-    { path: "/app/tasks", heading: "Tasks", screenshot: "tasks" },
+    { path: "/app/tasks", heading: "Work queue", screenshot: "tasks" },
     { path: "/app/risks", heading: "Risk register", screenshot: "risk-register" },
     { path: "/app/evidence", heading: "Evidence vault", screenshot: "evidence" },
     { path: "/app/policies", heading: "Policy library", screenshot: "policies" },

@@ -36,12 +36,12 @@ const SOURCE_LABEL: Record<string, string> = {
 // "absent" (decided, not implemented) both mean 0% implemented, so they fold into
 // one "Not started" segment; the coloured steps follow the recorded maturity levels.
 const MATURITY: ReadonlyArray<{ key: string; label: string; color: string; statuses: SoaStatus[] }> = [
-  { key: "not_started", label: "Not started", color: "#b9c5d6", statuses: ["pending", "absent"] },
-  { key: "in_progress", label: "In progress", color: "#9fbef5", statuses: ["in_progress"] },
-  { key: "established", label: "Established", color: "#718ce2", statuses: ["established"] },
-  { key: "operational", label: "Operational", color: "#35a69f", statuses: ["operational"] },
-  { key: "advanced", label: "Advanced", color: "#147f79", statuses: ["advanced"] },
-  { key: "not_applicable", label: "Not applicable", color: "#e0e5ee", statuses: ["not_applicable"] },
+  { key: "not_started", label: "Not started", color: "#b9c7dc", statuses: ["pending", "absent"] },
+  { key: "in_progress", label: "In progress", color: "var(--ch-chart-blue)", statuses: ["in_progress"] },
+  { key: "established", label: "Established", color: "var(--ch-chart-violet)", statuses: ["established"] },
+  { key: "operational", label: "Operational", color: "#31b8ac", statuses: ["operational"] },
+  { key: "advanced", label: "Advanced", color: "var(--ch-chart-teal)", statuses: ["advanced"] },
+  { key: "not_applicable", label: "Not applicable", color: "#dfe6f0", statuses: ["not_applicable"] },
 ];
 
 const BAND_COLOR: Record<RiskBand, string> = {
@@ -255,11 +255,11 @@ export default async function AppHome() {
       eyebrow={organisation.name.toUpperCase()}
       title="Programme overview"
       body="What needs attention, where your programme stands, and what comes next."
-      action={<><Link className="button secondary" href="/app/baseline">Continue your baseline</Link><Link className="button primary" href="/app/reports/readiness"><Icon name="file" />View report</Link></>}
+      action={<Link className="button primary" href="/app/reports/readiness"><Icon name="file" />View report</Link>}
     />
 
     <nav aria-label="Programme attention" className={styles.attention}>
-      {attention.map((item) => <Link key={item.label} href={item.href} className={styles.metric}>
+      {attention.map((item) => <Link key={item.label} href={item.href} className={styles.metric} data-tone={item.value === 0 ? "neutral" : item.tone}>
         <span className={styles.metricIcon} data-tone={item.value === 0 ? "neutral" : item.tone}><Icon name={item.icon} /></span>
         <span className={styles.metricBody}><span>{item.label}</span><strong>{item.value == null ? "—" : item.value.toLocaleString("en-GB")}</strong><small>{item.value == null ? "Count unavailable" : item.detail}</small></span>
         <Icon name="arrow" className={styles.metricArrow} />
@@ -275,6 +275,10 @@ export default async function AppHome() {
           <p>{readinessSummary.total > 0
             ? `${readinessSummary.total} controls scored · ${totalControls - readinessSummary.total} excluded as not applicable.`
             : totalControls > 0 ? "All controls are marked not applicable, so there is no maturity score." : "Add controls to your SoA to start measuring maturity."} Does not verify evidence or audit readiness.</p>
+        </div>
+        <div className={styles.positionContext}>
+          <span><Icon name="shield" /><span><b>Programme basis</b><small>Your scope and objective define what this position covers.</small></span></span>
+          <Link href="/app/baseline">Review programme scope <Icon name="arrow" /></Link>
         </div>
         {totalControls > 0 ? <div className={styles.maturityBars} aria-label="Control maturity distribution">
           {maturityShown.map((bucket) => <div className={styles.maturityRow} key={bucket.key}>
@@ -342,9 +346,9 @@ export default async function AppHome() {
             <div className="donut-center"><div className="d-count">{evidenceTotal}</div><div className="d-sub">items</div></div>
           </div>
           <div className="donut-legend">
-            <div className="seg-row"><span className="seg-dot" style={{ background: "#168b83" }} />Current<b>{evidence.current}</b></div>
-            <div className="seg-row"><span className="seg-dot" style={{ background: "var(--amber)" }} />Expiring<b>{evidence.expiring}</b></div>
-            <div className="seg-row"><span className="seg-dot" style={{ background: "var(--red)" }} />Expired<b>{evidence.expired}</b></div>
+            <div className="seg-row"><span className="seg-dot" style={{ background: "var(--ch-chart-teal)" }} />Current<b>{evidence.current}</b></div>
+            <div className="seg-row"><span className="seg-dot" style={{ background: "var(--ch-chart-amber)" }} />Expiring<b>{evidence.expiring}</b></div>
+            <div className="seg-row"><span className="seg-dot" style={{ background: "var(--ch-chart-coral)" }} />Expired<b>{evidence.expired}</b></div>
           </div>
         </div>
         <div className="card-foot"><span>Recorded freshness, not human approval</span><Link href="/app/evidence">Open evidence <Icon name="arrow" /></Link></div>
