@@ -80,6 +80,24 @@ async function activate(button: Locator) {
   await button.press("Enter");
 }
 
+async function selectEvidenceByTitle(page: Page, title: string) {
+  const record = page.getByRole("link").filter({ hasText: title }).first();
+  await expect(record).toBeVisible();
+  const href = await record.getAttribute("href");
+  if (!href) throw new Error(`Evidence record "${title}" did not expose a detail link`);
+  const target = new URL(href, "http://127.0.0.1");
+  const evidenceId = target.searchParams.get("evidence");
+  if (!evidenceId) throw new Error(`Evidence record "${title}" did not identify the selected evidence`);
+  expect(target.hash).toBe(`#evidence-${evidenceId}`);
+  await Promise.all([
+    page.waitForURL((url) => url.searchParams.get("evidence") === evidenceId && url.hash === `#evidence-${evidenceId}`),
+    record.click(),
+  ]);
+  const detail = page.locator(`#evidence-${evidenceId}`);
+  await expect(detail).toBeVisible();
+  return detail;
+}
+
 // The workspace nav is a horizontally scrollable strip on narrow viewports, so a
 // link can be clipped out of the clickable area — scroll it in before clicking.
 async function openSection(page: Page, name: string) {
@@ -130,14 +148,14 @@ test("a user runs the Phase 1 workflow loop", async ({ page, request }, testInfo
   await manualTaskRow.getByRole("button", { name: "Save" }).click();
 
   await openSection(page, "Evidence");
-  await page.getByRole("link", { name: "Add evidence" }).click();
+  await page.locator("header.page-heading").getByRole("link", { name: "Add evidence" }).click();
   const currentEvidenceTitle = `Access review minutes ${suffix}`;
-  await page.getByRole("textbox", { name: "Title", exact: true }).fill(currentEvidenceTitle);
-  await page.getByLabel("Kind").selectOption("link");
-  await page.getByLabel(/^URL/).fill("https://example.test/minutes");
+  await page.getByRole("textbox", { name: "Evidence title", exact: true }).fill(currentEvidenceTitle);
+  await page.getByLabel("Evidence type").selectOption("link");
+  await page.getByLabel("Web address").fill("https://example.test/minutes");
   await page.getByLabel("Valid until").fill(nextYear);
   await activate(page.getByRole("button", { name: "Save evidence" }));
-  const currentEvidence = page.getByRole("heading", { name: currentEvidenceTitle }).locator("xpath=ancestor::section");
+  const currentEvidence = await selectEvidenceByTitle(page, currentEvidenceTitle);
   await expect(currentEvidence.getByText("current", { exact: true })).toBeVisible();
   await currentEvidence.getByText("Manage links", { exact: true }).click();
   await currentEvidence.getByLabel(`Link ${currentEvidenceTitle} to a control`).selectOption({ index: 1 });
@@ -187,7 +205,7 @@ test("a user runs the Phase 1 workflow loop", async ({ page, request }, testInfo
   await page.locator('select[name="assessmentId"]').selectOption({ index: 1 });
   await Promise.all([
     page.waitForURL(/\/app\/soa\/[0-9a-f-]+$/),
-    activate(page.getByRole("button", { name: "Generate draft" })),
+    activate(page.getByRole("button", { name: "Start control review" })),
   ]);
   await page.getByRole("searchbox", { name: "Search controls" }).fill(controlTitle);
   const soaQueue = page.getByRole("region", { name: "SoA review queue" });
@@ -199,13 +217,13 @@ test("a user runs the Phase 1 workflow loop", async ({ page, request }, testInfo
 
   await page.goto("/app/evidence/new");
   const staleEvidenceTitle = `Stale control evidence ${suffix}`;
-  await page.getByRole("textbox", { name: "Title", exact: true }).fill(staleEvidenceTitle);
-  await page.getByLabel("Kind").selectOption("link");
-  await page.getByLabel(/^URL/).fill("https://example.test/stale-evidence");
+  await page.getByRole("textbox", { name: "Evidence title", exact: true }).fill(staleEvidenceTitle);
+  await page.getByLabel("Evidence type").selectOption("link");
+  await page.getByLabel("Web address").fill("https://example.test/stale-evidence");
   await page.getByLabel("Owner").selectOption({ label: "Phase One Owner" });
   await page.getByLabel("Valid until").fill(yesterday);
   await activate(page.getByRole("button", { name: "Save evidence" }));
-  const staleEvidence = page.getByRole("heading", { name: staleEvidenceTitle }).locator("xpath=ancestor::section");
+  const staleEvidence = await selectEvidenceByTitle(page, staleEvidenceTitle);
   await expect(staleEvidence.getByText("expired", { exact: true })).toBeVisible();
   await staleEvidence.getByText("Manage links", { exact: true }).click();
   const controlOptions = await staleEvidence.getByLabel(`Link ${staleEvidenceTitle} to a control`).locator("option").allTextContents();

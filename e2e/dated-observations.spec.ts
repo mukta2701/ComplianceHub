@@ -1,11 +1,18 @@
 import { existsSync, readFileSync } from "node:fs";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { signIn, teamTestEnabled } from "./helpers/team-workspace";
 
 const fixturePath = "artifacts/dated-observations/demo.json";
 const enabled = teamTestEnabled && process.env.COMPLIANCEHUB_OBSERVATION_DEMO === "1" && existsSync(fixturePath);
 test.skip(!enabled, "Requires the explicitly prepared isolated dated-observation fixture.");
+
+async function openEvidenceDetail(page: Page, evidenceId: string) {
+  await page.goto(`/app/evidence?evidence=${evidenceId}#evidence-${evidenceId}`);
+  const detail = page.locator(`#evidence-${evidenceId}`);
+  await expect(detail).toBeVisible();
+  return detail;
+}
 
 test("dated results remain distinguishable and earlier reviewed evidence stays linked", async ({ page }, testInfo) => {
   const fixture = JSON.parse(readFileSync(fixturePath, "utf8")) as {
@@ -14,26 +21,20 @@ test("dated results remain distinguishable and earlier reviewed evidence stays l
   };
   await page.setViewportSize(testInfo.project.name === "mobile" ? { width: 393, height: 851 } : { width: 1440, height: 1000 });
   await signIn(page, { id: "fictional-owner", email: fixture.email, password: fixture.password });
-  await page.goto("/app/evidence");
-  const earlier = page.locator(`#evidence-${fixture.firstEvidenceId}`);
-  await expect(earlier).toContainText("Collected 2026-08-01");
-  const details = earlier.getByText("Evidence details", { exact: true });
-  await details.focus();
-  await expect(details).toBeFocused();
-  await details.press("Enter");
+  const earlier = await openEvidenceDetail(page, fixture.firstEvidenceId);
+  await expect(earlier).toContainText("1 Aug 2026");
   await expect(earlier.getByText(/^1 protected/)).toBeVisible();
   await expect(earlier.getByRole("link", { name: "Task: Earlier observation review — fictional" })).toHaveAttribute("href", `/app/tasks/${fixture.taskId}`);
   await earlier.screenshot({ path: testInfo.outputPath("earlier-evidence.png") });
   for (const record of fixture.evidence.filter((item) => item.collected_on === "2026-09-01")) {
-    const card = page.locator(`#evidence-${record.id}`);
-    await expect(card).toContainText("Collected 2026-09-01");
+    const card = await openEvidenceDetail(page, record.id);
+    await expect(card).toContainText("1 Sep 2026");
     await expect(card).toContainText("Resource:");
-    await card.getByText("Evidence details", { exact: true }).click();
     await expect(card.getByText(record.description, { exact: true })).toBeVisible();
   }
-  const legacy = page.locator(`#evidence-${fixture.legacyEvidenceId}`);
+  const legacy = await openEvidenceDetail(page, fixture.legacyEvidenceId);
   await expect(legacy).toContainText("Legacy observation identity unknown");
-  await expect(legacy).toContainText("Collected 2026-07-01");
+  await expect(legacy).toContainText("1 Jul 2026");
   await expect(legacy).toContainText("Resource: fictional-legacy-example");
   await legacy.screenshot({ path: testInfo.outputPath("legacy-evidence.png") });
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);

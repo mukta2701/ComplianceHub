@@ -49,4 +49,30 @@ describe("evidence management access", () => {
     expect(upload).not.toHaveBeenCalled();
     expect(hoisted.enforceRateLimit).not.toHaveBeenCalled();
   });
+
+  it("lets an Owner reach the existing create, link, unlink and withdrawal interfaces", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: "evidence-1", error: null });
+    const insert = vi.fn().mockResolvedValue({ error: null });
+    const terminal = { then: (resolve: (value: unknown) => unknown) => Promise.resolve({ error: null }).then(resolve) };
+    const deleteEq = vi.fn(() => terminal);
+    const updateEq = vi.fn(() => terminal);
+    const from = vi.fn((table: string) => table === "evidence_links"
+      ? { insert, delete: vi.fn(() => ({ eq: vi.fn(() => ({ eq: deleteEq })) })) }
+      : { update: vi.fn(() => ({ eq: vi.fn(() => ({ eq: updateEq })) })) });
+    hoisted.ctx = {
+      supabase: { from, rpc, storage: { from: vi.fn() } },
+      user: { id: "00000000-0000-4000-8000-000000000002" }, organisation: { id: "00000000-0000-4000-8000-000000000001" }, membership: { role: "owner" },
+    };
+
+    await createEvidenceAction(form({ title: "Quarterly access review", kind: "note", description: "Reviewed sample" }));
+    await linkEvidenceAction(form({ evidenceId: "evidence-1", target: "control:control-1" }));
+    await unlinkEvidenceAction(form({ linkId: "link-1" }));
+    await withdrawEvidenceAction(form({ id: "evidence-1" }));
+
+    expect(hoisted.enforceRateLimit).toHaveBeenCalledOnce();
+    expect(rpc).toHaveBeenCalledWith("create_evidence_record", expect.any(Object));
+    expect(insert).toHaveBeenCalledWith(expect.objectContaining({ organisation_id: "00000000-0000-4000-8000-000000000001", evidence_id: "evidence-1", control_id: "control-1" }));
+    expect(deleteEq).toHaveBeenCalledWith("organisation_id", "00000000-0000-4000-8000-000000000001");
+    expect(updateEq).toHaveBeenCalledWith("organisation_id", "00000000-0000-4000-8000-000000000001");
+  });
 });

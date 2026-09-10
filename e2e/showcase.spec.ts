@@ -87,13 +87,15 @@ test("rehearses the saved connected showcase journey without writes", async ({ p
   await expect(page.getByText(/Linked risk/)).toBeVisible();
   await checkPage(page, "treatment task", errors);
 
-  await clickPath(page, "/app/evidence");
-  await expect(page.locator("span.pill").filter({ hasText: "Policy: NS-POL-001: Northstar access review policy" })).toBeVisible();
-  await expect(page.locator("span.pill").filter({ hasText: /^Risk NS-R-001/ })).toBeVisible();
-  await expect(page.locator("span.pill").filter({ hasText: /^Task: Treatment plan NS-RTP-001/ })).toBeVisible();
-  await expect(page.getByText("Task: undefined")).toHaveCount(0);
+  await page.goto(`/app/evidence?evidence=${manifest.ids.evidence}#evidence-${manifest.ids.evidence}`);
+  const evidenceDetail = page.locator(`#evidence-${manifest.ids.evidence}`);
+  await expect(evidenceDetail).toBeVisible();
+  await expect(evidenceDetail.locator("span.pill").filter({ hasText: "Policy: NS-POL-001: Northstar access review policy" })).toBeVisible();
+  await expect(evidenceDetail.locator("span.pill").filter({ hasText: /^Risk NS-R-001/ })).toBeVisible();
+  await expect(evidenceDetail.locator("span.pill").filter({ hasText: /^Task: Treatment plan NS-RTP-001/ })).toBeVisible();
+  await expect(evidenceDetail.getByText("Task: undefined")).toHaveCount(0);
   await page.reload();
-  await expect(page.locator("span.pill").filter({ hasText: "Policy: NS-POL-001: Northstar access review policy" })).toBeVisible();
+  await expect(evidenceDetail.locator("span.pill").filter({ hasText: "Policy: NS-POL-001: Northstar access review policy" })).toBeVisible();
   await checkPage(page, "evidence", errors);
 
   await clickPath(page, "/app/audits");
@@ -177,16 +179,20 @@ test("all showcase sections load with honest status and readable layouts", async
   await page.goto("/app/reports/readiness");
   await expect(page.getByText("MATURITY", { exact: true })).toBeVisible();
   await expect(page.getByText("READY", { exact: true })).toHaveCount(0);
-  await page.goto("/app/evidence");
+  await page.goto(`/app/evidence?evidence=${manifest.ids.evidence}#evidence-${manifest.ids.evidence}`);
   const sample = page.locator(`#evidence-${manifest.ids.evidence}`);
-  await expect(sample.locator(".evidence-preview")).toBeVisible();
-  await expect(sample.getByRole("button", { name: "Withdraw", exact: true })).not.toBeVisible();
-  await sample.getByText("Manage record", { exact: true }).click();
-  await expect(sample.getByRole("button", { name: "Withdraw", exact: true })).toBeVisible();
+  await expect(sample).toBeVisible();
   await expect(sample.getByRole("link", { name: "Supersede", exact: true })).toHaveAttribute("href", `/app/evidence/new?replaces=${manifest.ids.evidence}`);
+  await expect(sample.getByRole("button", { name: "Confirm withdrawal", exact: true })).not.toBeVisible();
+  await sample.getByText("Withdraw evidence", { exact: true }).click();
+  await expect(sample.getByRole("button", { name: "Confirm withdrawal", exact: true })).toBeVisible();
+  const manageLinks = sample.getByText("Manage links", { exact: true });
+  await manageLinks.click();
+  await expect(sample.getByLabel(/Link .+ to a control/)).toBeVisible();
   // Inspect maintenance affordances without altering the saved fictional records.
   await page.reload();
-  await expect(sample.getByRole("button", { name: "Withdraw", exact: true })).not.toBeVisible();
+  await expect(sample.getByRole("button", { name: "Confirm withdrawal", exact: true })).not.toBeVisible();
+  await expect(sample.getByLabel(/Link .+ to a control/)).not.toBeVisible();
 });
 
 test("shows the completed fictional human-review chain without changing records", async ({ page }) => {
@@ -201,7 +207,7 @@ test("shows the completed fictional human-review chain without changing records"
   await expect(page.locator('select[name="status"]')).toHaveValue("done");
   await expect(page.locator(`a[href="/app/audits/${ids.human_audit}"]`).first()).toBeVisible();
   await checkPage(page, "completed human-review task", errors);
-  await page.goto(`/app/evidence?evidence=${ids.human_evidence}`);
+  await page.goto(`/app/evidence?evidence=${ids.human_evidence}#evidence-${ids.human_evidence}`);
   const evidence = page.locator(`#evidence-${ids.human_evidence}`);
   await expect(evidence).toContainText("FICTIONAL HUMAN REVIEW");
   await expect(evidence).toContainText("not live provider verification");

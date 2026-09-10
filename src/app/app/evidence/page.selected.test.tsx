@@ -6,7 +6,7 @@ const id = "11111111-1111-4111-8111-111111111111";
 vi.mock("@/lib/app-context", () => ({ requireAppContext: async () => ({
   organisation: { id: "workspace-1" }, membership: { role: "member" },
   supabase: { from(table: string) {
-    const q = { select: () => q, order: () => q, range: () => q, limit: () => q, in: () => q,
+    const q = { select: () => q, order: () => q, range: () => q, limit: () => q, in: () => q, or: () => q,
       eq: (column: string, value: unknown) => { if (table === "evidence") state.filters.push([column, value]); return q; },
       maybeSingle: async () => table === "evidence" ? { data: state.missing ? null : { id, title: "Older linked verification", description: "Immutable older review note", kind: "note", status: "current", collected_on: "2026-01-01", valid_until: null, evidence_links: [] }, error: state.failed ? { message: "private detail" } : null } : { data: null, error: null },
       then: (resolve: (value: unknown) => unknown) => Promise.resolve({ data: table === "evidence" ? Array.from({ length: state.recentCount }, (_, index) => ({

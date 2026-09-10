@@ -5,8 +5,10 @@ import { Icon } from "@/components/icons";
 import { one } from "@/lib/supabase/one";
 import { downloadEvidenceAction, linkEvidenceAction, unlinkEvidenceAction, withdrawEvidenceAction } from "./actions";
 import { loadOfficialGitHubEvidenceProvenance, parseOfficialRecordSelection } from "@/features/github/application/github-record-provenance";
-import { OfficialGitHubEvidenceCard } from "@/features/github/components/github-record-provenance";
+import { OfficialGitHubEvidenceProvenancePanel } from "@/features/github/components/github-record-provenance";
+import { githubEvidenceTitle } from "@/features/github/components/github-check-presentation";
 import { AiSuggestionPanel } from "@/components/ai-suggestion-panel";
+import { addIsoDays, deriveEffectiveEvidenceStatus, EXPIRY_WARNING_DAYS, type EvidenceStatus } from "@/features/evidence/domain/evidence";
 import styles from "./evidence.module.css";
 
 const PAGE_SIZE = 25;
@@ -47,36 +49,58 @@ function displayDate(value: string | null | undefined) {
   return new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeZone: "UTC" }).format(new Date(`${value}T00:00:00Z`));
 }
 
+function filterCondition(filter: EvidenceFilter, today: string, warningDate: string): { status?: EvidenceStatus; statuses?: EvidenceStatus[]; or?: string } {
+  if (filter === "current") return { status: "current", or: `valid_until.is.null,valid_until.gt.${warningDate}` };
+  if (filter === "expiring") return { or: `and(status.eq.expiring,or(valid_until.is.null,valid_until.gte.${today})),and(status.eq.current,valid_until.gte.${today},valid_until.lte.${warningDate})` };
+  if (filter === "expired") return { or: `status.eq.expired,and(status.in.(current,expiring),valid_until.lt.${today})` };
+  if (filter === "superseded" || filter === "withdrawn") return { status: filter };
+  return {};
+}
+
 export default async function EvidencePage({ searchParams }: { searchParams: Promise<SearchParams> } = { searchParams: Promise.resolve({}) }) {
   const { supabase, organisation, membership } = await requireAppContext();
   const isMember = membership?.role === "member";
   const params = await searchParams;
   const filter = parseFilter(params.status);
-  const page = parsePage(params.page);
-  const from = (page - 1) * PAGE_SIZE;
-  const to = from + PAGE_SIZE - 1;
-
-  let listQuery = supabase.from("evidence").select(EVIDENCE_COLUMNS, { count: "exact" }).eq("organisation_id", organisation.id);
-  if (filter !== "all") listQuery = listQuery.eq("status", filter);
-
-  const [listResult, currentResult, expiringResult, expiredResult, archivedResult, aiResult] = await Promise.all([
-    listQuery.order("created_at", { ascending: false }).order("id", { ascending: false }).range(from, to),
-    supabase.from("evidence").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).eq("status", "current"),
-    supabase.from("evidence").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).eq("status", "expiring"),
-    supabase.from("evidence").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).eq("status", "expired"),
-    supabase.from("evidence").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).in("status", ["superseded", "withdrawn"]),
+  const today = new Date().toISOString().slice(0, 10);
+  const warningDate = addIsoDays(today, EXPIRY_WARNING_DAYS);
+  const countQuery = (statusFilter: EvidenceFilter | "history") => {
+    let query = supabase.from("evidence").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id);
+    if (statusFilter === "history") return query.in("status", ["superseded", "withdrawn"]);
+    const condition = filterCondition(statusFilter, today, warningDate);
+    if (condition.status) query = query.eq("status", condition.status);
+    if (condition.statuses) query = query.in("status", condition.statuses);
+    if (condition.or) query = query.or(condition.or);
+    return query;
+  };
+  const [totalResult, currentResult, expiringResult, expiredResult, archivedResult, aiResult] = await Promise.all([
+    countQuery("all"), countQuery("current"), countQuery("expiring"), countQuery("expired"), countQuery("history"),
     supabase.from("ai_workspace_settings").select("enabled").eq("organisation_id", organisation.id).maybeSingle(),
   ]);
-  if (listResult.error) throw new Error("Could not load evidence");
   if (aiResult.error) throw new Error("Could not load AI settings");
-  const items = [...(listResult.data ?? [])];
-  const filteredTotal = typeof listResult.count === "number" ? listResult.count : null;
+  const total = countValue(totalResult, "all");
   const counts = {
     current: countValue(currentResult, "current"),
     expiring: countValue(expiringResult, "expiring"),
     expired: countValue(expiredResult, "expired"),
     archived: countValue(archivedResult, "archived"),
   };
+  const filteredTotal = filter === "all" ? total : filter === "superseded" || filter === "withdrawn"
+    ? countValue(await countQuery(filter), filter)
+    : counts[filter];
+  const totalPages = filteredTotal === null ? null : Math.max(1, Math.ceil(filteredTotal / PAGE_SIZE));
+  const requestedPage = parsePage(params.page);
+  const page = totalPages === null ? requestedPage : Math.min(requestedPage, totalPages);
+  const from = (page - 1) * PAGE_SIZE;
+  const to = from + PAGE_SIZE - 1;
+  let listQuery = supabase.from("evidence").select(EVIDENCE_COLUMNS).eq("organisation_id", organisation.id);
+  const selectedCondition = filterCondition(filter, today, warningDate);
+  if (selectedCondition.status) listQuery = listQuery.eq("status", selectedCondition.status);
+  if (selectedCondition.statuses) listQuery = listQuery.in("status", selectedCondition.statuses);
+  if (selectedCondition.or) listQuery = listQuery.or(selectedCondition.or);
+  const listResult = await listQuery.order("created_at", { ascending: false }).order("id", { ascending: false }).range(from, to);
+  if (listResult.error) throw new Error("Could not load evidence");
+  const items = [...(listResult.data ?? [])];
 
   const requestedEvidence = parseOfficialRecordSelection(params.evidence);
   let selectedMissing = false;
@@ -114,7 +138,7 @@ export default async function EvidencePage({ searchParams }: { searchParams: Pro
     const control = one(link.controls); const risk = one(link.risks); const task = one(link.tasks); const policy = one(link.policies); const audit = one(link.audit_checklist_items);
     const label = control ? `${control.code}: ${control.title}` : risk ? `Risk ${risk.reference}` : task ? `Task: ${task.title}` : policy ? `Policy: ${policy.reference}: ${policy.title}` : audit ? `Audit: ${audit.checklist_item}` : "Unspecified link";
     const href = risk && link.risk_id ? `/app/risks/${link.risk_id}` : task && link.task_id ? `/app/tasks/${link.task_id}` : policy && link.policy_id ? `/app/policies/${link.policy_id}` : audit ? `/app/audits/${audit.audit_id}` : null;
-    return <span key={link.id} className={editing ? undefined : "pill neutral"}>{href && !editing ? <Link href={href}>{label}</Link> : label}</span>;
+    return <span key={link.id} className={editing ? styles.managementLabel : `${styles.linkedLabel} pill neutral`}>{href && !editing ? <Link href={href}>{label}</Link> : label}</span>;
   };
 
   const linkOptions = <>
@@ -126,11 +150,14 @@ export default async function EvidencePage({ searchParams }: { searchParams: Pro
   const selectedLinks = selectedItem?.evidence_links ?? [];
   const selectedControlLinks = selectedLinks.filter((link) => link.control_id);
   const selectedRelatedLinks = selectedLinks.filter((link) => !link.control_id);
+  const selectedStatus = selectedItem ? deriveEffectiveEvidenceStatus(selectedItem.status as EvidenceStatus, selectedItem.valid_until, today) : null;
+  const selectedOfficial = selectedItem ? officialByEvidence.get(selectedItem.id) : undefined;
+  const selectedTitle = selectedOfficial ? githubEvidenceTitle(selectedOfficial.checkId) : selectedItem?.title;
+  const selectedDescription = selectedOfficial?.catalogueSummary ?? selectedItem?.description;
 
   const firstVisible = filteredTotal === 0 || items.length === 0 ? 0 : from + 1;
   const lastVisible = filteredTotal === null ? from + items.length : Math.min(to + 1, filteredTotal);
-  const totalPages = filteredTotal === null ? null : Math.max(1, Math.ceil(filteredTotal / PAGE_SIZE));
-  const rangeText = filteredTotal === null ? `Showing ${items.length} evidence record${items.length === 1 ? "" : "s"} · total unavailable` : `Showing ${firstVisible}–${lastVisible} of ${filteredTotal} evidence records`;
+  const rangeText = filteredTotal === null ? `Showing ${items.length} evidence record${items.length === 1 ? "" : "s"} · total unavailable` : `Showing ${firstVisible}–${lastVisible} of ${filteredTotal} evidence record${filteredTotal === 1 ? "" : "s"}`;
 
   return <div className={styles.page}>
     <PageIntro eyebrow="EVIDENCE" title="Evidence vault" body="Find the proof behind your controls, understand its freshness, and trace where it is used." action={<span className={styles.pageActions}>
@@ -157,11 +184,11 @@ export default async function EvidencePage({ searchParams }: { searchParams: Pro
       <p className={styles.range}>{rangeText}</p>
     </div>
     {selectedMissing && <p role="status">The selected evidence was not found in this workspace. Choose an available record below.</p>}
-    {!items.length && !selectedItem ? <EmptyState icon="file" title={isMember ? "No evidence recorded yet" : "Add your first evidence"} body={isMember ? "Evidence added by workspace operators will appear here." : "Attach a file, link or note to a control, risk, policy, task or audit checklist item."} primary={isMember ? undefined : { href: "/app/evidence/new", label: "Add evidence" }} /> : <div className={styles.workspace}>
+    {total === 0 && !selectedItem ? <EmptyState icon="file" title={isMember ? "No evidence recorded yet" : "Add your first evidence"} body={isMember ? "Evidence added by workspace operators will appear here." : "Attach a file, link or note to a control, risk, policy, task or audit checklist item."} primary={isMember ? undefined : { href: "/app/evidence/new", label: "Add evidence" }} /> : <div className={styles.workspace}>
       <Card className={styles.listCard} aria-label="Evidence records">
-        {items.length ? <ul className={styles.list}>{items.map((item) => { const source = one(item.evidence_sources); const official = officialByEvidence.get(item.id); const title = official?.catalogueSummary ?? item.title; const isSelected = selectedItem?.id === item.id; return <li key={item.id}><Link href={`${hrefFor(filter, page, item.id)}#evidence-${item.id}`} className={styles.recordLink} data-selected={isSelected}>
-          {isSelected ? <span className={styles.recordTitle}>{title}</span> : <h3 className={styles.recordTitle}>{title}</h3>}<Pill tone={TONE[item.status]}>{item.status}</Pill>
-          <span className={styles.recordMeta}><span>{item.kind}</span><span>Collected {displayDate(item.collected_on)}</span>{source?.provider && <span>{PROVIDER_LABELS[source.provider] ?? source.provider} source</span>}{item.source_id && item.observation_key && <span>Resource: {item.external_ref ?? "reference unavailable"}</span>}{item.source_id && !item.observation_key && <span>Legacy observation identity unknown</span>}</span>
+        {items.length ? <ul className={styles.list}>{items.map((item) => { const source = one(item.evidence_sources); const official = officialByEvidence.get(item.id); const title = official?.catalogueSummary ?? item.title; const isSelected = selectedItem?.id === item.id; const status = deriveEffectiveEvidenceStatus(item.status as EvidenceStatus, item.valid_until, today); return <li key={item.id}><Link href={`${hrefFor(filter, page, item.id)}#evidence-${item.id}`} className={styles.recordLink} data-selected={isSelected}>
+          {isSelected ? <span className={styles.recordTitle}>{title}</span> : <h3 className={styles.recordTitle}>{title}</h3>}<Pill tone={TONE[status]}>{status}</Pill>
+          <span className={styles.recordMeta}><span>{item.kind}</span><span>Collected {displayDate(item.collected_on)}</span>{source?.provider && <span>{PROVIDER_LABELS[source.provider] ?? source.provider} source</span>}{item.source_id && item.observation_key && <span>Resource: {item.external_ref ?? "reference unavailable"}</span>}{item.source_id && !item.observation_key && <><span>Legacy observation identity unknown</span>{item.external_ref && <span>Resource: {item.external_ref}</span>}</>}</span>
         </Link></li>; })}</ul> : <p className={styles.emptyList}>No evidence matches this freshness filter.</p>}
         {filteredTotal !== null && filteredTotal > PAGE_SIZE && <nav className={styles.pagination} aria-label="Evidence pages">
           {page > 1 ? <Link className="button secondary" href={hrefFor(filter, page - 1)}>Previous</Link> : <span>First page</span>}
@@ -169,26 +196,28 @@ export default async function EvidencePage({ searchParams }: { searchParams: Pro
           {totalPages && page < totalPages ? <Link className="button secondary" href={hrefFor(filter, page + 1)}>Next</Link> : <span>Last page</span>}
         </nav>}
       </Card>
-      {selectedItem && (officialByEvidence.has(selectedItem.id) ? <OfficialGitHubEvidenceCard record={officialByEvidence.get(selectedItem.id)!} selected={requestedEvidence === selectedItem.id} /> : <Card id={`evidence-${selectedItem.id}`} className={styles.detail}>
-        <div className={styles.detailHeader}><div><p className={styles.eyebrow}>Selected evidence · {selectedItem.kind}</p><h2>{selectedItem.title}</h2></div><Pill tone={TONE[selectedItem.status]}>{selectedItem.status}</Pill></div>
+      {selectedItem && <Card id={`evidence-${selectedItem.id}`} className={styles.detail}>
+        <div className={styles.detailHeader}><div><p className={styles.eyebrow}>Selected evidence · {selectedItem.kind}</p><h2>{selectedTitle}</h2></div><Pill tone={TONE[selectedStatus!]}>{selectedStatus}</Pill></div>
         <dl className={styles.detailMeta}>
           <div><dt>Collected</dt><dd>{displayDate(selectedItem.collected_on)}</dd></div><div><dt>Valid until</dt><dd>{displayDate(selectedItem.valid_until)}</dd></div>
-          <div><dt>Source</dt><dd>{selectedItem.source_id ? PROVIDER_LABELS[one(selectedItem.evidence_sources)?.provider ?? ""] ?? "Automated source" : "Added in ComplianceHub"}</dd></div>
-          {selectedItem.source_id && <div><dt>Collection identity</dt><dd>{selectedItem.observation_key ? `Resource: ${selectedItem.external_ref ?? "reference unavailable"}` : "Legacy observation identity unknown"}</dd></div>}
+          <div><dt>Source</dt><dd>{selectedOfficial ? "Official GitHub collection" : selectedItem.source_id ? PROVIDER_LABELS[one(selectedItem.evidence_sources)?.provider ?? ""] ?? "Automated source" : "Added in ComplianceHub"}</dd></div>
+          {selectedItem.source_id && <div><dt>Collection identity</dt><dd>{selectedItem.observation_key ? `Resource: ${selectedItem.external_ref ?? "reference unavailable"}` : <>Legacy observation identity unknown{selectedItem.external_ref ? <><br />Resource: {selectedItem.external_ref}</> : null}</>}</dd></div>}
         </dl>
-        {selectedItem.description ? <p className={styles.description}>{selectedItem.description}</p> : <p className={styles.description}>No description was recorded.</p>}
+        {selectedDescription ? <p className={styles.description}>{selectedDescription}</p> : <p className={styles.description}>No description was recorded.</p>}
+        {selectedOfficial && <OfficialGitHubEvidenceProvenancePanel record={selectedOfficial} />}
         <div className={styles.recordActions}>
-          {selectedItem.kind === "link" && selectedItem.url && <a className="button secondary" href={selectedItem.url} rel="noreferrer" target="_blank">Open link</a>}
+          {!selectedOfficial && selectedItem.kind === "link" && selectedItem.url && <a className="button secondary" href={selectedItem.url} rel="noreferrer" target="_blank">Open link</a>}
           {selectedItem.kind === "file" && <form action={downloadEvidenceAction}><input type="hidden" name="id" value={selectedItem.id} /><button className="button secondary">Download file</button></form>}
-          {!isMember && ["current", "expiring", "expired"].includes(selectedItem.status) && <><Link className="button secondary" href={`/app/evidence/new?replaces=${selectedItem.id}`}>Supersede</Link><form action={withdrawEvidenceAction}><input type="hidden" name="id" value={selectedItem.id} /><button className="button secondary">Withdraw</button></form></>}
+          {!isMember && !selectedOfficial && selectedStatus && ["current", "expiring", "expired"].includes(selectedStatus) && <Link className="button secondary" href={`/app/evidence/new?replaces=${selectedItem.id}`}>Supersede</Link>}
         </div>
         {(selectedRelatedLinks.length > 0 || (selectedControlLinks.length > 0 && selectedControlLinks.length <= 3)) && <div className={styles.linked}>{selectedControlLinks.length <= 3 && selectedControlLinks.map((link) => renderLinkedRecord(link))}{selectedRelatedLinks.map((link) => renderLinkedRecord(link))}</div>}
         {selectedControlLinks.length > 3 && <details className={styles.disclosure}><summary>Linked controls ({selectedControlLinks.length})</summary><div className={styles.linked}>{selectedControlLinks.map((link) => renderLinkedRecord(link))}</div></details>}
-        {!isMember && <details className={styles.disclosure}><summary>Manage links</summary><form action={linkEvidenceAction} className={styles.linkForm}><input type="hidden" name="evidenceId" value={selectedItem.id} /><select name="target" defaultValue="" aria-label={`Link ${selectedItem.title} to a control`}><option value="" disabled>Choose a control or record…</option>{linkOptions}</select><button className="button secondary">Link</button></form>
+        {!isMember && !selectedOfficial && <details className={styles.disclosure}><summary>Manage links</summary><form action={linkEvidenceAction} className={styles.linkForm}><input type="hidden" name="evidenceId" value={selectedItem.id} /><select name="target" defaultValue="" aria-label={`Link ${selectedItem.title} to a control`}><option value="" disabled>Choose a control or record…</option>{linkOptions}</select><button className="button secondary">Link</button></form>
           {(selectedItem.evidence_links?.length ?? 0) > 0 && <ul className={styles.linkManagement}>{selectedItem.evidence_links?.map((link) => <li key={link.id}>{renderLinkedRecord(link, true)}<form action={unlinkEvidenceAction}><input type="hidden" name="linkId" value={link.id} /><button className="button secondary" aria-label="Remove link">Remove</button></form></li>)}</ul>}
         </details>}
+        {!isMember && !selectedOfficial && selectedStatus && ["current", "expiring", "expired"].includes(selectedStatus) && <details className={styles.disclosure}><summary>Withdraw evidence</summary><div className={styles.dangerAction}><p>Withdraw <strong>{selectedItem.title}</strong> from active use? This record stays in history and cannot be made active again.</p><form action={withdrawEvidenceAction}><input type="hidden" name="id" value={selectedItem.id} /><button className="button secondary">Confirm withdrawal</button></form></div></details>}
         {aiResult.data?.enabled && <AiSuggestionPanel target={{ targetType: "evidence", targetId: selectedItem.id }} />}
-      </Card>)}
+      </Card>}
     </div>}
   </div>;
 }

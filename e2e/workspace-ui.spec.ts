@@ -12,8 +12,25 @@ const viewports = [
 ] as const;
 
 async function expectNoBodyOverflow(page: Page, label: string) {
-  const width = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth }));
-  expect(width.scroll, `${label} should not make the document horizontally scroll`).toBeLessThanOrEqual(width.client);
+  const width = await page.evaluate(() => {
+    const client = document.documentElement.clientWidth;
+    const elements = [...document.querySelectorAll<HTMLElement>("body *")];
+    const offenders = elements
+      .map((element) => {
+        const bounds = element.getBoundingClientRect();
+        return { tag: element.tagName, className: element.className, left: Math.round(bounds.left), right: Math.round(bounds.right), width: Math.round(bounds.width) };
+      })
+      .filter((element) => element.right > client + 1)
+      .slice(-12);
+    const internalOverflow = elements.map((element) => {
+      const style = getComputedStyle(element);
+      return { tag: element.tagName, className: element.className, clientWidth: element.clientWidth, scrollWidth: element.scrollWidth, minWidth: style.minWidth, width: style.width, display: style.display, grid: style.gridTemplateColumns };
+    }).filter((element) => element.scrollWidth > element.clientWidth + 1)
+      .sort((left, right) => (right.scrollWidth - right.clientWidth) - (left.scrollWidth - left.clientWidth))
+      .slice(0, 12);
+    return { scroll: document.documentElement.scrollWidth, client, offenders, internalOverflow };
+  });
+  expect(width.scroll, `${label} should not make the document horizontally scroll. Offenders: ${JSON.stringify(width.offenders)}. Internal overflow: ${JSON.stringify(width.internalOverflow)}`).toBeLessThanOrEqual(width.client);
 }
 
 async function createWorkspaceUiFixture() {
@@ -211,5 +228,22 @@ test("fictional workspace remains keyboard-operable and contained at desktop, ta
       await page.screenshot({ animations: "disabled", path: testInfo.outputPath(`${route.screenshot}-${viewport.name}-${suffix}.png`), fullPage: true });
     }
   }
+  await page.setViewportSize(viewports[2].size);
+  await page.goto("/app/evidence/new");
+  await expect(page.locator('input[name="file"]')).toBeVisible();
+  await page.getByLabel("Evidence type").selectOption("note");
+  await expect(page.locator('input[name="file"]')).toHaveCount(0);
+  await expect(page.locator('input[name="url"]')).toHaveCount(0);
+  await expect(page.getByRole("note")).toContainText(/recorded in the description above/i);
+  await expectNoBodyOverflow(page, "mobile Add evidence");
+  const formScan = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze();
+  const formViolations = formScan.violations.filter((item) => item.impact === "serious" || item.impact === "critical");
+  if (formViolations.length) accessibilityFindings.push({ page: "mobile /app/evidence/new", violations: formViolations });
+  await page.screenshot({ animations: "disabled", path: testInfo.outputPath(`evidence-new-mobile-${suffix}.png`), fullPage: true });
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/app/evidence");
+  const reducedTransitionSeconds = await page.locator('a[href*="evidence="]').first().evaluate((element) => Number.parseFloat(getComputedStyle(element).transitionDuration));
+  expect(reducedTransitionSeconds).toBeLessThanOrEqual(0.00001);
   expect(accessibilityFindings).toEqual([]);
 });

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { assessScopeProfile } from "@/features/scope/domain/scope-profile";
-import { deriveEvidenceStatus, summariseEvidenceFreshness, type EvidenceStatus } from "@/features/evidence/domain/evidence";
+import { deriveEffectiveEvidenceStatus, summariseEvidenceFreshness } from "@/features/evidence/domain/evidence";
 import { DEFAULT_RISK_MATRIX_CONFIG, riskBand, exceedsAppetite, calculateRiskScore } from "@/features/risks/domain/risks";
 
 const scopeSchema = z.object({ scope_statement: z.string(), services: z.string(), locations: z.string(), information_types: z.string(), dependencies: z.string(), exclusions: z.string(), updated_at: z.string() });
@@ -37,13 +37,7 @@ export function summariseBaseline(payload: BaselinePayload) {
   const pending = payload.contributions.filter((item) => item.decision === "pending");
   const pendingReviews = pending.filter((item) => openTasks.some((task) => task.id === item.task_id && task.assignment_revision === item.assignment_revision && task.owner_id === item.submitter_id));
   const obsoletePendingReviews = pending.filter((item) => !pendingReviews.includes(item));
-  const evidenceItems = payload.evidence.map((item) => {
-    const datedStatus = deriveEvidenceStatus(item.valid_until, today);
-    const status: EvidenceStatus = item.status === "withdrawn" || item.status === "superseded" ? item.status
-      : item.status === "expired" || datedStatus === "expired" ? "expired"
-      : item.status === "expiring" || datedStatus === "expiring" ? "expiring" : "current";
-    return { ...item, status };
-  });
+  const evidenceItems = payload.evidence.map((item) => ({ ...item, status: deriveEffectiveEvidenceStatus(item.status, item.valid_until, today) }));
   const evidence = summariseEvidenceFreshness(evidenceItems);
   const unanswered = payload.questions.filter((question) => question.answer === null).length;
   const assessmentGaps = payload.questions.filter((question) => question.answer === null || question.answer === "no" || question.answer === "partially");

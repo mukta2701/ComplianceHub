@@ -11,7 +11,7 @@ const hoisted = vi.hoisted(() => ({
 
 function query(data: unknown[]) {
   const chain: Record<string, unknown> = {};
-  for (const method of ["select", "eq", "in", "order", "range", "limit", "maybeSingle"]) chain[method] = vi.fn(() => chain);
+  for (const method of ["select", "eq", "in", "or", "order", "range", "limit", "maybeSingle"]) chain[method] = vi.fn(() => chain);
   chain.then = (resolve: (value: { data: unknown[]; error: null }) => unknown) => Promise.resolve({ data, error: null }).then(resolve);
   return chain;
 }
@@ -63,10 +63,13 @@ describe("EvidencePage official GitHub records", () => {
   it("selects an exact active-workspace official record, hides its mutations, and preserves legacy evidence controls", async () => {
     render(await EvidencePage({ searchParams: Promise.resolve({ evidence: OFFICIAL }) }));
 
-    const official = screen.getByRole("article", { name: "Official GitHub evidence github.branch.force_pushes" });
-    expect(official).toHaveAttribute("aria-current", "true");
+    const official = document.querySelector(`#evidence-${OFFICIAL}`) as HTMLElement;
+    expect(within(official).getByRole("heading", { name: "Force-push protection" })).toBeInTheDocument();
+    expect(within(official).getByText("Collected")).toBeInTheDocument();
+    expect(within(official).getByText("Valid until")).toBeInTheDocument();
+    expect(within(official).getByRole("region", { name: "Official GitHub provenance github.branch.force_pushes" })).toBeInTheDocument();
     expect(within(official).queryByText("Provider text must not render")).not.toBeInTheDocument();
-    expect(within(official).queryByRole("button", { name: "Withdraw" })).not.toBeInTheDocument();
+    expect(within(official).queryByRole("button", { name: "Confirm withdrawal" })).not.toBeInTheDocument();
     expect(within(official).queryByRole("link", { name: "Supersede" })).not.toBeInTheDocument();
 
     expect(screen.getByRole("heading", { name: "Legacy policy evidence" })).toBeInTheDocument();
@@ -75,21 +78,20 @@ describe("EvidencePage official GitHub records", () => {
     render(await EvidencePage({ searchParams: Promise.resolve({ evidence: LEGACY }) }));
     const legacyDetail = screen.getByRole("heading", { name: "Legacy policy evidence" }).closest(".card");
     expect(legacyDetail).not.toBeNull();
-    expect(within(legacyDetail as HTMLElement).getByRole("button", { name: "Withdraw" })).toBeInTheDocument();
+    expect(within(legacyDetail as HTMLElement).getByText("Withdraw evidence")).toBeInTheDocument();
     expect(within(legacyDetail as HTMLElement).getByRole("link", { name: "Supersede" })).toBeInTheDocument();
     expect(within(legacyDetail as HTMLElement).getByRole("combobox", { name: "Link Legacy policy evidence to a control" })).toBeInTheDocument();
   });
 
   it("treats an invalid selection as no selection", async () => {
     render(await EvidencePage({ searchParams: Promise.resolve({ evidence: "not-a-uuid" }) }));
-    expect(screen.getByRole("article", { name: "Official GitHub evidence github.branch.force_pushes" }))
-      .not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("region", { name: "Official GitHub provenance github.branch.force_pushes" })).toBeInTheDocument();
   });
 
   it("does not disclose a sibling-workspace selection", async () => {
     render(await EvidencePage({ searchParams: Promise.resolve({ evidence: "30000000-0000-4000-8000-000000000099" }) }));
     expect(screen.getByRole("status")).toHaveTextContent(/not found in this workspace/i);
-    expect(screen.queryByRole("article", { name: "Official GitHub evidence github.branch.force_pushes" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Official GitHub provenance github.branch.force_pushes" })).not.toBeInTheDocument();
   });
 
   it("fails closed rather than rendering raw or mutable evidence when official provenance is missing", async () => {

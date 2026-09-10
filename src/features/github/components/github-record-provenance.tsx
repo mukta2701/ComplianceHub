@@ -107,6 +107,15 @@ export function OfficialGitHubEvidenceCard({
   </FocusedOfficialRecord>;
 }
 
+export function OfficialGitHubEvidenceProvenancePanel({ record }: { record: OfficialGitHubEvidenceProvenance }) {
+  return <section className="github-technical-evidence" aria-label={`Official GitHub provenance ${record.checkId}`}>
+    <ProvenanceDetails record={record} />
+    <p className="github-official-boundary" role="note">
+      This is approved technical repository evidence for human review. It does not certify ISO/IEC 27001 compliance or change readiness by itself.
+    </p>
+  </section>;
+}
+
 function OfficialFindingActions({
   findingId,
   currentStatus,
