@@ -20,15 +20,18 @@ const validAsset = {
   classification: "internal_use_only", valueCriticality: "medium", categoryId: "",
   securityControls: "", lifespan: "", lastUpdated: "", remarks: "",
 };
+const ASSET_ID = "77000000-0000-4000-8000-000000000001";
+const RISK_ID = "77000000-0000-4000-8000-000000000002";
+const UPDATED_AT = "2026-09-10T01:00:00.000Z";
 
-function context(role: "owner" | "admin" | "member" = "owner", result: { data?: unknown; error?: unknown } = { data: { id: "asset-1" }, error: null }) {
+function context(role: "owner" | "admin" | "member" = "owner", result: { data?: unknown; error?: unknown } = { data: { id: ASSET_ID, updated_at: UPDATED_AT }, error: null }) {
   const eq = vi.fn().mockReturnThis();
   const select = vi.fn().mockReturnThis();
   const maybeSingle = vi.fn().mockResolvedValue(result);
   const insert = vi.fn().mockResolvedValue({ error: null });
   const update = vi.fn().mockReturnValue({ eq, select, maybeSingle });
   const del = vi.fn().mockReturnValue({ eq, select, maybeSingle });
-  const from = vi.fn((table: string) => table === "assets" ? { insert, update, delete: del } : { insert, delete: del });
+  const from = vi.fn((table: string) => table === "assets" ? { insert, update, delete: del, select, eq, maybeSingle } : { insert, delete: del });
   hoisted.ctx = {
     user: { id: "88000000-0000-4000-8000-000000000001" },
     organisation: { id: "88000000-0000-4000-8000-000000000002" }, membership: { role },
@@ -55,10 +58,10 @@ describe("asset-to-risk link actions validate identifiers", () => {
   it.each(["member"] as const)("rejects %s from every asset mutation", async (role) => {
     const controls = context(role);
     await expect(createAssetAction(form(validAsset))).rejects.toThrow("Only workspace operators");
-    await expect(updateAssetAction(form({ ...validAsset, id: "asset-1" }))).rejects.toThrow("Only workspace operators");
-    await expect(deleteAssetAction(form({ id: "asset-1" }))).rejects.toThrow("Only workspace operators");
-    await expect(linkAssetRiskAction(form({ assetId: "asset-1", riskId: "risk-1" }))).rejects.toThrow("Only workspace operators");
-    await expect(unlinkAssetRiskAction(form({ assetId: "asset-1", riskId: "risk-1" }))).rejects.toThrow("Only workspace operators");
+    await expect(updateAssetAction(form({ ...validAsset, id: ASSET_ID, expectedUpdatedAt: UPDATED_AT }))).rejects.toThrow("Only workspace operators");
+    await expect(deleteAssetAction(form({ id: ASSET_ID }))).rejects.toThrow("Only workspace operators");
+    await expect(linkAssetRiskAction(form({ assetId: ASSET_ID, riskId: RISK_ID }))).rejects.toThrow("Only workspace operators");
+    await expect(unlinkAssetRiskAction(form({ assetId: ASSET_ID, riskId: RISK_ID }))).rejects.toThrow("Only workspace operators");
     expect(controls.from).not.toHaveBeenCalled();
   });
 
@@ -70,10 +73,10 @@ describe("asset-to-risk link actions validate identifiers", () => {
 
   it("allows an admin to update, delete, link, and unlink within the active workspace", async () => {
     const controls = context("admin");
-    await updateAssetAction(form({ ...validAsset, id: "asset-1" }));
-    await deleteAssetAction(form({ id: "asset-1" }));
-    await linkAssetRiskAction(form({ assetId: "asset-1", riskId: "risk-1" }));
-    await unlinkAssetRiskAction(form({ assetId: "asset-1", riskId: "risk-1" }));
+    await updateAssetAction(form({ ...validAsset, id: ASSET_ID, expectedUpdatedAt: UPDATED_AT }));
+    await deleteAssetAction(form({ id: ASSET_ID }));
+    await linkAssetRiskAction(form({ assetId: ASSET_ID, riskId: RISK_ID }));
+    await unlinkAssetRiskAction(form({ assetId: ASSET_ID, riskId: RISK_ID }));
     expect(controls.from).toHaveBeenCalledWith("assets");
     expect(controls.from).toHaveBeenCalledWith("asset_risks");
     expect(controls.eq).toHaveBeenCalledWith("organisation_id", "88000000-0000-4000-8000-000000000002");
@@ -81,9 +84,9 @@ describe("asset-to-risk link actions validate identifiers", () => {
 
   it("fails update, delete, and unlink when the tenant-scoped row is absent", async () => {
     const controls = context("owner", { data: null, error: null });
-    await expect(updateAssetAction(form({ ...validAsset, id: "asset-missing" }))).rejects.toThrow("Asset not found");
-    await expect(deleteAssetAction(form({ id: "asset-missing" }))).rejects.toThrow("Asset not found");
-    await expect(unlinkAssetRiskAction(form({ assetId: "asset-1", riskId: "risk-missing" }))).rejects.toThrow("Asset risk link not found");
+    await expect(updateAssetAction(form({ ...validAsset, id: ASSET_ID, expectedUpdatedAt: UPDATED_AT }))).rejects.toThrow("Asset not found");
+    await expect(deleteAssetAction(form({ id: ASSET_ID }))).rejects.toThrow("Asset not found");
+    await expect(unlinkAssetRiskAction(form({ assetId: ASSET_ID, riskId: RISK_ID }))).rejects.toThrow("Asset risk link not found");
     expect(controls.eq).toHaveBeenCalledWith("organisation_id", "88000000-0000-4000-8000-000000000002");
   });
 });

@@ -23,7 +23,7 @@ function query(table: string) {
     integration_connections: [{ id: "connection", label: "Tracker", provider: "github" }],
   };
   const chain: Record<string, unknown> = {};
-  for (const name of ["select", "eq", "order", "limit", "in", "not", "lt", "neq", "is"]) chain[name] = () => chain;
+  for (const name of ["select", "eq", "order", "limit", "in", "not", "lt", "neq", "is", "gt", "range"]) chain[name] = () => chain;
   for (const name of ["single", "maybeSingle"]) chain[name] = () => { single = true; return chain; };
   chain.then = (resolve: (value: unknown) => unknown) => {
     const data = state.empty ? [] : (rows[table] ?? []);

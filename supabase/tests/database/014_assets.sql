@@ -1,5 +1,5 @@
 begin;
-select plan(21);
+select plan(23);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data)
 values
@@ -105,6 +105,18 @@ select throws_ok(
   $$ insert into public.asset_risks (organisation_id, asset_id, risk_id, created_by)
      values ('20000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000002', '31000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001') $$,
   '23503', null, 'a link cannot reference an asset from another tenant');
+
+-- Removing a selected category changes the saved asset through the foreign-key
+-- action. That must advance the technical version so an older edit form cannot
+-- restore stale values over the change.
+update public.assets
+set category_id = (select id from public.asset_categories where organisation_id = '20000000-0000-4000-8000-000000000001' and name = 'Cloud Services'),
+    updated_at = '2026-01-01 00:00:00+00'
+where organisation_id = '20000000-0000-4000-8000-000000000001' and reference = 'AST-001';
+delete from public.asset_categories
+where organisation_id = '20000000-0000-4000-8000-000000000001' and name = 'Cloud Services';
+select is((select category_id from public.assets where organisation_id = '20000000-0000-4000-8000-000000000001' and reference = 'AST-001'), null, 'removing a category clears the asset category');
+select cmp_ok((select updated_at from public.assets where organisation_id = '20000000-0000-4000-8000-000000000001' and reference = 'AST-001'), '>', '2026-01-01 00:00:00+00'::timestamptz, 'foreign-key category removal advances the asset edit version');
 
 select * from finish();
 rollback;

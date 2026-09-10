@@ -4,6 +4,7 @@ import { toCsv, toXlsx, type ExportColumn } from "@/features/exports/exports";
 import { protectExport, recordExportAudit } from "@/features/exports/export-audit";
 import { ASSET_CLASSIFICATION_LABEL, ASSET_VALUE_LABEL, type AssetClassification, type AssetValue } from "@/features/assets/domain/assets";
 import { one } from "@/lib/supabase/one";
+import { collectIdPages } from "@/lib/supabase/paginate";
 
 type Row = { reference: string; description: string; owner_location: string; classification: string; value_criticality: string; security_controls: string; lifespan: string; last_updated: string | null; remarks: string; asset_categories: { name: string } | { name: string }[] | null };
 
@@ -12,9 +13,21 @@ export async function GET(request: Request) {
   const { supabase, organisation, user } = await requireAppContext();
   const auditContext = { organisationId: organisation.id, userId: user.id, resource: "assets" as const, format };
   await protectExport(auditContext);
-  const result = await supabase.from("assets").select("reference,description,owner_location,classification,value_criticality,security_controls,lifespan,last_updated,remarks,asset_categories(name)").eq("organisation_id", organisation.id).order("reference");
-  if (result.error) return NextResponse.json({ error: "Could not export assets" }, { status: 500, headers: { "cache-control": "private, no-store" } });
-  const rows = (result.data ?? []) as unknown as Row[];
+  let rows: Row[];
+  try {
+    rows = await collectIdPages(async (afterId, limit) => {
+      let query = supabase.from("assets")
+        .select("id,reference,description,owner_location,classification,value_criticality,security_controls,lifespan,last_updated,remarks,asset_categories(name)")
+        .eq("organisation_id", organisation.id).order("id", { ascending: true }).limit(limit);
+      if (afterId) query = query.gt("id", afterId);
+      const { data, error } = await query;
+      if (error) throw new Error("Could not export assets");
+      return data ?? [];
+    });
+  } catch {
+    return NextResponse.json({ error: "Could not export assets" }, { status: 500, headers: { "cache-control": "private, no-store" } });
+  }
+  rows.sort((a, b) => a.reference.localeCompare(b.reference));
   const columns: ExportColumn<Row>[] = [
     { header: "Asset Reference", value: (a) => a.reference },
     { header: "Asset Description", value: (a) => a.description },

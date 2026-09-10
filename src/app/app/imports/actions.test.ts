@@ -3,8 +3,8 @@ import { riskInputSchema } from "@/features/risks/application/risk";
 
 // runImportAction is a server action ("use server") that calls requireAppContext()
 // for its Supabase client. Rather than a live DB, we mock app-context with an
-// in-memory fake store — modelling only the handful of query shapes the risk
-// module commit path issues (mirrors the pattern used by
+// in-memory fake store — modelling the query shapes used by risk and asset
+// imports, including capped reads and write failures (mirrors the pattern used by
 // src/app/api/cron/daily/route.test.ts).
 
 const hoisted = vi.hoisted(() => ({ ctx: null as unknown }));
@@ -18,17 +18,19 @@ type Store = { risk_categories: Row[]; asset_categories?: Row[]; memberships: Ro
 
 type Result = { data: unknown; error: unknown; count?: number };
 
-// Minimal chainable query-builder fake over an in-memory store — only the
-// operations runImportAction's risk-module commit path issues (select/eq,
-// select-with-count-head, and plain insert).
+// Minimal chainable database boundary fake with workspace filters, exact counts,
+// capped/paginated reads and category/asset insertion outcomes.
 class Builder implements PromiseLike<Result> {
   private filters: [string, unknown][] = [];
   private op: "select" | "insert" = "select";
   private payload: Row = {};
   private countHead = false;
   private countRequested = false;
+  private bounds: [number, number] = [0, 999];
+  private singleResult = false;
+  private orderColumn: string | null = null;
 
-  constructor(private rows: Row[], private readError: unknown = null, private countOverride: number | undefined = undefined) {}
+  constructor(private rows: Row[], private readError: unknown = null, private countOverride: number | undefined = undefined, private insertError: unknown = null, private failFrom?: number) {}
 
   select(_cols?: string, opts?: { count?: string; head?: boolean }) {
     if (opts?.head) this.countHead = true;
@@ -45,19 +47,26 @@ class Builder implements PromiseLike<Result> {
     return this;
   }
 
+  order(column: string) { this.orderColumn = column; return this; }
+  range(from: number, to: number) { this.bounds = [from, to]; return this; }
+  single() { this.singleResult = true; return this; }
+
   private matched() {
     return this.rows.filter((r) => this.filters.every(([c, v]) => r[c] === v));
   }
 
   private resolve(): Result {
     if (this.op === "insert") {
-      const inserted = { id: `id-${this.rows.length + 1}`, ...this.payload };
+      if (this.insertError) return { data: null, error: this.insertError };
+      const inserted = { id: `00000000-0000-4000-8000-${String(this.rows.length + 100).padStart(12, "0")}`, ...this.payload };
       this.rows.push(inserted);
-      return { data: [inserted], error: null };
+      return { data: this.singleResult ? inserted : [inserted], error: null };
     }
-    if (this.readError) return { data: null, error: this.readError };
+    if (this.readError || (this.failFrom !== undefined && this.bounds[0] >= this.failFrom)) return { data: null, error: this.readError ?? new Error("private page diagnostic") };
     if (this.countHead) return { data: null, error: null, count: this.countOverride ?? this.matched().length };
-    return { data: this.matched(), error: null, count: this.countRequested ? this.countOverride ?? this.matched().length : undefined };
+    const matched = this.matched();
+    if (this.orderColumn) matched.sort((a, b) => String(a[this.orderColumn!]).localeCompare(String(b[this.orderColumn!])));
+    return { data: matched.slice(this.bounds[0], this.bounds[1] + 1), error: null, count: this.countRequested ? this.countOverride ?? matched.length : undefined };
   }
 
   then<T1 = Result, T2 = never>(
@@ -68,8 +77,15 @@ class Builder implements PromiseLike<Result> {
   }
 }
 
-function fakeSupabase(store: Store, options: { membershipsError?: unknown; membershipsCount?: number } = {}) {
-  return { from: (table: keyof Store) => new Builder(store[table] ?? [], table === "memberships" ? options.membershipsError : null, table === "memberships" ? options.membershipsCount : undefined) };
+type FakeOptions = { membershipsError?: unknown; membershipsCount?: number; categoryError?: unknown; categoryInsertError?: unknown; categoryCount?: number; assetsError?: unknown; assetsFailFrom?: number; assetsCount?: number; assetsInsertError?: unknown };
+function fakeSupabase(store: Store, options: FakeOptions = {}) {
+  return { from: (table: keyof Store) => new Builder(
+    store[table] ?? [],
+    table === "memberships" ? options.membershipsError : table === "asset_categories" ? options.categoryError : table === "assets" ? options.assetsError : null,
+    table === "memberships" ? options.membershipsCount : table === "asset_categories" ? options.categoryCount : table === "assets" ? options.assetsCount : undefined,
+    table === "asset_categories" ? options.categoryInsertError : table === "assets" ? options.assetsInsertError : null,
+    table === "assets" ? options.assetsFailFrom : undefined,
+  ) };
 }
 
 // zod's uuid() format requires valid version/variant nibbles, so these can't just be "org-1" etc.
@@ -271,4 +287,104 @@ describe("runImportAction — asset owners", () => {
     expect(committed.notes).toEqual(expect.arrayContaining([expect.stringMatching(/not found in this workspace/i)]));
     expect(store.assets).toEqual([]);
   });
+});
+
+
+describe("runImportAction — reliable asset imports", () => {
+  const headers = ["Reference", "Description", "Category", "Classification", "Value"];
+  const mapping = { Reference: "reference", Description: "description", Category: "categoryName", Classification: "classification", Value: "valueCriticality" };
+  const row = (reference: string, category = "") => [reference, "Imported asset", category, "Internal Use Only", "Medium"];
+  function setup(options: FakeOptions = {}, extra: Partial<Store> = {}) {
+    const store: Store = { risk_categories: [], asset_categories: [], memberships: [], risks: [], assets: [], ...extra };
+    hoisted.ctx = { supabase: fakeSupabase(store, options), user: { id: USER_ID }, organisation: { id: ORG_ID }, membership: { role: "owner" } };
+    return store;
+  }
+
+  it("skips a requested category that cannot be created while importing deliberately uncategorised rows", async () => {
+    const store = setup({ categoryInsertError: new Error("private category diagnostic") });
+    const { runImportAction } = await import("./actions");
+    const result = await runImportAction({ module: "asset", headers, mapping, rows: [row("AST-001", "Infrastructure"), row("AST-002")], commit: true });
+    expect(result).toMatchObject({ imported: 1, skipped: 1 });
+    expect(result.notes).toEqual([expect.stringMatching(/AST-001.*category.*not imported/i)]);
+    expect(JSON.stringify(result)).not.toContain("private category diagnostic");
+    expect(store.assets).toEqual([expect.objectContaining({ reference: "AST-002", category_id: null })]);
+  });
+
+  it("does not create a replacement category when the workspace category read fails", async () => {
+    const store = setup({ categoryError: new Error("private lookup diagnostic") });
+    const { runImportAction } = await import("./actions");
+    const result = await runImportAction({ module: "asset", headers, mapping, rows: [row("AST-001", "Infrastructure"), row("AST-002")], commit: true });
+    expect(result).toMatchObject({ imported: 1, skipped: 1 });
+    expect(store.asset_categories).toEqual([]);
+    expect(store.assets).toEqual([expect.objectContaining({ reference: "AST-002" })]);
+    expect(JSON.stringify(result)).not.toContain("private lookup diagnostic");
+  });
+
+
+  it("matches categories beyond the database page cap instead of creating duplicates", async () => {
+    const categories = Array.from({ length: 1001 }, (_, index) => ({ id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`, organisation_id: ORG_ID, name: `Category ${index}`, position: index }));
+    const store = setup({}, { asset_categories: categories });
+    const { runImportAction } = await import("./actions");
+    const result = await runImportAction({ module: "asset", headers, mapping, rows: [row("AST-001", "category 1000")], commit: true });
+    expect(result).toMatchObject({ imported: 1, skipped: 0 });
+    expect(store.asset_categories).toHaveLength(1001);
+    expect(store.assets).toEqual([expect.objectContaining({ category_id: categories[1000].id })]);
+  });
+
+
+  it("reserves sparse workspace references beyond one page and explicit references later in the batch", async () => {
+    const occupied = Array.from({ length: 1000 }, (_, index) => ({ id: String(index).padStart(5, "0"), organisation_id: ORG_ID, reference: `AST-${String(index + 1).padStart(3, "0")}` }));
+    occupied.push({ id: "99998", organisation_id: ORG_ID, reference: "AST-1002" });
+    occupied.push({ id: "99999", organisation_id: "another-workspace", reference: "AST-1003" });
+    const store = setup({}, { assets: occupied });
+    const { runImportAction } = await import("./actions");
+    const result = await runImportAction({ module: "asset", headers, mapping, rows: [row(""), row("AST-1001"), row("")], commit: true });
+    expect(result).toMatchObject({ imported: 3, skipped: 0 });
+    expect(store.assets?.slice(-3).map((asset) => asset.reference)).toEqual(["AST-1003", "AST-1001", "AST-1004"]);
+  });
+
+
+  it.each([
+    { assetsError: new Error("private reference diagnostic") },
+    { assetsCount: 1 },
+  ])("skips generated references when the complete workspace lookup is unavailable: %j", async (options) => {
+    const store = setup(options);
+    const { runImportAction } = await import("./actions");
+    const result = await runImportAction({ module: "asset", headers, mapping, rows: [row(""), row("AST-MANUAL")], commit: true });
+    expect(result).toMatchObject({ imported: 1, skipped: 1 });
+    expect(result.notes).toEqual([expect.stringMatching(/complete asset reference list.*not imported/i)]);
+    expect(store.assets).toEqual([expect.objectContaining({ reference: "AST-MANUAL" })]);
+    expect(JSON.stringify(result)).not.toContain("private reference diagnostic");
+  });
+
+  it("discards an incomplete reference lookup if a later database page fails", async () => {
+    const occupied = Array.from({ length: 1001 }, (_, index) => ({ id: String(index), organisation_id: ORG_ID, reference: `CUSTOM-${index}` }));
+    const store = setup({ assetsFailFrom: 1000 }, { assets: occupied });
+    const { runImportAction } = await import("./actions");
+    const result = await runImportAction({ module: "asset", headers, mapping, rows: [row("")], commit: true });
+    expect(result).toMatchObject({ imported: 0, skipped: 1 });
+    expect(store.assets).toHaveLength(1001);
+    expect(result.notes).toEqual([expect.stringMatching(/complete asset reference list/i)]);
+    expect(JSON.stringify(result)).not.toContain("private page diagnostic");
+  });
+
+  it("does not trust a category match from an incomplete lookup", async () => {
+    const store = setup({ categoryCount: 2 }, { asset_categories: [{ id: CATEGORY_ID, organisation_id: ORG_ID, name: "Infrastructure", position: 0 }] });
+    const { runImportAction } = await import("./actions");
+    const result = await runImportAction({ module: "asset", headers, mapping, rows: [row("AST-001", "Infrastructure")], commit: true });
+    expect(result).toMatchObject({ imported: 0, skipped: 1 });
+    expect(store.assets).toEqual([]);
+    expect(store.asset_categories).toHaveLength(1);
+  });
+
+  it("reports a concurrent reference conflict safely instead of exposing database diagnostics", async () => {
+    const store = setup({ assetsInsertError: { code: "23505", message: "private SQL reference detail" } });
+    const { runImportAction } = await import("./actions");
+    const result = await runImportAction({ module: "asset", headers, mapping, rows: [row("")], commit: true });
+    expect(result).toMatchObject({ imported: 0, skipped: 1 });
+    expect(result.notes).toEqual([expect.stringMatching(/AST-001.*reference.*already.*not imported/i)]);
+    expect(JSON.stringify(result)).not.toContain("private SQL reference detail");
+    expect(store.assets).toEqual([]);
+  });
+
 });

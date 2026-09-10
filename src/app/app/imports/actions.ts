@@ -48,11 +48,31 @@ export async function analyseImportAction(formData: FormData): Promise<AnalyseRe
   }
 }
 
+// Import decisions must not treat a capped or failed lookup as the whole workspace.
+async function assetImportLookup(supabase: SupabaseClient, table: "asset_categories" | "assets", organisationId: string): Promise<Record<string, unknown>[] | null> {
+  const rows: Record<string, unknown>[] = [];
+  let expectedCount: number | null = null;
+  while (true) {
+    const query = table === "asset_categories"
+      ? supabase.from("asset_categories").select("id,name,position", { count: "exact" })
+      : supabase.from("assets").select("id,reference", { count: "exact" });
+    const { data, error, count } = await query.eq("organisation_id", organisationId).order("id").range(rows.length, rows.length + 999);
+    if (error || !data || count === null || (expectedCount !== null && expectedCount !== count)) return null;
+    expectedCount = count;
+    rows.push(...data);
+    if (rows.length === count) return rows;
+    if (!data.length || rows.length > count) return null;
+  }
+}
+
 // Case-insensitive name -> id resolver for the per-org category tables; creates a missing category.
 // Explicitly scoped to organisationId (not just RLS) so a caller who belongs to several orgs never
 // resolves a name against a sibling org's rows.
 async function categoryResolver(supabase: SupabaseClient, table: "risk_categories" | "asset_categories", organisationId: string) {
-  const { data } = await supabase.from(table).select("id,name,position").eq("organisation_id", organisationId);
+  const { data } = table === "asset_categories"
+    ? { data: await assetImportLookup(supabase, table, organisationId) }
+    : await supabase.from(table).select("id,name,position").eq("organisation_id", organisationId);
+  if (table === "asset_categories" && !data) return async (): Promise<string | null> => null;
   const byName = new Map<string, string>();
   let maxPos = -1;
   for (const c of data ?? []) { byName.set(String(c.name).toLowerCase(), String(c.id)); maxPos = Math.max(maxPos, Number(c.position)); }
@@ -203,24 +223,40 @@ export async function runImportAction(input: { module: ImportModule; headers: st
     revalidatePath("/app/risks");
   } else if (input.module === "asset") {
     const resolveCategory = await categoryResolver(supabase, "asset_categories", organisation.id);
-    const { count } = await supabase.from("assets").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id);
-    let n = count ?? 0;
+    const existing = await assetImportLookup(supabase, "assets", organisation.id);
+    const occupied = new Set((existing ?? []).map((asset) => String(asset.reference)));
+    for (const [index, row] of results.entries()) {
+      if (row.ok && !assetOwners.get(index)?.error && row.values.reference) occupied.add(String(row.values.reference));
+    }
+    let nextReference = 1;
     for (const [index, r] of results.entries()) {
       if (!r.ok) continue;
       const v = r.values as Record<string, string | number | boolean | null>;
-      const reference = (v.reference as string) || `AST-${String(++n).padStart(3, "0")}`;
+      let reference = (v.reference as string) || "";
       const owner = assetOwners.get(index);
-      if (owner?.error) { skipped++; notes.push(`Row ${reference}: ${owner.error}`); continue; }
+      if (owner?.error) { skipped++; notes.push(`Row ${reference || index + 1}: ${owner.error}`); continue; }
+      if (!reference) {
+        if (!existing) { skipped++; notes.push(`Row ${index + 1}: Could not read the complete asset reference list; this asset was not imported. Try again or supply an explicit reference.`); continue; }
+        do { reference = `AST-${String(nextReference++).padStart(3, "0")}`; } while (occupied.has(reference));
+        occupied.add(reference);
+      }
+      const categoryId = v.categoryName ? await resolveCategory(String(v.categoryName)) : null;
+      if (v.categoryName && !categoryId) { skipped++; notes.push(`Row ${reference}: Could not resolve the requested category; this asset was not imported. Try again after checking the category.`); continue; }
       const parseResult = assetInputSchema.safeParse({
         organisationId: organisation.id, reference, description: String(v.description), ownerLocation: (v.ownerLocation as string) ?? "",
         ownerId: owner?.ownerId ?? "", classification: v.classification, valueCriticality: v.valueCriticality,
-        categoryId: (v.categoryName ? await resolveCategory(String(v.categoryName)) : null) ?? "", securityControls: (v.securityControls as string) ?? "",
+        categoryId: categoryId ?? "", securityControls: (v.securityControls as string) ?? "",
         lifespan: (v.lifespan as string) ?? "", lastUpdated: (v.lastUpdated as string) ?? "", remarks: (v.remarks as string) ?? "",
       });
       if (!parseResult.success) { skipped++; notes.push(`Row ${reference}: ${zodMessage(parseResult.error)}`); continue; }
       const parsed = parseResult.data;
       const { error } = await supabase.from("assets").insert({ organisation_id: organisation.id, reference: parsed.reference, description: parsed.description, owner_location: parsed.ownerLocation, owner_id: parsed.ownerId, classification: parsed.classification, value_criticality: parsed.valueCriticality, category_id: parsed.categoryId, security_controls: parsed.securityControls, lifespan: parsed.lifespan, last_updated: parsed.lastUpdated, remarks: parsed.remarks, created_by: user.id });
-      if (error) { skipped++; notes.push(`Row ${reference}: ${error.message}`); } else imported++;
+      if (error) {
+        skipped++;
+        notes.push(`Row ${reference}: ${error.code === "23505"
+          ? "This reference already exists; this asset was not imported. Check the inventory and use a different reference."
+          : "Could not save this asset; it was not imported. Check its category and owner, then try again."}`);
+      } else imported++;
     }
     revalidatePath("/app/assets");
   } else { // soa — UPDATE matched control_code rows in the selected register

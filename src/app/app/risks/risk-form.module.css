@@ -22,6 +22,7 @@
 .twoColumns, .threeColumns { display: grid; gap: 14px; }
 .twoColumns { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .threeColumns { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.section > .twoColumns + .twoColumns, .section > .field + .twoColumns, .section > .twoColumns + .field { margin-top: 18px; }
 .twoColumns .field + .field, .threeColumns .field + .field { margin-top: 0; }
 .ownerNotice { margin: 16px 0 0; padding: 11px 13px; border: 1px solid #f0d49d; border-radius: 9px; background: #fff8e8; color: #72531b; font-size: 12px; line-height: 1.5; }
 .recurrenceHelp { margin: 12px 0 0; color: var(--muted); font-size: 12px; }

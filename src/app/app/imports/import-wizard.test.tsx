@@ -30,7 +30,7 @@ describe("Import preview confirmation", () => {
 
     await user.selectOptions(screen.getByLabelText("Map column Description"), "ownerLocation");
 
-    expect(screen.queryByRole("button", { name: /Confirm import/ })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("button", { name: /Confirm import/ })).not.toBeInTheDocument());
     expect(actions.run).toHaveBeenCalledTimes(1);
   });
 
@@ -41,7 +41,7 @@ describe("Import preview confirmation", () => {
 
     await user.selectOptions(screen.getByLabelText("Target SoA register"), "two");
 
-    expect(screen.queryByRole("button", { name: /Confirm import/ })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("button", { name: /Confirm import/ })).not.toBeInTheDocument());
     expect(actions.run).toHaveBeenCalledTimes(1);
   });
 
@@ -90,9 +90,11 @@ describe("Import preview confirmation", () => {
 
     await user.upload(screen.getByLabelText("Workbook file (XLSX or CSV)"), new File(["Description\nReplacement service"], "replacement.csv", { type: "text/csv" }));
 
-    expect(screen.queryByRole("heading", { name: "2. Map columns" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Confirm import/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Import complete" })).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByRole("heading", { name: "2. Map columns" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Confirm import/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Import complete" })).not.toBeInTheDocument();
+    });
   });
 
   it("locks import settings while previewing and confirming", async () => {

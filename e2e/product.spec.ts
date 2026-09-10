@@ -289,13 +289,33 @@ test("an asset is added to the inventory and the list is accessible", async ({ p
   await page.getByRole("link", { name: "Add asset" }).click();
   await expect(page.getByRole("heading", { name: "Add asset" })).toBeVisible();
   await page.getByLabel("Reference", { exact: true }).fill("AST-001");
-  await page.getByLabel("Description").fill("Customer database");
+  await page.getByLabel("Asset name").fill("Customer database");
   await page.locator("select[name=classification]").selectOption("highly_confidential");
   await page.locator("select[name=valueCriticality]").selectOption("high");
-  await page.getByRole("button", { name: "Save asset" }).click();
+  await page.getByRole("button", { name: "Create asset" }).click();
 
   await expect(page.getByRole("heading", { name: "Asset inventory", level: 1 })).toBeVisible();
   await expect(page.getByRole("link", { name: "Customer database" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Export XLSX" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Export CSV" })).toBeVisible();
+  const csvExport = await page.request.get("/api/app/assets/export?format=csv");
+  expect(csvExport.status()).toBe(200);
+  expect(await csvExport.text()).toContain("AST-001");
+  const xlsxExport = await page.request.get("/api/app/assets/export?format=xlsx");
+  expect(xlsxExport.status()).toBe(200);
+  expect(xlsxExport.headers()["content-type"]).toContain("spreadsheetml");
+  const assetTable = page.getByRole("region", { name: "Asset inventory table" });
+  if (testInfo.project.name === "mobile") {
+    await expect(assetTable).toBeHidden();
+    await expect(page.getByRole("list", { name: "Asset inventory cards" })).toContainText("Customer database");
+  } else {
+    await expect(assetTable).toBeVisible();
+    await page.setViewportSize({ width: 883, height: 1000 });
+    await expect(assetTable).toBeHidden();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    await page.setViewportSize({ width: 1440, height: 1000 });
+  }
+  await page.screenshot({ animations: "disabled", path: testInfo.outputPath("asset-register.png"), fullPage: true });
   const axe = await new AxeBuilder({ page }).analyze();
   expect(axe.violations).toEqual([]);
 
@@ -307,17 +327,47 @@ test("an asset is added to the inventory and the list is accessible", async ({ p
   await page.locator("select[name=categoryId]").selectOption({ index: 1 });
   await Promise.all([
     page.waitForURL((url) => url.pathname === "/app/risks"),
-    page.getByRole("button", { name: "Save risk" }).click(),
+    page.getByRole("button", { name: "Create risk" }).click(),
   ]);
-  await expect(page.getByRole("link", { name: "Unencrypted laptops" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Unencrypted laptops", exact: true })).toBeVisible();
 
   // Open the asset detail page and link the risk.
   await page.goto("/app/assets");
-  await page.getByRole("link", { name: "Customer database" }).click();
+  await Promise.all([
+    page.waitForURL((url) => /^\/app\/assets\/[^/]+$/.test(url.pathname)),
+    page.getByRole("link", { name: "Customer database" }).click(),
+  ]);
+  const assetUrl = page.url();
   await expect(page.getByRole("heading", { name: "Customer database" })).toBeVisible();
-  await page.getByLabel(/Link a risk to/).selectOption({ label: "R-001: Unencrypted laptops" });
+  await page.getByLabel("Risk to link").selectOption({ label: "R-001: Unencrypted laptops" });
   await page.getByRole("button", { name: "Link risk" }).click();
   await expect(page.getByRole("link", { name: "R-001: Unencrypted laptops" })).toBeVisible();
+  await expect(page.getByText("Residual exposure 9")).toBeVisible();
+  await page.screenshot({ animations: "disabled", path: testInfo.outputPath("asset-detail.png"), fullPage: true });
+
+  await page.getByRole("link", { name: "R-001: Unencrypted laptops" }).click();
+  await expect(page.getByRole("link", { name: "AST-001: Customer database" })).toBeVisible();
+  await page.getByRole("link", { name: "AST-001: Customer database" }).click();
+  await expect(page).toHaveURL(assetUrl);
+
+  await page.getByRole("link", { name: "Edit asset" }).click();
+  await expect(page.getByRole("group", { name: "Asset identity" })).toBeVisible();
+  await expect(page.getByRole("group", { name: "Accountability and handling" })).toBeVisible();
+  await expect(page.getByRole("group", { name: "Safeguards and lifecycle" })).toBeVisible();
+  const staleAssetPage = await page.context().newPage();
+  await staleAssetPage.goto(page.url());
+  await page.getByLabel("Asset name").fill("Customer data platform");
+  await page.getByLabel("In-app owner").selectOption({ label: "Beta Owner" });
+  await page.getByRole("button", { name: "Save asset" }).click();
+  await expect(page.getByRole("heading", { name: "Customer data platform" })).toBeVisible();
+  await expect(page.getByText("Beta Owner", { exact: true })).toBeVisible();
+  await staleAssetPage.getByLabel("Remarks").fill("Stale draft stays visible");
+  await staleAssetPage.getByRole("button", { name: "Save asset" }).click();
+  await expect(staleAssetPage.locator("form").getByRole("alert")).toContainText("This asset changed");
+  await expect(staleAssetPage.getByLabel("Remarks")).toHaveValue("Stale draft stays visible");
+  await staleAssetPage.close();
+  await page.getByRole("button", { name: "Unlink R-001" }).click();
+  await expect(page.getByText("No risks linked yet.")).toBeVisible();
 
   const detailAxe = await new AxeBuilder({ page }).analyze();
   expect(detailAxe.violations).toEqual([]);
@@ -344,7 +394,7 @@ test("a treatment plan spawns an owned, dated task", async ({ page }, testInfo) 
   await page.getByLabel("Title").fill("Unencrypted laptops");
   await page.getByLabel("Description").fill("Endpoints hold data at rest without disk encryption.");
   await page.locator("select[name=categoryId]").selectOption({ index: 1 });
-  await page.getByRole("button", { name: "Save risk" }).click();
+  await page.getByRole("button", { name: "Create risk" }).click();
   await expect(page.getByRole("heading", { name: "Risk register" })).toBeVisible();
 
   // Open its detail page and add a treatment plan that spawns a task.
