@@ -359,4 +359,28 @@ describe("reviewSoaItemAction tenant scope", () => {
       message: "This control is no longer available. Refresh the review before saving again.",
     });
   });
+
+  it("does not let a dual-membership operator mutate a sibling register while another workspace is active", async () => {
+    const store = reviewedStore();
+    store.soa_registers[0] = { id: REGISTER_ID, organisation_id: OTHER_ORG_ID };
+    store.memberships.push(
+      { organisation_id: ORG_ID, user_id: USER_ID, role: "owner" },
+      { organisation_id: OTHER_ORG_ID, user_id: USER_ID, role: "owner" },
+    );
+    const fake = fakeSupabase(store);
+    hoisted.ctx = context(fake.client);
+    const { reviewSoaItemAction } = await import("./actions");
+
+    await expect(reviewSoaItemAction(reviewFormData())).resolves.toEqual({
+      status: "forbidden",
+      message: "You cannot update this control review. Refresh to check your current access and review state.",
+    });
+    expect(fake.rpc).not.toHaveBeenCalled();
+    expect(fake.queries).toContainEqual({
+      table: "soa_registers",
+      operation: "eq",
+      column: "organisation_id",
+      value: ORG_ID,
+    });
+  });
 });

@@ -338,7 +338,7 @@ export async function runImportAction(input: RunImportInput): Promise<ImportRunR
     const previewMatches = input.soaPreview?.registerId === registerId
       && input.soaPreview.identity === soaPreviewIdentity({ ...input, rows }, registerId, changes)
       && JSON.stringify(input.soaPreview.changes) === JSON.stringify(changes);
-    if (!previewMatches || skipped > 0 || changes.length === 0) {
+    if (!previewMatches || changes.length === 0) {
       return {
         ...result,
         skipped,

@@ -221,7 +221,7 @@ function mapSoaDecisionError(error: unknown): SaveSoaDecisionResult {
 }
 
 export async function reviewSoaItemAction(formData: FormData): Promise<SaveSoaDecisionResult> {
-  const { supabase } = await requireAppContext();
+  const { supabase, organisation } = await requireAppContext();
   const parsedReview = soaItemReviewSchema.safeParse({ itemId: formData.get("itemId"), status: formData.get("status"), applicable: formData.get("applicable") === "true", justification: formData.get("justification"), evidence: formData.get("evidence") });
   const parsedRegisterId = z.uuid().safeParse(formData.get("registerId"));
   const parsedRevision = z.coerce.number().int().nonnegative().safe().safeParse(formData.get("expectedRevision"));
@@ -229,6 +229,13 @@ export async function reviewSoaItemAction(formData: FormData): Promise<SaveSoaDe
   const parsedOwnerId = rawOwnerId ? z.uuid().safeParse(String(rawOwnerId)) : { success: true as const, data: null };
   if (!parsedReview.success || !parsedRegisterId.success || !parsedRevision.success || !parsedOwnerId.success) return forbiddenSoaDecisionResult(true);
   const parsed = parsedReview.data;
+  const { data: activeRegister, error: registerError } = await supabase
+    .from("soa_registers")
+    .select("id")
+    .eq("id", parsedRegisterId.data)
+    .eq("organisation_id", organisation.id)
+    .maybeSingle();
+  if (registerError || !activeRegister) return forbiddenSoaDecisionResult();
   const { data, error } = await supabase.rpc("update_soa_decisions_guarded", {
     target_register_id: parsedRegisterId.data,
     changes: [{

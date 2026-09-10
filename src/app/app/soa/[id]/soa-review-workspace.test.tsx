@@ -632,6 +632,81 @@ describe("SoaReviewWorkspace", () => {
     expect(saveAction.mock.calls[1][0].get("expectedRevision")).toBe("1");
   });
 
+  it("keeps a dirty draft on its original base revision through an ordinary prop refresh", async () => {
+    const user = userEvent.setup();
+    const saveAction = vi.fn()
+      .mockResolvedValueOnce({ status: "stale", message: "This control changed after you opened it. Refresh and reconcile your draft before saving again." })
+      .mockResolvedValueOnce({ status: "saved", revision: 2 });
+    const view = renderWorkspace(saveAction);
+    await user.type(screen.getByRole("textbox", { name: "Rationale" }), "Draft from revision zero");
+
+    view.rerender(
+      <SoaReviewWorkspace
+        items={items.map((item) => item.id === "item-1" ? { ...item, decisionRevision: 1, justification: "Another tab saved" } : item)}
+        members={members}
+        currentUserId={CURRENT_USER_ID}
+        registerId={REGISTER_ID}
+        saveAction={saveAction}
+      />,
+    );
+    expect(screen.getByRole("textbox", { name: "Rationale" })).toHaveValue("Draft from revision zero");
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    await screen.findByText(/changed after you opened it/i);
+    expect(saveAction.mock.calls[0][0].get("expectedRevision")).toBe("0");
+
+    await user.click(screen.getByRole("button", { name: "Refresh current decisions" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save draft" })).toBeEnabled());
+    expect(screen.getByRole("textbox", { name: "Rationale" })).toHaveValue("Draft from revision zero");
+
+    view.rerender(
+      <SoaReviewWorkspace
+        items={items.map((item) => item.id === "item-1" ? { ...item, decisionRevision: 2, justification: "A later ordinary refresh" } : item)}
+        members={members}
+        currentUserId={CURRENT_USER_ID}
+        registerId={REGISTER_ID}
+        saveAction={saveAction}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    await waitFor(() => expect(saveAction).toHaveBeenCalledTimes(2));
+    expect(saveAction.mock.calls[1][0].get("expectedRevision")).toBe("1");
+  });
+
+  it("discards an obsolete optimistic revision when reconciling after an earlier local save", async () => {
+    const user = userEvent.setup();
+    const saveAction = vi.fn()
+      .mockResolvedValueOnce({ status: "saved", revision: 1 })
+      .mockResolvedValueOnce({ status: "stale", message: "This control changed after you opened it. Refresh and reconcile your draft before saving again." })
+      .mockResolvedValueOnce({ status: "saved", revision: 3 });
+    const view = renderWorkspace(saveAction);
+
+    await user.type(screen.getByRole("textbox", { name: "Rationale" }), "First local save");
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Saved"));
+    await user.type(screen.getByRole("textbox", { name: "Rationale" }), " plus unsaved detail");
+
+    view.rerender(
+      <SoaReviewWorkspace
+        items={items.map((item) => item.id === "item-1" ? { ...item, decisionRevision: 2, justification: "Another tab saved twice" } : item)}
+        members={members}
+        currentUserId={CURRENT_USER_ID}
+        registerId={REGISTER_ID}
+        saveAction={saveAction}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    await screen.findByText(/changed after you opened it/i);
+    expect(saveAction.mock.calls[1][0].get("expectedRevision")).toBe("1");
+    expect(screen.getByRole("textbox", { name: "Rationale" })).toHaveValue("First local save plus unsaved detail");
+
+    await user.click(screen.getByRole("button", { name: "Refresh current decisions" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save draft" })).toBeEnabled());
+    expect(screen.getByRole("textbox", { name: "Rationale" })).toHaveValue("First local save plus unsaved detail");
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    await waitFor(() => expect(saveAction).toHaveBeenCalledTimes(3));
+    expect(saveAction.mock.calls[2][0].get("expectedRevision")).toBe("2");
+  });
+
   it("provides labelled controls, a live save region, and honest tab content", async () => {
     const user = userEvent.setup();
     renderWorkspace();

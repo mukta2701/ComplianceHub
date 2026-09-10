@@ -84,8 +84,31 @@ begin
       detail = 'changes_invalid';
   end if;
 
+  -- Parse every item identity before comparing it. PostgreSQL accepts multiple
+  -- textual spellings of one UUID, so raw JSON strings are not a safe identity
+  -- boundary for a command that must update each row at most once.
+  for change in select value from jsonb_array_elements(changes)
+  loop
+    if jsonb_typeof(change) is distinct from 'object'
+      or jsonb_typeof(change->'itemId') is distinct from 'string' then
+      raise exception using
+        errcode = '22023',
+        message = 'control_decision_invalid',
+        detail = 'change_invalid';
+    end if;
+
+    begin
+      parsed_item_id := (change->>'itemId')::uuid;
+    exception when invalid_text_representation then
+      raise exception using
+        errcode = '22023',
+        message = 'control_decision_invalid',
+        detail = 'change_invalid';
+    end;
+  end loop;
+
   if (select count(*) from jsonb_array_elements(changes)) is distinct from
-     (select count(distinct value->>'itemId') from jsonb_array_elements(changes)) then
+     (select count(distinct (value->>'itemId')::uuid) from jsonb_array_elements(changes)) then
     raise exception using
       errcode = '22023',
       message = 'control_decision_invalid',

@@ -61,6 +61,7 @@ export type SoaReviewWorkspaceItem = SoaQueueItem & {
 
 type Draft = Pick<SoaQueueItem, "applicable" | "status" | "justification" | "evidenceText" | "ownerId">;
 type OptimisticDraft = { draft: Draft; revision: number; sourceItems: SoaReviewWorkspaceItem[] };
+type ReconcileRequest = { itemId: string; observedRevision: number };
 
 export type SoaReviewWorkspaceProps = {
   items: SoaReviewWorkspaceItem[];
@@ -212,6 +213,8 @@ export function SoaReviewWorkspace({ items, members, currentUserId, registerId, 
   const firstAttention = initialItems.find((item) => item.reviewState !== "reviewed") ?? initialItems[0] ?? null;
   const [selectedId, setSelectedId] = useState<string | null>(firstAttention?.id ?? null);
   const [draft, setDraft] = useState<Draft | null>(firstAttention ? toDraft(firstAttention) : null);
+  const [draftBaseRevision, setDraftBaseRevision] = useState(firstAttention?.decisionRevision ?? 0);
+  const [reconcileRequest, setReconcileRequest] = useState<ReconcileRequest | null>(null);
   const [dirty, setDirty] = useState(false);
   const [activeTab, setActiveTab] = useState<DetailTab>("decision");
   const [saveMessage, setSaveMessage] = useState("");
@@ -262,9 +265,24 @@ export function SoaReviewWorkspace({ items, members, currentUserId, registerId, 
   const selectedDraft = selectedItem?.id === selectedId && draft && dirty
     ? draft
     : selectedItem ? toDraft(selectedItem) : null;
+  const canonicalSelectedItem = initialItems.find((item) => item.id === selectedItem?.id) ?? null;
+  const reconcileObservedRevision = reconcileRequest && selectedItem && reconcileRequest.itemId === selectedItem.id
+    ? reconcileRequest.observedRevision
+    : null;
+  const reconciledRevision = reconcileObservedRevision !== null
+    && canonicalSelectedItem
+    && canonicalSelectedItem.decisionRevision !== reconcileObservedRevision
+    ? canonicalSelectedItem.decisionRevision
+    : null;
+  const effectiveBaseRevision = reconciledRevision ?? draftBaseRevision;
   const selectedBlocked = selectedItem
-    ? blockedRevisions[selectedItem.id] === selectedItem.decisionRevision
+    ? blockedRevisions[selectedItem.id] === effectiveBaseRevision
     : false;
+
+  if (reconciledRevision !== null) {
+    setDraftBaseRevision(reconciledRevision);
+    setReconcileRequest(null);
+  }
 
   useEffect(() => {
     if (!dirty) return;
@@ -345,11 +363,15 @@ export function SoaReviewWorkspace({ items, members, currentUserId, registerId, 
     const nextSelected = nextVisible.find((item) => item.id === selectedId) ?? nextVisible[0] ?? null;
     setSelectedId(nextSelected?.id ?? null);
     setDraft(nextSelected ? toDraft(nextSelected) : null);
+    setDraftBaseRevision(nextSelected?.decisionRevision ?? 0);
+    setReconcileRequest(null);
   }
 
   function loadItem(item: SoaReviewWorkspaceItem) {
     setSelectedId(item.id);
     setDraft(toDraft(item));
+    setDraftBaseRevision(item.decisionRevision);
+    setReconcileRequest(null);
     setDirty(false);
     setActiveTab("decision");
     setSaveMessage("");
@@ -362,6 +384,10 @@ export function SoaReviewWorkspace({ items, members, currentUserId, registerId, 
 
   function updateDraft(next: Draft) {
     if (!selectedItem) return;
+    if (!dirty) {
+      setDraftBaseRevision(selectedItem.decisionRevision);
+      setReconcileRequest(null);
+    }
     setSelectedId(selectedItem.id);
     setDraft(next);
     setDirty(true);
@@ -455,6 +481,20 @@ export function SoaReviewWorkspace({ items, members, currentUserId, registerId, 
     });
   }
 
+  function refreshCurrentDecision() {
+    if (!selectedItem || !canonicalSelectedItem) return;
+    setOptimisticDrafts((current) => {
+      const next = { ...current };
+      delete next[selectedItem.id];
+      return next;
+    });
+    setDraftBaseRevision(canonicalSelectedItem.decisionRevision);
+    setReconcileRequest(canonicalSelectedItem.decisionRevision === effectiveBaseRevision
+      ? { itemId: selectedItem.id, observedRevision: canonicalSelectedItem.decisionRevision }
+      : null);
+    router.refresh();
+  }
+
   async function save(advance: boolean) {
     if (readOnly || !selectedItem || !selectedDraft || saving || selectedBlocked || !visibleItems.some((item) => item.id === selectedItem.id)) return;
     setSaving(true);
@@ -462,7 +502,7 @@ export function SoaReviewWorkspace({ items, members, currentUserId, registerId, 
     const formData = new FormData();
     formData.set("registerId", registerId);
     formData.set("itemId", selectedItem.id);
-    formData.set("expectedRevision", String(selectedItem.decisionRevision));
+    formData.set("expectedRevision", String(effectiveBaseRevision));
     formData.set("status", selectedDraft.status);
     formData.set("applicable", String(selectedDraft.applicable));
     formData.set("ownerId", selectedDraft.ownerId ?? "");
@@ -473,7 +513,7 @@ export function SoaReviewWorkspace({ items, members, currentUserId, registerId, 
       const result = await saveAction(formData);
       if (result.status !== "saved") {
         if (result.status === "stale") {
-          setBlockedRevisions((current) => ({ ...current, [selectedItem.id]: selectedItem.decisionRevision }));
+          setBlockedRevisions((current) => ({ ...current, [selectedItem.id]: effectiveBaseRevision }));
         }
         setSaveMessage(result.message);
         return;
@@ -492,6 +532,8 @@ export function SoaReviewWorkspace({ items, members, currentUserId, registerId, 
       }));
       setSelectedId(updated.id);
       setDraft(toDraft(updated));
+      setDraftBaseRevision(result.revision);
+      setReconcileRequest(null);
       setDirty(false);
       setSaveMessage("Saved");
       router.refresh();
@@ -637,7 +679,7 @@ export function SoaReviewWorkspace({ items, members, currentUserId, registerId, 
 
             {readOnly ? <p className="soa-detail-actions">Read-only review. A workspace operator can update these decisions.</p> : <footer className="soa-detail-actions">
               <p role="status" aria-live="polite">{saveMessage}</p>
-              {selectedBlocked ? <button type="button" className="button secondary" onClick={() => router.refresh()}>Refresh current decisions</button> : null}
+              {selectedBlocked ? <button type="button" className="button secondary" onClick={refreshCurrentDecision}>Refresh current decisions</button> : null}
               <button type="submit" name="saveIntent" value="draft" className="button secondary" disabled={saving || selectedBlocked}>{saving ? "Saving" : "Save draft"}</button>
               <button type="submit" name="saveIntent" value="next" className="button primary" disabled={saving || selectedBlocked}>{saving ? "Saving" : "Save and next"}</button>
             </footer>}

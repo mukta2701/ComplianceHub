@@ -132,6 +132,31 @@ describe("SoA imports stay in the active workspace", () => {
     });
   });
 
+  it("confirms the exact matched subset while keeping unmatched controls visibly skipped", async () => {
+    const rows = [soaRows[0], ["A.99", "false", "Outside this register", "not_applicable", "", ""]];
+    const preview = await runImportAction({
+      module: "soa", headers: soaHeaders, rows, mapping: soaMapping,
+      commit: false, registerId: REGISTER_ID,
+    });
+
+    expect(preview).toMatchObject({ updated: 1, skipped: 1 });
+    expect(preview.notes).toContain("Control A.99 is not in this register — skipped.");
+    expect(preview.soaPreview?.changes).toHaveLength(1);
+
+    const committed = await runImportAction({
+      module: "soa", headers: soaHeaders, rows, mapping: soaMapping,
+      commit: true, registerId: REGISTER_ID, soaPreview: preview.soaPreview,
+    });
+
+    expect(committed).toMatchObject({ updated: 1, skipped: 1 });
+    expect(committed).not.toHaveProperty("requiresFreshPreview");
+    expect(committed.notes).toContain("Control A.99 is not in this register — skipped.");
+    expect(hoisted.rpc).toHaveBeenCalledExactlyOnceWith("update_soa_decisions_guarded", expect.objectContaining({
+      target_register_id: REGISTER_ID,
+      changes: [expect.objectContaining({ itemId: ITEM_ID, expectedRevision: 7 })],
+    }));
+  });
+
   it("requires a fresh preview when any guarded revision is stale", async () => {
     const preview = await runImportAction({
       module: "soa", headers: soaHeaders, rows: soaRows, mapping: soaMapping,

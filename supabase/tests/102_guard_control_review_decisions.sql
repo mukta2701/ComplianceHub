@@ -59,6 +59,25 @@ select is((select detail from decision_error),'revision_mismatch','stale decisio
 select is((select justification from public.soa_items where id=current_setting('app.decision_item_one')::uuid),'First guarded review','a stale overwrite changes nothing');
 select is((select decision_revision from public.soa_items where id=current_setting('app.decision_item_two')::uuid),0::bigint,'one stale row rolls back the entire batch');
 
+truncate decision_error;
+do $$
+declare error_code text; error_message text; error_detail text;
+begin
+  perform public.update_soa_decisions_guarded(
+    current_setting('app.decision_register')::uuid,
+    jsonb_build_array(
+      jsonb_build_object('itemId',current_setting('app.decision_item_one'),'expectedRevision',1,'applicable',true,'status','operational','justification','Canonical duplicate one','evidence','','ownerId',null),
+      jsonb_build_object('itemId',replace(upper(current_setting('app.decision_item_one')),'-',''),'expectedRevision',1,'applicable',true,'status','advanced','justification','Canonical duplicate two','evidence','','ownerId',null)
+    )
+  );
+exception when others then
+  get stacked diagnostics error_code = returned_sqlstate, error_message = message_text, error_detail = pg_exception_detail;
+  insert into decision_error values(error_code,error_message,error_detail);
+end;
+$$;
+select is((select code||':'||message||':'||detail from decision_error),'22023:control_decision_invalid:duplicate_item','equivalent UUID spellings are rejected as one duplicated decision');
+select is((select decision_revision from public.soa_items where id=current_setting('app.decision_item_one')::uuid),1::bigint,'canonical duplicate rejection writes nothing');
+
 select set_config('app.batch_result',(
   select jsonb_agg(to_jsonb(result) order by item_id)::text from public.update_soa_decisions_guarded(
     current_setting('app.decision_register')::uuid,
