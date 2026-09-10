@@ -66,7 +66,6 @@ type ResponseRow = { question_id: string; answer: ControlSourceAnswer["answer"];
 type MemberRow = { user_id: string; profiles: { display_name: string | null } | { display_name: string | null }[] | null };
 type EvidenceRow = { id: string; organisation_id: string; title: string; status: EvidenceStatus; valid_until: string | null; kind: EvidenceKind };
 type EvidenceLinkRow = { control_id: string; evidence_id: string; evidence: EvidenceRow | EvidenceRow[] | null };
-type TaskRow = { id: string; title: string; status: TaskStatus; due_on: string | null };
 type RiskRow = { id: string; reference: string; title: string; status: string };
 const COMPLETE_LIMIT = 5000;
 const DISPLAY_LIMIT = 20;
@@ -98,6 +97,51 @@ async function readCatalogueProvenance(supabase: SupabaseClient, table: "catalog
   const parsed = catalogueProvenanceSchema.safeParse(first(result.rows, label));
   if (!parsed.success || parsed.data.id !== id) throw new UnavailableInput(label);
   return parsed.data;
+}
+
+const historyGroupSchema = z.object({
+  item_id: z.string().min(1), total: z.number().int().nonnegative().safe(),
+  entries: z.array(z.object({ id: z.string().min(1), action: z.string().min(1), occurred_at: z.string().refine((value) => Number.isFinite(Date.parse(value))) })).max(HISTORY_LIMIT),
+}).refine((group) => group.entries.length === Math.min(group.total, HISTORY_LIMIT)
+  && new Set(group.entries.map((entry) => entry.id)).size === group.entries.length
+  && group.entries.every((entry, index) => {
+    if (index === 0) return true;
+    const previous = group.entries[index - 1];
+    if (Date.parse(previous.occurred_at) < Date.parse(entry.occurred_at)) return false;
+    // Compare identities only for identical timestamp strings; Date loses SQL microseconds.
+    if (previous.occurred_at !== entry.occurred_at) return true;
+    return /^\d+$/.test(previous.id) && /^\d+$/.test(entry.id)
+      ? BigInt(previous.id) > BigInt(entry.id)
+      : previous.id.localeCompare(entry.id) > 0;
+  }));
+const taskGroupSchema = z.object({
+  item_id: z.string().min(1), total: z.number().int().nonnegative().safe(), open_count: z.number().int().nonnegative().safe(),
+  entries: z.array(z.object({ id: z.string().min(1), title: z.string().min(1), status: z.enum(["open", "in_progress", "done", "cancelled"]), due_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable() })).max(DISPLAY_LIMIT),
+}).refine((group) => {
+  const shownOpen = group.entries.filter((entry) => entry.status === "open" || entry.status === "in_progress").length;
+  return group.entries.length === Math.min(group.total, DISPLAY_LIMIT) && group.open_count <= group.total
+    && shownOpen <= group.open_count && group.entries.length - shownOpen <= group.total - group.open_count
+    && new Set(group.entries.map((entry) => entry.id)).size === group.entries.length
+    && group.entries.every((entry, index) => index === 0 || group.entries[index - 1].id.localeCompare(entry.id) < 0);
+});
+
+// Missing/invalid known groups affect only their decision. Unknown identities make
+// the dataset untrustworthy, while the independently loaded dataset stays usable.
+async function readContextGroups<T extends { item_id: string }>(query: () => PromiseLike<{ data: unknown; error: unknown }>, itemIds: ReadonlySet<string>, schema: z.ZodType<T>): Promise<Map<string, T>> {
+  try {
+    const result = await query();
+    if (result.error || !Array.isArray(result.data)) return new Map();
+    const groups = new Map<string, T>();
+    const seen = new Set<string>();
+    for (const row of result.data) {
+      if (!row || typeof row.item_id !== "string" || !itemIds.has(row.item_id)) return new Map();
+      if (seen.has(row.item_id)) { groups.delete(row.item_id); continue; }
+      seen.add(row.item_id);
+      const parsed = schema.safeParse(row);
+      if (parsed.success) groups.set(row.item_id, parsed.data);
+    }
+    return groups;
+  } catch { return new Map(); }
 }
 
 type ReviewContext = { organisationId: string; registerId: string; today?: string };
@@ -226,51 +270,52 @@ async function readControlReview(supabase: SupabaseClient, context: ReviewContex
       riskLists[relationship] = metadata(null, 0, RISK_LIMIT);
     }
   }
-  // Bound concurrent per-decision reads; a busy control cannot consume another's history allowance.
-  for (let offset = 0; offset < items.length; offset += 8) {
-    await Promise.all(items.slice(offset, offset + 8).map(async (item) => {
-      const controlIds = workMappingResult.rows.filter((mapping) => mapping.requirement_id === item.controlId).map((mapping) => mapping.control_id);
-      const records = new Map<string, EvidenceRow>();
-      for (const link of evidenceLinks.filter((link) => controlIds.includes(link.control_id))) {
-        const evidence = one(link.evidence);
-        if (!evidence || evidence.organisation_id !== organisationId) throw new UnavailableInput("evidence");
-        records.set(evidence.id, evidence);
-      }
-      const allEvidence = [...records.values()].map((evidence) => {
-        if (evidence.status === "current" || evidence.status === "expiring") liveRequirements.add(item.controlId);
-        if (evidence.status === "expired") expiredRequirements.add(item.controlId);
-        return { id: evidence.id, title: evidence.title, storedStatus: evidence.status, status: evidence.status === "current" || evidence.status === "expiring" ? deriveEvidenceStatus(evidence.valid_until, today) : evidence.status, validUntil: evidence.valid_until, kind: evidence.kind };
-      });
-      const freshness = summariseEvidenceFreshness(allEvidence);
-      Object.assign(item, { evidenceTotal: freshness.total, evidenceExpiring: freshness.expiring, evidenceExpired: freshness.expired });
-      item.linkedEvidence = allEvidence.slice(0, DISPLAY_LIMIT);
-      item.evidence = item.linkedEvidence.map(({ id, title, storedStatus, validUntil }) => ({ id, title, storedStatus, validUntil }));
-      item.lists.evidence = metadata(allEvidence.length, item.linkedEvidence.length, DISPLAY_LIMIT);
-      item.reviewState = deriveSoaReviewState(item);
-      try {
-        const history = await readRows("audit history", supabase.from("audit_events").select("action,occurred_at", { count: "exact" })
-          .eq("organisation_id", organisationId).eq("entity_type", "soa_items").eq("entity_id", item.id).order("occurred_at", { ascending: false }).order("id", { ascending: false }).limit(HISTORY_LIMIT).returns<Array<{ action: string; occurred_at: string }>>(), true);
-        item.recentAuditEvents = history.rows.map((event) => ({ action: event.action, occurredAt: event.occurred_at }));
-        item.lists.history = metadata(history.total, history.rows.length, HISTORY_LIMIT);
-      } catch {
-        optionalUnavailable.add("Audit history");
-        item.lists.history = metadata(null, 0, HISTORY_LIMIT);
-      }
-      if (controlIds.length) {
-        try {
-          const tasks = await readRows("linked tasks", supabase.from("tasks").select("id,title,status,due_on", { count: "exact" }).eq("organisation_id", organisationId).in("control_id", controlIds).order("id").limit(DISPLAY_LIMIT).returns<TaskRow[]>(), true);
-          const open = await supabase.from("tasks").select("id", { count: "exact", head: true }).eq("organisation_id", organisationId).in("control_id", controlIds).in("status", ["open", "in_progress"]);
-          if (open.error || open.count === null) throw new UnavailableInput("linked tasks");
-          item.openTaskCount = open.count;
-          // Tasks have no human reference field in the existing schema; use their record identity.
-          item.linkedTasks = tasks.rows.map((task) => ({ id: task.id, reference: task.id, title: task.title, status: task.status, dueOn: task.due_on }));
-          item.lists.tasks = metadata(tasks.total, tasks.rows.length, DISPLAY_LIMIT);
-        } catch {
-          optionalUnavailable.add("Linked tasks");
-          item.lists.tasks = metadata(null, 0, DISPLAY_LIMIT);
-        }
-      }
-    }));
+  for (const item of items) {
+    const controlIds = workMappingResult.rows.filter((mapping) => mapping.requirement_id === item.controlId).map((mapping) => mapping.control_id);
+    const records = new Map<string, EvidenceRow>();
+    for (const link of evidenceLinks.filter((link) => controlIds.includes(link.control_id))) {
+      const evidence = one(link.evidence);
+      if (!evidence || evidence.organisation_id !== organisationId) throw new UnavailableInput("evidence");
+      records.set(evidence.id, evidence);
+    }
+    const allEvidence = [...records.values()].map((evidence) => {
+      if (evidence.status === "current" || evidence.status === "expiring") liveRequirements.add(item.controlId);
+      if (evidence.status === "expired") expiredRequirements.add(item.controlId);
+      return { id: evidence.id, title: evidence.title, storedStatus: evidence.status, status: evidence.status === "current" || evidence.status === "expiring" ? deriveEvidenceStatus(evidence.valid_until, today) : evidence.status, validUntil: evidence.valid_until, kind: evidence.kind };
+    });
+    const freshness = summariseEvidenceFreshness(allEvidence);
+    Object.assign(item, { evidenceTotal: freshness.total, evidenceExpiring: freshness.expiring, evidenceExpired: freshness.expired });
+    item.linkedEvidence = allEvidence.slice(0, DISPLAY_LIMIT);
+    item.evidence = item.linkedEvidence.map(({ id, title, storedStatus, validUntil }) => ({ id, title, storedStatus, validUntil }));
+    item.lists.evidence = metadata(allEvidence.length, item.linkedEvidence.length, DISPLAY_LIMIT);
+    item.reviewState = deriveSoaReviewState(item);
+  }
+  const itemIds = new Set(items.map((item) => item.id));
+  const args = { target_organisation_id: organisationId, target_register_id: registerId };
+  const [historyGroups, taskGroups] = await Promise.all([
+    readContextGroups(() => supabase.rpc("load_control_review_history", args), itemIds, historyGroupSchema),
+    readContextGroups(() => supabase.rpc("load_control_review_tasks", args), itemIds, taskGroupSchema),
+  ]);
+  for (const item of items) {
+    const history = historyGroups.get(item.id);
+    if (history) {
+      item.recentAuditEvents = history.entries.map((event) => ({ action: event.action, occurredAt: event.occurred_at }));
+      item.lists.history = metadata(history.total, history.entries.length, HISTORY_LIMIT);
+    } else {
+      optionalUnavailable.add("Audit history");
+      item.lists.history = metadata(null, 0, HISTORY_LIMIT);
+    }
+    const hasMappings = workMappingResult.rows.some((mapping) => mapping.requirement_id === item.controlId);
+    const tasks = taskGroups.get(item.id);
+    if (tasks && (hasMappings || tasks.total === 0)) {
+      item.openTaskCount = tasks.open_count;
+      item.linkedTasks = tasks.entries.map((task) => ({ id: task.id, reference: task.id, title: task.title, status: task.status, dueOn: task.due_on }));
+      item.lists.tasks = metadata(tasks.total, tasks.entries.length, DISPLAY_LIMIT);
+    } else if (hasMappings || tasks) {
+      optionalUnavailable.add("Linked tasks");
+      item.lists.tasks = metadata(null, 0, DISPLAY_LIMIT);
+    }
+    // Verified lack of mappings means known zero tasks even if the optional read failed.
   }
   let aiEnabled = false;
   try {

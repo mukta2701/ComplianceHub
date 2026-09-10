@@ -98,3 +98,51 @@ All commands used the local resource guard sequentially with `--maxWorkers=1` fo
 ### Self-review
 
 Compared saved fields with `202607020003_soa_risks_audit.sql`, `202607020004_review_hardening.sql`, the restored finalisation migration and the existing export route. Checked that current source records cannot replace snapshot IDs, that existing malformed snapshots cannot silently become editable views, that optional label failures leave snapshots readable, and that current membership authorization is retained. No migration, database data or release-checklist changes were made. The existing preview was not rebuilt. Independent review and later Task 5/6 presentation/browser checks remain separate gates.
+
+## Measured performance correction — grouped optional context
+
+Selected from the 10 September architecture review after measurement showed per-decision network multiplication. The public `loadControlReview(client, context)` interface and all provenance/evidence/finalisation semantics remain unchanged. Complexity stays inside this deep module; its existing application seam and injected Supabase transport adapter are retained.
+
+### Implementation and scope
+
+- Additive migration `20260910180006_grouped_control_review_context.sql` adds two independent reads: `load_control_review_history(organisation, register)` and `load_control_review_tasks(organisation, register)`.
+- Both are `STABLE SECURITY INVOKER` with an empty search path, qualified relations, explicit authenticated execute grants and no anonymous/public grant. They require an authenticated member and a visible register in the supplied organisation, using the existing read policies. Owner/Admin/Member read access remains intact; no operator or write authority is added.
+- Each function derives its own scoped decision set internally. History returns every visible decision, exact event totals and its newest five events ordered by timestamp descending, then numeric event ID descending. Tasks deduplicate task identity per decision before exact all/open counts and the first 20 IDs in ascending order. Empty groups are explicit zeros. A shared task may appear once in each legitimately mapped decision.
+- The loader dispatches the two reads independently, validates known decision identities, complete group coverage, safe nonnegative totals, entry counts/caps, statuses, uniqueness and ordering. Missing or malformed known groups become unavailable for those decisions. Unknown identities invalidate only that dataset. A failed task read leaves verified unmapped decisions at known zero and mapped decisions unavailable. A failed history read cannot hide task context; a failed task read cannot hide history. Readiness never depends on these optional datasets.
+- The finalised snapshot branch still exits before any grouped/mutable context reads. Evidence reads/completeness and stored-versus-date freshness are unchanged.
+- No Task 5 UI/e2e files, release checklist, existing migration or application records were edited by this correction. The parent/Task 5 agent owns the uncommitted presentation changes present during verification.
+
+### Fresh request-count evidence
+
+The fictional HTTP adapter wraps the real Supabase client. Counts are total transport requests through the unchanged loader seam, with zero synthetic latency; they do not establish a live timing improvement.
+
+| Scenario | Before | After |
+|---|---:|---:|
+| Existing 93-control fixture, one mapped decision | 111 | 18 |
+| All 93 decisions mapped to shared work | 295 | 18 |
+| 93 decisions without work mappings | 108 | 17 |
+| Finalised Statement of Applicability | 4 | 4 |
+
+Before values were reproduced by failing request-count assertions. After values pass in the same test cases. There are no direct per-decision `tasks` or `audit_events` transport reads left in the loader.
+
+### RED → GREEN and verification
+
+All heavy commands ran sequentially under `node --import=tsx scripts/local-resource-guard.ts --`.
+
+1. Loader RED: three assertions reproduced 111/295/108 requests rather than the selected 18/18/17; finalised remained four.
+2. Database RED: `103_grouped_control_review_context.sql` failed its function-existence assertions and first grouped call because neither function existed.
+3. Created the migration through `supabase migration new`, implemented only the two functions/grants, and applied it with:
+   `PGSSLMODE=disable node --import=tsx scripts/local-resource-guard.ts -- node_modules/.bin/supabase migration up --local --workdir artifacts/team-baseline/runtime`
+   Only migration `20260910180006` was pending/applied. This is the preserved `compliancehub-team-baseline` stack, API 55321/database 55322. No reset, include-all, migration repair or historical replay was used.
+4. Initial GREEN: loader **42/42** and pgTAP **26/26**.
+5. Added missing/duplicate/unknown group, unsafe/contradictory counters, duplicate task, partial coverage, transport isolation and shared-task tests. A new ordering regression failed before validation was added; it then passed. Loader now has **53 passing tests**.
+6. Added database tests for a caller who can see both organisations and rollback-only restrictive SELECT policies. These show that explicit dataset scope excludes sibling records and `SECURITY INVOKER` honours the caller's row policies. Final pgTAP **30/30** passed:
+   `node --import=tsx scripts/local-resource-guard.ts -- node_modules/.bin/supabase test db --local --workdir artifacts/team-baseline/runtime "$PWD/supabase/tests/103_grouped_control_review_context.sql"`
+7. Fresh broad focused run: **9 files / 166 tests passed**, using `npm test -- src/features/soa/application 'src/app/app/soa/[id]' src/app/app/actions.soa.test.ts 'src/app/app/assessment/[id]/page.ai.test.tsx' --maxWorkers=1`. This also covers the concurrently prepared Task 5 UI as it stood at this run; it is not a claim that Task 5 is completed.
+8. Fresh full ESLint, TypeScript and scoped diff hygiene passed. Installed function body hashes match the migration, both read back stable/invoker, and the isolated database migration ledger contains `20260910180006`.
+
+### Self-review and limits
+
+Reviewed function scope, invoker privileges, ranking-before-cap, independent dataset validation and unchanged finalised/essential paths. The pgTAP transaction's fictional users/records and restrictive test policies roll back; the test temporarily suppressed audit triggers only while preparing zero-history fictional decisions, then immediately restored them. No fixture data is persisted. Tests cover Member reading and failed anonymous/unrelated-register reads without granting new editing rights.
+
+SQL still examines all matching records to compute exact totals; reduced network requests do not eliminate underlying database work or prove a particular server duration. The existing 1,000-row API response limit comfortably covers the expected 93 groups; unexpected truncated group coverage is reported unavailable. Current context is separately consistent per grouped statement, not one transaction covering every loader input. The full unit suite/build/browser journey was not rerun by this correction; Task 5 was explicitly released after guarded checks completed to collect real production-preview timing and behavior evidence. This correction is committed locally without a push as directed.

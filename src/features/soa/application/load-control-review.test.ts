@@ -196,3 +196,86 @@ it("does not fall back to mutable decisions when the existing snapshot is malfor
   fixture.tables.soa_snapshots[0].items = [{ controlCode: "5.1" }];
   expect((await loadControlReview(fixture.client, context)).finalisation).toMatchObject({ readiness: "could_not_verify", unavailableInputs: ["final statement"] });
 });
+
+it.each(["existing", "all mapped", "unmapped", "finalised"])("keeps the %s review read count constant with grouped context", async (scenario) => {
+  const fixture = controlReviewFixture();
+  if (scenario === "all mapped") fixture.tables.requirement_control_mappings = fixture.tables.soa_items.map((item) => ({ requirement_id: item.control_id, control_id: "shared" }));
+  if (scenario === "unmapped") fixture.tables.requirement_control_mappings = [];
+  if (scenario === "finalised") finaliseControlReviewFixture(fixture);
+  const result = await loadControlReview(fixture.client, context);
+  expect(result.finalisation.readiness).toBe(scenario === "finalised" ? "finalised" : "ready");
+  expect(fixture.requests.length).toBe(scenario === "finalised" ? 4 : scenario === "unmapped" ? 17 : 18);
+});
+
+it.each(["load_control_review_history", "load_control_review_tasks"])("isolates a failed grouped %s read while preserving the other dataset", async (rpc) => {
+  const fixture = controlReviewFixture();
+  fixture.tables.audit_events = [{ id: "1", organisation_id: "org", entity_type: "soa_items", entity_id: "item-0", action: "reviewed", occurred_at: "2026-09-10T12:00:00Z" }];
+  fixture.failures.add(rpc);
+  const result = await loadControlReview(fixture.client, context);
+  expect(result.finalisation.readiness).toBe("ready");
+  expect(result.items[0].lists.history.total).toBe(rpc === "load_control_review_history" ? null : 1);
+  expect(result.items[0].lists.tasks.total).toBe(rpc === "load_control_review_tasks" ? null : 1);
+  expect(result.items[1].lists.tasks.total).toBe(0);
+});
+
+it("identifies missing, duplicate and malformed history groups without hiding valid decision histories", async () => {
+  const fixture = controlReviewFixture();
+  fixture.rpcOverrides.load_control_review_history = [
+    { item_id: "item-0", total: -1, entries: [] },
+    { item_id: "item-1", total: 1, entries: [{ id: "1", action: "reviewed", occurred_at: "2026-09-10T12:00:00Z" }] },
+    { item_id: "item-2", total: 0, entries: [] },
+    { item_id: "item-2", total: 0, entries: [] },
+  ];
+  const result = await loadControlReview(fixture.client, context);
+  expect(result.items.slice(0, 4).map((item) => item.lists.history.total)).toEqual([null, 1, null, null]);
+  expect(result.items[1].recentAuditEvents).toEqual([{ action: "reviewed", occurredAt: "2026-09-10T12:00:00Z" }]);
+  expect(result.items[0].lists.tasks.total).toBe(1);
+});
+
+it("does not trust groups for unknown decisions and keeps the independent dataset available", async () => {
+  const fixture = controlReviewFixture();
+  fixture.rpcOverrides.load_control_review_history = [{ item_id: "other-workspace-item", total: 0, entries: [] }];
+  const result = await loadControlReview(fixture.client, context);
+  expect(result.items.every((item) => item.lists.history.total === null)).toBe(true);
+  expect(result.items[0].lists.tasks.total).toBe(1);
+  expect(result.optionalUnavailable).toEqual(["Audit history"]);
+});
+
+it.each([
+  { total: 1, open_count: 2, entries: [] },
+  { total: 1, open_count: 1, entries: [] },
+  { total: Number.MAX_SAFE_INTEGER + 1, open_count: 0, entries: [] },
+  { total: 1, open_count: 0, entries: [{ id: "task", title: "Task", status: "unexpected", due_on: null }] },
+  { total: 2, open_count: 2, entries: [{ id: "task", title: "Task", status: "open", due_on: null }, { id: "task", title: "Task", status: "open", due_on: null }] },
+])("treats malformed task counters or entries as unavailable: %o", async (group) => {
+  const fixture = controlReviewFixture();
+  fixture.rpcOverrides.load_control_review_tasks = [{ item_id: "item-0", ...group }];
+  const result = await loadControlReview(fixture.client, context);
+  expect(result.items[0].lists.tasks.total).toBeNull();
+  expect(result.items[0].lists.history.total).toBe(0);
+  expect(result.finalisation.readiness).toBe("ready");
+});
+
+it("returns a shared task once per mapped decision and keeps exact total before display slicing", async () => {
+  const fixture = controlReviewFixture();
+  fixture.tables.requirement_control_mappings.push({ requirement_id: "control-1", control_id: "shared" });
+  const result = await loadControlReview(fixture.client, context);
+  expect(result.items.slice(0, 2).map((item) => item.linkedTasks.map((task) => task.id))).toEqual([["task"], ["task"]]);
+  expect(result.items.slice(0, 2).map((item) => item.lists.tasks.total)).toEqual([1, 1]);
+  expect(fixture.requests.filter((url) => /\/(tasks|audit_events)$/.test(url.pathname))).toHaveLength(0);
+});
+
+it("rejects grouped entries that violate the promised history and task ordering", async () => {
+  const fixture = controlReviewFixture();
+  fixture.rpcOverrides.load_control_review_history = [{ item_id: "item-0", total: 2, entries: [
+    { id: "1", action: "older", occurred_at: "2026-01-01T00:00:00Z" },
+    { id: "2", action: "newer", occurred_at: "2026-09-01T00:00:00Z" },
+  ] }];
+  fixture.rpcOverrides.load_control_review_tasks = [{ item_id: "item-0", total: 2, open_count: 2, entries: [
+    { id: "z-task", title: "Last task", status: "open", due_on: null },
+    { id: "a-task", title: "First task", status: "open", due_on: null },
+  ] }];
+  const result = await loadControlReview(fixture.client, context);
+  expect(result.items[0].lists.history.total).toBeNull();
+  expect(result.items[0].lists.tasks.total).toBeNull();
+});

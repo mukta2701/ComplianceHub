@@ -30,12 +30,28 @@ export function controlReviewFixture() {
   const thrown = new Set<string>();
   const missingCounts = new Set<string>();
   const requests: URL[] = [];
+  const rpcOverrides: Record<string, unknown> = {};
   const client = createClient("http://fixture.local", "fictional-key", { global: { fetch: async (input, init) => {
     const url = new URL(String(input));
     requests.push(url);
     const table = url.pathname.split("/").at(-1)!;
     if (thrown.has(table)) throw new DOMException("private network failure", "AbortError");
-    if (failures.has(table)) return new Response(JSON.stringify({ message: "private database failure" }), { status: 500 });
+    if (failures.has(table) || (table === "load_control_review_history" && failures.has("audit_events")) || (table === "load_control_review_tasks" && failures.has("tasks"))) return new Response(JSON.stringify({ message: "private database failure" }), { status: 500 });
+    if (url.pathname.includes("/rpc/")) {
+      const args = JSON.parse(String(init?.body));
+      const decisions = tables.soa_items.filter((item) => item.organisation_id === args.target_organisation_id && item.soa_register_id === args.target_register_id);
+      const groups = decisions.map((item) => {
+        if (table === "load_control_review_history") {
+          const events = tables.audit_events.filter((event) => event.organisation_id === args.target_organisation_id && event.entity_type === "soa_items" && event.entity_id === item.id)
+            .sort((a, b) => String(b.occurred_at).localeCompare(String(a.occurred_at)) || String(b.id).localeCompare(String(a.id)));
+          return { item_id: item.id, total: events.length, entries: events.slice(0, 5).map((event) => ({ id: String(event.id), action: event.action, occurred_at: event.occurred_at })) };
+        }
+        const shared = new Set(tables.requirement_control_mappings.filter((mapping) => mapping.requirement_id === item.control_id).map((mapping) => mapping.control_id));
+        const tasks = [...new Map(tables.tasks.filter((task) => task.organisation_id === args.target_organisation_id && shared.has(task.control_id)).map((task) => [task.id, task])).values()].sort((a, b) => String(a.id).localeCompare(String(b.id)));
+        return { item_id: item.id, total: tasks.length, open_count: tasks.filter((task) => task.status === "open" || task.status === "in_progress").length, entries: tasks.slice(0, 20).map((task) => ({ id: task.id, title: task.title, status: task.status, due_on: task.due_on })) };
+      });
+      return new Response(JSON.stringify(table in rpcOverrides ? rpcOverrides[table] : groups), { status: 200, headers: { "content-type": "application/json" } });
+    }
     let rows = [...(tables[table] ?? [])];
     for (const [field, condition] of url.searchParams) {
       if (condition.startsWith("eq.")) rows = rows.filter((row) => String(row[field]) === condition.slice(3));
@@ -55,7 +71,7 @@ export function controlReviewFixture() {
     if (!missingCounts.has(table)) headers["content-range"] = `0-${Math.max(0, rows.length - 1)}/${total}`;
     return new Response(init?.method === "HEAD" ? null : JSON.stringify(rows), { status: 200, headers });
   } }, auth: { persistSession: false, autoRefreshToken: false, storageKey: `fixture-${fixtureNumber++}` } });
-  return { client, tables, failures, thrown, missingCounts, requests };
+  return { client, tables, failures, thrown, missingCounts, requests, rpcOverrides };
 }
 
 export function finaliseControlReviewFixture(fixture: ReturnType<typeof controlReviewFixture>) {
