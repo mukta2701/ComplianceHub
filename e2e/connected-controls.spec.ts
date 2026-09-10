@@ -250,7 +250,7 @@ test.describe.serial("connected controls workspace", () => {
     await finalise.click();
     await expect(page).toHaveURL(/\/app\/soa\?finalised=[0-9a-f-]+$/);
     const redirectedFormalOutput = page.locator(".soa-formal-list article").filter({ hasText: "STATEMENT OF APPLICABILITY" });
-    await expect(redirectedFormalOutput.getByText("Finalised", { exact: true })).toBeVisible();
+    await expect(redirectedFormalOutput.locator(".pill.green").filter({ hasText: /^Finalised$/ })).toBeVisible();
     await redirectedFormalOutput.getByRole("link", { name: "Review finalised statement" }).click();
     await expect(page).toHaveURL(new RegExp(`${registerUrl}$`));
     await expect(page.getByRole("heading", { name: "Statement of Applicability", exact: true })).toBeVisible();
@@ -278,7 +278,7 @@ test.describe.serial("connected controls workspace", () => {
     await expect(page.getByRole("heading", { name: "Finalised statements", exact: true })).toBeVisible();
     await expect(page.getByText("Immutable formal outputs", { exact: true })).toBeVisible();
     const formalOutput = page.locator(".soa-formal-list article").filter({ hasText: "STATEMENT OF APPLICABILITY" });
-    await expect(formalOutput.getByText("Finalised", { exact: true })).toBeVisible();
+    await expect(formalOutput.locator(".pill.green").filter({ hasText: /^Finalised$/ })).toBeVisible();
     await expect(formalOutput.getByRole("link", { name: "Review finalised statement" })).toBeVisible();
     await expect(formalOutput.getByRole("button", { name: /Edit|Save|Finalise/ })).toHaveCount(0);
   });
