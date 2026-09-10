@@ -36,6 +36,8 @@ All images use fictional local workspaces and records.
 
 ## Running preview and limits
 
-The verified source will be recorded here after the final package is committed, started at http://127.0.0.1:3300/app/tasks and checked against its reported release identity. The temporary candidate at port 3301 supplied the browser and image evidence above.
+Verified source `a9dbe88baf3b4b946ee466661ef4281f3e138110` is committed and pushed to the existing feature branch. Its production package runs independently at http://127.0.0.1:3300/app/tasks. Fresh health reports both app and database OK with that exact release identity, and the launcher has operating-system parent process 1 rather than depending on a temporary terminal.
+
+All four desktop/mobile contribution and concurrency journeys were repeated against the actual port 3300 background process and passed in 24.6 seconds. The in-app browser was then refreshed with the new release and inspected: Work queue, exact summary cards, deadline health, review queue and task rows all came from the new build. The images above were captured from the identical source in the temporary candidate before packaging.
 
 This is local fictional proof. It does not establish live-provider behavior, a hosted release, formal audit acceptance or Mukta/Charlie acceptance. Other product areas still need the approved page-specific visual treatment; the next increment should apply the same hierarchy and truthful state treatment to the Risk register and risk detail journey.
