@@ -61,7 +61,7 @@ export type SoaReviewWorkspaceItem = SoaQueueItem & {
 
 type Draft = Pick<SoaQueueItem, "applicable" | "status" | "justification" | "evidenceText" | "ownerId">;
 type OptimisticDraft = { draft: Draft; revision: number; sourceItems: SoaReviewWorkspaceItem[] };
-type ReconcileRequest = { itemId: string; observedRevision: number };
+type ReconcileRequest = { itemId: string; baseRevision: number };
 
 export type SoaReviewWorkspaceProps = {
   items: SoaReviewWorkspaceItem[];
@@ -266,12 +266,12 @@ export function SoaReviewWorkspace({ items, members, currentUserId, registerId, 
     ? draft
     : selectedItem ? toDraft(selectedItem) : null;
   const canonicalSelectedItem = initialItems.find((item) => item.id === selectedItem?.id) ?? null;
-  const reconcileObservedRevision = reconcileRequest && selectedItem && reconcileRequest.itemId === selectedItem.id
-    ? reconcileRequest.observedRevision
+  const reconcileBaseRevision = reconcileRequest && selectedItem && reconcileRequest.itemId === selectedItem.id
+    ? reconcileRequest.baseRevision
     : null;
-  const reconciledRevision = reconcileObservedRevision !== null
+  const reconciledRevision = reconcileBaseRevision !== null
     && canonicalSelectedItem
-    && canonicalSelectedItem.decisionRevision !== reconcileObservedRevision
+    && canonicalSelectedItem.decisionRevision > reconcileBaseRevision
     ? canonicalSelectedItem.decisionRevision
     : null;
   const effectiveBaseRevision = reconciledRevision ?? draftBaseRevision;
@@ -282,6 +282,12 @@ export function SoaReviewWorkspace({ items, members, currentUserId, registerId, 
   if (reconciledRevision !== null) {
     setDraftBaseRevision(reconciledRevision);
     setReconcileRequest(null);
+    setOptimisticDrafts((current) => {
+      if (!selectedItem || !current[selectedItem.id]) return current;
+      const next = { ...current };
+      delete next[selectedItem.id];
+      return next;
+    });
   }
 
   useEffect(() => {
@@ -483,15 +489,17 @@ export function SoaReviewWorkspace({ items, members, currentUserId, registerId, 
 
   function refreshCurrentDecision() {
     if (!selectedItem || !canonicalSelectedItem) return;
-    setOptimisticDrafts((current) => {
-      const next = { ...current };
-      delete next[selectedItem.id];
-      return next;
-    });
-    setDraftBaseRevision(canonicalSelectedItem.decisionRevision);
-    setReconcileRequest(canonicalSelectedItem.decisionRevision === effectiveBaseRevision
-      ? { itemId: selectedItem.id, observedRevision: canonicalSelectedItem.decisionRevision }
-      : null);
+    if (canonicalSelectedItem.decisionRevision > effectiveBaseRevision) {
+      setOptimisticDrafts((current) => {
+        const next = { ...current };
+        delete next[selectedItem.id];
+        return next;
+      });
+      setDraftBaseRevision(canonicalSelectedItem.decisionRevision);
+      setReconcileRequest(null);
+    } else {
+      setReconcileRequest({ itemId: selectedItem.id, baseRevision: effectiveBaseRevision });
+    }
     router.refresh();
   }
 

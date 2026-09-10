@@ -684,6 +684,25 @@ describe("SoaReviewWorkspace", () => {
     await user.click(screen.getByRole("button", { name: "Save draft" }));
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Saved"));
     await user.type(screen.getByRole("textbox", { name: "Rationale" }), " plus unsaved detail");
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    await screen.findByText(/changed after you opened it/i);
+    expect(saveAction.mock.calls[1][0].get("expectedRevision")).toBe("1");
+    expect(screen.getByRole("textbox", { name: "Rationale" })).toHaveValue("First local save plus unsaved detail");
+
+    await user.click(screen.getByRole("button", { name: "Refresh current decisions" }));
+    view.rerender(
+      <SoaReviewWorkspace
+        items={items.map((item) => item.id === "item-1" ? { ...item, decisionRevision: 0, justification: "Lagging refresh" } : item)}
+        members={members}
+        currentUserId={CURRENT_USER_ID}
+        registerId={REGISTER_ID}
+        saveAction={saveAction}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Save draft" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Refresh current decisions" })).toBeVisible();
+    expect(saveAction).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("textbox", { name: "Rationale" })).toHaveValue("First local save plus unsaved detail");
 
     view.rerender(
       <SoaReviewWorkspace
@@ -694,12 +713,6 @@ describe("SoaReviewWorkspace", () => {
         saveAction={saveAction}
       />,
     );
-    await user.click(screen.getByRole("button", { name: "Save draft" }));
-    await screen.findByText(/changed after you opened it/i);
-    expect(saveAction.mock.calls[1][0].get("expectedRevision")).toBe("1");
-    expect(screen.getByRole("textbox", { name: "Rationale" })).toHaveValue("First local save plus unsaved detail");
-
-    await user.click(screen.getByRole("button", { name: "Refresh current decisions" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Save draft" })).toBeEnabled());
     expect(screen.getByRole("textbox", { name: "Rationale" })).toHaveValue("First local save plus unsaved detail");
     await user.click(screen.getByRole("button", { name: "Save draft" }));
