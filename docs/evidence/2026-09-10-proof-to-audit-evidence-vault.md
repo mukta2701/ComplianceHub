@@ -29,9 +29,9 @@ All records shown in these screenshots are fictional local test data created for
 
 ## Fresh verification
 
-Verified on 10 September 2026 in the isolated local ComplianceHub worktree against fictional local Supabase data:
+Verified on 10–11 September 2026 in the isolated local ComplianceHub worktree against fictional local Supabase data:
 
-- focused Evidence and baseline logic: 14 files and 53 tests passed;
+- focused Evidence and baseline logic: 14 files and 55 tests passed;
 - evidence schema and evidence-to-audit database behavior: 2 files and 16 pgTAP tests passed;
 - TypeScript checking passed;
 - lint passed;
@@ -46,7 +46,7 @@ These checks prove the implemented code, local production build, fictional local
 
 ## Running preview and source identity
 
-Application source `830e2eb` is pushed to the existing `codex/team-baseline` branch. Its immutable production package is the source intended for the background preview at http://127.0.0.1:3300/app/evidence. The final background health and exact release identity are rechecked after this evidence note is committed.
+Application source `37b86ec` is pushed to the existing `codex/team-baseline` branch. Its immutable production package is running in the background at http://127.0.0.1:3300/app/evidence. Fresh health reports both application and database `ok` with the exact release identity `37b86ec0c41c410cbba7d59a98854698901174ba`. The full connected journey and final responsive browser suite pass against this package.
 
 ## Architecture boundary
 
