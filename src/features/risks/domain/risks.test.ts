@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateRiskScore, DEFAULT_RISK_MATRIX_CONFIG, exceedsAppetite, riskBand, suggestRisksFromGaps } from "./risks";
+import { calculateRiskScore, DEFAULT_RISK_MATRIX_CONFIG, exceedsAppetite, nextRiskReference, riskBand, suggestRisksFromGaps } from "./risks";
 
 describe("risk matrix", () => {
   it("uses a 5 by 5 likelihood-impact matrix", () => {
@@ -27,6 +27,13 @@ describe("configurable riskBand", () => {
     expect(exceedsAppetite(9, { ...DEFAULT_RISK_MATRIX_CONFIG, appetite: 8 })).toBe(true);
     expect(exceedsAppetite(8, { ...DEFAULT_RISK_MATRIX_CONFIG, appetite: 8 })).toBe(false);
     expect(exceedsAppetite(25, DEFAULT_RISK_MATRIX_CONFIG)).toBe(false); // null appetite ⇒ never exceeded
+  });
+});
+
+describe("risk references", () => {
+  it("fills the lowest unused canonical workspace reference", () => {
+    expect(nextRiskReference(["R-001", "R-003", "vendor-1", "r-002"])).toBe("R-004");
+    expect(nextRiskReference(["R-001", "R-003"])).toBe("R-002");
   });
 });
 

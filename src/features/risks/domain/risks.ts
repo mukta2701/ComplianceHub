@@ -37,6 +37,18 @@ export function exceedsAppetite(score: number, config: RiskMatrixConfig): boolea
   return config.appetite !== null && score > config.appetite;
 }
 
+export function nextRiskReference(workspaceReferences: readonly string[]): string {
+  const used = new Set(
+    workspaceReferences
+      .map((reference) => /^R-(\d+)$/i.exec(reference.trim())?.[1])
+      .filter((value): value is string => Boolean(value))
+      .map(Number),
+  );
+  let next = 1;
+  while (used.has(next)) next += 1;
+  return `R-${String(next).padStart(3, "0")}`;
+}
+
 export function suggestRisksFromGaps(gaps: readonly GapForRisk[]) {
   return gaps.filter((gap) => gap.answer === "no" || gap.answer === "partially").map((gap) => ({
     sourceQuestionId: gap.questionId,

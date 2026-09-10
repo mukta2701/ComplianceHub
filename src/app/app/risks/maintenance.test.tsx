@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const state = vi.hoisted(() => ({ role: "owner", rows: {} as Record<string, Record<string, unknown>[]>, failUpdate: false, emptyUpdate: false, failAssets: false }));
+const state = vi.hoisted(() => ({ role: "owner", rows: {} as Record<string, Record<string, unknown>[]>, failUpdate: false, emptyUpdate: false, failAssets: false, failTables: new Set<string>() }));
 const org = "10000000-0000-4000-8000-000000000001";
 const otherOrg = "10000000-0000-4000-8000-000000000002";
 const riskId = "20000000-0000-4000-8000-000000000001";
@@ -19,6 +19,7 @@ function query(table: string) {
   chain.update = (value: Record<string, unknown>) => { patch = value; return chain; };
   for (const name of ["single", "maybeSingle"]) chain[name] = () => { single = true; return chain; };
   chain.then = (resolve: (value: unknown) => unknown) => {
+    if (state.failTables.has(table)) return Promise.resolve({ data: null, error: { code: "08006" } }).then(resolve);
     if (table === "asset_risks" && state.failAssets) return Promise.resolve({ data: null, error: { code: "08006" } }).then(resolve);
     let rows = (state.rows[table] ?? []).filter((row) => filters.every((filter) => filter(row)));
     if (patch && (state.failUpdate || state.emptyUpdate)) rows = [];
@@ -38,7 +39,7 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/app/risks",
 }));
 
-import { updateRiskAction } from "./edit-actions";
+import { createRiskFormAction, updateRiskAction, updateRiskFormAction } from "./edit-actions";
 import EditRiskPage from "./[id]/edit/page";
 import NewRiskPage from "./new/page";
 import RiskDetailPage from "./[id]/page";
@@ -47,15 +48,15 @@ import RisksPage from "./page";
 function form(overrides: Record<string, string> = {}) {
   const data = new FormData();
   for (const [key, value] of Object.entries({
-    id: riskId, reference: "R-001", title: "Reviewed supplier", description: "Updated exposure",
+    id: riskId, expectedUpdatedAt: "2026-09-10T01:00:00.000Z", reference: "R-001", title: "Reviewed supplier", description: "Updated exposure",
     categoryId, ownerId, likelihood: "4", impact: "4", residualLikelihood: "1", residualImpact: "2",
     treatment: "mitigate", treatmentPlan: "Review access", reviewDate: "2026-10-01", status: "treating", evidence: "E-1", ...overrides,
   })) data.set(key, value);
   return data;
 }
 beforeEach(() => {
-  state.role = "owner"; state.failUpdate = false; state.emptyUpdate = false; state.failAssets = false;
-  const risk = { id: riskId, organisation_id: org, reference: "R-001", title: "Supplier risk", description: "Existing exposure", category_id: categoryId, owner_id: ownerId, likelihood: 3, impact: 4, residual_likelihood: 2, residual_impact: 3, treatment: "mitigate", treatment_plan: "Existing plan", status: "open", review_date: "2026-09-20", evidence: "Existing evidence", source_assessment_session_id: "original-assessment", source_soa_register_id: "original-soa", created_by: ownerId, created_at: "2026-09-01" };
+  state.role = "owner"; state.failUpdate = false; state.emptyUpdate = false; state.failAssets = false; state.failTables.clear();
+  const risk = { id: riskId, organisation_id: org, reference: "R-001", title: "Supplier risk", description: "Existing exposure", category_id: categoryId, owner_id: ownerId, likelihood: 3, impact: 4, residual_likelihood: 2, residual_impact: 3, treatment: "mitigate", treatment_plan: "Existing plan", status: "open", review_date: "2026-09-20", evidence: "Existing evidence", source_assessment_session_id: "original-assessment", source_soa_register_id: "original-soa", created_by: ownerId, created_at: "2026-09-01", updated_at: "2026-09-10T01:00:00.000Z" };
   state.rows = {
     risks: [risk, { ...risk, id: otherRiskId, organisation_id: otherOrg, title: "Other company risk" }],
     risk_categories: [{ id: categoryId, organisation_id: org, name: "Suppliers" }],
@@ -87,9 +88,20 @@ describe("maintaining risks", () => {
     await expect(updateRiskAction(form(overrides))).rejects.toThrow();
     expect(state.rows.risks[0].title).toBe("Supplier risk");
   });
+  it("returns field errors without discarding a create draft", async () => {
+    const result = await createRiskFormAction({}, form({ title: "   " }));
+    expect(result.error).toBe("Check the highlighted fields and try again.");
+    expect(result.fieldErrors?.title).toBeTruthy();
+  });
+  it("returns a recoverable conflict for an old edit version", async () => {
+    state.rows.risks[0].updated_at = "2026-09-10T02:00:00.000Z";
+    const result = await updateRiskFormAction({}, form());
+    expect(result).toEqual({ error: "This risk changed or is no longer available. Reload it before saving again.", conflict: true });
+    expect(state.rows.risks[0].title).toBe("Supplier risk");
+  });
   it.each(["failUpdate", "emptyUpdate"] as const)("does not report success when update produces %s", async (flag) => {
     state[flag] = true;
-    await expect(updateRiskAction(form())).rejects.toThrow(/Could not update|not found/);
+    await expect(updateRiskAction(form())).rejects.toThrow(/Could not update|changed or is no longer available/);
     expect(state.rows.risks[0].title).toBe("Supplier risk");
   });
   it("loads the current values and workspace owners in the edit form", async () => {
@@ -97,6 +109,7 @@ describe("maintaining risks", () => {
     expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("Supplier risk");
     expect(screen.getByRole("combobox", { name: "Owner" })).toHaveValue(ownerId);
     expect(screen.getByRole("combobox", { name: "Residual likelihood" })).toHaveValue("2");
+    expect(document.querySelector('input[name="expectedUpdatedAt"]')).toHaveValue("2026-09-10T01:00:00.000Z");
     expect(screen.queryByRole("option", { name: "Foreign Owner" })).not.toBeInTheDocument();
   });
   it("offers workspace ownership when creating a risk", async () => {
@@ -146,7 +159,35 @@ describe("maintaining risks", () => {
   it("counts only open exposure in the risk heatmap", async () => {
     state.rows.risks.push({ ...state.rows.risks[0], id: "closed", status: "closed" });
     render(await RisksPage());
-    expect(screen.getByText(/Remaining exposure for/)).toHaveTextContent("1 open risk, scored by likelihood");
+    expect(screen.getByText(/Remaining exposure for/)).toHaveTextContent("1 current risk, scored by likelihood");
+    expect(screen.getByText("Not set")).toBeInTheDocument();
+  });
+  it("does not turn a failed risk read into a missing record", async () => {
+    state.failTables.add("risks");
+    await expect(RiskDetailPage({ params: Promise.resolve({ id: riskId }) })).rejects.toThrow("Could not load the risk");
+  });
+  it("does not calculate exposure with silently defaulted workspace thresholds", async () => {
+    state.failTables.add("risk_matrix_config");
+    await expect(RisksPage()).rejects.toThrow("Could not load the risk register");
+  });
+  it("connects tasks and linked evidence to the risk detail", async () => {
+    state.rows.tasks = [{ id: "task-1", organisation_id: org, risk_id: riskId, title: "Review supplier access", status: "in_progress", due_on: "2026-09-30" }];
+    state.rows.evidence_links = [{ id: "link-1", organisation_id: org, risk_id: riskId, evidence: { id: "evidence-1", title: "Access export", status: "current", kind: "document" } }];
+    render(await RiskDetailPage({ params: Promise.resolve({ id: riskId }) }));
+    expect(screen.getByRole("link", { name: "Review supplier access" })).toHaveAttribute("href", "/app/tasks/task-1");
+    expect(screen.getByRole("link", { name: "Access export" })).toHaveAttribute("href", "/app/evidence/evidence-1");
+    expect(screen.getByText(/Free-text references are supporting notes/)).toBeInTheDocument();
+  });
+  it("does not describe cancelled-only treatment work as complete", async () => {
+    state.rows.risk_treatment_plans = [{ id: "plan-1", risk_id: riskId, organisation_id: org, reference: "RTP-001", status: "cancelled" }];
+    render(await RiskDetailPage({ params: Promise.resolve({ id: riskId }) }));
+    expect(screen.getByText(/1 cancelled/)).toBeInTheDocument();
+    expect(screen.queryByText("All plans complete")).not.toBeInTheDocument();
+  });
+  it("suggests a treatment reference from the whole workspace", async () => {
+    state.rows.risk_treatment_plans = [{ id: "plan-1", risk_id: "another-risk", organisation_id: org, reference: "RTP-001", status: "planned" }];
+    render(await RiskDetailPage({ params: Promise.resolve({ id: riskId }) }));
+    expect(screen.getByRole("textbox", { name: "Reference" })).toHaveValue("RTP-002");
   });
   it("lets Members read ownership, treatment instructions and evidence references", async () => {
     state.role = "member";

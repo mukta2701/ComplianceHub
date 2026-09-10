@@ -92,7 +92,8 @@ describe("audit pages and actions keep related reads in the active workspace", (
 describe("active-workspace reference and AI reads are explicit", () => {
   it("pins risk suggestion reference lookups to the active organisation", () => {
     const source = readFileSync(path.join(root, "actions.ts"), "utf8");
-    expect(source).toMatch(/from\("risks"\)\.select\("id",\{count:"exact",head:true\}\)\.eq\("organisation_id", organisation\.id\)/);
+    expect(source).toMatch(/from\("assessment_responses"\)[\s\S]{0,350}?\.eq\("organisation_id", organisation\.id\)[\s\S]{0,250}?\.eq\("session_id", sessionId\)[\s\S]{0,180}?\.eq\("question_id", questionId\)/);
+    expect(source).toMatch(/from\("risks"\)[\s\S]{0,120}?\.select\("reference"\)[\s\S]{0,120}?\.eq\("organisation_id", organisation\.id\)/);
     expect(source).toMatch(/from\("risk_categories"\)[\s\S]{0,220}?\.eq\("name", "Readiness"\)\.eq\("organisation_id", organisation\.id\)/);
   });
 

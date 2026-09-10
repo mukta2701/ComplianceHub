@@ -57,17 +57,40 @@ async function workspace(page: Page, info: TestInfo) {
 }
 test("risk and task metadata edits persist without changing status or source", async ({ page }, info) => {
   test.setTimeout(90_000);
+  await page.setViewportSize(info.project.name === "mobile" ? { width: 393, height: 851 } : { width: 1440, height: 1000 });
   const { db, orgId, ownerName } = await workspace(page, info);
   await page.goto("/app/risks/new");
+  await expect(page.getByRole("group", { name: "Risk context" })).toBeVisible();
+  await expect(page.getByRole("group", { name: "Exposure scoring" })).toBeVisible();
+  await expect(page.getByRole("group", { name: "Treatment and review" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Cancel" })).toHaveAttribute("href", "/app/risks");
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await page.screenshot({ animations: "disabled", path: info.outputPath("risk-new.png"), fullPage: true });
   await page.getByLabel("Reference", { exact: true }).fill("R-MAINT");
   await page.getByLabel("Title", { exact: true }).fill("Original risk");
   await page.getByLabel("Description", { exact: true }).fill("Original description");
   await page.getByLabel("Category").selectOption({ index: 1 });
-  await page.getByRole("button", { name: "Save risk" }).click();
+  await page.getByRole("button", { name: "Create risk" }).click();
   await expect(page).toHaveURL("/app/risks");
   const riskLookup = await db.from("risks").select("id").eq("organisation_id", orgId).eq("reference", "R-MAINT").single();
   expect(riskLookup.error).toBeNull(); if (!riskLookup.data) throw new Error("E2E risk fixture was not created");
   const riskId = riskLookup.data.id;
+  await expect(page.locator("#main-content").getByRole("heading", { name: "Risk register", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Original risk", exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  const riskTable = page.getByRole("region", { name: "Risk register table" });
+  if (info.project.name === "mobile") {
+    await expect(riskTable).toBeHidden();
+    await page.screenshot({ animations: "disabled", path: info.outputPath("risk-register-mobile.png"), fullPage: true });
+  } else {
+    await expect(riskTable).toBeVisible();
+    await page.screenshot({ animations: "disabled", path: info.outputPath("risk-register-desktop.png"), fullPage: true });
+    await page.setViewportSize({ width: 883, height: 1000 });
+    await expect(riskTable).toBeHidden();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    await page.screenshot({ animations: "disabled", path: info.outputPath("risk-register-tablet.png"), fullPage: true });
+    await page.setViewportSize({ width: 1440, height: 1000 });
+  }
   await page.goto(`/app/risks/${riskId}`);
   await page.getByRole("link", { name: "Edit risk" }).click();
   await expect(page).toHaveURL(new RegExp(`/app/risks/${riskId}/edit$`));
@@ -75,7 +98,7 @@ test("risk and task metadata edits persist without changing status or source", a
   await page.getByRole("textbox", { name: "Description", exact: true }).fill("Updated description");
   await page.getByRole("combobox", { name: "Likelihood", exact: true }).selectOption("5");
   await page.getByLabel("Owner").selectOption({ label: ownerName });
-  await page.getByRole("button", { name: "Save changes" }).click();
+  await page.getByRole("button", { name: "Save risk" }).click();
   await expect(page).toHaveURL(new RegExp(`/app/risks/${riskId}$`));
   await expect(page.getByRole("heading", { name: "Updated risk" })).toBeVisible();
   await expect(page.getByText("Updated description")).toBeVisible();
@@ -85,6 +108,21 @@ test("risk and task metadata edits persist without changing status or source", a
   expect(risk?.likelihood).toBe(5);
   expect(risk?.status).toBe("open");
   expect(risk?.owner_id).toBeTruthy();
+
+  await page.goto(`/app/risks/${riskId}/edit`);
+  const staleRiskPage = await page.context().newPage();
+  await staleRiskPage.goto(`/app/risks/${riskId}/edit`);
+  await page.getByRole("textbox", { name: "Title", exact: true }).fill("Latest risk title");
+  await page.getByRole("button", { name: "Save risk" }).click();
+  await expect(page).toHaveURL(new RegExp(`/app/risks/${riskId}$`));
+  await staleRiskPage.getByRole("textbox", { name: "Description", exact: true }).fill("Stale risk description retained");
+  await staleRiskPage.getByRole("button", { name: "Save risk" }).click();
+  await expect(staleRiskPage.locator("form").getByRole("alert")).toContainText("This risk changed");
+  await expect(staleRiskPage.getByRole("textbox", { name: "Description", exact: true })).toHaveValue("Stale risk description retained");
+  await staleRiskPage.screenshot({ animations: "disabled", path: info.outputPath("risk-stale-save.png"), fullPage: true });
+  const latestRisk = await db.from("risks").select("title,description").eq("id", riskId).eq("organisation_id", orgId).single();
+  expect(latestRisk.data).toEqual({ title: "Latest risk title", description: "Updated description" });
+  await staleRiskPage.close();
 
   await page.goto("/app/tasks/new");
   await expect(page.getByRole("group", { name: "Task brief" })).toBeVisible();
@@ -97,6 +135,7 @@ test("risk and task metadata edits persist without changing status or source", a
   await page.getByLabel("Detail", { exact: true }).fill("Original detail");
   await page.getByLabel("Owner").selectOption({ label: ownerName });
   await page.getByLabel("Recurrence").selectOption("monthly");
+  await page.getByLabel("Linked risk").selectOption(riskId);
   await page.getByRole("button", { name: "Create task" }).click();
   await expect(page).toHaveURL("/app/tasks");
   const taskLookup = await db.from("tasks").select("id").eq("organisation_id", orgId).eq("title", "Original task").single();
@@ -116,6 +155,13 @@ test("risk and task metadata edits persist without changing status or source", a
   const { data: task } = await db.from("tasks").select("title,detail,owner_id,due_on,recurrence,status,source").eq("id", taskId).eq("organisation_id", orgId).single();
   expect(task).toMatchObject({ title: "Updated task", detail: "Updated detail", due_on: "2026-12-31", recurrence: "monthly", status: "open", source: "manual" });
   expect(task?.owner_id).toBeTruthy();
+
+  await page.goto(`/app/risks/${riskId}`);
+  await expect(page.getByRole("heading", { name: "Exposure decision" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Updated task" })).toHaveAttribute("href", `/app/tasks/${taskId}`);
+  await expect(page.getByText("Free-text references are supporting notes.")).toBeVisible();
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await page.screenshot({ animations: "disabled", path: info.outputPath("risk-detail-connected.png"), fullPage: true });
 
   await page.goto(`/app/tasks/${taskId}/edit`);
   const stalePage = await page.context().newPage();

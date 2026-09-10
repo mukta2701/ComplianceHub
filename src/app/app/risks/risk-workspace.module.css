@@ -1,0 +1,118 @@
+.headerActions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; }
+.summaryGrid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin:18px 0 16px; }
+.summaryCard { min-height:92px; padding:16px 18px; display:flex; align-items:center; gap:13px; }
+.summaryIcon { display:grid; place-items:center; width:38px; height:38px; flex:none; border-radius:11px; background:#e9f1ff; color:var(--blue); }
+.summaryIcon[data-tone="risk"] { background:#fff0ef; color:var(--ch-risk); }
+.summaryIcon[data-tone="attention"] { background:#fff7e6; color:#9a6712; }
+.summaryIcon svg { width:19px; height:19px; }
+.summaryLabel { display:block; color:var(--muted); font-size:12px; line-height:1.3; }
+.summaryValue { display:block; margin-top:2px; color:var(--ink); font-size:23px; font-weight:760; line-height:1; }
+.analysisGrid { display:grid; grid-template-columns:minmax(340px,.85fr) minmax(0,1.15fr); gap:16px; margin-bottom:16px; }
+.panel { padding:20px; min-width:0; }
+.panelHeader { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:15px; }
+.panelHeader h2,.registerHeader h2,.sectionHeader h2 { margin:0; color:var(--ink); font-size:16px; font-weight:760; }
+.panelHeader p,.registerHeader p,.sectionHeader p { margin:4px 0 0; color:var(--muted); font-size:12px; line-height:1.45; }
+.heatmapWrap { display:grid; grid-template-columns:minmax(230px,320px) 1fr; align-items:center; gap:18px; }
+.heatmap { display:grid; grid-template-columns:16px repeat(5,1fr); grid-template-rows:repeat(5,1fr) 16px; gap:4px; padding:2px; aspect-ratio:1.25; }
+.heatCell { border-radius:5px; display:grid; place-items:center; min-height:0; color:#fff; font-size:11.5px; font-weight:800; }
+.heatCell[data-empty="true"] { opacity:.28; }
+.heatAxis { display:grid; place-items:center; color:var(--muted); font-size:8px; letter-spacing:.08em; }
+.heatAxisY { grid-row:1 / span 5; grid-column:1; writing-mode:vertical-rl; transform:rotate(180deg); }
+.heatAxisX { grid-row:6; grid-column:2 / span 5; }
+.legend { display:grid; gap:9px; color:var(--muted); font-size:11px; }
+.legend span { display:flex; align-items:center; gap:7px; }
+.legend i { width:10px; height:10px; border-radius:3px; }
+.attentionList,.linkedList,.planList,.mobileList { list-style:none; margin:0; padding:0; }
+.attentionList { display:grid; }
+.attentionList li + li { border-top:1px solid var(--border); }
+.attentionLink { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:14px; padding:13px 0; color:inherit; }
+.attentionLink:hover strong { color:var(--blue); }
+.attentionMain strong,.attentionMain small { display:block; }
+.attentionMain strong { color:var(--ink); font-size:13px; }
+.attentionMain small { margin-top:3px; color:var(--muted); font-size:11px; line-height:1.35; }
+.attentionMeta { display:flex; align-items:center; gap:9px; }
+.registerCard { overflow:hidden; }
+.registerHeader { display:flex; justify-content:space-between; gap:18px; padding:18px 20px 14px; border-bottom:1px solid var(--border); }
+.populationNote { align-self:center; color:var(--muted); font-size:11px; }
+.table td { vertical-align:middle; }
+.table th,.table td { padding-left:10px; padding-right:10px; }
+.riskCell { min-width:200px; }
+.riskCell strong,.riskCell small { display:block; }
+.riskCell small { margin-top:3px; line-height:1.35; }
+.ownerCell { min-width:105px; }
+.missing { color:#9a6712; font-weight:700; }
+.statusText { text-transform:capitalize; }
+.mobileList { display:none; }
+.mobileCard { padding:17px; }
+.mobileCard + .mobileCard { border-top:1px solid var(--border); }
+.mobileTop { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
+.mobileTop small,.mobileTop strong { display:block; }
+.mobileTop small { color:var(--muted); font-size:11px; }
+.mobileTop strong { margin-top:3px; color:var(--ink); font-size:14px; line-height:1.35; }
+.mobileScores { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:14px 0; }
+.mobileScores span { display:grid; gap:5px; }
+.mobileScores small,.mobileMeta dt { color:var(--muted); font-size:10px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
+.mobileMeta { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:0; }
+.mobileMeta div { min-width:0; }
+.mobileMeta dd { margin:3px 0 0; color:var(--ink); font-size:12px; overflow-wrap:anywhere; }
+.config { margin-top:16px; border:1px solid var(--border); border-radius:12px; background:#fff; }
+.config summary { cursor:pointer; padding:16px 18px; color:var(--ink); font-size:14px; font-weight:760; }
+.configBody { padding:0 18px 18px; }
+.configBody p { margin:0 0 13px; color:var(--muted); font-size:12px; }
+.configForm { display:flex; flex-wrap:wrap; align-items:end; gap:12px; }
+.configForm label { color:var(--ink); font-size:12px; font-weight:700; }
+.configForm input { display:block; width:112px; margin-top:6px; }
+.gapCard { padding:18px; margin-bottom:16px; border-color:#efe1aa; background:#fffbef; }
+.gapCard h2 { margin:0 0 4px; font-size:15px; }
+.gapCard>p { margin:0; color:var(--muted); font-size:12px; }
+.gapRow { display:flex; justify-content:space-between; gap:16px; margin-top:12px; font-size:13px; }
+.gapActions { display:flex; flex-shrink:0; gap:16px; }
+.textAction { border:0; background:none; color:var(--blue); font-weight:700; }
+.pageBack { display:inline-flex; align-items:center; gap:4px; margin-bottom:18px; color:var(--blue); font-size:13px; font-weight:750; }
+.detailHero { display:grid; grid-template-columns:minmax(0,1.05fr) minmax(340px,.95fr); gap:16px; margin-bottom:16px; }
+.exposureCard,.decisionCard,.contentCard,.treatmentCard { padding:20px; }
+.exposureCard h2,.decisionCard h2,.contentCard h2,.treatmentCard h2 { margin:0; color:var(--ink); font-size:16px; }
+.exposureFlow { display:grid; grid-template-columns:1fr 28px 1fr; align-items:center; gap:12px; margin-top:16px; }
+.exposureBox { padding:17px; border:1px solid var(--border); border-radius:11px; background:#fbfcff; }
+.exposureBox small,.exposureBox strong { display:block; }
+.exposureBox small { color:var(--muted); font-size:11px; }
+.exposureBox strong { margin-top:5px; font-size:21px; }
+.exposureArrow { color:#93a0b4; text-align:center; }
+.exposureCaption { margin:13px 0 0; color:var(--muted); font-size:11px; line-height:1.45; }
+.decisionGrid { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin:16px 0 0; }
+.decisionGrid div { min-width:0; }
+.decisionGrid dt { color:var(--muted); font-size:10px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; }
+.decisionGrid dd { margin:4px 0 0; color:var(--ink); font-size:13px; font-weight:650; overflow-wrap:anywhere; }
+.detailGrid { display:grid; grid-template-columns:minmax(0,1.05fr) minmax(320px,.95fr); gap:16px; }
+.contentCard + .contentCard { margin-top:16px; }
+.contentCard h3 { margin:18px 0 6px; color:var(--ink); font-size:13px; }
+.contentCard p { margin:0; color:var(--text); font-size:13px; line-height:1.55; white-space:pre-wrap; }
+.supportNote { margin-top:9px!important; color:var(--muted)!important; font-size:11px!important; }
+.linkedSection + .linkedSection { margin-top:20px; padding-top:18px; border-top:1px solid var(--border); }
+.linkedSection h2 { font-size:14px; }
+.linkedSection>p { margin:4px 0 10px; color:var(--muted); font-size:11px; white-space:normal; }
+.linkedList { display:grid; gap:7px; }
+.linkedItem { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 11px; border:1px solid var(--border); border-radius:9px; background:#fbfcff; }
+.linkedItem a { min-width:0; color:var(--ink); font-size:12px; font-weight:700; overflow-wrap:anywhere; }
+.linkedItem small { color:var(--muted); font-size:10px; white-space:nowrap; }
+.emptyLine { color:var(--muted); font-size:12px; }
+.treatmentCard { margin-top:16px; }
+.sectionHeader { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+.progressPills { display:flex; flex-wrap:wrap; gap:7px; }
+.planList { display:grid; gap:10px; margin-top:15px; }
+.planItem { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:14px; padding:15px; border:1px solid var(--border); border-radius:10px; background:#fbfcff; }
+.planBody strong,.planBody span,.planBody small { display:block; }
+.planBody span { margin-top:5px; color:var(--text); font-size:12px; line-height:1.5; white-space:pre-wrap; }
+.planBody small { margin-top:7px; color:var(--muted); font-size:11px; }
+.planActions { display:flex; align-items:center; gap:8px; }
+.planActions form { display:flex; align-items:center; gap:6px; }
+.planActions select { min-height:34px; }
+.deleteAction { border:0; background:none; color:var(--red); }
+.addPlan { margin-top:16px; border-top:1px solid var(--border); }
+.addPlan summary { cursor:pointer; padding:16px 0 0; color:var(--blue); font-size:13px; font-weight:750; }
+.addPlan form { max-width:none; padding:18px 0 0; }
+@media (max-width:1320px) { .desktopTable{display:none}.mobileList{display:block} }
+@media (max-width:1050px) { .summaryGrid{grid-template-columns:1fr 1fr}.detailHero,.detailGrid{grid-template-columns:1fr}.heatmapWrap{grid-template-columns:minmax(220px,290px) 1fr} }
+@media (max-width:900px) { .analysisGrid{grid-template-columns:1fr} }
+@media (max-width:720px) { .headerActions{justify-content:flex-start}.summaryGrid{grid-template-columns:1fr 1fr}.summaryCard{min-height:78px;padding:13px}.heatmapWrap{grid-template-columns:1fr}.legend{grid-template-columns:1fr 1fr}.registerHeader{padding:16px}.gapRow{display:grid}.gapActions{flex-wrap:wrap}.exposureFlow{grid-template-columns:1fr}.exposureArrow{transform:rotate(90deg)}.planItem{grid-template-columns:1fr}.planActions{align-items:flex-start;flex-wrap:wrap}.planActions form{flex-wrap:wrap}.configForm{display:grid;grid-template-columns:1fr 1fr}.configForm label,.configForm input,.configForm button{width:100%} }
+@media (max-width:430px) { .summaryGrid{grid-template-columns:1fr 1fr;gap:8px}.summaryIcon{width:34px;height:34px}.summaryValue{font-size:20px}.panel,.exposureCard,.decisionCard,.contentCard,.treatmentCard{padding:16px}.decisionGrid{grid-template-columns:1fr 1fr}.mobileScores{grid-template-columns:1fr 1fr} }

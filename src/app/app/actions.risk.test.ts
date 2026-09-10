@@ -21,7 +21,7 @@ vi.mock("@/lib/app-context", () => ({ requireAppContext: async () => ({
 vi.mock("@/lib/security/rate-limit", () => ({ enforceRateLimit: vi.fn() }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
-import { createRiskAction, deleteRiskAction, updateRiskStatusAction } from "./actions";
+import { acceptRiskSuggestionAction, createRiskAction, deleteRiskAction, updateRiskStatusAction } from "./actions";
 const form = (values: Record<string, string>) => { const data = new FormData(); Object.entries(values).forEach(([k, v]) => data.set(k, v)); return data; };
 beforeEach(() => { state.role = "owner"; state.writes = 0; state.row = { id: "risk-1", organisation_id: "11111111-1111-4111-8111-111111111111", status: "open" }; });
 describe("risk mutation results", () => {
@@ -29,7 +29,7 @@ describe("risk mutation results", () => {
     await createRiskAction(form({ reference: "R-001", title: "Endpoint risk", description: "Unencrypted endpoints", categoryId: "22222222-2222-4222-8222-222222222222", ownerId: "", likelihood: "3", impact: "4", residualLikelihood: "2", residualImpact: "2", treatment: "mitigate", status: "open" }));
     expect(state.row.owner_id).toBeNull();
   });
-  it.each([deleteRiskAction, updateRiskStatusAction])("rejects a Member before mutation", async (action) => {
+  it.each([deleteRiskAction, updateRiskStatusAction, acceptRiskSuggestionAction])("rejects a Member before mutation", async (action) => {
     state.role = "member";
     await expect(action(form({ id: "risk-1", status: "closed" }))).rejects.toThrow();
     expect(state.writes).toBe(0);
@@ -41,5 +41,6 @@ describe("risk mutation results", () => {
   it("updates an operator's active-workspace risk", async () => {
     await updateRiskStatusAction(form({ id: "risk-1", status: "closed" }));
     expect(state.row.status).toBe("closed");
+    expect(state.row.updated_at).toEqual(expect.any(String));
   });
 });
