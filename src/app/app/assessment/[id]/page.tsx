@@ -27,7 +27,7 @@ export default async function AssessmentPage({ params, searchParams }: { params:
     supabase.from("catalogue_questions").select("id,category_id,code,prompt,position", { count: "exact" }).eq("catalogue_version_id", session.catalogue_version_id).order("position").limit(RELATED_READ_LIMIT),
     supabase.from("assessment_responses").select("question_id,answer,evidence_note", { count: "exact" }).eq("session_id", id).eq("organisation_id", organisation.id).limit(RELATED_READ_LIMIT),
     supabase.from("ai_workspace_settings").select("enabled").eq("organisation_id", organisation.id).maybeSingle(),
-    supabase.from("soa_registers").select("id,assessment_session_id,version,updated_at,soa_snapshots(id)", { count: "exact" }).eq("assessment_session_id", id).eq("organisation_id", organisation.id).order("updated_at", { ascending: false }).order("version", { ascending: false }).order("id", { ascending: false }).limit(REVIEW_READ_LIMIT),
+    supabase.from("soa_registers").select("id,assessment_session_id,version,updated_at,soa_snapshots!soa_snapshots_register_tenant_fk(id)", { count: "exact" }).eq("assessment_session_id", id).eq("organisation_id", organisation.id).order("updated_at", { ascending: false }).order("version", { ascending: false }).order("id", { ascending: false }).limit(REVIEW_READ_LIMIT),
   ]);
   if (!isCompleteResult(categoryResult) || !isCompleteResult(questionResult) || !isCompleteResult(responseResult)) return <>
     <PageIntro eyebrow="GAP ASSESSMENT" title={session.title} body="The complete assessment record could not be loaded." />

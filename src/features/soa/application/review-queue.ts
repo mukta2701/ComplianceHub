@@ -49,6 +49,17 @@ export type SoaQueueSummary = {
   undecided: number;
 };
 
+export function describeSoaAttention(item: Pick<SoaQueueItem, "reviewState">): string {
+  switch (item.reviewState) {
+    case "missing_decision": return "Choose an implementation status";
+    case "missing_rationale": return "Add a decision rationale";
+    case "missing_owner": return "Assign an accountable owner";
+    case "missing_evidence": return "Link current or expiring evidence";
+    case "stale_evidence": return "Replace expired evidence";
+    case "reviewed": return "Required decision details recorded";
+  }
+}
+
 type ReviewStateInput = Pick<
   SoaQueueItem,
   | "applicable"

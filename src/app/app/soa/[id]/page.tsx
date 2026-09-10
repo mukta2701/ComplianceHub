@@ -8,7 +8,7 @@ import { SoaReviewWorkspace } from "./soa-review-workspace";
 
 function CatalogueContext({ catalogues }: { catalogues: ControlReviewLoadResult["catalogues"] }) {
   if (!catalogues) return null;
-  return <div aria-label="Catalogue provenance">
+  return <div className="soa-catalogue-provenance" aria-label="Catalogue provenance">
     {(["assessment", "control"] as const).map((kind) => {
       const catalogue = catalogues[kind];
       return <p key={kind}>{kind === "assessment" ? "Assessment" : "Control"} catalogue: {catalogue.title ? `${catalogue.title} — ` : ""}{catalogue.version ? `version ${catalogue.version}; ` : ""}ID: {catalogue.id}</p>;
@@ -74,7 +74,7 @@ export default async function SoaReviewPage({ params }: { params: Promise<{ id: 
     <PageIntro
       eyebrow={`CONTROL REVIEW - V${register.version}`}
       title={register.title}
-      body={preflight}
+      body="Active working register. Decisions remain editable until you create the immutable formal statement."
       action={canFinalise && membership.role !== "member" ? (
         <form action={finaliseSoaAction} data-soa-finalise-form>
           <input type="hidden" name="registerId" value={id} />
@@ -82,12 +82,18 @@ export default async function SoaReviewPage({ params }: { params: Promise<{ id: 
         </form>
       ) : <Link className="button secondary" href="/app/soa">Controls & applicability</Link>}
     />
-    <section className="panel" aria-label="Source assessment">
-      <h2>Source assessment: <Link href={`/app/assessment/${source.id}`}>{source.title}</Link></h2>
-      <CatalogueContext catalogues={review.catalogues} />
-      <p>Current assessment context — {source.state}, revision {source.revision}. Answers can change after a control decision is saved.</p>
-      {source.state !== "completed" && <p>This assessment is incomplete. Its recorded answers provide context; they do not decide applicability or establish effectiveness.</p>}
+    <section className="soa-review-header" aria-label="Control review context">
+      <div><span className="eyebrow">SOURCE ASSESSMENT</span><strong><Link href={`/app/assessment/${source.id}`}>{source.title}</Link></strong><small>Revision {source.revision} · {source.state}</small></div>
+      <div><span className="eyebrow">REVIEW STATE</span><strong>Active and editable</strong><small>Version {register.version}</small></div>
+      <div><span className="eyebrow">LAST ACTIVITY</span><strong><time dateTime={register.updatedAt}>{new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(register.updatedAt))}</time></strong><small>Register activity</small></div>
+      <div><span className="eyebrow">FORMAL OUTPUT</span><strong>Not finalised</strong><small>Finalisation creates an immutable Statement of Applicability.</small></div>
     </section>
+    <section className={`soa-finalisation-status ${canFinalise ? "is-ready" : "is-blocked"}`} aria-label="Finalisation readiness">
+      <div><span className="eyebrow">FINALISATION CHECK</span><h2>{canFinalise ? "Ready to create the formal statement" : "Work remains before finalisation"}</h2><p>{preflight}</p></div>
+      {!canFinalise && <Link href="#soa-review-blockers">Review attention filters</Link>}
+    </section>
+    <details className="soa-provenance-details"><summary>Catalogue and source details</summary><CatalogueContext catalogues={review.catalogues} /><p>Current assessment context — {source.state}, revision {source.revision}. Answers can change after a control decision is saved.</p></details>
+    {source.state !== "completed" && <p className="soa-context-warning">This assessment is incomplete. Its recorded answers provide context; they do not decide applicability or establish effectiveness.</p>}
     {review.optionalUnavailable.length > 0 && <p role="status">Unavailable context: {review.optionalUnavailable.join(", ")}. The remaining review is available.</p>}
     {review.relatedRisks.length > 0 && <section className="panel" aria-label="Related risks">
       <h2>Related risks</h2>
@@ -106,6 +112,7 @@ export default async function SoaReviewPage({ params }: { params: Promise<{ id: 
       currentUserId={user.id}
       registerId={id}
       saveAction={reviewSoaItemAction}
+      sourceAssessment={source}
     />
   </>;
 }

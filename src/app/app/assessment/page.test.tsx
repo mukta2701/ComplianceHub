@@ -98,6 +98,11 @@ describe("assessment register journey", () => {
       .getByRole("link", { name: "Resume control review" })).toHaveAttribute("href", "/app/soa/review-8");
     expect(within(screen.getByRole("article", { name: "Supplier follow-up assessment" }))
       .getByRole("link", { name: "Continue assessment" })).toHaveAttribute("href", "/app/assessment/draft");
+    const reviewQuery = fixture.queries.find((item) => item.table === "soa_registers");
+    expect(reviewQuery?.operations).toContainEqual({
+      name: "select",
+      args: ["id,assessment_session_id,version,updated_at,soa_snapshots!soa_snapshots_register_tenant_fk(id)", { count: "exact" }],
+    });
   });
 
   it("routes a completed assessment without an active review through its authoritative detail page", async () => {

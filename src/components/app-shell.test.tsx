@@ -78,8 +78,9 @@ describe("AppShell role-specific navigation", () => {
     renderShell("member", "Developer");
 
     const navigation = screen.getByRole("navigation", { name: "Workspace" });
-    expect(navigation).toHaveTextContent("OverviewComplianceAssigned tasksPoliciesFramework coverageMonitoringLeadership report");
-    expect(navigation.querySelectorAll("a")).toHaveLength(6);
+    expect(navigation).toHaveTextContent("OverviewComplianceAssigned tasksPoliciesControls & applicabilityFramework coverageMonitoringLeadership report");
+    expect(navigation.querySelectorAll("a")).toHaveLength(7);
+    expect(screen.getByRole("link", { name: "Controls & applicability" })).toHaveAttribute("href", "/app/soa");
     expect(screen.getByRole("link", { name: "Framework coverage" })).toHaveAttribute("href", "/app/frameworks");
     expect(screen.getByText("Developer · Assigned work access")).toBeInTheDocument();
     expect(screen.getByText("Member view", { selector: "span" })).toBeInTheDocument();

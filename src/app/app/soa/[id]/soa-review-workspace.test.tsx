@@ -37,6 +37,15 @@ const items: SoaReviewWorkspaceItem[] = [
     linkedEvidence: [],
     linkedTasks: [],
     recentAuditEvents: [],
+    sourceAnswers: [
+      { questionId: "question-1", code: "G1", prompt: "Who reviews access?", answer: "partially", evidenceNote: "Quarterly notes", updatedAt: "2026-09-09T12:00:00.000Z" },
+      { questionId: "question-2", code: "G2", prompt: "Are reviews recorded?", answer: null, evidenceNote: "", updatedAt: null },
+    ],
+    lists: {
+      tasks: { total: 0, shown: 0, limit: 20, truncated: false },
+      evidence: { total: 0, shown: 0, limit: 20, truncated: false },
+      history: { total: 0, shown: 0, limit: 5, truncated: false },
+    },
   },
   {
     id: "item-2",
@@ -71,6 +80,12 @@ const items: SoaReviewWorkspaceItem[] = [
       dueOn: "2026-09-30",
     }],
     recentAuditEvents: [{ action: "update", occurredAt: "2026-07-10T09:30:00.000Z" }],
+    sourceAnswers: [],
+    lists: {
+      tasks: { total: 1, shown: 1, limit: 20, truncated: false },
+      evidence: { total: 1, shown: 1, limit: 20, truncated: false },
+      history: { total: 1, shown: 1, limit: 5, truncated: false },
+    },
   },
   {
     id: "item-3",
@@ -103,6 +118,12 @@ const items: SoaReviewWorkspaceItem[] = [
       { id: "task-32", title: "Patch critical findings", status: "in_progress", dueOn: null },
     ],
     recentAuditEvents: [{ action: "update", occurredAt: "2026-07-09T14:15:00.000Z" }],
+    sourceAnswers: [],
+    lists: {
+      tasks: { total: 2, shown: 2, limit: 20, truncated: false },
+      evidence: { total: 1, shown: 1, limit: 20, truncated: false },
+      history: { total: 1, shown: 1, limit: 5, truncated: false },
+    },
   },
   {
     id: "item-4",
@@ -126,6 +147,12 @@ const items: SoaReviewWorkspaceItem[] = [
     linkedEvidence: [],
     linkedTasks: [],
     recentAuditEvents: [],
+    sourceAnswers: [],
+    lists: {
+      tasks: { total: 0, shown: 0, limit: 20, truncated: false },
+      evidence: { total: 0, shown: 0, limit: 20, truncated: false },
+      history: { total: 0, shown: 0, limit: 5, truncated: false },
+    },
   },
 ];
 
@@ -145,6 +172,7 @@ function renderWorkspace(
       currentUserId={CURRENT_USER_ID}
       registerId={REGISTER_ID}
       saveAction={saveAction}
+      sourceAssessment={{ id: "assessment-1", title: "Recorded practices", state: "draft", revision: 7 }}
     />,
   );
 }
@@ -159,11 +187,43 @@ function workspaceItem(overrides: Partial<SoaReviewWorkspaceItem>): SoaReviewWor
     linkedEvidence: [],
     linkedTasks: [],
     recentAuditEvents: [],
+    sourceAnswers: [],
+    lists: {
+      tasks: { total: 0, shown: 0, limit: 20, truncated: false },
+      evidence: { total: 0, shown: 0, limit: 20, truncated: false },
+      history: { total: 0, shown: 0, limit: 5, truncated: false },
+    },
     ...overrides,
   };
 }
 
 describe("SoaReviewWorkspace", () => {
+  it("shows every mapped answer as current guidance and makes unmapped context explicit", async () => {
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    const source = screen.getByRole("region", { name: "Assessment context for A.5.1" });
+    expect(within(source).getByRole("link", { name: "Open source assessment" })).toHaveAttribute("href", "/app/assessment/assessment-1");
+    expect(within(source).getByText("G1")).toBeInTheDocument();
+    expect(within(source).getByText("Partially")).toBeInTheDocument();
+    expect(within(source).getByText("Quarterly notes")).toBeInTheDocument();
+    expect(within(source).getByText("G2")).toBeInTheDocument();
+    expect(within(source).getByText("Not answered")).toBeInTheDocument();
+    expect(within(source).getByText("No supporting note recorded.")).toBeInTheDocument();
+    expect(within(source).getByText(/guides this review.*does not decide applicability.*not frozen/i)).toBeInTheDocument();
+
+    await user.click(queue().getByRole("button", { name: "Review A.7.1 Physical security perimeters" }));
+    expect(screen.getByText("No direct assessment question is mapped to this control.")).toBeInTheDocument();
+  });
+
+  it("uses one labelled progress graphic and a visible decision chain", () => {
+    renderWorkspace();
+    expect(screen.getByRole("progressbar", { name: "1 of 4 controls reviewed" })).toHaveAttribute("aria-valuenow", "1");
+    const chain = screen.getByRole("list", { name: "Control decision chain" });
+    for (const label of ["Assessment context", "Decision", "Accountability", "Evidence", "Linked work"]) {
+      expect(within(chain).getByText(label)).toBeInTheDocument();
+    }
+  });
   it("keeps Member review navigation available without editable decisions", async () => {
     const saveAction = vi.fn();
     render(<SoaReviewWorkspace items={items} members={members} currentUserId={CURRENT_USER_ID} registerId={REGISTER_ID} saveAction={saveAction} readOnly />);

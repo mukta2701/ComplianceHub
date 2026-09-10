@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-const state = vi.hoisted(() => ({ status: "completed", role: "owner", activeReview: false, reviewError: false, truncatedTable: "" }));
+const state = vi.hoisted(() => ({ status: "completed", role: "owner", activeReview: false, reviewError: false, truncatedTable: "", reviewSelect: "" }));
 vi.mock("next/navigation", () => ({ notFound: () => { throw new Error("NOT_FOUND"); }, useRouter: () => ({ push: vi.fn() }) }));
 vi.mock("../../actions", () => ({ createSoaAction: vi.fn() }));
 vi.mock("@/lib/app-context", () => ({ requireAppContext: async () => ({
@@ -15,7 +15,7 @@ vi.mock("@/lib/app-context", () => ({ requireAppContext: async () => ({
       soa_registers: state.activeReview ? [{ id: "review", assessment_session_id: "session", version: 4, updated_at: "2026-09-10T12:00:00.000Z", soa_snapshots: [] }] : [],
     };
     const chain: Record<string, unknown> = {};
-    for (const method of ["select", "eq", "order", "limit"]) chain[method] = () => chain;
+    for (const method of ["select", "eq", "order", "limit"]) chain[method] = (...args: unknown[]) => { if (table === "soa_registers" && method === "select") state.reviewSelect = String(args[0]); return chain; };
     chain.single = chain.maybeSingle = () => Promise.resolve({ data: rows[table][0], error: null });
     chain.then = (resolve: (value: unknown) => unknown) => Promise.resolve({ data: rows[table], count: rows[table].length + (state.truncatedTable === table ? 1 : 0), error: table === "soa_registers" && state.reviewError ? { message: "private error" } : null }).then(resolve);
     return chain;
@@ -23,7 +23,7 @@ vi.mock("@/lib/app-context", () => ({ requireAppContext: async () => ({
 }) }));
 import AssessmentPage from "./page";
 describe("completed assessment display", () => {
-  beforeEach(() => { state.status = "completed"; state.role = "owner"; state.activeReview = false; state.reviewError = false; state.truncatedTable = ""; });
+  beforeEach(() => { state.status = "completed"; state.role = "owner"; state.activeReview = false; state.reviewError = false; state.truncatedTable = ""; state.reviewSelect = ""; });
   it.each(["owner", "admin", "member"])("renders completed answers read-only for %s", async (role) => {
     state.role = role; state.status = "completed";
     render(await AssessmentPage({ params: Promise.resolve({ id: "session" }) }));
@@ -51,6 +51,7 @@ describe("completed assessment display", () => {
     render(await AssessmentPage({ params: Promise.resolve({ id: "session" }) }));
     expect(screen.getByRole("link", { name: "Resume control review" })).toHaveAttribute("href", "/app/soa/review");
     expect(screen.queryByRole("button", { name: "Review controls" })).not.toBeInTheDocument();
+    expect(state.reviewSelect).toContain("soa_snapshots!soa_snapshots_register_tenant_fk(id)");
   });
   it("keeps the handoff read-only for Members", async () => {
     state.role = "member"; state.status = "completed"; state.activeReview = false;

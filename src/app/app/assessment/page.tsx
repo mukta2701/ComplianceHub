@@ -54,7 +54,7 @@ export default async function AssessmentsPage({ searchParams }: { searchParams: 
       const [questionResult, responseResult, reviewResult] = await Promise.all([
         supabase.from("catalogue_questions").select("id,catalogue_version_id", { count: "exact" }).in("catalogue_version_id", catalogueVersionIds).limit(RELATED_READ_LIMIT),
         supabase.from("assessment_responses").select("session_id,question_id,answer,evidence_note", { count: "exact" }).eq("organisation_id", organisation.id).in("session_id", sessionIds).limit(RELATED_READ_LIMIT),
-        supabase.from("soa_registers").select("id,assessment_session_id,version,updated_at,soa_snapshots(id)", { count: "exact" }).eq("organisation_id", organisation.id).in("assessment_session_id", sessionIds).order("updated_at", { ascending: false }).order("version", { ascending: false }).order("id", { ascending: false }).limit(RELATED_READ_LIMIT),
+        supabase.from("soa_registers").select("id,assessment_session_id,version,updated_at,soa_snapshots!soa_snapshots_register_tenant_fk(id)", { count: "exact" }).eq("organisation_id", organisation.id).in("assessment_session_id", sessionIds).order("updated_at", { ascending: false }).order("version", { ascending: false }).order("id", { ascending: false }).limit(RELATED_READ_LIMIT),
       ]);
       if (isCompleteResult(questionResult) && isCompleteResult(responseResult) && isCompleteResult(reviewResult)) {
         const questionTotals = new Map<string, number>();

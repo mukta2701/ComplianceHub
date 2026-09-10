@@ -49,6 +49,7 @@ const memberNavGroups = [
   { label: "Compliance", items: [
     ["/app/tasks?filter=assigned", "check", "Assigned tasks"],
     ["/app/policies", "file", "Policies"],
+    ["/app/soa", "file", "Controls & applicability"],
     ["/app/frameworks", "file", "Framework coverage"],
   ] },
   { label: null, items: [

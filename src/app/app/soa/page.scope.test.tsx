@@ -110,6 +110,22 @@ describe("connected control review choices", () => {
     expect(screen.getByRole("button", { name: "Start control review" })).toBeInTheDocument();
   });
 
+  it("presents the programme path and distinguishes working reviews from formal outputs", async () => {
+    hoisted.requireContext.mockResolvedValue(activeContext(reviewRows()));
+    const { default: SoaPage } = await import("./page");
+    render(await SoaPage());
+
+    const programme = screen.getByRole("navigation", { name: "Programme steps" });
+    expect(within(programme).getByText("Assess current practices")).toBeInTheDocument();
+    expect(within(programme).getByText("Review control decisions")).toBeInTheDocument();
+    expect(within(programme).getByText("Finalise formal statement")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Active control reviews" })).toBeInTheDocument();
+    expect(screen.getByText("Editable working decisions", { selector: "p" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Finalised statements" })).toBeInTheDocument();
+    expect(screen.getByText("Immutable formal outputs", { selector: "p" })).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "1 of 3 review records are finalised statements" })).toHaveAttribute("aria-valuenow", "1");
+  });
+
   it("uses version to break equal update dates while keeping every duplicate visible", async () => {
     const rows = reviewRows();
     rows.soa_registers[0].updated_at = rows.soa_registers[1].updated_at;

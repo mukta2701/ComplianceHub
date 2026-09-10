@@ -34,6 +34,14 @@ describe("control review page loading", () => {
     render(await SoaReviewPage({ params: Promise.resolve({ id: "register" }) }));
     expect(screen.queryByRole("button", { name: /Finalise/ })).not.toBeInTheDocument();
   });
+  it("states every exact finalisation blocker without requiring an owner for exclusions", async () => {
+    const first = state.fixture!.tables.soa_items[1];
+    Object.assign(first, { applicable: true, status: "pending", justification: "", owner_id: null });
+    state.fixture!.tables.soa_items.pop();
+    render(await SoaReviewPage({ params: Promise.resolve({ id: "register" }) }));
+    expect(screen.getByText(/must contain all 93 controls; 92 are present/i)).toBeInTheDocument();
+    expect(screen.getByText(/1 pending, 1 missing rationale, 1 unassigned, 1 missing live evidence, 0 with stored expired evidence/i)).toBeInTheDocument();
+  });
 });
 
 

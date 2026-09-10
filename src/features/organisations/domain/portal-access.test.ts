@@ -18,6 +18,8 @@ describe("workspace portal route access", () => {
     `/app/policies/${POLICY_ID}`,
     "/app/monitoring",
     "/app/frameworks",
+    "/app/soa",
+    `/app/soa/${POLICY_ID}`,
     "/app/reports/readiness",
     "/app/notifications",
     "/app/baseline",
@@ -41,6 +43,9 @@ describe("workspace portal route access", () => {
     "/app/policies-evil",
     "/app/monitoring/connections",
     "/app/reports/readiness/history",
+    "/app/soa/import",
+    "/app/soa/not-a-register-id",
+    `/app/soa/${POLICY_ID}/history`,
   ])("redirects a Member away from the non-curated app route %s", (pathname) => {
     expect(workspaceRequestAccess(pathname, { authenticated: true, role: "member" })).toBe("redirect-member-home");
   });
@@ -51,9 +56,11 @@ describe("workspace portal route access", () => {
     expect(workspaceRequestAccess("/api/app/reports/readiness/pdf-extra", { authenticated: true, role: "member" })).toBe("forbidden");
   });
 
-  it("does not broaden Member access beyond the Framework Coverage read page", () => {
+  it("keeps Member access within the curated read pages", () => {
     expect(workspaceRequestAccess("/app/frameworks", { authenticated: true, role: "member" })).toBe("allow");
-    expect(workspaceRequestAccess("/app/soa", { authenticated: true, role: "member" })).toBe("redirect-member-home");
+    expect(workspaceRequestAccess("/app/soa", { authenticated: true, role: "member" })).toBe("allow");
+    expect(workspaceRequestAccess(`/app/soa/${POLICY_ID}`, { authenticated: true, role: "member" })).toBe("allow");
+    expect(workspaceRequestAccess("/app/soa/import", { authenticated: true, role: "member" })).toBe("redirect-member-home");
     expect(workspaceRequestAccess("/app/settings", { authenticated: true, role: "member" })).toBe("redirect-member-home");
     expect(workspaceRequestAccess("/app/integrations", { authenticated: true, role: "member" })).toBe("redirect-member-home");
   });
