@@ -349,7 +349,7 @@ describe("reviewSoaItemAction tenant scope", () => {
   });
 
   it.each([
-    [{ code: "40001", message: "control_decision_stale", details: "revision_mismatch" }, { status: "stale", message: "This control changed after you opened it. Refresh and reconcile your draft before saving again." }],
+    [{ code: "PT409", message: "control_decision_stale", details: "revision_mismatch" }, { status: "stale", message: "This control changed after you opened it. Refresh and reconcile your draft before saving again." }],
     [{ code: "P0002", message: "control_decision_missing", details: "item_unavailable" }, { status: "missing", message: "This control is no longer available. Refresh the review before saving again." }],
     [{ code: "42501", message: "control_decision_forbidden", details: "register_unavailable" }, { status: "forbidden", message: "You cannot update this control review. Refresh to check your current access and review state." }],
     [{ code: "22023", message: "control_decision_invalid", details: "owner_unavailable" }, { status: "forbidden", message: "This decision is no longer valid. Refresh and check the control owner before saving again." }],

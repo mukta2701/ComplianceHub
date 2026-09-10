@@ -351,7 +351,7 @@ export async function runImportAction(input: RunImportInput): Promise<ImportRunR
       changes,
     });
     if (error) {
-      const stale = error.code === "40001" && error.message === "control_decision_stale" && error.details === "revision_mismatch";
+      const stale = error.code === "PT409" && error.message === "control_decision_stale" && error.details === "revision_mismatch";
       return {
         ...result,
         requiresFreshPreview: true,

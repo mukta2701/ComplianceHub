@@ -214,7 +214,7 @@ const forbiddenSoaDecisionResult = (invalid = false): SaveSoaDecisionResult => (
 function mapSoaDecisionError(error: unknown): SaveSoaDecisionResult {
   if (!error || typeof error !== "object") return forbiddenSoaDecisionResult();
   const record = error as { code?: unknown; message?: unknown; details?: unknown };
-  if (record.code === "40001" && record.message === "control_decision_stale" && record.details === "revision_mismatch") return staleSoaDecisionResult();
+  if (record.code === "PT409" && record.message === "control_decision_stale" && record.details === "revision_mismatch") return staleSoaDecisionResult();
   if (record.code === "P0002" && record.message === "control_decision_missing" && record.details === "item_unavailable") return missingSoaDecisionResult();
   if (record.code === "22023" && record.message === "control_decision_invalid") return forbiddenSoaDecisionResult(true);
   return forbiddenSoaDecisionResult();

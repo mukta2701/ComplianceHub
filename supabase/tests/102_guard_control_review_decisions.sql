@@ -38,6 +38,7 @@ select ok((select updated_at from public.soa_registers where id=current_setting(
 select is((select count(*)::integer from public.audit_events where entity_type='soa_registers' and entity_id=current_setting('app.decision_register') and action='update'),1,'one successful batch updates the parent register once');
 
 create temporary table decision_error(code text, message text, detail text);
+select set_config('app.stale_parent_updated_before',(select updated_at::text from public.soa_registers where id=current_setting('app.decision_register')::uuid),true);
 do $$
 declare error_code text; error_message text; error_detail text;
 begin
@@ -53,11 +54,14 @@ exception when others then
   insert into decision_error values(error_code,error_message,error_detail);
 end;
 $$;
-select is((select code from decision_error),'40001','stale decisions use a stable SQLSTATE');
+select is((select code from decision_error),'PT409','stale decisions use a stable non-retryable SQLSTATE');
 select is((select message from decision_error),'control_decision_stale','stale decisions use a stable message');
 select is((select detail from decision_error),'revision_mismatch','stale decisions use stable detail');
 select is((select justification from public.soa_items where id=current_setting('app.decision_item_one')::uuid),'First guarded review','a stale overwrite changes nothing');
+select is((select decision_revision from public.soa_items where id=current_setting('app.decision_item_one')::uuid),1::bigint,'the stale item revision does not advance');
 select is((select decision_revision from public.soa_items where id=current_setting('app.decision_item_two')::uuid),0::bigint,'one stale row rolls back the entire batch');
+select is((select updated_at from public.soa_registers where id=current_setting('app.decision_register')::uuid),current_setting('app.stale_parent_updated_before')::timestamptz,'a stale batch does not update parent activity');
+select is((select count(*)::integer from public.audit_events where entity_type='soa_registers' and entity_id=current_setting('app.decision_register') and action='update'),1,'a stale batch does not append parent update audit history');
 
 truncate decision_error;
 do $$

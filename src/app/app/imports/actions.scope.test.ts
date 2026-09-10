@@ -162,7 +162,7 @@ describe("SoA imports stay in the active workspace", () => {
       module: "soa", headers: soaHeaders, rows: soaRows, mapping: soaMapping,
       commit: false, registerId: REGISTER_ID,
     });
-    hoisted.rpc.mockResolvedValue({ data: null, error: { code: "40001", message: "control_decision_stale", details: "revision_mismatch" } });
+    hoisted.rpc.mockResolvedValue({ data: null, error: { code: "PT409", message: "control_decision_stale", details: "revision_mismatch" } });
 
     const committed = await runImportAction({
       module: "soa", headers: soaHeaders, rows: soaRows, mapping: soaMapping,
