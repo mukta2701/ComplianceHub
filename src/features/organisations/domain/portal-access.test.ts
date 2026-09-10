@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { workspaceRequestAccess } from "./portal-access";
 
 const POLICY_ID = "51000000-0000-4000-8000-000000000001";
+const ASSESSMENT_ID = "52000000-0000-4000-8000-000000000001";
 
 describe("workspace portal route access", () => {
   it.each(["owner", "admin"] as const)("allows %s operators throughout the app and app API", (role) => {
@@ -12,6 +13,8 @@ describe("workspace portal route access", () => {
 
   it.each([
     "/app",
+    "/app/assessment",
+    `/app/assessment/${ASSESSMENT_ID}`,
     "/app/tasks",
     `/app/tasks/${POLICY_ID}`,
     "/app/policies",
@@ -30,6 +33,8 @@ describe("workspace portal route access", () => {
   it.each([
     "/app/baseline/edit",
     "/app/baseline-evil",
+    "/app/assessment/not-an-assessment-id",
+    `/app/assessment/${ASSESSMENT_ID}/edit`,
     "/app/setup",
     "/app/settings",
     "/app/integrations",

@@ -17,10 +17,13 @@ const POLICY_DETAIL_PATH = /^\/app\/policies\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4
 
 const TASK_DETAIL_PATH = /^\/app\/tasks\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+const ASSESSMENT_DETAIL_PATH = /^\/app\/assessment\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const SOA_DETAIL_PATH = /^\/app\/soa\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const MEMBER_APP_PATHS = new Set([
   "/app",
+  "/app/assessment",
   "/app/policies",
   "/app/tasks",
   "/app/monitoring",
@@ -41,7 +44,11 @@ function normalisePath(pathname: string): string {
 }
 
 function isMemberAppPath(pathname: string): boolean {
-  return MEMBER_APP_PATHS.has(pathname) || POLICY_DETAIL_PATH.test(pathname) || TASK_DETAIL_PATH.test(pathname) || SOA_DETAIL_PATH.test(pathname);
+  return MEMBER_APP_PATHS.has(pathname)
+    || ASSESSMENT_DETAIL_PATH.test(pathname)
+    || POLICY_DETAIL_PATH.test(pathname)
+    || TASK_DETAIL_PATH.test(pathname)
+    || SOA_DETAIL_PATH.test(pathname);
 }
 
 export function workspaceRequestAccess(
