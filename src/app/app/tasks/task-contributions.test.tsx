@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const actionState = vi.hoisted(() => ({ result: {} as { error?: string } }));
@@ -10,9 +10,20 @@ const pending = { id: "submission", submitter_id: "author", assignment_revision:
 describe("task contributions", () => {
   it("offers assigned member a note form with review limitations", () => {
     render(<TaskContributions {...base} />);
+    expect(screen.getByRole("region", { name: "Work submission and review" })).toBeInTheDocument();
+    const progress = within(screen.getByRole("list", { name: "Task review progress" }));
+    expect(progress.getByText("Assigned")).toBeInTheDocument();
+    expect(progress.getByText("Ready to submit")).toBeInTheDocument();
+    expect(progress.getByText("Not submitted")).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Work note" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Submit for review" })).toBeInTheDocument();
     expect(screen.getByText(/does not complete the task/)).toBeInTheDocument();
+  });
+  it("does not claim accountability when no owner is assigned", () => {
+    render(<TaskContributions {...base} ownerId={null} />);
+    const progress = within(screen.getByRole("list", { name: "Task review progress" }));
+    expect(progress.getByText("Unassigned")).toBeInTheDocument();
+    expect(progress.queryByText("Owner named")).not.toBeInTheDocument();
   });
   it("retains the entered work note when a stale submission is rejected", async () => {
     actionState.result = { error: "The assignment changed. Reload this task before continuing." };
@@ -34,6 +45,9 @@ describe("task contributions", () => {
   });
   it("shows pending history without another submit form or self review", () => {
     render(<TaskContributions {...base} role="owner" contributions={[pending]} />);
+    const progress = within(screen.getByRole("list", { name: "Task review progress" }));
+    expect(progress.getByText("Submitted")).toBeInTheDocument();
+    expect(progress.getByText("Review pending")).toBeInTheDocument();
     expect(screen.getByText("Awaiting review")).toBeInTheDocument();
     expect(screen.getByText("Restore took 5 minutes")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Submit for review" })).not.toBeInTheDocument();
@@ -46,6 +60,7 @@ describe("task contributions", () => {
     expect(screen.getByText("Restore took 5 minutes")).toBeInTheDocument();
     expect(screen.queryByText("Waiting for review.")).not.toBeInTheDocument();
     expect(screen.queryByText("Awaiting review")).not.toBeInTheDocument();
+    expect(within(screen.getByRole("list", { name: "Task review progress" })).getByText("Review blocked")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Submit for review" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Accept evidence" })).not.toBeInTheDocument();
   });
@@ -81,7 +96,10 @@ describe("task contributions", () => {
   });
   it("retains review rationale and links accepted evidence", () => {
     render(<TaskContributions {...base} role="admin" userId="reviewer" contributions={[{ ...pending, decision: "accepted", reviewer_id: "reviewer", reviewed_at: "2026-09-09T11:00:00Z", rationale: "Timing checked", evidence_id: "evidence" }]} />);
-    expect(screen.getByText("Accepted")).toBeInTheDocument();
+    const progress = within(screen.getByRole("list", { name: "Task review progress" }));
+    expect(progress.getByText("Submitted")).toBeInTheDocument();
+    expect(progress.getByText("Accepted")).toBeInTheDocument();
+    expect(screen.getAllByText("Accepted")).toHaveLength(2);
     expect(screen.getByText("Timing checked")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open accepted evidence" })).toHaveAttribute("href", "/app/evidence?evidence=evidence#evidence-evidence");
   });
