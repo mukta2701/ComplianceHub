@@ -148,6 +148,45 @@ test.describe.serial("connected controls workspace", () => {
     await expect(page).toHaveURL(new RegExp(`${registerUrl}$`));
   });
 
+  test("the review workspace remains accessible at each target width", async ({ page }, testInfo) => {
+    await signIn(page, fixture.actors[0]);
+    await page.goto(registerUrl);
+    for (const viewport of [{ width: 1440, height: 1000 }, { width: 1024, height: 1000 }, { width: 390, height: 844 }]) {
+      await page.setViewportSize(viewport);
+      await expect(page.getByRole("progressbar", { name: /controls reviewed/ })).toBeVisible();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+      const scan = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze();
+      expect(scan.violations.filter((violation) => violation.impact === "serious" || violation.impact === "critical")).toEqual([]);
+      const layout = await page.evaluate(() => ({
+        documentScrollHeight: document.documentElement.scrollHeight,
+        bodyScrollHeight: document.body.scrollHeight,
+        main: (() => { const rect = document.querySelector("main")?.getBoundingClientRect(); return rect ? { top: rect.top, height: rect.height, bottom: rect.bottom } : null; })(),
+        sticky: [...document.querySelectorAll(".soa-review-toolbar,.soa-review-detail")].map((element) => ({ className: element.className, position: getComputedStyle(element).position, height: element.getBoundingClientRect().height })),
+      }));
+      expect(layout.main).not.toBeNull();
+      expect(layout.main!.bottom).toBeLessThanOrEqual(layout.bodyScrollHeight);
+      expect(layout.sticky.map((element) => element.position)).toEqual(viewport.width === 1440 ? ["sticky", "sticky"] : ["static", "static"]);
+      await page.screenshot({ animations: "disabled", path: testInfo.outputPath(`connected-controls-${viewport.width}-viewport.png`) });
+      await page.locator(".soa-review-layout").screenshot({
+        animations: "disabled",
+        path: testInfo.outputPath(`connected-controls-${viewport.width}-workspace.png`),
+      });
+    }
+  });
+
+  test("Member access stays read-only on mobile", async ({ browser }, testInfo) => {
+    const memberContext = await browser.newContext({ baseURL: testInfo.project.use.baseURL as string, viewport: { width: 390, height: 844 } });
+    const memberPage = await memberContext.newPage();
+    await signIn(memberPage, fixture.actors[1]);
+    await memberPage.goto(registerUrl);
+    await openControl(memberPage, mappedControlTitle);
+    await expect(memberPage.getByRole("combobox", { name: "Applicability decision", exact: true })).toBeDisabled();
+    await expect(memberPage.getByRole("combobox", { name: "Owner assignment", exact: true })).toBeDisabled();
+    await expect(memberPage.getByRole("button", { name: "Save draft" })).toHaveCount(0);
+    expect(await memberPage.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    await memberContext.close();
+  });
+
   test("a reviewed control workspace becomes an immutable Statement of Applicability", async ({ page }) => {
     await signIn(page, fixture.actors[0]);
     const registerId = registerUrl.split("/").pop()!;
@@ -209,6 +248,11 @@ test.describe.serial("connected controls workspace", () => {
     const finalise = page.getByRole("button", { name: /Finalise immutable/ });
     await expect(finalise).toBeVisible();
     await finalise.click();
+    await expect(page).toHaveURL(/\/app\/soa\?finalised=[0-9a-f-]+$/);
+    const redirectedFormalOutput = page.locator(".soa-formal-list article").filter({ hasText: "STATEMENT OF APPLICABILITY" });
+    await expect(redirectedFormalOutput.getByText("Finalised", { exact: true })).toBeVisible();
+    await redirectedFormalOutput.getByRole("link", { name: "Review finalised statement" }).click();
+    await expect(page).toHaveURL(new RegExp(`${registerUrl}$`));
     await expect(page.getByRole("heading", { name: "Statement of Applicability", exact: true })).toBeVisible();
     await expect(page.getByText("These saved decisions are immutable.", { exact: false })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Saved statement provenance", exact: true })).toBeVisible();
@@ -237,44 +281,5 @@ test.describe.serial("connected controls workspace", () => {
     await expect(formalOutput.getByText("Finalised", { exact: true })).toBeVisible();
     await expect(formalOutput.getByRole("link", { name: "Review finalised statement" })).toBeVisible();
     await expect(formalOutput.getByRole("button", { name: /Edit|Save|Finalise/ })).toHaveCount(0);
-  });
-
-  test("the review workspace remains accessible at each target width", async ({ page }, testInfo) => {
-    await signIn(page, fixture.actors[0]);
-    await page.goto(registerUrl);
-    for (const viewport of [{ width: 1440, height: 1000 }, { width: 1024, height: 1000 }, { width: 390, height: 844 }]) {
-      await page.setViewportSize(viewport);
-      await expect(page.getByRole("progressbar", { name: /controls reviewed/ })).toBeVisible();
-      expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
-      const scan = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze();
-      expect(scan.violations.filter((violation) => violation.impact === "serious" || violation.impact === "critical")).toEqual([]);
-      const layout = await page.evaluate(() => ({
-        documentScrollHeight: document.documentElement.scrollHeight,
-        bodyScrollHeight: document.body.scrollHeight,
-        main: (() => { const rect = document.querySelector("main")?.getBoundingClientRect(); return rect ? { top: rect.top, height: rect.height, bottom: rect.bottom } : null; })(),
-        sticky: [...document.querySelectorAll(".soa-review-toolbar,.soa-review-detail")].map((element) => ({ className: element.className, position: getComputedStyle(element).position, height: element.getBoundingClientRect().height })),
-      }));
-      expect(layout.main).not.toBeNull();
-      expect(layout.main!.bottom).toBeLessThanOrEqual(layout.bodyScrollHeight);
-      expect(layout.sticky.map((element) => element.position)).toEqual(viewport.width === 1440 ? ["sticky", "sticky"] : ["static", "static"]);
-      await page.screenshot({ animations: "disabled", path: testInfo.outputPath(`connected-controls-${viewport.width}-viewport.png`) });
-      await page.locator(".soa-review-layout").screenshot({
-        animations: "disabled",
-        path: testInfo.outputPath(`connected-controls-${viewport.width}-workspace.png`),
-      });
-    }
-  });
-
-  test("Member access stays read-only on mobile", async ({ browser }, testInfo) => {
-    const memberContext = await browser.newContext({ baseURL: testInfo.project.use.baseURL as string, viewport: { width: 390, height: 844 } });
-    const memberPage = await memberContext.newPage();
-    await signIn(memberPage, fixture.actors[1]);
-    await memberPage.goto(registerUrl);
-    await openControl(memberPage, mappedControlTitle);
-    await expect(memberPage.getByRole("combobox", { name: "Applicability decision", exact: true })).toBeDisabled();
-    await expect(memberPage.getByRole("combobox", { name: "Owner assignment", exact: true })).toBeDisabled();
-    await expect(memberPage.getByRole("button", { name: "Save draft" })).toHaveCount(0);
-    expect(await memberPage.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
-    await memberContext.close();
   });
 });
