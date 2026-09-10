@@ -5,7 +5,15 @@ import { ImportWizard } from "./import-wizard";
 
 const actions = vi.hoisted(() => ({ analyse: vi.fn(), run: vi.fn() }));
 vi.mock("./actions", () => ({ analyseImportAction: actions.analyse, runImportAction: actions.run }));
-const preview = { committed: false, total: 1, valid: 1, invalid: 0, imported: 1, updated: 1, skipped: 0, rowErrors: [], notes: [] };
+const preview = {
+  committed: false, total: 1, valid: 1, invalid: 0, imported: 1, updated: 1, skipped: 0, rowErrors: [], notes: [],
+  soaPreview: {
+    identity: "a".repeat(64),
+    registerId: "one",
+    changes: [{ itemId: "item-1", expectedRevision: 3, applicable: true, status: "established", justification: "Reviewed", evidence: "", ownerId: null }],
+  },
+};
+const soaPreview = preview;
 const fields = [{ key: "description", label: "Description", required: true }, { key: "ownerLocation", label: "Owner & Location", required: false }];
 
 beforeEach(() => {
@@ -43,6 +51,37 @@ describe("Import preview confirmation", () => {
 
     await waitFor(() => expect(screen.queryByRole("button", { name: /Confirm import/ })).not.toBeInTheDocument());
     expect(actions.run).toHaveBeenCalledTimes(1);
+  });
+
+  it("confirms a SoA import with the exact preview identity and revisions", async () => {
+    actions.run.mockResolvedValueOnce(soaPreview).mockResolvedValueOnce({ ...preview, committed: true });
+    const user = await upload("soa");
+    await user.click(screen.getByRole("button", { name: "Preview 1 control update" }));
+    await user.click(await screen.findByRole("button", { name: "4. Confirm import (1)" }));
+
+    await waitFor(() => expect(actions.run).toHaveBeenCalledTimes(2));
+    expect(actions.run.mock.calls[1][0]).toMatchObject({
+      commit: true,
+      registerId: "one",
+      soaPreview: soaPreview.soaPreview,
+    });
+  });
+
+  it("requires another preview after an atomic stale confirmation", async () => {
+    actions.run.mockResolvedValueOnce(soaPreview).mockResolvedValueOnce({
+      ...preview,
+      committed: true,
+      updated: 0,
+      requiresFreshPreview: true,
+      notes: ["A control decision changed after this preview. No controls were updated; preview the file again before confirming."],
+    });
+    const user = await upload("soa");
+    await user.click(screen.getByRole("button", { name: "Preview 1 control update" }));
+    await user.click(await screen.findByRole("button", { name: "4. Confirm import (1)" }));
+
+    expect(await screen.findByRole("heading", { name: "Fresh preview required" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Confirm import/ })).not.toBeInTheDocument();
+    expect(screen.getByText(/No controls were updated/i)).toBeInTheDocument();
   });
 
   it("locks the workbook and target register while analysis is pending", async () => {

@@ -38,7 +38,7 @@ export default async function SoaReviewPage({ params }: { params: Promise<{ id: 
   const [itemResult, memberResult, aiSettingsResult] = await Promise.all([
     supabase
       .from("soa_items")
-      .select("id,control_id,control_code,control_title,applicable,status,justification,evidence,owner_id,position")
+      .select("id,control_id,control_code,control_title,applicable,status,justification,evidence,owner_id,position,decision_revision")
       .eq("soa_register_id", id)
       .eq("organisation_id", organisation.id)
       .order("position"),
@@ -171,6 +171,7 @@ export default async function SoaReviewPage({ params }: { params: Promise<{ id: 
     const freshness = summariseEvidenceFreshness(linkedEvidence);
     const projected = {
       id: item.id,
+      decisionRevision: Number(item.decision_revision),
       controlId,
       code: item.control_code,
       title: item.control_title,
@@ -219,6 +220,7 @@ export default async function SoaReviewPage({ params }: { params: Promise<{ id: 
       items={queueItems}
       members={memberOptions}
       currentUserId={user.id}
+      registerId={id}
       saveAction={reviewSoaItemAction}
     />
   </>;

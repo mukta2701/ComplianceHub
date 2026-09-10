@@ -24,9 +24,10 @@ import {
 } from "@/features/soa/application/review-queue";
 import { SOA_STATUS_LABEL, type SoaStatus } from "@/features/soa/domain/soa";
 import type { TaskStatus } from "@/features/tasks/domain/tasks";
+import type { SaveSoaDecisionResult } from "../../actions";
 
 type MemberOption = { id: string; name: string };
-type SaveAction = (formData: FormData) => Promise<void>;
+type SaveAction = (formData: FormData) => Promise<SaveSoaDecisionResult>;
 type DetailTab = "decision" | "evidence" | "work" | "history";
 type BlockerFilter = "missing_rationale" | "evidence_gaps" | "unassigned" | "undecided";
 type EvidenceFreshnessFilter = "none" | "current" | "expiring" | "expired";
@@ -52,18 +53,20 @@ type RecentAuditEvent = {
 };
 
 export type SoaReviewWorkspaceItem = SoaQueueItem & {
+  decisionRevision: number;
   linkedEvidence: LinkedEvidence[];
   linkedTasks: LinkedTask[];
   recentAuditEvents: RecentAuditEvent[];
 };
 
 type Draft = Pick<SoaQueueItem, "applicable" | "status" | "justification" | "evidenceText" | "ownerId">;
-type OptimisticDraft = { draft: Draft; sourceItems: SoaReviewWorkspaceItem[] };
+type OptimisticDraft = { draft: Draft; revision: number; sourceItems: SoaReviewWorkspaceItem[] };
 
 export type SoaReviewWorkspaceProps = {
   items: SoaReviewWorkspaceItem[];
   members: MemberOption[];
   currentUserId: string;
+  registerId: string;
   saveAction: SaveAction;
   readOnly?: boolean;
   aiEnabled?: boolean;
@@ -193,7 +196,7 @@ function filterWorkspaceItems(
   return applyEvidenceFilter(applyBlockerFilter(queueFiltered, blocker), freshness);
 }
 
-export function SoaReviewWorkspace({ items, members, currentUserId, saveAction, readOnly = false, aiEnabled = false }: SoaReviewWorkspaceProps) {
+export function SoaReviewWorkspace({ items, members, currentUserId, registerId, saveAction, readOnly = false, aiEnabled = false }: SoaReviewWorkspaceProps) {
   const router = useRouter();
   const initialItems = useMemo(() => [...items].sort((left, right) => left.position - right.position), [items]);
   const [optimisticDrafts, setOptimisticDrafts] = useState<Record<string, OptimisticDraft>>({});
@@ -213,6 +216,7 @@ export function SoaReviewWorkspace({ items, members, currentUserId, saveAction, 
   const [activeTab, setActiveTab] = useState<DetailTab>("decision");
   const [saveMessage, setSaveMessage] = useState("");
   const [saving, setSaving] = useState(false);
+  const [blockedRevisions, setBlockedRevisions] = useState<Record<string, number>>({});
 
   const queueItems = useMemo(() => initialItems.map((item) => {
     const optimisticEntry = optimisticDrafts[item.id];
@@ -224,6 +228,7 @@ export function SoaReviewWorkspace({ items, members, currentUserId, saveAction, 
     const projected = {
       ...item,
       ...optimistic,
+      decisionRevision: optimisticEntry.revision,
       ownerName: members.find((member) => member.id === optimistic.ownerId)?.name ?? null,
     };
     return { ...projected, reviewState: deriveSoaReviewState(projected) };
@@ -257,6 +262,9 @@ export function SoaReviewWorkspace({ items, members, currentUserId, saveAction, 
   const selectedDraft = selectedItem?.id === selectedId && draft && dirty
     ? draft
     : selectedItem ? toDraft(selectedItem) : null;
+  const selectedBlocked = selectedItem
+    ? blockedRevisions[selectedItem.id] === selectedItem.decisionRevision
+    : false;
 
   useEffect(() => {
     if (!dirty) return;
@@ -448,11 +456,13 @@ export function SoaReviewWorkspace({ items, members, currentUserId, saveAction, 
   }
 
   async function save(advance: boolean) {
-    if (readOnly || !selectedItem || !selectedDraft || saving || !visibleItems.some((item) => item.id === selectedItem.id)) return;
+    if (readOnly || !selectedItem || !selectedDraft || saving || selectedBlocked || !visibleItems.some((item) => item.id === selectedItem.id)) return;
     setSaving(true);
     setSaveMessage("Saving");
     const formData = new FormData();
+    formData.set("registerId", registerId);
     formData.set("itemId", selectedItem.id);
+    formData.set("expectedRevision", String(selectedItem.decisionRevision));
     formData.set("status", selectedDraft.status);
     formData.set("applicable", String(selectedDraft.applicable));
     formData.set("ownerId", selectedDraft.ownerId ?? "");
@@ -460,17 +470,25 @@ export function SoaReviewWorkspace({ items, members, currentUserId, saveAction, 
     formData.set("evidence", selectedDraft.evidenceText);
 
     try {
-      await saveAction(formData);
+      const result = await saveAction(formData);
+      if (result.status !== "saved") {
+        if (result.status === "stale") {
+          setBlockedRevisions((current) => ({ ...current, [selectedItem.id]: selectedItem.decisionRevision }));
+        }
+        setSaveMessage(result.message);
+        return;
+      }
       const updated: SoaReviewWorkspaceItem = {
         ...selectedItem,
         ...selectedDraft,
+        decisionRevision: result.revision,
         ownerName: members.find((member) => member.id === selectedDraft.ownerId)?.name ?? null,
         reviewState: deriveSoaReviewState({ ...selectedItem, ...selectedDraft }),
       };
       const nextQueue = queueItems.map((item) => item.id === updated.id ? updated : item);
       setOptimisticDrafts((current) => ({
         ...current,
-        [updated.id]: { draft: selectedDraft, sourceItems: items },
+        [updated.id]: { draft: selectedDraft, revision: result.revision, sourceItems: items },
       }));
       setSelectedId(updated.id);
       setDraft(toDraft(updated));
@@ -619,8 +637,9 @@ export function SoaReviewWorkspace({ items, members, currentUserId, saveAction, 
 
             {readOnly ? <p className="soa-detail-actions">Read-only review. A workspace operator can update these decisions.</p> : <footer className="soa-detail-actions">
               <p role="status" aria-live="polite">{saveMessage}</p>
-              <button type="submit" name="saveIntent" value="draft" className="button secondary" disabled={saving}>{saving ? "Saving" : "Save draft"}</button>
-              <button type="submit" name="saveIntent" value="next" className="button primary" disabled={saving}>{saving ? "Saving" : "Save and next"}</button>
+              {selectedBlocked ? <button type="button" className="button secondary" onClick={() => router.refresh()}>Refresh current decisions</button> : null}
+              <button type="submit" name="saveIntent" value="draft" className="button secondary" disabled={saving || selectedBlocked}>{saving ? "Saving" : "Save draft"}</button>
+              <button type="submit" name="saveIntent" value="next" className="button primary" disabled={saving || selectedBlocked}>{saving ? "Saving" : "Save and next"}</button>
             </footer>}
           </form>
         ) : <section className="soa-review-detail soa-review-empty"><h2>No control selected</h2><p>Adjust the filters or choose a control from the review queue.</p></section>}

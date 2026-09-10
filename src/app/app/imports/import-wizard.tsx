@@ -26,9 +26,11 @@ export function ImportWizard({ module, fields, recordsHref, recordsLabel, regist
   }
   function run(commit: boolean) {
     if (!headers) return;
+    const soaPreview = commit && module === "soa" ? preview?.soaPreview : undefined;
+    if (commit && module === "soa" && !soaPreview) return;
     if (commit) setPreview(null);
     start(async () => {
-      const res = await runImportAction({ module, headers, rows, mapping, commit, registerId: registerId || undefined });
+      const res = await runImportAction({ module, headers, rows, mapping, commit, registerId: registerId || undefined, soaPreview });
       if (commit) setResult(res); else setPreview(res);
     });
   }
@@ -66,11 +68,11 @@ export function ImportWizard({ module, fields, recordsHref, recordsLabel, regist
       <h2 style={{ fontSize: "15px", margin: "0 0 4px" }}>3. Preview &amp; validation</h2>
       <p style={{ fontSize: "13px", margin: "0 0 10px" }}>{preview.valid} valid, {preview.invalid} with errors. {module === "soa" ? `${preview.updated} matched control${preview.updated === 1 ? "" : "s"} will be updated.` : `${preview.valid} row${preview.valid === 1 ? "" : "s"} will be added.`}</p>
       {preview.rowErrors.length > 0 && <ul style={{ fontSize: "12px", color: "var(--red)", margin: "0 0 10px", paddingLeft: "18px" }}>{preview.rowErrors.slice(0, 50).map((e) => <li key={e.row}>Row {e.row}: {e.errors.join("; ")}</li>)}</ul>}
-      {preview.valid > 0 && <form onSubmit={(event) => { event.preventDefault(); run(true); }}><button className="button primary" disabled={pending}>4. Confirm import ({module === "soa" ? preview.updated : preview.valid})</button></form>}
+      {(module === "soa" ? preview.updated > 0 && Boolean(preview.soaPreview) : preview.valid > 0) && <form onSubmit={(event) => { event.preventDefault(); run(true); }}><button className="button primary" disabled={pending}>4. Confirm import ({module === "soa" ? preview.updated : preview.valid})</button></form>}
     </Card>}
 
     {result && <Card style={{ padding: "22px" }}>
-      <h2 style={{ fontSize: "15px", margin: "0 0 6px" }}>Import complete</h2>
+      <h2 style={{ fontSize: "15px", margin: "0 0 6px" }}>{result.requiresFreshPreview ? "Fresh preview required" : "Import complete"}</h2>
       <p style={{ fontSize: "13px", margin: "0 0 6px" }}>{module === "soa" ? `${result.updated} control${result.updated === 1 ? "" : "s"} updated` : `${result.imported} row${result.imported === 1 ? "" : "s"} added`}{result.skipped ? `, ${result.skipped} skipped` : ""}.</p>
       {result.notes.length > 0 && <ul style={{ fontSize: "12px", color: "#596273", margin: "0 0 10px", paddingLeft: "18px" }}>{result.notes.slice(0, 50).map((note, i) => <li key={i}>{note}</li>)}</ul>}
       <Link className="button secondary" href={recordsHref}>View {recordsLabel}</Link>

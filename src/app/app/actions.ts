@@ -192,31 +192,60 @@ export async function createSoaSuccessorAction(formData: FormData) {
   redirect(`/app/soa/${registerId}`);
 }
 
-export async function reviewSoaItemAction(formData: FormData) {
-  const { supabase, organisation } = await requireAppContext();
-  const parsed = soaItemReviewSchema.parse({ itemId: formData.get("itemId"), status: formData.get("status"), applicable: formData.get("applicable") === "true", justification: formData.get("justification"), evidence: formData.get("evidence") });
+export type SaveSoaDecisionResult =
+  | { status: "saved"; revision: number }
+  | { status: "stale" | "missing" | "forbidden"; message: string };
+
+const staleSoaDecisionResult = (): SaveSoaDecisionResult => ({
+  status: "stale",
+  message: "This control changed after you opened it. Refresh and reconcile your draft before saving again.",
+});
+const missingSoaDecisionResult = (): SaveSoaDecisionResult => ({
+  status: "missing",
+  message: "This control is no longer available. Refresh the review before saving again.",
+});
+const forbiddenSoaDecisionResult = (invalid = false): SaveSoaDecisionResult => ({
+  status: "forbidden",
+  message: invalid
+    ? "This decision is no longer valid. Refresh and check the control owner before saving again."
+    : "You cannot update this control review. Refresh to check your current access and review state.",
+});
+
+function mapSoaDecisionError(error: unknown): SaveSoaDecisionResult {
+  if (!error || typeof error !== "object") return forbiddenSoaDecisionResult();
+  const record = error as { code?: unknown; message?: unknown; details?: unknown };
+  if (record.code === "40001" && record.message === "control_decision_stale" && record.details === "revision_mismatch") return staleSoaDecisionResult();
+  if (record.code === "P0002" && record.message === "control_decision_missing" && record.details === "item_unavailable") return missingSoaDecisionResult();
+  if (record.code === "22023" && record.message === "control_decision_invalid") return forbiddenSoaDecisionResult(true);
+  return forbiddenSoaDecisionResult();
+}
+
+export async function reviewSoaItemAction(formData: FormData): Promise<SaveSoaDecisionResult> {
+  const { supabase } = await requireAppContext();
+  const parsedReview = soaItemReviewSchema.safeParse({ itemId: formData.get("itemId"), status: formData.get("status"), applicable: formData.get("applicable") === "true", justification: formData.get("justification"), evidence: formData.get("evidence") });
+  const parsedRegisterId = z.uuid().safeParse(formData.get("registerId"));
+  const parsedRevision = z.coerce.number().int().nonnegative().safe().safeParse(formData.get("expectedRevision"));
   const rawOwnerId = formData.get("ownerId");
-  const ownerId = rawOwnerId ? z.uuid().parse(String(rawOwnerId)) : null;
-  if (ownerId) {
-    const { data: owner, error: ownerError } = await supabase
-      .from("memberships")
-      .select("user_id")
-      .eq("organisation_id", organisation.id)
-      .eq("user_id", ownerId)
-      .maybeSingle();
-    if (ownerError) throw new Error("Could not verify SoA item owner");
-    if (!owner) throw new Error("SoA owner must be a member of the active workspace");
-  }
-  const { data: updated, error } = await supabase
-    .from("soa_items")
-    .update({ status: parsed.status, applicable: parsed.applicable, justification: parsed.justification, evidence: parsed.evidence, owner_id: ownerId })
-    .eq("id", parsed.itemId)
-    .eq("organisation_id", organisation.id)
-    .select("id")
-    .maybeSingle();
-  if (error) throw new Error("Could not update SoA item");
-  if (!updated) throw new Error("SoA item not found in the active workspace");
+  const parsedOwnerId = rawOwnerId ? z.uuid().safeParse(String(rawOwnerId)) : { success: true as const, data: null };
+  if (!parsedReview.success || !parsedRegisterId.success || !parsedRevision.success || !parsedOwnerId.success) return forbiddenSoaDecisionResult(true);
+  const parsed = parsedReview.data;
+  const { data, error } = await supabase.rpc("update_soa_decisions_guarded", {
+    target_register_id: parsedRegisterId.data,
+    changes: [{
+      itemId: parsed.itemId,
+      expectedRevision: parsedRevision.data,
+      applicable: parsed.applicable,
+      status: parsed.status,
+      justification: parsed.justification,
+      evidence: parsed.evidence,
+      ownerId: parsedOwnerId.data,
+    }],
+  });
+  if (error) return mapSoaDecisionError(error);
+  const result = Array.isArray(data) ? data[0] : null;
+  if (!result || result.item_id !== parsed.itemId || !Number.isSafeInteger(Number(result.decision_revision))) return missingSoaDecisionResult();
   revalidatePath("/app/soa");
+  return { status: "saved", revision: Number(result.decision_revision) };
 }
 
 export async function finaliseSoaAction(formData: FormData) {

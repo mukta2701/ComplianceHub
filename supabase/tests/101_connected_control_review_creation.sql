@@ -34,8 +34,12 @@ select set_config('request.jwt.claims','{"sub":"a1010000-0000-4000-8000-00000000
 select throws_ok($$ select public.create_or_reuse_soa_review('a1010000-0000-4000-8000-000000000013') $$,'42501','Assessment unavailable','cross-workspace assessment uses the same non-disclosing error');
 select has_function('public','create_or_reuse_soa_successor',array['uuid']);
 select throws_ok(format('select public.create_or_reuse_soa_successor(%L)',current_setting('app.review_first')),'42501','Finalised statement unavailable','an active register is not a finalised successor source');
+-- Privileged fixture preparation: ordinary authenticated decisions use the
+-- guarded update command installed by the following migration.
+reset role;
 update public.soa_items set applicable=false,status='not_applicable',justification='Reviewed exclusion',evidence='Preserved evidence text',owner_id='a1010000-0000-4000-8000-000000000001'
  where soa_register_id=current_setting('app.review_first')::uuid;
+set local role authenticated;
 select set_config('app.review_snapshot',public.finalise_soa(current_setting('app.review_first')::uuid)::text,true);
 select set_config('app.source_items',(select md5(jsonb_agg(to_jsonb(i) order by i.position)::text) from public.soa_items i where soa_register_id=current_setting('app.review_first')::uuid),true);
 select set_config('app.source_snapshot',(select md5(to_jsonb(s)::text) from public.soa_snapshots s where id=current_setting('app.review_snapshot')::uuid),true);
@@ -53,8 +57,10 @@ select is((select md5(to_jsonb(s)::text) from public.soa_snapshots s where id=cu
 -- A finalised owner cannot normally be removed because the FK update hits the
 -- immutability trigger. Simulate only a historical stale owner on our fictional
 -- source; bypass is transaction-local, restored before invoking the public RPC.
+reset role;
 update public.soa_items set applicable=false,status='not_applicable',justification='Second reviewed exclusion'
   where soa_register_id=current_setting('app.review_second')::uuid;
+set local role authenticated;
 select public.finalise_soa(current_setting('app.review_second')::uuid);
 reset role;
 set local session_replication_role = replica;

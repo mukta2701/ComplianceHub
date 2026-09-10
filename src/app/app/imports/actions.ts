@@ -12,10 +12,22 @@ import { MAX_IMPORT_ROWS } from "@/features/imports/limits";
 import { riskInputSchema } from "@/features/risks/application/risk";
 import { assetInputSchema } from "@/features/assets/application/asset";
 import { soaItemReviewSchema } from "@/features/soa/application/review";
+import type { SoaStatus } from "@/features/soa/domain/soa";
 import { hasCapability } from "@/features/organisations/domain/access";
+import { createHash } from "node:crypto";
 
 export type AnalyseResult = { headers: string[]; rows: string[][]; suggestion: Record<string, string> } | { error: string };
-export type ImportRunResult = { committed: boolean; total: number; valid: number; invalid: number; imported: number; updated: number; skipped: number; rowErrors: { row: number; errors: string[] }[]; notes: string[] };
+export type SoaImportChange = {
+  itemId: string;
+  expectedRevision: number;
+  applicable: boolean;
+  status: SoaStatus;
+  justification: string;
+  evidence: string;
+  ownerId: string | null;
+};
+export type SoaImportPreview = { identity: string; registerId: string; changes: SoaImportChange[] };
+export type ImportRunResult = { committed: boolean; total: number; valid: number; invalid: number; imported: number; updated: number; skipped: number; rowErrors: { row: number; errors: string[] }[]; notes: string[]; soaPreview?: SoaImportPreview; requiresFreshPreview?: boolean };
 
 const MODULES = new Set<ImportModule>(["risk", "soa", "asset"]);
 
@@ -124,7 +136,9 @@ async function assetOwnerResolver(supabase: SupabaseClient, organisationId: stri
 
 // Resolves the SoA register + its control_code -> item id map. Read-only, so it's safe to call from
 // both the dry-run preview and the real commit (Fix 4: keeps the preview's updated/skipped counts honest).
-async function loadSoaRegister(supabase: SupabaseClient, registerId: string | undefined, organisationId: string): Promise<{ registerId: string | null; byCode: Map<string, string> }> {
+type SoaItemIdentity = { id: string; decisionRevision: number };
+
+async function loadSoaRegister(supabase: SupabaseClient, registerId: string | undefined, organisationId: string): Promise<{ registerId: string | null; byCode: Map<string, SoaItemIdentity> }> {
   let id = registerId;
   if (!id) {
     const { data: latest } = await supabase.from("soa_registers").select("id").eq("organisation_id", organisationId).order("updated_at", { ascending: false }).limit(1).maybeSingle();
@@ -134,17 +148,33 @@ async function loadSoaRegister(supabase: SupabaseClient, registerId: string | un
     if (!selected) return { registerId: null, byCode: new Map() };
   }
   if (!id) return { registerId: null, byCode: new Map() };
-  const { data: items } = await supabase.from("soa_items").select("id,control_code").eq("soa_register_id", id).eq("organisation_id", organisationId);
-  const byCode = new Map<string, string>();
-  for (const it of items ?? []) byCode.set(String(it.control_code).toLowerCase(), String(it.id));
+  const { data: items } = await supabase.from("soa_items").select("id,control_code,decision_revision").eq("soa_register_id", id).eq("organisation_id", organisationId);
+  const byCode = new Map<string, SoaItemIdentity>();
+  for (const it of items ?? []) byCode.set(String(it.control_code).toLowerCase(), { id: String(it.id), decisionRevision: Number(it.decision_revision) });
   return { registerId: id, byCode };
+}
+
+function soaPreviewIdentity(
+  input: Pick<RunImportInput, "headers" | "rows" | "mapping">,
+  registerId: string,
+  changes: SoaImportChange[],
+) {
+  return createHash("sha256").update(JSON.stringify({
+    registerId,
+    headers: input.headers,
+    rows: input.rows,
+    mapping: Object.entries(input.mapping).sort(([left], [right]) => left.localeCompare(right)),
+    changes,
+  })).digest("hex");
 }
 
 function zodMessage(error: { issues: { message: string }[] }): string {
   return error.issues.map((issue) => issue.message).join("; ");
 }
 
-export async function runImportAction(input: { module: ImportModule; headers: string[]; rows: string[][]; mapping: Record<string, string>; commit: boolean; registerId?: string }): Promise<ImportRunResult> {
+type RunImportInput = { module: ImportModule; headers: string[]; rows: string[][]; mapping: Record<string, string>; commit: boolean; registerId?: string; soaPreview?: SoaImportPreview };
+
+export async function runImportAction(input: RunImportInput): Promise<ImportRunResult> {
   const { supabase, user, organisation, membership } = await requireAppContext();
   if (!hasCapability(membership.role, "manage_imports")) {
     throw new Error("You do not have permission to manage imports.");
@@ -182,15 +212,34 @@ export async function runImportAction(input: { module: ImportModule; headers: st
       // Fix 4: preview the real control_code match against the selected register instead of assuming every valid row updates.
       const { registerId, byCode } = await loadSoaRegister(supabase, input.registerId, organisation.id);
       if (!registerId) { notes.push("No SoA register found to update."); return result; }
-      let previewUpdated = 0, previewSkipped = 0;
+      const resolveMember = await memberResolver(supabase, organisation.id);
+      const changes: SoaImportChange[] = [];
+      let previewSkipped = 0;
       for (const r of results) {
         if (!r.ok) continue;
         const v = r.values as Record<string, string | number | boolean | null>;
-        if (byCode.has(String(v.controlCode).toLowerCase())) previewUpdated++;
-        else { previewSkipped++; notes.push(`Control ${v.controlCode} is not in this register — skipped.`); }
+        const item = byCode.get(String(v.controlCode).toLowerCase());
+        if (!item) { previewSkipped++; notes.push(`Control ${v.controlCode} is not in this register — skipped.`); continue; }
+        const parseResult = soaItemReviewSchema.safeParse({ itemId: item.id, status: v.status, applicable: v.applicable, justification: v.justification, evidence: (v.comments as string) ?? "" });
+        if (!parseResult.success) { previewSkipped++; notes.push(`Control ${v.controlCode}: ${zodMessage(parseResult.error)}`); continue; }
+        const parsed = parseResult.data;
+        changes.push({
+          itemId: parsed.itemId,
+          expectedRevision: item.decisionRevision,
+          applicable: parsed.applicable,
+          status: parsed.status,
+          justification: parsed.justification,
+          evidence: parsed.evidence,
+          ownerId: resolveMember(v.ownerName as string | null),
+        });
       }
-      result.updated = previewUpdated;
+      result.updated = changes.length;
       result.skipped = previewSkipped;
+      result.soaPreview = {
+        registerId,
+        changes,
+        identity: soaPreviewIdentity({ ...input, rows }, registerId, changes),
+      };
       return result;
     }
     result.imported = valid;
@@ -259,21 +308,66 @@ export async function runImportAction(input: { module: ImportModule; headers: st
       } else imported++;
     }
     revalidatePath("/app/assets");
-  } else { // soa — UPDATE matched control_code rows in the selected register
+  } else { // soa — apply the exact previewed revisions in one guarded command
     const { registerId, byCode } = await loadSoaRegister(supabase, input.registerId, organisation.id);
     if (!registerId) { notes.push("No SoA register found to update."); return result; }
     const resolveMember = await memberResolver(supabase, organisation.id);
+    const previewChanges = input.soaPreview?.changes ?? [];
+    const expectedRevisionByItem = new Map(previewChanges.map((change) => [change.itemId, change.expectedRevision]));
+    const changes: SoaImportChange[] = [];
     for (const r of results) {
       if (!r.ok) continue;
       const v = r.values as Record<string, string | number | boolean | null>;
-      const itemId = byCode.get(String(v.controlCode).toLowerCase());
-      if (!itemId) { skipped++; notes.push(`Control ${v.controlCode} is not in this register — skipped.`); continue; }
-      const parseResult = soaItemReviewSchema.safeParse({ itemId, status: v.status, applicable: v.applicable, justification: v.justification, evidence: (v.comments as string) ?? "" });
+      const item = byCode.get(String(v.controlCode).toLowerCase());
+      if (!item) { skipped++; notes.push(`Control ${v.controlCode} is not in this register — skipped.`); continue; }
+      const parseResult = soaItemReviewSchema.safeParse({ itemId: item.id, status: v.status, applicable: v.applicable, justification: v.justification, evidence: (v.comments as string) ?? "" });
       if (!parseResult.success) { skipped++; notes.push(`Control ${v.controlCode}: ${zodMessage(parseResult.error)}`); continue; }
       const parsed = parseResult.data;
-      const { error } = await supabase.from("soa_items").update({ status: parsed.status, applicable: parsed.applicable, justification: parsed.justification, evidence: parsed.evidence, owner_id: resolveMember(v.ownerName as string | null) }).eq("id", parsed.itemId).eq("organisation_id", organisation.id);
-      if (error) { skipped++; notes.push(`Control ${v.controlCode}: ${error.message}`); } else updated++;
+      const expectedRevision = expectedRevisionByItem.get(parsed.itemId);
+      if (expectedRevision === undefined) { skipped++; continue; }
+      changes.push({
+        itemId: parsed.itemId,
+        expectedRevision,
+        applicable: parsed.applicable,
+        status: parsed.status,
+        justification: parsed.justification,
+        evidence: parsed.evidence,
+        ownerId: resolveMember(v.ownerName as string | null),
+      });
     }
+    const previewMatches = input.soaPreview?.registerId === registerId
+      && input.soaPreview.identity === soaPreviewIdentity({ ...input, rows }, registerId, changes)
+      && JSON.stringify(input.soaPreview.changes) === JSON.stringify(changes);
+    if (!previewMatches || skipped > 0 || changes.length === 0) {
+      return {
+        ...result,
+        skipped,
+        requiresFreshPreview: true,
+        notes: [...notes, "The selected register, file, mapping, or validated rows changed after preview. No controls were updated; preview the file again before confirming."],
+      };
+    }
+    const { data, error } = await supabase.rpc("update_soa_decisions_guarded", {
+      target_register_id: registerId,
+      changes,
+    });
+    if (error) {
+      const stale = error.code === "40001" && error.message === "control_decision_stale" && error.details === "revision_mismatch";
+      return {
+        ...result,
+        requiresFreshPreview: true,
+        notes: [...notes, stale
+          ? "A control decision changed after this preview. No controls were updated; preview the file again before confirming."
+          : "The control decisions could not be applied. No controls were updated; refresh access and preview the file again."],
+      };
+    }
+    if (!Array.isArray(data) || data.length !== changes.length) {
+      return {
+        ...result,
+        requiresFreshPreview: true,
+        notes: [...notes, "The control update did not return a complete result. Preview the file again before confirming."],
+      };
+    }
+    updated = data.length;
     revalidatePath("/app/soa");
   }
   return { ...result, imported, updated, skipped, notes };

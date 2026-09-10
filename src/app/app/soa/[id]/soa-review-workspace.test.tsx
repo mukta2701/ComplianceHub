@@ -12,10 +12,12 @@ vi.mock("next/navigation", () => ({
 }));
 
 const CURRENT_USER_ID = "member-1";
+const REGISTER_ID = "register-1";
 
 const items: SoaReviewWorkspaceItem[] = [
   {
     id: "item-1",
+    decisionRevision: 0,
     controlId: "control-1",
     code: "A.5.1",
     title: "Policies for information security",
@@ -38,6 +40,7 @@ const items: SoaReviewWorkspaceItem[] = [
   },
   {
     id: "item-2",
+    decisionRevision: 2,
     controlId: "control-2",
     code: "A.6.3",
     title: "Information security awareness",
@@ -71,6 +74,7 @@ const items: SoaReviewWorkspaceItem[] = [
   },
   {
     id: "item-3",
+    decisionRevision: 4,
     controlId: "control-3",
     code: "A.8.8",
     title: "Management of technical vulnerabilities",
@@ -102,6 +106,7 @@ const items: SoaReviewWorkspaceItem[] = [
   },
   {
     id: "item-4",
+    decisionRevision: 1,
     controlId: "control-4",
     code: "A.7.1",
     title: "Physical security perimeters",
@@ -130,7 +135,7 @@ const members = [
 ];
 
 function renderWorkspace(
-  saveAction = vi.fn<(formData: FormData) => Promise<void>>(async () => undefined),
+  saveAction = vi.fn<(formData: FormData) => Promise<{ status: "saved"; revision: number }>>(async () => ({ status: "saved", revision: 1 })),
   workspaceItems = items,
 ) {
   return render(
@@ -138,6 +143,7 @@ function renderWorkspace(
       items={workspaceItems}
       members={members}
       currentUserId={CURRENT_USER_ID}
+      registerId={REGISTER_ID}
       saveAction={saveAction}
     />,
   );
@@ -160,7 +166,7 @@ function workspaceItem(overrides: Partial<SoaReviewWorkspaceItem>): SoaReviewWor
 describe("SoaReviewWorkspace", () => {
   it("keeps Member review navigation available without editable decisions", async () => {
     const saveAction = vi.fn();
-    render(<SoaReviewWorkspace items={items} members={members} currentUserId={CURRENT_USER_ID} saveAction={saveAction} readOnly />);
+    render(<SoaReviewWorkspace items={items} members={members} currentUserId={CURRENT_USER_ID} registerId={REGISTER_ID} saveAction={saveAction} readOnly />);
     expect(screen.getByLabelText("Applicability decision")).toBeDisabled();
     expect(screen.getByLabelText("Owner assignment")).toBeDisabled();
     expect(screen.getByLabelText("Rationale")).toHaveAttribute("readonly");
@@ -368,7 +374,7 @@ describe("SoaReviewWorkspace", () => {
           <a href="https://example.test/external">External guidance</a>
           <Link href="#soa-review-blockers">Review summary</Link>
         </nav>
-        <SoaReviewWorkspace items={items} members={members} currentUserId={CURRENT_USER_ID} saveAction={vi.fn()} />
+        <SoaReviewWorkspace items={items} members={members} currentUserId={CURRENT_USER_ID} registerId={REGISTER_ID} saveAction={vi.fn()} />
       </>,
     );
     await user.type(screen.getByRole("textbox", { name: "Rationale" }), "Unsaved shell navigation");
@@ -391,7 +397,7 @@ describe("SoaReviewWorkspace", () => {
     render(
       <>
         <form data-soa-finalise-form><button type="submit">Finalise immutable v1</button></form>
-        <SoaReviewWorkspace items={items} members={members} currentUserId={CURRENT_USER_ID} saveAction={vi.fn()} />
+        <SoaReviewWorkspace items={items} members={members} currentUserId={CURRENT_USER_ID} registerId={REGISTER_ID} saveAction={vi.fn()} />
       </>,
     );
     await user.type(screen.getByRole("textbox", { name: "Rationale" }), "Unsaved before finalisation");
@@ -413,12 +419,12 @@ describe("SoaReviewWorkspace", () => {
 
   it("guards sign-out submission without intercepting the workspace save form", async () => {
     const user = userEvent.setup();
-    const saveAction = vi.fn<(formData: FormData) => Promise<void>>(async () => undefined);
+    const saveAction = vi.fn<(formData: FormData) => Promise<{ status: "saved"; revision: number }>>(async () => ({ status: "saved", revision: 1 }));
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
     render(
       <>
         <form data-app-exit-form><button type="submit">Sign out</button></form>
-        <SoaReviewWorkspace items={items} members={members} currentUserId={CURRENT_USER_ID} saveAction={saveAction} />
+        <SoaReviewWorkspace items={items} members={members} currentUserId={CURRENT_USER_ID} registerId={REGISTER_ID} saveAction={saveAction} />
       </>,
     );
     await user.type(screen.getByRole("textbox", { name: "Rationale" }), "Unsaved before sign-out");
@@ -442,7 +448,7 @@ describe("SoaReviewWorkspace", () => {
 
   it("shows an optimistic save immediately and adopts the next canonical props", async () => {
     const user = userEvent.setup();
-    const saveAction = vi.fn<(formData: FormData) => Promise<void>>(async () => undefined);
+    const saveAction = vi.fn<(formData: FormData) => Promise<{ status: "saved"; revision: number }>>(async () => ({ status: "saved", revision: 1 }));
     const view = renderWorkspace(saveAction);
 
     await user.type(screen.getByRole("textbox", { name: "Rationale" }), "Optimistic rationale");
@@ -458,6 +464,7 @@ describe("SoaReviewWorkspace", () => {
         items={refreshedItems}
         members={members}
         currentUserId={CURRENT_USER_ID}
+        registerId={REGISTER_ID}
         saveAction={saveAction}
       />,
     );
@@ -479,6 +486,7 @@ describe("SoaReviewWorkspace", () => {
         items={refreshedItems}
         members={members}
         currentUserId={CURRENT_USER_ID}
+        registerId={REGISTER_ID}
         saveAction={vi.fn()}
       />,
     );
@@ -550,7 +558,7 @@ describe("SoaReviewWorkspace", () => {
 
   it("saves once and advances to the next unresolved visible control", async () => {
     const user = userEvent.setup();
-    const saveAction = vi.fn<(formData: FormData) => Promise<void>>(async () => undefined);
+    const saveAction = vi.fn<(formData: FormData) => Promise<{ status: "saved"; revision: number }>>(async () => ({ status: "saved", revision: 1 }));
     renderWorkspace(saveAction);
 
     await user.selectOptions(screen.getByRole("combobox", { name: "Implementation status" }), "in_progress");
@@ -561,7 +569,9 @@ describe("SoaReviewWorkspace", () => {
     await waitFor(() => expect(saveAction).toHaveBeenCalledTimes(1));
     const formData = saveAction.mock.calls[0][0];
     expect(Object.fromEntries(formData)).toMatchObject({
+      registerId: REGISTER_ID,
       itemId: "item-1",
+      expectedRevision: "0",
       applicable: "true",
       status: "in_progress",
       ownerId: CURRENT_USER_ID,
@@ -574,7 +584,7 @@ describe("SoaReviewWorkspace", () => {
 
   it("reports save errors and keeps the selected control open", async () => {
     const user = userEvent.setup();
-    const saveAction = vi.fn<(formData: FormData) => Promise<void>>(async () => {
+    const saveAction = vi.fn(async () => {
       throw new Error("save failed");
     });
     renderWorkspace(saveAction);
@@ -586,6 +596,40 @@ describe("SoaReviewWorkspace", () => {
     expect(saveAction).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("heading", { name: "A.5.1 Policies for information security" })).toBeInTheDocument();
     expect(navigation.refresh).not.toHaveBeenCalled();
+  });
+
+  it("preserves a stale draft and blocks that control until refreshed data arrives", async () => {
+    const user = userEvent.setup();
+    const saveAction = vi.fn()
+      .mockResolvedValueOnce({ status: "stale", message: "This control changed after you opened it. Refresh and reconcile your draft before saving again." })
+      .mockResolvedValueOnce({ status: "saved", revision: 2 });
+    const view = renderWorkspace(saveAction);
+
+    await user.type(screen.getByRole("textbox", { name: "Rationale" }), "My newer draft");
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+
+    await screen.findByText(/changed after you opened it/i);
+    expect(screen.getByRole("textbox", { name: "Rationale" })).toHaveValue("My newer draft");
+    expect(screen.getByRole("button", { name: "Save draft" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save and next" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Refresh current decisions" }));
+    expect(navigation.refresh).toHaveBeenCalledTimes(1);
+    expect(saveAction).toHaveBeenCalledTimes(1);
+
+    view.rerender(
+      <SoaReviewWorkspace
+        items={items.map((item) => item.id === "item-1" ? { ...item, decisionRevision: 1 } : item)}
+        members={members}
+        currentUserId={CURRENT_USER_ID}
+        registerId={REGISTER_ID}
+        saveAction={saveAction}
+      />,
+    );
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save draft" })).toBeEnabled());
+    expect(screen.getByRole("textbox", { name: "Rationale" })).toHaveValue("My newer draft");
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    await waitFor(() => expect(saveAction).toHaveBeenCalledTimes(2));
+    expect(saveAction.mock.calls[1][0].get("expectedRevision")).toBe("1");
   });
 
   it("provides labelled controls, a live save region, and honest tab content", async () => {
@@ -691,7 +735,7 @@ describe("SoA optional AI restoration", () => {
       id: "suggestion", status: "draft", output: { explanation: "Review rationale", recommendedAction: "Confirm applicability", confidence: "medium" }, source_references: [],
     }) });
     vi.stubGlobal("fetch", fetchMock);
-    render(<SoaReviewWorkspace items={items} members={members} currentUserId={CURRENT_USER_ID} saveAction={vi.fn()} aiEnabled />);
+    render(<SoaReviewWorkspace items={items} members={members} currentUserId={CURRENT_USER_ID} registerId={REGISTER_ID} saveAction={vi.fn()} aiEnabled />);
     await userEvent.click(screen.getByRole("button", { name: "Draft explanation and next step" }));
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ targetType: "soa_item", targetId: "item-1" });
     expect(await screen.findByRole("button", { name: "Mark draft reviewed" })).toBeVisible();
@@ -700,14 +744,14 @@ describe("SoA optional AI restoration", () => {
     expect(screen.queryByText("Review rationale")).not.toBeInTheDocument();
   });
   it("requires unsaved decisions to be saved before generating AI context", async () => {
-    render(<SoaReviewWorkspace items={items} members={members} currentUserId={CURRENT_USER_ID} saveAction={vi.fn().mockResolvedValue(undefined)} aiEnabled />);
+    render(<SoaReviewWorkspace items={items} members={members} currentUserId={CURRENT_USER_ID} registerId={REGISTER_ID} saveAction={vi.fn().mockResolvedValue({ status: "saved", revision: 1 })} aiEnabled />);
     await userEvent.type(screen.getByLabelText("Rationale"), "Working rationale");
     expect(screen.queryByRole("button", { name: "Draft explanation and next step" })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Save draft" }));
     expect(await screen.findByRole("button", { name: "Draft explanation and next step" })).toBeVisible();
   });
   it.each([{ aiEnabled: false, readOnly: false }, { aiEnabled: true, readOnly: true }])("keeps optional AI unavailable for %j", (access) => {
-    render(<SoaReviewWorkspace items={items} members={members} currentUserId={CURRENT_USER_ID} saveAction={vi.fn()} {...access} />);
+    render(<SoaReviewWorkspace items={items} members={members} currentUserId={CURRENT_USER_ID} registerId={REGISTER_ID} saveAction={vi.fn()} {...access} />);
     expect(screen.queryByRole("button", { name: "Draft explanation and next step" })).not.toBeInTheDocument();
     expect(screen.getByText("Why this matters")).toBeVisible();
   });

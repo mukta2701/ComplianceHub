@@ -110,7 +110,6 @@ const ITEM_ID = "00000000-0000-4000-8000-000000000005";
 const REQUIREMENT_ID = "00000000-0000-4000-8000-000000000006";
 const CONTROL_ID = "00000000-0000-4000-8000-000000000007";
 const OWNER_ID = "00000000-0000-4000-8000-000000000008";
-const OTHER_OWNER_ID = "00000000-0000-4000-8000-000000000010";
 
 function formData() {
   const data = new FormData();
@@ -126,7 +125,9 @@ function assessmentFormData(assessmentId = ASSESSMENT_ID) {
 
 function reviewFormData(itemId = ITEM_ID) {
   const data = new FormData();
+  data.set("registerId", REGISTER_ID);
   data.set("itemId", itemId);
+  data.set("expectedRevision", "0");
   data.set("status", "in_progress");
   data.set("applicable", "true");
   data.set("ownerId", OWNER_ID);
@@ -158,6 +159,7 @@ function reviewedStore(): Store {
       status: "operational",
       justification: "Reviewed rationale",
       owner_id: OWNER_ID,
+      decision_revision: 0,
     }],
     requirement_control_mappings: [{ requirement_id: REQUIREMENT_ID, control_id: CONTROL_ID }],
     evidence_links: [{
@@ -311,59 +313,50 @@ describe("finaliseSoaAction preflight", () => {
 });
 
 describe("reviewSoaItemAction tenant scope", () => {
-  it("updates only an item in the active organisation and requests the changed id", async () => {
-    const store = reviewedStore();
-    const fake = fakeSupabase(store);
-    hoisted.ctx = context(fake.client);
-    const { reviewSoaItemAction } = await import("./actions");
-
-    await expect(reviewSoaItemAction(reviewFormData())).resolves.toBeUndefined();
-
-    expect(fake.queries).toContainEqual({
-      table: "soa_items",
-      operation: "eq",
-      column: "organisation_id",
-      value: ORG_ID,
-    });
-    expect(store.soa_items[0]).toMatchObject({ status: "in_progress", evidence: "Evidence reference" });
-  });
-
-  it("rejects an item id belonging only to another membership organisation", async () => {
-    const store = reviewedStore();
-    store.soa_items[0] = { ...store.soa_items[0], organisation_id: OTHER_ORG_ID };
-    const fake = fakeSupabase(store);
-    hoisted.ctx = context(fake.client);
-    const { reviewSoaItemAction } = await import("./actions");
-
-    await expect(reviewSoaItemAction(reviewFormData())).rejects.toThrow("SoA item not found in the active workspace");
-    expect(store.soa_items[0].status).toBe("operational");
-  });
-
-  it("throws when the scoped update changes zero rows", async () => {
+  it("saves through the guarded command and returns the advanced revision", async () => {
     const fake = fakeSupabase(reviewedStore());
+    fake.rpc.mockResolvedValue({ data: [{ item_id: ITEM_ID, decision_revision: 1 }], error: null });
     hoisted.ctx = context(fake.client);
     const { reviewSoaItemAction } = await import("./actions");
 
-    await expect(reviewSoaItemAction(reviewFormData("00000000-0000-4000-8000-000000000099")))
-      .rejects.toThrow("SoA item not found in the active workspace");
+    await expect(reviewSoaItemAction(reviewFormData())).resolves.toEqual({ status: "saved", revision: 1 });
+    expect(fake.rpc).toHaveBeenCalledExactlyOnceWith("update_soa_decisions_guarded", {
+      target_register_id: REGISTER_ID,
+      changes: [{
+        itemId: ITEM_ID,
+        expectedRevision: 0,
+        applicable: true,
+        status: "in_progress",
+        justification: "Reviewed rationale",
+        evidence: "Evidence reference",
+        ownerId: OWNER_ID,
+      }],
+    });
   });
 
-  it("rejects an owner who is not a member of the active organisation", async () => {
-    const store = reviewedStore();
-    store.memberships = [{ organisation_id: OTHER_ORG_ID, user_id: OTHER_OWNER_ID }];
-    const fake = fakeSupabase(store);
+  it.each([
+    [{ code: "40001", message: "control_decision_stale", details: "revision_mismatch" }, { status: "stale", message: "This control changed after you opened it. Refresh and reconcile your draft before saving again." }],
+    [{ code: "P0002", message: "control_decision_missing", details: "item_unavailable" }, { status: "missing", message: "This control is no longer available. Refresh the review before saving again." }],
+    [{ code: "42501", message: "control_decision_forbidden", details: "register_unavailable" }, { status: "forbidden", message: "You cannot update this control review. Refresh to check your current access and review state." }],
+    [{ code: "22023", message: "control_decision_invalid", details: "owner_unavailable" }, { status: "forbidden", message: "This decision is no longer valid. Refresh and check the control owner before saving again." }],
+  ])("maps guarded database outcomes to recoverable results without leaking details", async (error, expected) => {
+    const fake = fakeSupabase(reviewedStore());
+    fake.rpc.mockResolvedValue({ data: null, error });
     hoisted.ctx = context(fake.client);
     const { reviewSoaItemAction } = await import("./actions");
 
-    await expect(reviewSoaItemAction(reviewFormData(ITEM_ID))).rejects.toThrow(
-      "SoA owner must be a member of the active workspace",
-    );
-    expect(store.soa_items[0].status).toBe("operational");
-    expect(fake.queries).toContainEqual({
-      table: "memberships",
-      operation: "eq",
-      column: "organisation_id",
-      value: ORG_ID,
+    await expect(reviewSoaItemAction(reviewFormData())).resolves.toEqual(expected);
+  });
+
+  it("does not turn an empty guarded response into a successful save", async () => {
+    const fake = fakeSupabase(reviewedStore());
+    fake.rpc.mockResolvedValue({ data: [], error: null });
+    hoisted.ctx = context(fake.client);
+    const { reviewSoaItemAction } = await import("./actions");
+
+    await expect(reviewSoaItemAction(reviewFormData())).resolves.toEqual({
+      status: "missing",
+      message: "This control is no longer available. Refresh the review before saving again.",
     });
   });
 });
