@@ -1,10 +1,20 @@
 import Link from "next/link";
 import { PageIntro } from "@/components/ui";
-import { loadControlReview } from "@/features/soa/application/load-control-review";
+import { loadControlReview, type ControlReviewLoadResult } from "@/features/soa/application/load-control-review";
 import { summariseSoaQueue } from "@/features/soa/application/review-queue";
 import { requireAppContext } from "@/lib/app-context";
 import { finaliseSoaAction, reviewSoaItemAction } from "../../actions";
 import { SoaReviewWorkspace } from "./soa-review-workspace";
+
+function CatalogueContext({ catalogues }: { catalogues: ControlReviewLoadResult["catalogues"] }) {
+  if (!catalogues) return null;
+  return <div aria-label="Catalogue provenance">
+    {(["assessment", "control"] as const).map((kind) => {
+      const catalogue = catalogues[kind];
+      return <p key={kind}>{kind === "assessment" ? "Assessment" : "Control"} catalogue: {catalogue.title ? `${catalogue.title} — ` : ""}{catalogue.version ? `version ${catalogue.version}; ` : ""}ID: {catalogue.id}</p>;
+    })}
+  </div>;
+}
 
 export default async function SoaReviewPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -21,8 +31,36 @@ export default async function SoaReviewPage({ params }: { params: Promise<{ id: 
     </section>
   </>;
 
+  if (review.finalisedStatement) {
+    const statement = review.finalisedStatement;
+    return <>
+      <PageIntro eyebrow={`STATEMENT OF APPLICABILITY - V${register.version}`} title={register.title}
+        body={`${statement.organisationName} · Finalised ${statement.finalisedAt}. These saved decisions are immutable.`}
+        action={<Link className="button secondary" href="/app/soa">Controls & applicability</Link>} />
+      <section className="panel" aria-label="Saved statement provenance">
+        <h2>Saved statement provenance</h2>
+        <p>Source assessment ID: {register.sourceAssessment.id}</p>
+        <CatalogueContext catalogues={review.catalogues} />
+        <p><Link href={`/app/assessment/${register.sourceAssessment.id}`}>Open current source assessment</Link>. Its current answers, state and revision are not part of this saved statement.</p>
+        <p>Current owners, linked work and evidence freshness are not re-evaluated here. The evidence notes below are the notes saved at finalisation.</p>
+        <p><a href={`/api/app/soa/${statement.id}/pdf`}>Download saved PDF</a> · <a href={`/api/app/soa/${statement.id}/docx`}>Download saved DOCX</a></p>
+      </section>
+      {review.optionalUnavailable.length > 0 && <p role="status">Unavailable labels: {review.optionalUnavailable.join(", ")}. Saved identities and decisions remain available.</p>}
+      <section aria-label="Saved control decisions">
+        <h2>{statement.items.length} saved control decisions</h2>
+        {statement.items.map((item, index) => <article className="panel" key={`${item.controlCode}-${index}`}>
+          <h3>{item.controlCode}: {item.controlTitle}</h3>
+          <p>{item.applicable ? "Applicable" : "Not applicable"} · Recorded status: {item.status.replaceAll("_", " ")}</p>
+          <p>{item.ownerId ? "An owner was recorded at finalisation." : item.ownerId === null ? "No owner was recorded at finalisation." : "This older statement does not include an owner record."}</p>
+          <h4>Saved rationale</h4><p>{item.justification || "No rationale recorded."}</p>
+          <h4>Saved evidence note</h4><p>{item.evidence || "No evidence note recorded."}</p>
+        </article>)}
+      </section>
+    </>;
+  }
+
   const summary = summariseSoaQueue(review.items);
-  const canFinalise = finalisation.readiness === "ready" && !register.finalisedSnapshotId;
+  const canFinalise = finalisation.readiness === "ready";
   const blockers = finalisation.blockers;
   const preflight = canFinalise
     ? `Finalisation checks passed for all ${summary.total} controls. Date-based evidence freshness remains separate review guidance.`
@@ -36,7 +74,7 @@ export default async function SoaReviewPage({ params }: { params: Promise<{ id: 
     <PageIntro
       eyebrow={`CONTROL REVIEW - V${register.version}`}
       title={register.title}
-      body={register.finalisedSnapshotId ? "This review has a finalised Statement of Applicability. Its saved statement is immutable." : preflight}
+      body={preflight}
       action={canFinalise && membership.role !== "member" ? (
         <form action={finaliseSoaAction} data-soa-finalise-form>
           <input type="hidden" name="registerId" value={id} />
@@ -46,9 +84,9 @@ export default async function SoaReviewPage({ params }: { params: Promise<{ id: 
     />
     <section className="panel" aria-label="Source assessment">
       <h2>Source assessment: <Link href={`/app/assessment/${source.id}`}>{source.title}</Link></h2>
+      <CatalogueContext catalogues={review.catalogues} />
       <p>Current assessment context — {source.state}, revision {source.revision}. Answers can change after a control decision is saved.</p>
       {source.state !== "completed" && <p>This assessment is incomplete. Its recorded answers provide context; they do not decide applicability or establish effectiveness.</p>}
-      {register.finalisedSnapshotId && <p>The source link opens its current record. Later answers are not part of the immutable statement.</p>}
     </section>
     {review.optionalUnavailable.length > 0 && <p role="status">Unavailable context: {review.optionalUnavailable.join(", ")}. The remaining review is available.</p>}
     {review.relatedRisks.length > 0 && <section className="panel" aria-label="Related risks">
@@ -62,7 +100,7 @@ export default async function SoaReviewPage({ params }: { params: Promise<{ id: 
     </section>}
     <SoaReviewWorkspace
       aiEnabled={review.aiEnabled}
-      readOnly={membership.role === "member" || Boolean(register.finalisedSnapshotId)}
+      readOnly={membership.role === "member"}
       items={review.items}
       members={review.members}
       currentUserId={user.id}

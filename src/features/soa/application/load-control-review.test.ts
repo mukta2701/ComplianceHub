@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { controlReviewFixture } from "@/test/control-review-fixture";
+import { controlReviewFixture, finaliseControlReviewFixture } from "@/test/control-review-fixture";
 import { loadControlReview } from "./load-control-review";
 
 const context = { organisationId: "org", registerId: "register", today: "2026-09-10" };
@@ -31,7 +31,7 @@ it("loads safe ownership, linked work and stored evidence separately from date f
 });
 
 it.each([
-  "soa_registers", "soa_items", "assessment_sessions", "catalogue_questions", "assessment_responses", "control_catalogue_controls", "assessment_control_mappings", "requirement_control_mappings", "memberships", "evidence_links", "soa_snapshots",
+  "soa_registers", "soa_items", "assessment_sessions", "catalogue_questions", "assessment_responses", "control_catalogue_controls", "assessment_control_mappings", "requirement_control_mappings", "memberships", "evidence_links", "soa_snapshots", "catalogue_versions", "control_catalogue_versions",
 ])("fails closed when essential %s cannot be read", async (table) => {
   const fixture = controlReviewFixture();
   fixture.failures.add(table);
@@ -118,4 +118,81 @@ it("does not attach cross-workspace evidence or pretend a hidden linked record i
   expect((await loadControlReview(fixture.client, context)).finalisation).toMatchObject({ readiness: "could_not_verify", unavailableInputs: ["evidence"] });
   fixture.tables.evidence_links[0].evidence = { id: "other", organisation_id: "other-org", status: "current" };
   expect((await loadControlReview(fixture.client, context)).finalisation.readiness).toBe("could_not_verify");
+});
+
+it("loads immutable snapshot facts even when every changing review input fails", async () => {
+  const fixture = controlReviewFixture();
+  finaliseControlReviewFixture(fixture);
+  for (const table of ["soa_items", "assessment_sessions", "assessment_responses", "memberships", "evidence_links", "assessment_control_mappings", "requirement_control_mappings", "control_catalogue_controls", "tasks", "risks"]) fixture.failures.add(table);
+  const result = await loadControlReview(fixture.client, context);
+  expect(result.finalisation.readiness).toBe("finalised");
+  expect(result.register).toMatchObject({ title: "Saved statement", sourceAssessment: { id: "saved-assessment", catalogueVersionId: "saved-questions", revision: null }, controlCatalogueVersionId: "saved-controls" });
+  expect(result.finalisedStatement?.items).toEqual([{ controlCode: "5.1", controlTitle: "Saved security policy", applicable: true, status: "operational", ownerId: "former-owner", justification: "Saved rationale", evidence: "Saved evidence note" }]);
+  expect(result.items).toEqual([]);
+});
+
+
+it("exposes both verified catalogue identities and version labels", async () => {
+  const fixture = controlReviewFixture();
+  const result = await loadControlReview(fixture.client, context);
+  expect(result.catalogues).toEqual({
+    assessment: { id: "questions-v1", title: "Assessment questions", version: "2026.1" },
+    control: { id: "controls-v1", title: "ISO control catalogue", version: "2022.1" },
+  });
+});
+
+it("rejects an empty control catalogue even when no decision is present to reference it", async () => {
+  const fixture = controlReviewFixture();
+  fixture.tables.soa_items = [];
+  fixture.tables.control_catalogue_controls = [];
+  expect((await loadControlReview(fixture.client, context)).finalisation).toMatchObject({ readiness: "could_not_verify", unavailableInputs: ["control catalogue"] });
+});
+
+it("rejects decisions belonging to a different control catalogue identity", async () => {
+  const fixture = controlReviewFixture();
+  fixture.tables.soa_items[0].control_catalogue_version_id = "different-catalogue";
+  expect((await loadControlReview(fixture.client, context)).finalisation.readiness).toBe("could_not_verify");
+});
+
+it.each(["catalogue_versions", "control_catalogue_versions"])("fails closed when editable %s identity is absent or unavailable", async (table) => {
+  const fixture = controlReviewFixture();
+  fixture.tables[table] = [];
+  expect((await loadControlReview(fixture.client, context)).finalisation.readiness).toBe("could_not_verify");
+});
+
+it("uses the snapshot's catalogue labels and preserves saved IDs if those labels are unavailable", async () => {
+  const fixture = controlReviewFixture();
+  finaliseControlReviewFixture(fixture);
+  fixture.tables.catalogue_versions.push({ id: "saved-questions", title: "Saved assessment catalogue", version: "2025.1" });
+  fixture.tables.control_catalogue_versions.push({ id: "saved-controls", title: "Saved control catalogue", version: "2022.0" });
+  let result = await loadControlReview(fixture.client, context);
+  expect(result.catalogues).toEqual({
+    assessment: { id: "saved-questions", title: "Saved assessment catalogue", version: "2025.1" },
+    control: { id: "saved-controls", title: "Saved control catalogue", version: "2022.0" },
+  });
+  fixture.failures.add("catalogue_versions");
+  fixture.failures.add("control_catalogue_versions");
+  result = await loadControlReview(fixture.client, context);
+  expect(result.finalisation.readiness).toBe("finalised");
+  expect(result.catalogues).toMatchObject({ assessment: { id: "saved-questions", title: null }, control: { id: "saved-controls", title: null } });
+  expect(result.optionalUnavailable).toEqual(["Assessment catalogue label", "Control catalogue label"]);
+});
+
+it("preserves older immutable statements without inventing owner records or applying today's 93-control gate", async () => {
+  const fixture = controlReviewFixture();
+  finaliseControlReviewFixture(fixture);
+  const items = fixture.tables.soa_snapshots[0].items as Array<Record<string, unknown>>;
+  delete items[0].ownerId;
+  items[0].status = "implemented";
+  const result = await loadControlReview(fixture.client, context);
+  expect(result.finalisation.readiness).toBe("finalised");
+  expect(result.finalisedStatement?.items[0]).toMatchObject({ status: "implemented", justification: "Saved rationale" });
+  expect(result.finalisedStatement?.items[0].ownerId).toBeUndefined();
+});
+
+it("does not fall back to mutable decisions when the existing snapshot is malformed", async () => {
+  const fixture = controlReviewFixture();
+  finaliseControlReviewFixture(fixture);
+  fixture.tables.soa_snapshots[0].items = [{ controlCode: "5.1" }];
+  expect((await loadControlReview(fixture.client, context)).finalisation).toMatchObject({ readiness: "could_not_verify", unavailableInputs: ["final statement"] });
 });

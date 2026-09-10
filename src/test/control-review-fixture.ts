@@ -6,7 +6,9 @@ export function controlReviewFixture() {
   const tables: Record<string, Row[]> = {
     soa_registers: [{ id: "register", organisation_id: "org", title: "Annual control review", version: 2, updated_at: "2026-09-10T10:00:00Z", assessment_session_id: "assessment", control_catalogue_version_id: "controls-v1" }],
     soa_snapshots: [],
-    soa_items: Array.from({ length: 93 }, (_, i) => ({ id: `item-${i}`, organisation_id: "org", soa_register_id: "register", control_id: `control-${i}`, control_code: `5.${i + 1}`, control_title: `Control ${i + 1}`, applicable: false, status: "not_applicable", justification: "Outside the recorded scope", evidence: "", owner_id: null, position: i, decision_revision: 0 })),
+    catalogue_versions: [{ id: "questions-v1", title: "Assessment questions", version: "2026.1" }],
+    control_catalogue_versions: [{ id: "controls-v1", title: "ISO control catalogue", version: "2022.1" }],
+    soa_items: Array.from({ length: 93 }, (_, i) => ({ id: `item-${i}`, organisation_id: "org", soa_register_id: "register", control_catalogue_version_id: "controls-v1", control_id: `control-${i}`, control_code: `5.${i + 1}`, control_title: `Control ${i + 1}`, applicable: false, status: "not_applicable", justification: "Outside the recorded scope", evidence: "", owner_id: null, position: i, decision_revision: 0 })),
     assessment_sessions: [{ id: "assessment", organisation_id: "org", title: "Recorded practices", state: "draft", revision: 7, catalogue_version_id: "questions-v1" }],
     catalogue_questions: [
       { id: "q1", catalogue_version_id: "questions-v1", code: "G1", prompt: "Who reviews access?", position: 0 },
@@ -54,4 +56,13 @@ export function controlReviewFixture() {
     return new Response(init?.method === "HEAD" ? null : JSON.stringify(rows), { status: 200, headers });
   } }, auth: { persistSession: false, autoRefreshToken: false, storageKey: `fixture-${fixtureNumber++}` } });
   return { client, tables, failures, thrown, missingCounts, requests };
+}
+
+export function finaliseControlReviewFixture(fixture: ReturnType<typeof controlReviewFixture>) {
+  fixture.tables.soa_snapshots = [{
+    id: "snapshot", organisation_id: "org", soa_register_id: "register", title: "Saved statement",
+    version: 2, organisation_name: "Fictional company", finalised_at: "2026-08-01T12:00:00Z", finalised_by: "former-reviewer",
+    assessment_session_id: "saved-assessment", catalogue_version_id: "saved-questions", control_catalogue_version_id: "saved-controls",
+    items: [{ controlCode: "5.1", controlTitle: "Saved security policy", applicable: true, status: "operational", ownerId: "former-owner", justification: "Saved rationale", evidence: "Saved evidence note" }],
+  }];
 }

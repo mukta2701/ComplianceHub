@@ -68,3 +68,33 @@ Final affected/focused verification command:
 - **Verified:** Fresh 135-test focused pass, final lint/typecheck/diff hygiene; complete-suite outcome and isolated fixture correction recorded above.
 - **Still unfinished:** Task 5 presentation, parent-coordinated independent reviews, production build/browser demonstration and GitHub push. Existing preview remains unchanged.
 - **Next step:** Consume the loader's source/context/list metadata in the Task 5 workspace and continue the integrated verification workflow.
+
+## Independent-review corrections — after `1fa73bc`
+
+The earlier implementation still used live review inputs for a finalised statement, did not expose both labelled catalogue identities, and could treat an empty catalogue plus empty decisions as an ordinary blocked review. This correction supersedes those parts of the earlier implementation description; the earlier test evidence is retained as history.
+
+### Corrected behavior
+
+- The loader reads the scoped immutable `soa_snapshots` record immediately after finding the scoped register. An existing snapshot takes a separate path before any current decision, membership-label, evidence, assessment-answer, mapping, task or risk reads.
+- `finalisedStatement` preserves the actual saved JSON shape from the existing migrations: control code/title, applicability, recorded status, rationale, evidence note and optional saved owner identity. The page renders these saved records directly instead of passing an invented snapshot through the editable queue. It includes the existing saved PDF/DOCX export links.
+- Saved title, formal version, source assessment ID and both catalogue IDs come from the snapshot. Current source assessment title/state/revision are not invented as saved facts. Source answers are not loaded into an archived statement; a separately labelled **Open current source assessment** link explains that current answers, state and revision are outside the saved statement.
+- The loader now exposes `register.controlCatalogueVersionId`, both `catalogues` entries (`id`, immutable catalogue `title`, `version`), nullable source title/state/revision for snapshots, and explicit `finalisation.readiness: "finalised"`. Saved statement readiness is not recalculated from today's evidence or owners.
+- Immutable catalogue version labels are optional for a saved statement. If label reads fail, saved IDs and decisions remain visible and the affected labels are identified as unavailable. Existing workspace authorization still applies; this does not bypass `requireAppContext` membership authorization.
+- Editable reviews require both exact catalogue identity records and the complete 93-control catalogue. Missing/empty version identities, zero/incomplete/duplicate control sets, missing identity fields, mixed catalogue identities and decisions from another control catalogue fail as **Could not verify**, even when there are zero decision rows. Assessment question rows are also checked against their exact source catalogue identity.
+- Older snapshots lacking owner fields or using historical status names remain readable. Their saved records are not retroactively subjected to today's 93-control preflight. A malformed existing snapshot fails visibly and never falls back to mutable decisions.
+
+### RED / GREEN and fresh verification
+
+All commands used the local resource guard sequentially with `--maxWorkers=1` for Vitest.
+
+1. Loader snapshot RED: the saved-statement scenario returned `could_not_verify` when live inputs failed. GREEN: 28 loader tests passed after the early snapshot path.
+2. Page snapshot RED: saved rationale was not rendered because the page still displayed the editable queue. GREEN: all five page tests passed after the separate saved-record view. The test demonstrates saved decisions and snapshot provenance, no later answer text/current revision claim, and the saved export link.
+3. Catalogue RED: five failures demonstrated missing labels, zero catalogue/zero decisions, mismatched decision identity and missing version records. GREEN: all 38 loader/page tests then passed.
+4. Added coverage for both source version labels in the page, optional saved-label failures, preserved historical owner/status fields and malformed-snapshot refusal.
+5. The focused regression run initially had two shared AI fixture failures because its nominal catalogue contained only one record. Updated only that fictional fixture to a complete control catalogue, both identity records and the decision's catalogue ID. No application readiness checks were relaxed.
+6. Final broad focused command: `node --import=tsx scripts/local-resource-guard.ts -- npm test -- src/features/soa/application 'src/app/app/soa/[id]' src/app/app/actions.soa.test.ts 'src/app/app/assessment/[id]/page.ai.test.tsx' --maxWorkers=1` — **9 files / 148 tests passed**.
+7. Fresh final typecheck and lint pass. Final page rerun and diff hygiene are recorded with the commit handoff. A full suite/build/browser run was not repeated in this correction; the parent coordinates integrated acceptance.
+
+### Self-review
+
+Compared saved fields with `202607020003_soa_risks_audit.sql`, `202607020004_review_hardening.sql`, the restored finalisation migration and the existing export route. Checked that current source records cannot replace snapshot IDs, that existing malformed snapshots cannot silently become editable views, that optional label failures leave snapshots readable, and that current membership authorization is retained. No migration, database data or release-checklist changes were made. The existing preview was not rebuilt. Independent review and later Task 5/6 presentation/browser checks remain separate gates.

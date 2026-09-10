@@ -9,12 +9,14 @@ vi.mock("@/lib/app-context", () => ({ requireAppContext: async () => ({
     const rows: Record<string, Record<string, unknown>[]> = {
       memberships: [{ organisation_id: "org", user_id: "user", profiles: { display_name: "Reviewer" } }],
       assessment_sessions: [{ id: "session", organisation_id: "org", title: "Assessment", state: state.status, revision: 2, catalogue_version_id: "catalogue" }],
+      catalogue_versions: [{ id: "catalogue", title: "Assessment catalogue", version: "2026.1" }],
+      control_catalogue_versions: [{ id: "controls", title: "Control catalogue", version: "2022.1" }],
       catalogue_categories: [{ id: "category", catalogue_version_id: "catalogue", code: "GOV", title: "Governance", position: 0 }],
       catalogue_questions: [{ id: "question", catalogue_version_id: "catalogue", category_id: "category", code: "GOV-01", prompt: "Have leaders approved security objectives?", position: 0 }],
       assessment_responses: [{ session_id: "session", organisation_id: "org", question_id: "question", answer: "no", evidence_note: "" }],
       soa_registers: [{ id: "register", organisation_id: "org", assessment_session_id: "session", title: "SoA", version: 1, updated_at: "2026-09-10T09:00:00Z", control_catalogue_version_id: "controls", soa_snapshots: [] }],
-      soa_items: [{ id: "item", organisation_id: "org", soa_register_id: "register", control_id: "control", control_code: "A.5.1", control_title: "Security policies", applicable: true, status: "pending", justification: "", evidence: "", owner_id: null, position: 0, decision_revision: 0 }],
-      control_catalogue_controls: [{ id: "control", catalogue_version_id: "controls", theme: "organisational" }],
+      soa_items: [{ id: "item", organisation_id: "org", soa_register_id: "register", control_catalogue_version_id: "controls", control_id: "control", control_code: "A.5.1", control_title: "Security policies", applicable: true, status: "pending", justification: "", evidence: "", owner_id: null, position: 0, decision_revision: 0 }],
+      control_catalogue_controls: Array.from({ length: 93 }, (_, i) => ({ id: i === 0 ? "control" : `control-${i}`, catalogue_version_id: "controls", theme: "organisational" })),
       ai_workspace_settings: [{ organisation_id: "sibling", enabled: !state.enabled }, { organisation_id: "org", enabled: state.enabled }],
     };
     const filters: Array<[string, unknown]> = [];
