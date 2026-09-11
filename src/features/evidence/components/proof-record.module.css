@@ -1,0 +1,7 @@
+.record { min-width:0; padding:10px 11px; border:1px solid var(--ch-border); border-radius:10px; background:var(--ch-canvas); }
+.top { display:flex; align-items:flex-start; justify-content:space-between; min-width:0; gap:9px; }
+.identity { min-width:0; }
+.identity a,.identity strong { display:block; min-width:0; overflow-wrap:anywhere; color:var(--ch-text); font-size:12px; font-weight:740; }
+.identity small { display:block; margin-top:4px; color:var(--ch-text-muted); font-size:10px; }
+.meta { display:flex; flex-wrap:wrap; gap:5px 9px; margin:8px 0 0; color:var(--ch-text-muted); font-size:10px; line-height:1.4; }
+.boundary { margin:8px 0 0; padding-top:7px; border-top:1px solid var(--ch-border); color:var(--ch-text-muted); font-size:10px; line-height:1.4; }

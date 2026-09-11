@@ -5,6 +5,8 @@ const hoisted = vi.hoisted(() => ({
   protectExport: vi.fn(),
   recordExportAudit: vi.fn(),
   linksError: false,
+  evidenceStatus: "current",
+  evidenceValidUntil: "2027-09-05",
   filters: [] as Array<[string, string, unknown]>,
 }));
 
@@ -21,7 +23,7 @@ function client() {
     order: vi.fn(() => builder),
     limit: vi.fn(() => builder), gt: vi.fn(() => builder),
     maybeSingle: vi.fn().mockResolvedValue({ data: { reference: "Q4/2026\\\"\r\n", title: "Quarterly audit" }, error: null }),
-    then: (resolve: (value: unknown) => unknown) => Promise.resolve({ data: table === "evidence_links" ? [{ id: "link-1", evidence_id: "proof-1", audit_checklist_item_id: "check-1", audit_checklist_items: { audit_id: "audit-1", checklist_item: "Review sign-off" }, evidence: { id: "proof-1", title: "Fictional fresh verification", description: "Reviewed the corrected fictional sample", kind: "note", status: "current", collected_on: "2026-09-05", valid_until: "2027-09-05" } }] : [], error: table === "evidence_links" && hoisted.linksError ? { message: "private detail" } : null }).then(resolve),
+    then: (resolve: (value: unknown) => unknown) => Promise.resolve({ data: table === "evidence_links" ? [{ id: "link-1", evidence_id: "proof-1", audit_checklist_item_id: "check-1", audit_checklist_items: { audit_id: "audit-1", checklist_item: "Review sign-off" }, evidence: { id: "proof-1", title: "Fictional fresh verification", description: "Reviewed the corrected fictional sample", kind: "note", status: hoisted.evidenceStatus, collected_on: "2026-09-05", valid_until: hoisted.evidenceValidUntil } }] : [], error: table === "evidence_links" && hoisted.linksError ? { message: "private detail" } : null }).then(resolve),
   };
   return builder;
   }
@@ -32,6 +34,8 @@ describe("audit pack filenames", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     hoisted.linksError = false; hoisted.filters = [];
+    hoisted.evidenceStatus = "current";
+    hoisted.evidenceValidUntil = "2027-09-05";
     hoisted.protectExport.mockResolvedValue(undefined);
     hoisted.recordExportAudit.mockResolvedValue(undefined);
     hoisted.requireContext.mockResolvedValue({
@@ -60,6 +64,13 @@ describe("audit pack filenames", () => {
     expect(response.status).toBe(503);
     expect(await response.text()).not.toContain("private detail");
     expect(hoisted.recordExportAudit).not.toHaveBeenCalled();
+  });
+
+  it("exports effective freshness when a stored-current record has passed its validity date", async () => {
+    hoisted.evidenceValidUntil = "2026-09-01";
+    const response = await GET(new Request("http://localhost/api/app/audits/audit-1/pack?format=csv"), { params: Promise.resolve({ id: "audit-1" }) });
+    const csv = await response.text();
+    expect(csv).toContain("Fictional fresh verification,expired");
   });
 
   it("keeps fallback filenames path/control-character safe while preserving encoded names", async () => {

@@ -83,9 +83,10 @@ describe("audit pages and actions keep related reads in the active workspace", (
     expect(source).toMatch(/from\("audit_checklist_items"\)[\s\S]{0,500}?\.eq\("audit_id", parsed\.auditId\)[\s\S]{0,500}?\.eq\("organisation_id", organisation\.id\)/);
   });
 
-  it("scopes the detail page's auditor token list to the selected audit", () => {
+  it("scopes the detail page's auditor token list to the organisation and selected-audit or organisation-wide scope", () => {
     const source = readFileSync(path.join(root, "audits/[id]/page.tsx"), "utf8");
-    expect(source).toMatch(/from\("auditor_access_tokens"\)[\s\S]{0,500}?\.eq\("audit_id", id\)[\s\S]{0,500}?\.eq\("organisation_id", organisation\.id\)/);
+    expect(source).toMatch(/from\("auditor_access_tokens"\)[\s\S]{0,500}?\.eq\("organisation_id", organisation\.id\)/);
+    expect(source).toContain(".or(`audit_id.eq.${id},audit_id.is.null`)");
   });
 });
 

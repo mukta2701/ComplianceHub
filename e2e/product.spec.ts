@@ -450,29 +450,32 @@ test("an audit runs from plan through checklist to a corrective-action task", as
   await page.waitForURL(/\/app\/audits\/[0-9a-f-]+$/);
   const auditUrl = page.url();
   await expect(page.getByRole("heading", { name: "Access control internal audit", level: 2 })).toBeVisible();
-  await page.getByLabel("Checklist item", { exact: true }).fill("Are leavers de-provisioned within 24 hours?");
+  await page.getByText("Add or populate checklist items", { exact: true }).click();
+  await page.getByRole("textbox", { name: "Checklist item", exact: true }).fill("Are leavers de-provisioned within 24 hours?");
   await page.getByRole("button", { name: "Add item" }).click();
 
   // One-click populate the checklist from the Annex A control library (93
   // controls). It is idempotent: a second click adds no duplicates.
   const checklistRows = page.locator("table").first().locator("tbody tr");
   await page.getByRole("button", { name: "Populate from control library" }).click();
-  await expect(page.getByText("Is the control 'Direction for security policy' implemented and operating effectively?")).toBeVisible();
+  await expect(page.getByRole("cell", { name: "Is the control 'Direction for security policy' implemented and operating effectively?", exact: true })).toBeVisible();
   const populatedCount = await checklistRows.count();
   expect(populatedCount).toBeGreaterThan(90);
+  expect(await page.getByRole("combobox", { name: "Evidence record" }).count(), "the proof picker must not be repeated per checklist row").toBeLessThanOrEqual(1);
   await page.getByRole("button", { name: "Populate from control library" }).click();
-  await expect(page.getByText("Is the control 'Direction for security policy' implemented and operating effectively?")).toBeVisible();
+  await expect(page.getByRole("cell", { name: "Is the control 'Direction for security policy' implemented and operating effectively?", exact: true })).toBeVisible();
   expect(await checklistRows.count(), "re-running must not duplicate rows").toBe(populatedCount);
 
   // Set that row's result to Non-compliant and save.
-  await expect(page.getByText("Are leavers de-provisioned within 24 hours?")).toBeVisible();
+  await expect(page.getByRole("cell", { name: "Are leavers de-provisioned within 24 hours?", exact: true })).toBeVisible();
   const leaverRow = checklistRows.filter({ hasText: "Are leavers de-provisioned within 24 hours?" });
   await leaverRow.getByLabel("Result for Are leavers de-provisioned within 24 hours?").selectOption("non_compliant");
-  await leaverRow.getByRole("button", { name: "Save", exact: true }).click();
+  await leaverRow.getByRole("button", { name: "Save review", exact: true }).click();
   await expect(page.getByRole("cell", { name: "Non-compliant" })).toBeVisible();
 
   // Raise a finding with a corrective-action task.
-  await page.getByLabel("Summary").fill("Leavers retained access beyond policy");
+  await page.getByText("Raise a finding", { exact: true }).click();
+  await page.getByRole("textbox", { name: "Summary", exact: true }).fill("Leavers retained access beyond policy");
   await page.locator("select[name=severity]").selectOption("minor_nc");
   await page.getByLabel("Corrective action").fill("Automate de-provisioning on HR termination event.");
   await page.getByLabel(/Raise a corrective-action task from this finding/).check();
@@ -519,7 +522,7 @@ test("an audit runs from plan through checklist to a corrective-action task", as
 
   // Share with an auditor: the owner mints an AUDIT-SCOPED, read-only link.
   await page.goto(auditUrl);
-  await expect(page.getByRole("heading", { name: "Share with an auditor" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "External auditor access" })).toBeVisible();
   await page.getByLabel("Label", { exact: true }).fill("External ISO auditor");
   // Scope defaults to "This audit" and expiry to 14 days — leave them. Mint it.
   await page.getByRole("button", { name: "Create link" }).click();
@@ -529,8 +532,10 @@ test("an audit runs from plan through checklist to a corrective-action task", as
   const shownLink = await page.locator("code").filter({ hasText: "/audit-view/" }).first().textContent();
   expect(shownLink, "the one-time link should render").toMatch(/^\/audit-view\/.+/);
   const auditorToken = shownLink!.replace("/audit-view/", "");
+  await page.reload();
+  await expect(page.locator("code").filter({ hasText: "/audit-view/" })).toHaveCount(0);
 
-  // Axe on the audit detail page WITH the share panel and the one-time link card.
+  // Axe on the audit detail page after the raw credential has been consumed.
   const shareAxe = await new AxeBuilder({ page }).analyze();
   expect(shareAxe.violations).toEqual([]);
 
@@ -539,8 +544,8 @@ test("an audit runs from plan through checklist to a corrective-action task", as
   const auditor = await browser.newContext();
   const auditorPage = await auditor.newPage();
   await auditorPage.goto(`/audit-view/${auditorToken}`);
-  await expect(auditorPage.getByRole("heading", { level: 1, name: /— readiness$/ })).toBeVisible();
-  await expect(auditorPage.getByText("OPEN NON-CONFORMITIES")).toBeVisible();
+  await expect(auditorPage.getByRole("heading", { level: 1, name: /— audit review$/ })).toBeVisible();
+  await expect(auditorPage.getByText("OPEN NON-CONFORMITIES")).toHaveCount(0);
   // The audit section renders: reference/title heading, the checklist item, and the finding.
   await expect(auditorPage.getByRole("heading", { name: "AUD-001: Access control internal audit", level: 2 })).toBeVisible();
   await expect(auditorPage.getByText("Are leavers de-provisioned within 24 hours?")).toBeVisible();

@@ -6,6 +6,12 @@
 
 export type EvidenceProviderKind = "google_workspace" | "github" | "aws";
 
+export const EVIDENCE_PROVIDER_LABELS: Record<EvidenceProviderKind, string> = {
+  google_workspace: "Google Workspace",
+  github: "GitHub",
+  aws: "AWS",
+};
+
 export type EvidenceSourceConnection = {
   id: string;
   provider: EvidenceProviderKind;

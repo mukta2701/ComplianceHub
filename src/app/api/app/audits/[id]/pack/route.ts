@@ -5,6 +5,7 @@ import { protectExport, recordExportAudit } from "@/features/exports/export-audi
 import { CHECKLIST_RESULT_LABEL, FINDING_SEVERITY_LABEL, FINDING_STATUS_LABEL, type ChecklistResult, type FindingSeverity, type FindingStatus } from "@/features/audits/domain/audits";
 import { one } from "@/lib/supabase/one";
 import { collectIdPages } from "@/lib/supabase/paginate";
+import { deriveEffectiveEvidenceStatus, type EvidenceStatus } from "@/features/evidence/domain/evidence";
 
 type PackRow = { section: string; ref: string; item: string; result: string; detail: string };
 
@@ -37,7 +38,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       const evidence = one(link.evidence);
       const checklist = one(link.audit_checklist_items);
       if (!evidence || !checklist) throw new Error("Evidence unavailable");
-      evidenceRows.push({ section: "Linked evidence", ref: evidence.id, item: evidence.title, result: evidence.status,
+      const effectiveStatus = deriveEffectiveEvidenceStatus(evidence.status as EvidenceStatus, evidence.valid_until, new Date().toISOString().slice(0,10));
+      evidenceRows.push({ section: "Linked evidence", ref: evidence.id, item: evidence.title, result: effectiveStatus,
         detail: [`Checklist: ${checklist.checklist_item}`, `Kind: ${evidence.kind}`, `Collected: ${evidence.collected_on}`, `Valid until: ${evidence.valid_until ?? "No expiry recorded"}`, evidence.description].filter(Boolean).join(" — ") });
     }
   } catch {

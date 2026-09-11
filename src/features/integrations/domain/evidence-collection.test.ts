@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fakeEvidenceProvider } from "./evidence-provider";
+import { EVIDENCE_PROVIDER_LABELS, fakeEvidenceProvider } from "./evidence-provider";
 import type { EvidenceSourceConnection } from "./evidence-provider";
 import { observationKey, toEvidenceRow } from "./evidence-collection";
 
@@ -8,6 +8,14 @@ function conn(provider: EvidenceSourceConnection["provider"], config: Record<str
 }
 
 describe("fakeEvidenceProvider.collect", () => {
+  it("provides one canonical display label for every evidence provider", () => {
+    expect(EVIDENCE_PROVIDER_LABELS).toEqual({
+      google_workspace:"Google Workspace",
+      github:"GitHub",
+      aws:"AWS",
+    });
+  });
+
   it("returns a stable, deterministic sample set per provider", async () => {
     const items = await fakeEvidenceProvider.collect(conn("github"));
     expect(items.map((i) => i.title)).toEqual(["Branch protection settings", "Dependabot alerts summary"]);

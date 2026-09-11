@@ -5,7 +5,7 @@ vi.mock("next/navigation", () => ({ usePathname: () => "/app/audits" }));
 
 function query(data: unknown[]) {
   const chain: Record<string, unknown> = {};
-  for (const method of ["select", "eq", "order", "limit", "maybeSingle", "in", "lt"]) chain[method] = vi.fn(() => chain);
+  for (const method of ["select", "eq", "order", "limit", "maybeSingle", "in", "lt", "or"]) chain[method] = vi.fn(() => chain);
   chain.then = (resolve: (value: { data: unknown[]; error: null }) => unknown) => Promise.resolve({ data, error: null }).then(resolve);
   return chain;
 }
@@ -25,7 +25,7 @@ describe("AuditsPage member branch", () => {
     render(await AuditsPage());
 
     expect(screen.getByRole("heading", { name: "Internal audits" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Access review" })).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "Access review" })).toHaveLength(2);
     expect(screen.queryByRole("link", { name: "Plan an audit" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Plan your first audit" })).not.toBeInTheDocument();
   });

@@ -9,13 +9,13 @@ import { OfficialGitHubEvidenceProvenancePanel } from "@/features/github/compone
 import { githubEvidenceTitle } from "@/features/github/components/github-check-presentation";
 import { AiSuggestionPanel } from "@/components/ai-suggestion-panel";
 import { addIsoDays, deriveEffectiveEvidenceStatus, EXPIRY_WARNING_DAYS, type EvidenceStatus } from "@/features/evidence/domain/evidence";
+import { EVIDENCE_PROVIDER_LABELS } from "@/features/integrations/domain/evidence-provider";
 import styles from "./evidence.module.css";
 
 const PAGE_SIZE = 25;
 const STATUSES = ["all", "current", "expiring", "expired", "superseded", "withdrawn"] as const;
 type EvidenceFilter = (typeof STATUSES)[number];
 const TONE: Record<string, string> = { current: "green", expiring: "amber", expired: "red", superseded: "neutral", withdrawn: "neutral" };
-const PROVIDER_LABELS: Record<string, string> = { google_workspace: "Google Workspace", github: "GitHub", aws: "AWS" };
 const EVIDENCE_COLUMNS = "id,title,description,kind,url,storage_path,status,collected_on,valid_until,source_id,observation_key,external_ref,evidence_sources(provider),evidence_links(id,control_id,risk_id,task_id,policy_id,audit_checklist_item_id,audit_checklist_items(audit_id,checklist_item),controls(code,title),risks(reference),tasks(title),policies(reference,title))";
 
 type SearchParams = { evidence?: string | string[]; status?: string | string[]; page?: string | string[] };
@@ -188,7 +188,7 @@ export default async function EvidencePage({ searchParams }: { searchParams: Pro
       <Card className={styles.listCard} aria-label="Evidence records">
         {items.length ? <ul className={styles.list}>{items.map((item) => { const source = one(item.evidence_sources); const official = officialByEvidence.get(item.id); const title = official?.catalogueSummary ?? item.title; const isSelected = selectedItem?.id === item.id; const status = deriveEffectiveEvidenceStatus(item.status as EvidenceStatus, item.valid_until, today); return <li key={item.id}><Link href={`${hrefFor(filter, page, item.id)}#evidence-${item.id}`} className={styles.recordLink} data-selected={isSelected}>
           {isSelected ? <span className={styles.recordTitle}>{title}</span> : <h3 className={styles.recordTitle}>{title}</h3>}<Pill tone={TONE[status]}>{status}</Pill>
-          <span className={styles.recordMeta}><span>{item.kind}</span><span>Collected {displayDate(item.collected_on)}</span>{source?.provider && <span>{PROVIDER_LABELS[source.provider] ?? source.provider} source</span>}{item.source_id && item.observation_key && <span>Resource: {item.external_ref ?? "reference unavailable"}</span>}{item.source_id && !item.observation_key && <><span>Legacy observation identity unknown</span>{item.external_ref && <span>Resource: {item.external_ref}</span>}</>}</span>
+          <span className={styles.recordMeta}><span>{item.kind}</span><span>Collected {displayDate(item.collected_on)}</span>{source?.provider && <span>{EVIDENCE_PROVIDER_LABELS[source.provider as keyof typeof EVIDENCE_PROVIDER_LABELS] ?? source.provider} source</span>}{item.source_id && item.observation_key && <span>Resource: {item.external_ref ?? "reference unavailable"}</span>}{item.source_id && !item.observation_key && <><span>Legacy observation identity unknown</span>{item.external_ref && <span>Resource: {item.external_ref}</span>}</>}</span>
         </Link></li>; })}</ul> : <p className={styles.emptyList}>No evidence matches this freshness filter.</p>}
         {filteredTotal !== null && filteredTotal > PAGE_SIZE && <nav className={styles.pagination} aria-label="Evidence pages">
           {page > 1 ? <Link className="button secondary" href={hrefFor(filter, page - 1)}>Previous</Link> : <span>First page</span>}
@@ -200,7 +200,7 @@ export default async function EvidencePage({ searchParams }: { searchParams: Pro
         <div className={styles.detailHeader}><div><p className={styles.eyebrow}>Selected evidence · {selectedItem.kind}</p><h2>{selectedTitle}</h2></div><Pill tone={TONE[selectedStatus!]}>{selectedStatus}</Pill></div>
         <dl className={styles.detailMeta}>
           <div><dt>Collected</dt><dd>{displayDate(selectedItem.collected_on)}</dd></div><div><dt>Valid until</dt><dd>{displayDate(selectedItem.valid_until)}</dd></div>
-          <div><dt>Source</dt><dd>{selectedOfficial ? "Official GitHub collection" : selectedItem.source_id ? PROVIDER_LABELS[one(selectedItem.evidence_sources)?.provider ?? ""] ?? "Automated source" : "Added in ComplianceHub"}</dd></div>
+          <div><dt>Source</dt><dd>{selectedOfficial ? "Official GitHub collection" : selectedItem.source_id ? EVIDENCE_PROVIDER_LABELS[one(selectedItem.evidence_sources)?.provider as keyof typeof EVIDENCE_PROVIDER_LABELS] ?? "Automated source" : "Added in ComplianceHub"}</dd></div>
           {selectedItem.source_id && <div><dt>Collection identity</dt><dd>{selectedItem.observation_key ? `Resource: ${selectedItem.external_ref ?? "reference unavailable"}` : <>Legacy observation identity unknown{selectedItem.external_ref ? <><br />Resource: {selectedItem.external_ref}</> : null}</>}</dd></div>}
         </dl>
         {selectedDescription ? <p className={styles.description}>{selectedDescription}</p> : <p className={styles.description}>No description was recorded.</p>}
