@@ -48,3 +48,61 @@ describe("Framework coverage workspace access", () => {
     expect(frameworks.navigation).toBeNull();
   });
 });
+
+describe("Leadership report workspace access", () => {
+  it("keeps the published Leadership report and PDF visible but not manageable for Members", () => {
+    const access = workspaceAccess("member");
+    const leadershipReport = access.sectionForPath("/app/reports/readiness");
+
+    expect(leadershipReport).toMatchObject({
+      id: "leadership-report",
+      href: "/app/reports/readiness",
+      label: "Leadership report",
+      title: "Leadership report",
+      icon: "file",
+      canView: true,
+      canManage: false,
+      navigation: {
+        group: null,
+        href: "/app/reports/readiness",
+        label: "Leadership report",
+        icon: "file",
+      },
+    });
+    expect(access.sectionForPath("/api/app/reports/readiness/pdf")?.id).toBe("leadership-report");
+    expect(access.sectionForPath("/app/reports/readiness/history")).toBeNull();
+    expect(access.sectionForPath("/api/app/reports/readiness/pdf-extra")).toBeNull();
+    expect(() => leadershipReport?.requireManage()).toThrow(
+      "Only workspace operators can publish leadership reports",
+    );
+  });
+
+  it.each(["owner", "admin"] as const)(
+    "keeps live Leadership report management and Share navigation available to %ss",
+    (role) => {
+      const leadershipReport = workspaceAccess(role).sectionForPath("/app/reports/readiness");
+
+      expect(leadershipReport).toMatchObject({
+        canView: true,
+        canManage: true,
+        navigation: {
+          group: "Share",
+          href: "/app/reports/readiness",
+          label: "Leadership report",
+          icon: "file",
+        },
+      });
+      expect(() => leadershipReport?.requireManage()).not.toThrow();
+    },
+  );
+
+  it("does not grant Leadership report access before Workspace membership exists", () => {
+    const leadershipReport = workspaceAccess(null).sectionForPath("/app/reports/readiness");
+
+    expect(leadershipReport).toMatchObject({
+      canView: false,
+      canManage: false,
+      navigation: null,
+    });
+  });
+});

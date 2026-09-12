@@ -29,13 +29,8 @@ const MEMBER_APP_PATHS = new Set([
   "/app/tasks",
   "/app/monitoring",
   "/app/soa",
-  "/app/reports/readiness",
   "/app/notifications",
   "/app/baseline",
-]);
-
-const MEMBER_API_PATHS = new Set([
-  "/api/app/reports/readiness/pdf",
 ]);
 
 function normalisePath(pathname: string): string {
@@ -70,8 +65,8 @@ export function workspaceRequestAccess(
   if (pathname === "/app/onboarding") return "redirect-member-home";
   if (identity.role === "owner" || identity.role === "admin") return "allow";
 
-  if (isApi) return MEMBER_API_PATHS.has(pathname) ? "allow" : "forbidden";
   const section = workspaceAccess(identity.role).sectionForPath(pathname);
-  if (section) return section.canView ? "allow" : "redirect-member-home";
+  if (section) return section.canView ? "allow" : isApi ? "forbidden" : "redirect-member-home";
+  if (isApi) return "forbidden";
   return isMemberAppPath(pathname) ? "allow" : "redirect-member-home";
 }

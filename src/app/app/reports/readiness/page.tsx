@@ -5,6 +5,7 @@ import { loadLatestLeadershipSnapshot } from "@/features/reports/application/lea
 import { RISK_BAND_LABEL, type RiskBand } from "@/features/risks/domain/risks";
 import { Card, EmptyState, PageIntro, Ring, Stat } from "@/components/ui";
 import { Icon } from "@/components/icons";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import { publishLeadershipReportAction } from "./actions";
 
 const BAND_TONE: Record<RiskBand, string> = { low: "green", moderate: "amber", high: "red", very_high: "critical" };
@@ -32,9 +33,10 @@ function ReportMetrics({ report }: { report: ReadinessReport }) {
 
 export default async function ReadinessReportPage() {
   const { supabase, organisation, membership } = await requireAppContext();
+  const reportAccess = workspaceAccess(membership.role).section("leadership-report");
   const latestSnapshot = await loadLatestLeadershipSnapshot(supabase, organisation.id);
 
-  if (membership.role === "member") {
+  if (!reportAccess.canManage) {
     if (!latestSnapshot) {
       return <>
         <PageIntro eyebrow="REPORTS" title="Leadership report" body="A board-ready summary shared by your workspace operators." />

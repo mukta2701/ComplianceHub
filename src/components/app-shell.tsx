@@ -10,6 +10,8 @@ import { roleLabel, type MembershipRole } from "@/features/organisations/domain/
 import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import styles from "./app-shell.module.css";
 
+const operatorLeadershipNavigation = workspaceAccess("owner").section("leadership-report").navigation!;
+
 const navGroups = [
   { label: "Work", items: [
     ["/app/tasks", "check", "Tasks"],
@@ -28,8 +30,8 @@ const navGroups = [
     ["/app/audits", "shield", "Internal audits"],
     ["/app/kpis", "check", "Performance"],
   ] },
-  { label: "Share", items: [
-    ["/app/reports/readiness", "file", "Leadership report"],
+  { label: operatorLeadershipNavigation.group, items: [
+    [operatorLeadershipNavigation.href, operatorLeadershipNavigation.icon, operatorLeadershipNavigation.label],
     ["/app/trust", "shield", "Trust Center"],
   ] },
   { label: "Admin", items: [
@@ -46,6 +48,7 @@ function subscribeToDrawer(callback: () => void) {
 const drawerSnapshot = () => window.matchMedia(DRAWER_QUERY).matches;
 
 const memberFrameworkNavigation = workspaceAccess("member").section("frameworks").navigation!;
+const memberLeadershipNavigation = workspaceAccess("member").section("leadership-report").navigation!;
 const memberNavGroups = [
   { label: null, items: [["/app", "home", "Overview"]] },
   { label: "Compliance", items: [
@@ -54,9 +57,9 @@ const memberNavGroups = [
     ["/app/soa", "file", "Controls & applicability"],
     [memberFrameworkNavigation.href, memberFrameworkNavigation.icon, memberFrameworkNavigation.label],
   ] },
-  { label: null, items: [
+  { label: memberLeadershipNavigation.group, items: [
     ["/app/monitoring", "activity", "Monitoring"],
-    ["/app/reports/readiness", "file", "Leadership report"],
+    [memberLeadershipNavigation.href, memberLeadershipNavigation.icon, memberLeadershipNavigation.label],
   ] },
 ] as const;
 

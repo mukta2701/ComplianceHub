@@ -1,9 +1,11 @@
 import { hasCapability, type MembershipRole, type WorkspaceCapability } from "./access";
 
-export type WorkspaceSectionId = "frameworks";
+export type WorkspaceSectionId = "frameworks" | "leadership-report";
+
+type WorkspaceNavigationGroup = "Compliance" | "Share" | null;
 
 type WorkspaceNavigationItem = {
-  group: "Compliance";
+  group: WorkspaceNavigationGroup;
   href: string;
   label: string;
   icon: string;
@@ -27,9 +29,9 @@ type WorkspaceSectionPolicy = {
   label: string;
   title: string;
   icon: string;
-  navigationGroup: WorkspaceNavigationItem["group"];
+  apiPaths: readonly string[];
   viewRoles: ReadonlySet<MembershipRole>;
-  navigationRoles: ReadonlySet<MembershipRole>;
+  navigationGroups: Partial<Record<MembershipRole, WorkspaceNavigationGroup>>;
   manageCapability: WorkspaceCapability;
   manageDeniedMessage: string;
 };
@@ -41,11 +43,23 @@ const sectionPolicies: Record<WorkspaceSectionId, WorkspaceSectionPolicy> = {
     label: "Framework coverage",
     title: "Framework coverage",
     icon: "file",
-    navigationGroup: "Compliance",
+    apiPaths: [],
     viewRoles: new Set(["owner", "admin", "member"]),
-    navigationRoles: new Set(["member"]),
+    navigationGroups: { member: "Compliance" },
     manageCapability: "manage_frameworks",
     manageDeniedMessage: "Only workspace operators can manage framework mappings",
+  },
+  "leadership-report": {
+    id: "leadership-report",
+    href: "/app/reports/readiness",
+    label: "Leadership report",
+    title: "Leadership report",
+    icon: "file",
+    apiPaths: ["/api/app/reports/readiness/pdf"],
+    viewRoles: new Set(["owner", "admin", "member"]),
+    navigationGroups: { owner: "Share", admin: "Share", member: null },
+    manageCapability: "manage_policies",
+    manageDeniedMessage: "Only workspace operators can publish leadership reports",
   },
 };
 
@@ -55,6 +69,7 @@ function sectionAccess(
 ): WorkspaceSectionAccess {
   const canView = role !== null && policy.viewRoles.has(role);
   const canManage = role !== null && hasCapability(role, policy.manageCapability);
+  const navigationGroup = role === null ? undefined : policy.navigationGroups[role];
   return {
     id: policy.id,
     href: policy.href,
@@ -63,9 +78,9 @@ function sectionAccess(
     icon: policy.icon,
     canView,
     canManage,
-    navigation: role !== null && policy.navigationRoles.has(role)
+    navigation: navigationGroup !== undefined
       ? {
-          group: policy.navigationGroup,
+          group: navigationGroup,
           href: policy.href,
           label: policy.label,
           icon: policy.icon,
@@ -83,7 +98,9 @@ export function workspaceAccess(role: MembershipRole | null) {
       return sectionAccess(sectionPolicies[sectionId], role);
     },
     sectionForPath(pathname: string): WorkspaceSectionAccess | null {
-      const policy = Object.values(sectionPolicies).find((candidate) => candidate.href === pathname);
+      const policy = Object.values(sectionPolicies).find(
+        (candidate) => candidate.href === pathname || candidate.apiPaths.includes(pathname),
+      );
       return policy ? sectionAccess(policy, role) : null;
     },
   };
