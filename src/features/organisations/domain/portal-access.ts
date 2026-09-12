@@ -1,4 +1,5 @@
 import type { MembershipRole } from "./access";
+import { workspaceAccess } from "./workspace-access";
 
 export type WorkspaceAccessDecision =
   | "allow"
@@ -27,7 +28,6 @@ const MEMBER_APP_PATHS = new Set([
   "/app/policies",
   "/app/tasks",
   "/app/monitoring",
-  "/app/frameworks",
   "/app/soa",
   "/app/reports/readiness",
   "/app/notifications",
@@ -71,5 +71,7 @@ export function workspaceRequestAccess(
   if (identity.role === "owner" || identity.role === "admin") return "allow";
 
   if (isApi) return MEMBER_API_PATHS.has(pathname) ? "allow" : "forbidden";
+  const section = workspaceAccess(identity.role).sectionForPath(pathname);
+  if (section) return section.canView ? "allow" : "redirect-member-home";
   return isMemberAppPath(pathname) ? "allow" : "redirect-member-home";
 }

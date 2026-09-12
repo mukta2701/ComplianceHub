@@ -7,6 +7,7 @@ import { Icon } from "./icons";
 import { AlertToaster } from "./alert-toaster";
 import { signOutAction } from "@/app/app/actions";
 import { roleLabel, type MembershipRole } from "@/features/organisations/domain/access";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import styles from "./app-shell.module.css";
 
 const navGroups = [
@@ -44,13 +45,14 @@ function subscribeToDrawer(callback: () => void) {
 }
 const drawerSnapshot = () => window.matchMedia(DRAWER_QUERY).matches;
 
+const memberFrameworkNavigation = workspaceAccess("member").section("frameworks").navigation!;
 const memberNavGroups = [
   { label: null, items: [["/app", "home", "Overview"]] },
   { label: "Compliance", items: [
     ["/app/tasks?filter=assigned", "check", "Assigned tasks"],
     ["/app/policies", "file", "Policies"],
     ["/app/soa", "file", "Controls & applicability"],
-    ["/app/frameworks", "file", "Framework coverage"],
+    [memberFrameworkNavigation.href, memberFrameworkNavigation.icon, memberFrameworkNavigation.label],
   ] },
   { label: null, items: [
     ["/app/monitoring", "activity", "Monitoring"],
@@ -63,7 +65,6 @@ const EXTRA_TITLES: Array<[string, string]> = [
   ["/app", "Dashboard"],
   ["/app/assets/import", "Import asset inventory"],
   ["/app/assets", "Asset inventory"],
-  ["/app/frameworks", "Framework coverage"],
   ["/app/activity", "Audit trail"],
   ["/app/notifications", "Notifications"],
   ["/app/integrations", "Connections"],
@@ -127,9 +128,12 @@ export function AppShell({ organisationId, orgName, orgInitials, userInitials, u
   }, [drawerOpen, closeNavigation]);
   const isMember = role === "member";
   const isOperator = role === "owner" || role === "admin";
+  const frameworkAccess = workspaceAccess(role).section("frameworks");
   const title = isMember && path === "/app"
     ? "Overview"
-    : TITLE_ROUTES.find(([href]) => isActive(path, href))?.[1] ?? "ComplianceHub";
+    : isActive(path, frameworkAccess.href)
+      ? frameworkAccess.title
+      : TITLE_ROUTES.find(([href]) => isActive(path, href))?.[1] ?? "ComplianceHub";
   const accessCue = isMember ? "Member view" : role ? roleLabel(role) : "Workspace setup";
   const workspaceSubtitle = isMember
     ? `${jobTitle?.trim() || "Member"} · Assigned work access`

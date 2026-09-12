@@ -5,18 +5,12 @@ import { z } from "zod";
 import { requireAppContext } from "@/lib/app-context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { crosswalkInputSchema } from "@/features/controls/application/crosswalk";
-import { hasCapability } from "@/features/organisations/domain/access";
-
-async function requireFrameworkManager() {
-  const context = await requireAppContext();
-  if (!hasCapability(context.membership.role, "manage_frameworks")) {
-    throw new Error("Only workspace operators can manage framework mappings");
-  }
-  return context;
-}
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 
 export async function addControlCrosswalkAction(formData: FormData) {
-  const { supabase, user, organisation } = await requireFrameworkManager();
+  const context = await requireAppContext();
+  workspaceAccess(context.membership.role).section("frameworks").requireManage();
+  const { supabase, user, organisation } = context;
   await enforceRateLimit(`crosswalk:${user.id}`, { limit: 30, windowMs: 60_000 });
   const parsed = crosswalkInputSchema.parse({ ...Object.fromEntries(formData), organisationId: organisation.id });
   const { error } = await supabase.from("control_crosswalks").insert({
@@ -36,7 +30,9 @@ export async function addControlCrosswalkAction(formData: FormData) {
 }
 
 export async function deleteControlCrosswalkAction(formData: FormData) {
-  const { supabase, user, organisation } = await requireFrameworkManager();
+  const context = await requireAppContext();
+  workspaceAccess(context.membership.role).section("frameworks").requireManage();
+  const { supabase, user, organisation } = context;
   const id = z.uuid().parse(String(formData.get("id")));
   await enforceRateLimit(`crosswalk:${user.id}`, { limit: 30, windowMs: 60_000 });
   const { data, error } = await supabase.from("control_crosswalks")
