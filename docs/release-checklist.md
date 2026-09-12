@@ -93,6 +93,12 @@ Role clarification confirmed by the owner on 9 September 2026: **Mukta operates 
 
 ## Engineering history — dated checkpoints below
 
+### SoA finalisation rule ownership — 12 September 2026
+
+- Local-only architecture refactor: `src/features/soa/application/finalisation.ts` now owns the catalogue size, evidence-freshness classification and finalisation preflight data gathering used by the action and review loader. The two existing blocker messages retain their exact wording, no records or features were removed, and the rendered workflow is unchanged.
+- Fresh local verification on `codex/team-baseline`: typecheck and lint pass; the full unit suite passes with 336 files, 2,942 tests passed and three intentional skips; the production build passes. The first unrestricted test runs exposed two unrelated timing failures under Mac resource contention. One real process-readiness race in the resource-guard test was stabilised; the Evidence test passed alone and the complete suite then passed with the documented single-worker setting.
+- The rebuilt production app runs independently at `http://127.0.0.1:3300` with private file logging against the preserved fictional team database. Fresh health reports application and database `ok`; the sign-in page loads and the existing authenticated SoA review renders its 93-control catalogue and blocker summary. This is local fictional verification only. No database, staging, hosted release, live-provider or acceptance gate changed.
+
 ## Active goal — connected remediation rehearsal
 
 - The attached overnight goal resumes the full lifecycle work; the earlier usability-only pause below is historical, not a current instruction. Preserve the polished layout and existing fixtures.
