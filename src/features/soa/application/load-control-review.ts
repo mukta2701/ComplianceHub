@@ -4,7 +4,7 @@ import { one } from "@/lib/supabase/one";
 import { deriveEvidenceStatus, summariseEvidenceFreshness, type EvidenceKind, type EvidenceStatus } from "@/features/evidence/domain/evidence";
 import type { TaskStatus } from "@/features/tasks/domain/tasks";
 import { SOA_STATUS_LABEL, type SoaStatus } from "../domain/soa";
-import { collectSoaFinalisationBlockers, countSoaFinalisationBlockers, type SoaFinalisationBlockers } from "./finalisation";
+import { classifyRequirementEvidence, collectSoaFinalisationBlockers, countSoaFinalisationBlockers, SOA_CATALOGUE_SIZE, type SoaFinalisationBlockers } from "./finalisation";
 import { deriveSoaReviewState, type SoaDomain, type SoaQueueItem } from "./review-queue";
 
 export type ControlSourceAnswer = {
@@ -205,8 +205,8 @@ async function readControlReview(supabase: SupabaseClient, context: ReviewContex
     readRows("control catalogue", supabase.from("control_catalogue_controls").select("id,catalogue_version_id,theme", { count: "exact" }).eq("catalogue_version_id", register.control_catalogue_version_id).order("position").limit(COMPLETE_LIMIT).returns<Array<{ id: string; catalogue_version_id: string; theme: SoaDomain }>>()),
   ]);
   const assessment = first(assessmentResult.rows, "source assessment");
-  if (catalogueResult.rows.length !== 93
-    || new Set(catalogueResult.rows.map((control) => control.id)).size !== 93
+  if (catalogueResult.rows.length !== SOA_CATALOGUE_SIZE
+    || new Set(catalogueResult.rows.map((control) => control.id)).size !== SOA_CATALOGUE_SIZE
     || catalogueResult.rows.some((control) => !control.id || control.catalogue_version_id !== register.control_catalogue_version_id || !domains.has(control.theme))) {
     throw new UnavailableInput("control catalogue");
   }
@@ -253,8 +253,10 @@ async function readControlReview(supabase: SupabaseClient, context: ReviewContex
   const evidenceLinks = sharedIds.length ? (await readRows("evidence", supabase.from("evidence_links")
     .select("control_id,evidence_id,evidence(id,organisation_id,title,status,valid_until,kind)", { count: "exact" })
     .eq("organisation_id", organisationId).in("control_id", sharedIds).order("evidence_id").order("control_id").limit(COMPLETE_LIMIT).returns<EvidenceLinkRow[]>())).rows : [];
-  const liveRequirements = new Set<string>();
-  const expiredRequirements = new Set<string>();
+  const { live: liveRequirements, expired: expiredRequirements } = classifyRequirementEvidence(
+    workMappingResult.rows.map((mapping) => ({ requirementId: mapping.requirement_id, controlId: mapping.control_id })),
+    evidenceLinks.map((link) => ({ controlId: link.control_id, evidenceStatus: one(link.evidence)?.status ?? null })),
+  );
   const optionalUnavailable = new Set<string>();
   const relatedRisks: ControlReviewLoadResult["relatedRisks"] = [];
   const riskLists = { assessment: metadata(0, 0, RISK_LIMIT), register: metadata(0, 0, RISK_LIMIT) };
@@ -279,8 +281,6 @@ async function readControlReview(supabase: SupabaseClient, context: ReviewContex
       records.set(evidence.id, evidence);
     }
     const allEvidence = [...records.values()].map((evidence) => {
-      if (evidence.status === "current" || evidence.status === "expiring") liveRequirements.add(item.controlId);
-      if (evidence.status === "expired") expiredRequirements.add(item.controlId);
       return { id: evidence.id, title: evidence.title, storedStatus: evidence.status, status: evidence.status === "current" || evidence.status === "expiring" ? deriveEvidenceStatus(evidence.valid_until, today) : evidence.status, validUntil: evidence.valid_until, kind: evidence.kind };
     });
     const freshness = summariseEvidenceFreshness(allEvidence);

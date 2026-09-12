@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { PageIntro } from "@/components/ui";
 import { loadControlReview, type ControlReviewLoadResult } from "@/features/soa/application/load-control-review";
+import { SOA_CATALOGUE_SIZE } from "@/features/soa/application/finalisation";
 import { summariseSoaQueue } from "@/features/soa/application/review-queue";
 import { requireAppContext } from "@/lib/app-context";
 import { finaliseSoaAction, reviewSoaItemAction } from "../../actions";
@@ -65,7 +66,7 @@ export default async function SoaReviewPage({ params }: { params: Promise<{ id: 
   const preflight = canFinalise
     ? `Finalisation checks passed for all ${summary.total} controls. Date-based evidence freshness remains separate review guidance.`
     : [
-      blockers.incompleteCatalogue ? `The review must contain all 93 controls; ${summary.total} are present.` : null,
+      blockers.incompleteCatalogue ? `The review must contain all ${SOA_CATALOGUE_SIZE} controls; ${summary.total} are present.` : null,
       `${blockers.pending.length} pending, ${blockers.missingRationale.length} missing rationale, ${blockers.unassigned.length} unassigned, ${blockers.missingEvidence.length} missing live evidence, ${blockers.expiredEvidence.length} with stored expired evidence.`,
     ].filter(Boolean).join(" ");
   const source = register.sourceAssessment;
@@ -74,7 +75,7 @@ export default async function SoaReviewPage({ params }: { params: Promise<{ id: 
     <PageIntro
       eyebrow={`CONTROL REVIEW - V${register.version}`}
       title={register.title}
-      body="Work through the 93 ISO controls and record applicability, progress, ownership, rationale and evidence. Decisions remain editable until you create the formal statement."
+      body={`Work through the ${SOA_CATALOGUE_SIZE} ISO controls and record applicability, progress, ownership, rationale and evidence. Decisions remain editable until you create the formal statement.`}
       action={canFinalise && membership.role !== "member" ? (
         <form action={finaliseSoaAction} data-soa-finalise-form>
           <input type="hidden" name="registerId" value={id} />

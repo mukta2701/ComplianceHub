@@ -7,8 +7,7 @@ import { createInvitationCredential, inviteMember } from "@/features/organisatio
 import { sendInvitationEmail, type InvitationDeliveryOutcome } from "@/features/organisations/infrastructure/invitation-mail";
 import { riskInputSchema } from "@/features/risks/application/risk";
 import { soaItemReviewSchema } from "@/features/soa/application/review";
-import { collectSoaFinalisationBlockers, countSoaFinalisationBlockers } from "@/features/soa/application/finalisation";
-import type { SoaStatus } from "@/features/soa/domain/soa";
+import { collectSoaFinalisationBlockers, countSoaFinalisationBlockers, loadSoaFinalisationPreflight, SOA_CATALOGUE_SIZE } from "@/features/soa/application/finalisation";
 import { clearActiveOrganisationCookie, requireAppContext, setActiveOrganisationCookie } from "@/lib/app-context";
 import { one } from "@/lib/supabase/one";
 import { revalidatePath } from "next/cache";
@@ -269,64 +268,12 @@ export async function finaliseSoaAction(formData: FormData) {
   if (registerError) throw new Error("Could not load SoA register");
   if (!register) throw new Error("SoA register not found");
 
-  const { data: itemRows, error: itemError } = await supabase
-    .from("soa_items")
-    .select("id,control_id,applicable,status,justification,owner_id")
-    .eq("soa_register_id", register.id)
-    .eq("organisation_id", organisation.id);
-  if (itemError) throw new Error("Could not load SoA finalisation preflight");
+  const preflight = await loadSoaFinalisationPreflight(supabase, organisation.id, register.id);
 
-  const requirementIds = (itemRows ?? []).map((item) => item.control_id);
-  const requirementIdsWithLiveEvidence = new Set<string>();
-  const requirementIdsWithExpiredEvidence = new Set<string>();
-  if (requirementIds.length) {
-    const { data: mappings, error: mappingError } = await supabase
-      .from("requirement_control_mappings")
-      .select("requirement_id,control_id")
-      .in("requirement_id", requirementIds);
-    if (mappingError) throw new Error("Could not load SoA evidence mappings");
-
-    const requirementIdsByControl = new Map<string, Set<string>>();
-    for (const mapping of mappings ?? []) {
-      const mappedRequirements = requirementIdsByControl.get(mapping.control_id) ?? new Set<string>();
-      mappedRequirements.add(mapping.requirement_id);
-      requirementIdsByControl.set(mapping.control_id, mappedRequirements);
-    }
-
-    const sharedControlIds = [...requirementIdsByControl.keys()];
-    if (sharedControlIds.length) {
-      const { data: evidenceLinks, error: evidenceError } = await supabase
-        .from("evidence_links")
-        .select("control_id,evidence(status)")
-        .eq("organisation_id", organisation.id)
-        .in("control_id", sharedControlIds);
-      if (evidenceError) throw new Error("Could not load SoA evidence freshness");
-
-      for (const link of evidenceLinks ?? []) {
-        if (!link.control_id) continue;
-        const evidence = one(link.evidence);
-        const mappedRequirementIds = requirementIdsByControl.get(link.control_id) ?? [];
-        if (evidence?.status === "expired") {
-          for (const requirementId of mappedRequirementIds) requirementIdsWithExpiredEvidence.add(requirementId);
-        }
-        if (evidence?.status === "current" || evidence?.status === "expiring") {
-          for (const requirementId of mappedRequirementIds) requirementIdsWithLiveEvidence.add(requirementId);
-        }
-      }
-    }
-  }
-
-  const blockers = collectSoaFinalisationBlockers((itemRows ?? []).map((item) => ({
-    id: item.id,
-    controlId: item.control_id,
-    applicable: item.applicable,
-    status: item.status as SoaStatus,
-    justification: item.justification,
-    ownerId: item.owner_id,
-  })), requirementIdsWithLiveEvidence, requirementIdsWithExpiredEvidence);
+  const blockers = collectSoaFinalisationBlockers(preflight.items, preflight.liveEvidence, preflight.expiredEvidence);
   if (countSoaFinalisationBlockers(blockers) > 0) {
     const details = [
-      blockers.incompleteCatalogue ? "the complete 93-control catalogue is required" : null,
+      blockers.incompleteCatalogue ? `the complete ${SOA_CATALOGUE_SIZE}-control catalogue is required` : null,
       blockers.expiredEvidence.length ? `${blockers.expiredEvidence.length} with expired evidence` : null,
       blockers.pending.length ? `${blockers.pending.length} pending` : null,
       blockers.missingRationale.length ? `${blockers.missingRationale.length} missing rationale` : null,
