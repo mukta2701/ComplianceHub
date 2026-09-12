@@ -40,7 +40,9 @@ test("stops only its own command group when the memory budget is exceeded", asyn
   const unrelated = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
   try {
     const result = await runGuard([
-      "--min-start-gib=0", "--min-free-gib=0", "--max-rss-mib=1", "--interval-ms=300", "--grace-ms=150",
+      // Leave enough startup time for both signal handlers to be installed
+      // before the deliberately tiny memory limit stops the process group.
+      "--min-start-gib=0", "--min-free-gib=0", "--max-rss-mib=1", "--interval-ms=1000", "--grace-ms=500",
     ], `
       process.on("SIGTERM", () => console.log("GRACEFUL_STOP_RECEIVED"));
       require("node:child_process").spawn(process.execPath, ["-e", ${JSON.stringify('process.on("SIGTERM", () => console.log("DESCENDANT_STOP_RECEIVED")); setTimeout(() => process.exit(0), 2000);')}], { stdio: "inherit" });
