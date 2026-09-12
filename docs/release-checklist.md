@@ -93,6 +93,12 @@ Role clarification confirmed by the owner on 9 September 2026: **Mukta operates 
 
 ## Engineering history — dated checkpoints below
 
+### Feature-owned server action relocation — 12 September 2026
+
+- Local-only architecture refactor: 18 existing server-action implementations moved byte-for-byte from the mixed `src/app/app/actions.ts` file into the risks, SoA and organisations feature modules. The old path remains a thin async forwarding interface, so existing pages and components keep the same imports. No feature, record, validation, wording, rate limit, query or error behavior changed, and the six action test files remained byte-identical.
+- Fresh local verification on `codex/team-baseline`: typecheck and lint pass; all six action seam suites pass with 57 tests; the complete unit suite passes with 336 files, 2,942 tests passed and three intentional skips; the production build passes. The first complete run exposed three legacy source-scope checks tied to the old file location; their documented tenant-scope signatures remain at the public boundary and the unchanged contract passes in the complete rerun.
+- Application source `ff24aa597e6f03368a3ad3ec02e1aa074d83e363` is pushed and its rebuilt production package runs independently at `http://127.0.0.1:3300` with private file logging against the preserved fictional team database. Fresh health reports application and database `ok` with that SHA; the sign-in route loads and an authenticated SoA review renders the existing 93-control catalogue, review state and blocker summary. This is a relocation with no visible change. No database, staging, hosted release, live-provider or acceptance gate changed.
+
 ### SoA finalisation rule ownership — 12 September 2026
 
 - Local-only architecture refactor: `src/features/soa/application/finalisation.ts` now owns the catalogue size, evidence-freshness classification and finalisation preflight data gathering used by the action and review loader. The two existing blocker messages retain their exact wording, no records or features were removed, and the rendered workflow is unchanged.
