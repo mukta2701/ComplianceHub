@@ -93,6 +93,12 @@ Role clarification confirmed by the owner on 9 September 2026: **Mukta operates 
 
 ## Engineering history — dated checkpoints below
 
+### Shared Workspace access — Leadership report — 12 September 2026
+
+- Local-only architecture refactor: the organisations-domain Workspace access module is now the single source for Leadership report route and PDF visibility, Owner/Admin versus Member presentation, navigation metadata and publishing authorization. Members still see only the latest published snapshot and its PDF, while Owners and Admins retain the live report and publishing access. Every route, label, response, rate limit and exact denial message is unchanged; no record, feature or existing test was deleted.
+- Fresh local verification on `codex/team-baseline`: the new access contract failed first because the section was absent, then passed after the policy was added; all six focused seams pass with 68 tests. Typecheck and lint pass; the complete unit suite passes with 337 files, 2,950 tests passed and three intentional skips; the production build passes. The existing workspace UI and team-contribution Member journeys pass 8/8 across Chromium desktop and mobile. These automated checks verify source and test environments, not the independently running app.
+- Application source `de9889198aa119086dd65611bcbcb8d6f5a586a0` is pushed and its rebuilt production package runs independently at `http://127.0.0.1:3300` with private file logging against the fictional local team database. Fresh health reports application and database `ok` with that SHA; the sign-in route loads, and a fresh fictional Member browser session sees the published Leadership report without a publish control and downloads the authenticated PDF successfully. This is the second gradual access-rule migration with no visible behavior change. No database schema, staging, hosted release, live-provider or acceptance gate changed.
+
 ### Shared Workspace access — Framework coverage — 12 September 2026
 
 - Local-only architecture refactor: the new organisations-domain Workspace access module is now the single source for Framework coverage route visibility, Member navigation metadata, page editability and action authorization. Members still see and read Framework coverage but cannot add or remove mappings; Owners and Admins retain management access. The route, labels and exact denial message are unchanged, and no record, feature or test was deleted.
