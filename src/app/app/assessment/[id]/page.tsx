@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { requireAppContext } from "@/lib/app-context";
 import { PageIntro, Pill } from "@/components/ui";
 import { AssessmentResponseList } from "@/components/assessment-response-form";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import { createSoaAction } from "../../actions";
 
 const REVIEW_READ_LIMIT = 100;
@@ -16,6 +17,7 @@ export default async function AssessmentPage({ params, searchParams }: { params:
   const { id } = await params;
   const completed = (await searchParams)?.completed === "1";
   const { supabase, organisation, membership } = await requireAppContext();
+  const assessmentAccess = workspaceAccess(membership.role).section("assessments");
   const { data: session, error: sessionError } = await supabase.from("assessment_sessions").select("id,title,state,revision,catalogue_version_id").eq("id", id).eq("organisation_id", organisation.id).single();
   if (sessionError) {
     if (sessionError.code === "PGRST116") notFound();
@@ -46,7 +48,7 @@ export default async function AssessmentPage({ params, searchParams }: { params:
   const activeReview = reviewStatusAvailable ? reviewResult.data.find((review) => review.soa_snapshots.length === 0) : null;
   const answered = responseResult.data.filter((response) => response.answer !== null).length;
   const missingNotes = responseResult.data.filter((response) => response.answer !== null && response.evidence_note.trim().length === 0).length;
-  const isMember = membership.role === "member";
+  const isMember = !assessmentAccess.canManage;
   const controlReviewHref = activeReview ? `/app/soa/${activeReview.id}` : undefined;
   return <>
     <PageIntro eyebrow="GAP ASSESSMENT" title={session.title} body={session.state === "completed" ? "This assessment is complete. It records current practice and supporting notes for review." : isMember ? "Review the recorded answers and supporting notes. Ask a workspace operator to make changes." : "Answer each question from current practice. Answers and supporting notes save as you go."} action={<Pill tone={session.state === "completed" ? "green" : "amber"}>{session.state === "completed" ? "Completed" : "In progress"}</Pill>} />

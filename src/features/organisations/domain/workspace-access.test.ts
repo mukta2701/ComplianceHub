@@ -106,3 +106,62 @@ describe("Leadership report workspace access", () => {
     });
   });
 });
+
+describe("Readiness assessment workspace access", () => {
+  const assessmentId = "52000000-0000-4000-8000-000000000001";
+
+  it("keeps assessment pages visible but read-only and absent from Member navigation", () => {
+    const access = workspaceAccess("member");
+    const assessments = access.section("assessments");
+
+    expect(assessments).toMatchObject({
+      id: "assessments",
+      href: "/app/assessment",
+      label: "Gap assessment",
+      title: "Gap assessment",
+      icon: "clipboard",
+      canView: true,
+      canManage: false,
+      navigation: null,
+      manageDeniedMessage: "Only workspace operators can complete assessments.",
+    });
+    expect(access.sectionForPath("/app/assessment")?.canAccessPath("/app/assessment")).toBe(true);
+    expect(access.sectionForPath(`/app/assessment/${assessmentId}`)?.canAccessPath(`/app/assessment/${assessmentId}`)).toBe(true);
+    expect(access.sectionForPath("/api/app/assessment/complete")?.canAccessPath("/api/app/assessment/complete")).toBe(false);
+    expect(access.sectionForPath("/app/assessment/not-an-assessment-id")).toBeNull();
+    expect(access.sectionForPath(`/app/assessment/${assessmentId}/edit`)).toBeNull();
+  });
+
+  it.each(["owner", "admin"] as const)(
+    "keeps assessment management and Programme navigation available to %ss",
+    (role) => {
+      const access = workspaceAccess(role);
+      const assessments = access.section("assessments");
+
+      expect(assessments).toMatchObject({
+        canView: true,
+        canManage: true,
+        navigation: {
+          group: "Programme",
+          href: "/app/assessment",
+          label: "Gap assessment",
+          icon: "clipboard",
+        },
+      });
+      expect(access.sectionForPath("/api/app/assessment/complete")?.canAccessPath("/api/app/assessment/complete")).toBe(true);
+      expect(() => assessments.requireManage()).not.toThrow();
+    },
+  );
+
+  it("does not grant assessment access before Workspace membership exists", () => {
+    const assessments = workspaceAccess(null).section("assessments");
+
+    expect(assessments).toMatchObject({
+      canView: false,
+      canManage: false,
+      navigation: null,
+    });
+    expect(assessments.canAccessPath("/app/assessment")).toBe(false);
+    expect(assessments.canAccessPath("/api/app/assessment/complete")).toBe(false);
+  });
+});

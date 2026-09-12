@@ -4,6 +4,12 @@
 max_ttl_days: 14
 require_github_issue: false
 entries:
+  - id: "5b860e1541398aff"
+    reason: "Assessment detail reads the fixed catalogue question prompt column from the local database for ordinary UI rendering; no model call, external transfer, or personal data occurs on this line"
+    privacy_approver: "Codex architecture refactor review"
+    security_approver: "Codex architecture refactor review"
+    created_on: "2026-09-12"
+    expires_on: "2026-09-26"
   - id: "233734437dc5e586"
     reason: "Assessment detail reads the fixed catalogue question prompt column from the local database for ordinary UI rendering; no model call, external transfer, or personal data occurs on this line"
     privacy_approver: "Codex Astra release review"

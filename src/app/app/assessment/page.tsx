@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireAppContext } from "@/lib/app-context";
 import { EmptyState, ModuleExplainer, PageIntro, Pill } from "@/components/ui";
 import { getModuleGuidance } from "@/features/education/domain/guidance";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import { createAssessmentAction } from "../actions";
 
 const ASSESSMENT_DISPLAY_LIMIT = 50;
@@ -37,6 +38,7 @@ function RegisterUnavailable() {
 
 export default async function AssessmentsPage({ searchParams }: { searchParams: Promise<{ message?: string }> }) {
   const { supabase, organisation, membership } = await requireAppContext();
+  const assessmentAccess = workspaceAccess(membership.role).section("assessments");
   const { message } = await searchParams;
   const sessionResult = await supabase.from("assessment_sessions")
     .select("id,title,state,revision,updated_at,catalogue_version_id", { count: "exact" })
@@ -81,7 +83,7 @@ export default async function AssessmentsPage({ searchParams }: { searchParams: 
     <PageIntro eyebrow="ASSESSMENT" title="Readiness assessments" body="Record current practice and supporting notes, then carry that source context into a separate control review." action={<span className="assessment-page-actions">
       <a className="button secondary" href="/api/app/assessment/export?format=xlsx">Export XLSX</a>
       <a className="button secondary" href="/api/app/assessment/export?format=csv">CSV</a>
-      {membership.role !== "member" && <form action={createAssessmentAction}><button className="button primary">New assessment</button></form>}
+      {assessmentAccess.canManage && <form action={createAssessmentAction}><button className="button primary">New assessment</button></form>}
     </span>} />
     {message && <div className="assessment-notice" role="status">{message}</div>}
     <details className="section-guide"><summary>How assessments work</summary><ModuleExplainer guidance={getModuleGuidance("assessment")} /></details>
@@ -90,7 +92,7 @@ export default async function AssessmentsPage({ searchParams }: { searchParams: 
       <section className="assessment-register" aria-label="Readiness assessments">
         {items.map((item) => {
           const unanswered = Math.max(0, item.questions - item.answered);
-          const isMember = membership.role === "member";
+          const isMember = !assessmentAccess.canManage;
           const action = item.activeReviewId
             ? { href: `/app/soa/${item.activeReviewId}`, label: isMember ? "View control review" : "Resume control review" }
             : { href: `/app/assessment/${item.id}`, label: isMember ? "View assessment" : item.state === "completed" ? "Review controls" : "Continue assessment" };
@@ -105,7 +107,7 @@ export default async function AssessmentsPage({ searchParams }: { searchParams: 
           </article>;
         })}
       </section>
-    </> : membership.role === "member" ? <section className="assessment-empty-card"><h2>No assessments are available yet</h2><p>A workspace operator will need to start one before you can review the answers and supporting notes.</p></section> : (
+    </> : !assessmentAccess.canManage ? <section className="assessment-empty-card"><h2>No assessments are available yet</h2><p>A workspace operator will need to start one before you can review the answers and supporting notes.</p></section> : (
       <EmptyState icon="clipboard" title="Start your first assessment" body="Answer the plain-English readiness catalogue to see where you stand, capture supporting notes as you go, and identify gaps for later review." action={<form action={createAssessmentAction}><button className="button primary">Start your first assessment</button></form>} />
     )}
   </>;

@@ -11,6 +11,7 @@ import { workspaceAccess } from "@/features/organisations/domain/workspace-acces
 import styles from "./app-shell.module.css";
 
 const operatorLeadershipNavigation = workspaceAccess("owner").section("leadership-report").navigation!;
+const operatorAssessmentNavigation = workspaceAccess("owner").section("assessments").navigation!;
 
 const navGroups = [
   { label: "Work", items: [
@@ -19,7 +20,7 @@ const navGroups = [
     ["/app/evidence", "file", "Evidence"],
   ] },
   { label: "Programme", items: [
-    ["/app/assessment", "clipboard", "Gap assessment"],
+    [operatorAssessmentNavigation.href, operatorAssessmentNavigation.icon, operatorAssessmentNavigation.label],
     ["/app/soa", "file", "Controls & applicability"],
     ["/app/policies", "file", "Policies"],
     ["/app/assets", "file", "Asset inventory"],

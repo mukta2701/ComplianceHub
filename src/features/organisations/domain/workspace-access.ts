@@ -1,8 +1,15 @@
 import { hasCapability, type MembershipRole, type WorkspaceCapability } from "./access";
 
-export type WorkspaceSectionId = "frameworks" | "leadership-report";
+export type WorkspaceSectionId = "assessments" | "frameworks" | "leadership-report";
 
-type WorkspaceNavigationGroup = "Compliance" | "Share" | null;
+type WorkspaceNavigationGroup = "Compliance" | "Programme" | "Share" | null;
+
+type WorkspacePathRequirement = "view" | "manage";
+
+type WorkspacePathRule = {
+  path: string | RegExp;
+  requirement: WorkspacePathRequirement;
+};
 
 type WorkspaceNavigationItem = {
   group: WorkspaceNavigationGroup;
@@ -20,6 +27,8 @@ export type WorkspaceSectionAccess = {
   canView: boolean;
   canManage: boolean;
   navigation: WorkspaceNavigationItem | null;
+  manageDeniedMessage: string;
+  canAccessPath: (pathname: string) => boolean;
   requireManage: () => void;
 };
 
@@ -29,21 +38,43 @@ type WorkspaceSectionPolicy = {
   label: string;
   title: string;
   icon: string;
-  apiPaths: readonly string[];
+  paths: readonly WorkspacePathRule[];
   viewRoles: ReadonlySet<MembershipRole>;
   navigationGroups: Partial<Record<MembershipRole, WorkspaceNavigationGroup>>;
   manageCapability: WorkspaceCapability;
   manageDeniedMessage: string;
 };
 
+const ASSESSMENT_DETAIL_PATH = /^\/app\/assessment\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function pathMatches(rule: WorkspacePathRule, pathname: string): boolean {
+  return typeof rule.path === "string" ? rule.path === pathname : rule.path.test(pathname);
+}
+
 const sectionPolicies: Record<WorkspaceSectionId, WorkspaceSectionPolicy> = {
+  assessments: {
+    id: "assessments",
+    href: "/app/assessment",
+    label: "Gap assessment",
+    title: "Gap assessment",
+    icon: "clipboard",
+    paths: [
+      { path: "/app/assessment", requirement: "view" },
+      { path: ASSESSMENT_DETAIL_PATH, requirement: "view" },
+      { path: "/api/app/assessment/complete", requirement: "manage" },
+    ],
+    viewRoles: new Set(["owner", "admin", "member"]),
+    navigationGroups: { owner: "Programme", admin: "Programme" },
+    manageCapability: "manage_assessments",
+    manageDeniedMessage: "Only workspace operators can complete assessments.",
+  },
   frameworks: {
     id: "frameworks",
     href: "/app/frameworks",
     label: "Framework coverage",
     title: "Framework coverage",
     icon: "file",
-    apiPaths: [],
+    paths: [{ path: "/app/frameworks", requirement: "view" }],
     viewRoles: new Set(["owner", "admin", "member"]),
     navigationGroups: { member: "Compliance" },
     manageCapability: "manage_frameworks",
@@ -55,7 +86,10 @@ const sectionPolicies: Record<WorkspaceSectionId, WorkspaceSectionPolicy> = {
     label: "Leadership report",
     title: "Leadership report",
     icon: "file",
-    apiPaths: ["/api/app/reports/readiness/pdf"],
+    paths: [
+      { path: "/app/reports/readiness", requirement: "view" },
+      { path: "/api/app/reports/readiness/pdf", requirement: "view" },
+    ],
     viewRoles: new Set(["owner", "admin", "member"]),
     navigationGroups: { owner: "Share", admin: "Share", member: null },
     manageCapability: "manage_policies",
@@ -86,6 +120,12 @@ function sectionAccess(
           icon: policy.icon,
         }
       : null,
+    manageDeniedMessage: policy.manageDeniedMessage,
+    canAccessPath: (pathname) => {
+      const rule = policy.paths.find((candidate) => pathMatches(candidate, pathname));
+      if (!rule) return false;
+      return rule.requirement === "manage" ? canManage : canView;
+    },
     requireManage: () => {
       if (!canManage) throw new Error(policy.manageDeniedMessage);
     },
@@ -99,7 +139,7 @@ export function workspaceAccess(role: MembershipRole | null) {
     },
     sectionForPath(pathname: string): WorkspaceSectionAccess | null {
       const policy = Object.values(sectionPolicies).find(
-        (candidate) => candidate.href === pathname || candidate.apiPaths.includes(pathname),
+        (candidate) => candidate.paths.some((rule) => pathMatches(rule, pathname)),
       );
       return policy ? sectionAccess(policy, role) : null;
     },
