@@ -93,6 +93,12 @@ Role clarification confirmed by the owner on 9 September 2026: **Mukta operates 
 
 ## Engineering history — dated checkpoints below
 
+### Shared Workspace access — Framework coverage — 12 September 2026
+
+- Local-only architecture refactor: the new organisations-domain Workspace access module is now the single source for Framework coverage route visibility, Member navigation metadata, page editability and action authorization. Members still see and read Framework coverage but cannot add or remove mappings; Owners and Admins retain management access. The route, labels and exact denial message are unchanged, and no record, feature or test was deleted.
+- Fresh local verification on `codex/team-baseline`: typecheck and lint pass; the complete unit suite passes with 337 files, 2,946 tests passed and three intentional skips; the production build passes. The existing workspace UI and team-contribution Member journeys pass 8/8 across Chromium desktop and mobile. These automated results verify the source and test environments, not the independently running app.
+- Application source `fb29793003601e1eb3f8ff2d810d427a5a282457` is pushed and its rebuilt production package runs independently at `http://127.0.0.1:3300` with private file logging against the fictional local team database. Fresh health reports application and database `ok` with that SHA, the sign-in route loads, and a fresh fictional Member browser session sees Framework coverage navigation and a recorded mapping without Add/Remove controls; the same session is redirected away from operator-only Settings. This is phase one of a gradual access-rule migration with no visible behavior change. No database schema, staging, hosted release, live-provider or acceptance gate changed.
+
 ### Feature-owned server action relocation — 12 September 2026
 
 - Local-only architecture refactor: 18 existing server-action implementations moved byte-for-byte from the mixed `src/app/app/actions.ts` file into the risks, SoA and organisations feature modules. The old path remains a thin async forwarding interface, so existing pages and components keep the same imports. No feature, record, validation, wording, rate limit, query or error behavior changed, and the six action test files remained byte-identical.
