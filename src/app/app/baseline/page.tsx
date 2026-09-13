@@ -5,13 +5,14 @@ import { z } from "zod";
 import { requireAppContext } from "@/lib/app-context";
 import { Card, PageIntro } from "@/components/ui";
 import { baselinePayloadSchema } from "@/features/baselines/domain/summary";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import { BaselineForm } from "./baseline-form";
 import { BaselineReport, formatBaselineDate } from "./baseline-report";
 
 export default async function BaselinePage({ searchParams }: { searchParams: Promise<{ snapshot?: string }> }) {
   const { supabase, organisation, membership } = await requireAppContext();
   const { snapshot } = await searchParams;
-  const operator = membership.role === "owner" || membership.role === "admin";
+  const operator = workspaceAccess(membership.role).section("baseline").canManage;
   if (snapshot && !z.uuid().safeParse(snapshot).success) return <Card style={{ padding: "20px" }}>This baseline reference is invalid. <Link href="/app/baseline">Open the latest baseline</Link></Card>;
   let snapshotQuery = supabase.from("baseline_snapshots").select("id,payload,progress_revision").eq("organisation_id", organisation.id);
   if (snapshot) snapshotQuery = snapshotQuery.eq("id", snapshot);

@@ -4,10 +4,11 @@ import { revalidatePath } from "next/cache";
 import { requireAppContext } from "@/lib/app-context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { baselineInputSchema, type BaselineState } from "@/features/baselines/domain/summary";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 
 export async function saveBaselineAction(_state: BaselineState, form: FormData): Promise<BaselineState> {
   const { supabase, organisation, membership, user } = await requireAppContext();
-  if (membership.role !== "owner" && membership.role !== "admin") return { error: "Only a workspace coordinator can save a baseline." };
+  if (!workspaceAccess(membership.role).section("baseline").canManage) return { error: "Only a workspace coordinator can save a baseline." };
   const parsed = baselineInputSchema.safeParse(Object.fromEntries(form));
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the baseline details." };
   await enforceRateLimit(`baseline-save:${user.id}`, { limit: 20, windowMs: 60_000 });

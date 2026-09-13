@@ -1,6 +1,51 @@
 import { describe, expect, it } from "vitest";
 import { workspaceAccess } from "./workspace-access";
 
+describe("Saved baseline workspace access", () => {
+  it("keeps the saved baseline visible and read-only for Members", () => {
+    const access = workspaceAccess("member");
+    const baseline = access.section("baseline");
+
+    expect(baseline).toMatchObject({
+      id: "baseline",
+      href: "/app/baseline",
+      label: "Baseline",
+      title: "Baseline",
+      icon: "file",
+      canView: true,
+      canManage: false,
+      navigation: null,
+      manageDeniedMessage: "Only a workspace coordinator can save a baseline.",
+    });
+    expect(access.sectionForPath("/app/baseline")?.canAccessPath("/app/baseline")).toBe(true);
+    expect(access.sectionForPath("/app/baseline/edit")).toBeNull();
+    expect(() => baseline.requireManage()).toThrow(
+      "Only a workspace coordinator can save a baseline.",
+    );
+  });
+
+  it.each(["owner", "admin"] as const)(
+    "keeps saved-baseline management available to %ss without adding navigation",
+    (role) => {
+      const baseline = workspaceAccess(role).section("baseline");
+
+      expect(baseline.canView).toBe(true);
+      expect(baseline.canManage).toBe(true);
+      expect(baseline.navigation).toBeNull();
+      expect(() => baseline.requireManage()).not.toThrow();
+    },
+  );
+
+  it("does not grant saved-baseline access before Workspace membership exists", () => {
+    const baseline = workspaceAccess(null).section("baseline");
+
+    expect(baseline.canView).toBe(false);
+    expect(baseline.canManage).toBe(false);
+    expect(baseline.navigation).toBeNull();
+    expect(baseline.canAccessPath("/app/baseline")).toBe(false);
+  });
+});
+
 describe("Framework coverage workspace access", () => {
   it("keeps Framework coverage visible and read-only for Members", () => {
     const access = workspaceAccess("member");

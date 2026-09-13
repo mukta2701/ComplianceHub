@@ -1,6 +1,6 @@
 import { hasCapability, type MembershipRole, type WorkspaceCapability } from "./access";
 
-export type WorkspaceSectionId = "assets" | "assessments" | "frameworks" | "leadership-report" | "policies" | "risks" | "soa";
+export type WorkspaceSectionId = "assets" | "assessments" | "baseline" | "frameworks" | "leadership-report" | "policies" | "risks" | "soa";
 
 type WorkspaceNavigationGroup = "Compliance" | "Programme" | "Share" | "Work" | null;
 
@@ -93,6 +93,18 @@ const sectionPolicies: Record<WorkspaceSectionId, WorkspaceSectionPolicy> = {
     navigationGroups: { owner: "Programme", admin: "Programme" },
     manageCapability: "manage_assessments",
     manageDeniedMessage: "Only workspace operators can complete assessments.",
+  },
+  baseline: {
+    id: "baseline",
+    href: "/app/baseline",
+    label: "Baseline",
+    title: "Baseline",
+    icon: "file",
+    paths: [{ path: "/app/baseline", requirement: "view" }],
+    viewRoles: new Set(["owner", "admin", "member"]),
+    navigationGroups: {},
+    manageCapability: "manage_baselines",
+    manageDeniedMessage: "Only a workspace coordinator can save a baseline.",
   },
   frameworks: {
     id: "frameworks",
