@@ -1,6 +1,53 @@
 import { describe, expect, it } from "vitest";
 import { workspaceAccess } from "./workspace-access";
 
+describe("Trust Center workspace access", () => {
+  it.each(["owner", "admin"] as const)(
+    "keeps Trust Center management and Share navigation available to %ss",
+    (role) => {
+      const trustCenter = workspaceAccess(role).section("trust-center");
+
+      expect(trustCenter).toMatchObject({
+        id: "trust-center",
+        href: "/app/trust",
+        label: "Trust Center",
+        title: "Trust Center",
+        icon: "shield",
+        canView: true,
+        canManage: true,
+        navigation: {
+          group: "Share",
+          href: "/app/trust",
+          label: "Trust Center",
+          icon: "shield",
+        },
+        manageDeniedMessage: "Only workspace operators can manage the Trust Center",
+      });
+      expect(trustCenter.canAccessPath("/app/trust")).toBe(true);
+      expect(() => trustCenter.requireManage()).not.toThrow();
+    },
+  );
+
+  it.each(["member", null] as const)("does not grant private Trust Center access to %s", (role) => {
+    const trustCenter = workspaceAccess(role).section("trust-center");
+
+    expect(trustCenter.canView).toBe(false);
+    expect(trustCenter.canManage).toBe(false);
+    expect(trustCenter.navigation).toBeNull();
+    expect(trustCenter.canAccessPath("/app/trust")).toBe(false);
+    expect(() => trustCenter.requireManage()).toThrow(
+      "Only workspace operators can manage the Trust Center",
+    );
+  });
+
+  it("keeps public and nested Trust Center routes outside the private section", () => {
+    const access = workspaceAccess("owner");
+
+    expect(access.sectionForPath("/trust/example")).toBeNull();
+    expect(access.sectionForPath("/app/trust/extra")).toBeNull();
+  });
+});
+
 describe("Saved baseline workspace access", () => {
   it("keeps the saved baseline visible and read-only for Members", () => {
     const access = workspaceAccess("member");

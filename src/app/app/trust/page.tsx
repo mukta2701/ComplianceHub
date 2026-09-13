@@ -2,11 +2,11 @@ import { requireAppContext } from "@/lib/app-context";
 import { Card, PageIntro, Pill } from "@/components/ui";
 import { siteUrl } from "@/lib/site-url";
 import { saveTrustCenterAction, disableTrustCenterAction } from "./actions";
-import { hasCapability } from "@/features/organisations/domain/access";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 
 export default async function TrustCenterSettingsPage() {
   const { supabase, membership, organisation } = await requireAppContext();
-  const canManageTrustCenter = hasCapability(membership.role, "manage_trust_center");
+  const canManageTrustCenter = workspaceAccess(membership.role).section("trust-center").canManage;
   const site = siteUrl();
 
   // Sensitive settings are operator-only; ordinary Members never load them.

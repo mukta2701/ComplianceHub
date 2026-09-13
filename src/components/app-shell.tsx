@@ -16,6 +16,7 @@ const operatorRiskNavigation = workspaceAccess("owner").section("risks").navigat
 const operatorAssetNavigation = workspaceAccess("owner").section("assets").navigation!;
 const operatorPolicyNavigation = workspaceAccess("owner").section("policies").navigation!;
 const operatorSoaNavigation = workspaceAccess("owner").section("soa").navigation!;
+const operatorTrustCenterNavigation = workspaceAccess("owner").section("trust-center").navigation!;
 
 const navGroups = [
   { label: "Work", items: [
@@ -37,7 +38,7 @@ const navGroups = [
   ] },
   { label: operatorLeadershipNavigation.group, items: [
     [operatorLeadershipNavigation.href, operatorLeadershipNavigation.icon, operatorLeadershipNavigation.label],
-    ["/app/trust", "shield", "Trust Center"],
+    [operatorTrustCenterNavigation.href, operatorTrustCenterNavigation.icon, operatorTrustCenterNavigation.label],
   ] },
   { label: "Admin", items: [
     ["/app/settings", "settings", "Settings"],

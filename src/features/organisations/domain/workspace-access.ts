@@ -1,6 +1,6 @@
 import { hasCapability, type MembershipRole, type WorkspaceCapability } from "./access";
 
-export type WorkspaceSectionId = "assets" | "assessments" | "baseline" | "frameworks" | "leadership-report" | "policies" | "risks" | "scope" | "soa";
+export type WorkspaceSectionId = "assets" | "assessments" | "baseline" | "frameworks" | "leadership-report" | "policies" | "risks" | "scope" | "soa" | "trust-center";
 
 type WorkspaceNavigationGroup = "Compliance" | "Programme" | "Share" | "Work" | null;
 
@@ -197,6 +197,18 @@ const sectionPolicies: Record<WorkspaceSectionId, WorkspaceSectionPolicy> = {
     navigationGroups: { owner: "Programme", admin: "Programme", member: "Compliance" },
     manageCapability: "manage_imports",
     manageDeniedMessage: "Only workspace Owners and Admins can finalise a Statement of Applicability",
+  },
+  "trust-center": {
+    id: "trust-center",
+    href: "/app/trust",
+    label: "Trust Center",
+    title: "Trust Center",
+    icon: "shield",
+    paths: [{ path: "/app/trust", requirement: "view" }],
+    viewRoles: new Set(["owner", "admin"]),
+    navigationGroups: { owner: "Share", admin: "Share" },
+    manageCapability: "manage_trust_center",
+    manageDeniedMessage: "Only workspace operators can manage the Trust Center",
   },
 };
 

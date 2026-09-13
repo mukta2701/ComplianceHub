@@ -38,6 +38,7 @@ describe("workspace portal route access", () => {
     "/app/assessment/not-an-assessment-id",
     `/app/assessment/${ASSESSMENT_ID}/edit`,
     "/app/setup",
+    "/app/trust",
     "/app/scope",
     "/app/settings",
     "/app/integrations",
@@ -98,5 +99,9 @@ describe("workspace portal route access", () => {
     expect(workspaceRequestAccess("/api/app/tasks/export", { authenticated: false, role: null })).toBe("unauthorized");
     expect(workspaceRequestAccess("/app/policies", { authenticated: true, role: null })).toBe("redirect-onboarding");
     expect(workspaceRequestAccess("/api/app/reports/readiness/pdf", { authenticated: true, role: null })).toBe("forbidden");
+  });
+
+  it("keeps the public Trust Center outside workspace membership gates", () => {
+    expect(workspaceRequestAccess("/trust/example", { authenticated: false, role: null })).toBe("allow");
   });
 });
