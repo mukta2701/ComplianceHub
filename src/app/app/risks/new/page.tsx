@@ -4,12 +4,13 @@ import { requireAppContext } from "@/lib/app-context";
 import { one } from "@/lib/supabase/one";
 import { Card, PageIntro } from "@/components/ui";
 import { RiskForm, type RiskFormValues } from "../risk-form";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import styles from "../risk-form.module.css";
 
 export default async function NewRiskPage({ searchParams }: { searchParams: Promise<{ title?: string; description?: string; treatmentPlan?: string; sourceAssessmentSessionId?: string }> }) {
   const suggested = await searchParams;
   const { supabase, organisation, membership } = await requireAppContext();
-  if (membership.role !== "owner" && membership.role !== "admin") redirect("/app/risks");
+  if (!workspaceAccess(membership.role).section("risks").canManage) redirect("/app/risks");
   const [categoriesResult, membersResult] = await Promise.all([
     supabase.from("risk_categories").select("id,name").eq("organisation_id", organisation.id).order("position"),
     supabase.from("memberships").select("user_id,profiles(display_name)").eq("organisation_id", organisation.id),

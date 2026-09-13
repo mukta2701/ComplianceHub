@@ -5,9 +5,9 @@ import { describe, expect, it } from "vitest";
 const source = readFileSync(resolve(process.cwd(), "src/app/app/risks/page.tsx"), "utf8");
 
 describe("risk matrix editor workspace contract", () => {
-  it("imports and checks the operator-only capability before rendering the form", () => {
-    expect(source).toContain('import { hasCapability } from "@/features/organisations/domain/access";');
-    expect(source).toContain('hasCapability(membership.role, "manage_risk_matrix")');
+  it("uses the shared Risk-register access decision before rendering the form", () => {
+    expect(source).toContain('import { workspaceAccess } from "@/features/organisations/domain/workspace-access";');
+    expect(source).toContain('workspaceAccess(membership.role).section("risks")');
     expect(source).toContain("Only workspace operators can change these thresholds.");
   });
 });

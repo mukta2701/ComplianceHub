@@ -3,6 +3,7 @@ import { workspaceRequestAccess } from "./portal-access";
 
 const POLICY_ID = "51000000-0000-4000-8000-000000000001";
 const ASSESSMENT_ID = "52000000-0000-4000-8000-000000000001";
+const RISK_ID = "53000000-0000-4000-8000-000000000001";
 
 describe("workspace portal route access", () => {
   it.each(["owner", "admin"] as const)("allows %s operators throughout the app and app API", (role) => {
@@ -47,6 +48,12 @@ describe("workspace portal route access", () => {
     `/app/policies/${POLICY_ID}/edit`,
     "/app/policies-evil",
     "/app/monitoring/connections",
+    "/app/risks",
+    `/app/risks/${RISK_ID}`,
+    "/app/risks/new",
+    `/app/risks/${RISK_ID}/edit`,
+    "/app/risks/import",
+    "/app/risks/not-a-risk-id",
     "/app/reports/readiness/history",
     "/app/soa/import",
     "/app/soa/not-a-register-id",
@@ -58,6 +65,7 @@ describe("workspace portal route access", () => {
   it("allows only the readiness PDF in the app API for Members", () => {
     expect(workspaceRequestAccess("/api/app/reports/readiness/pdf", { authenticated: true, role: "member" })).toBe("allow");
     expect(workspaceRequestAccess("/api/app/tasks/export", { authenticated: true, role: "member" })).toBe("forbidden");
+    expect(workspaceRequestAccess("/api/app/risks/export", { authenticated: true, role: "member" })).toBe("forbidden");
     expect(workspaceRequestAccess("/api/app/reports/readiness/pdf-extra", { authenticated: true, role: "member" })).toBe("forbidden");
   });
 

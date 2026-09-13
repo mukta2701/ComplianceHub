@@ -1,8 +1,8 @@
 import { hasCapability, type MembershipRole, type WorkspaceCapability } from "./access";
 
-export type WorkspaceSectionId = "assessments" | "frameworks" | "leadership-report";
+export type WorkspaceSectionId = "assessments" | "frameworks" | "leadership-report" | "risks";
 
-type WorkspaceNavigationGroup = "Compliance" | "Programme" | "Share" | null;
+type WorkspaceNavigationGroup = "Compliance" | "Programme" | "Share" | "Work" | null;
 
 type WorkspacePathRequirement = "view" | "manage";
 
@@ -46,6 +46,8 @@ type WorkspaceSectionPolicy = {
 };
 
 const ASSESSMENT_DETAIL_PATH = /^\/app\/assessment\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const RISK_DETAIL_PATH = /^\/app\/risks\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const RISK_EDIT_PATH = /^\/app\/risks\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/edit$/i;
 
 function pathMatches(rule: WorkspacePathRule, pathname: string): boolean {
   return typeof rule.path === "string" ? rule.path === pathname : rule.path.test(pathname);
@@ -94,6 +96,25 @@ const sectionPolicies: Record<WorkspaceSectionId, WorkspaceSectionPolicy> = {
     navigationGroups: { owner: "Share", admin: "Share", member: null },
     manageCapability: "manage_policies",
     manageDeniedMessage: "Only workspace operators can publish leadership reports",
+  },
+  risks: {
+    id: "risks",
+    href: "/app/risks",
+    label: "Risk register",
+    title: "Risk register",
+    icon: "alert",
+    paths: [
+      { path: "/app/risks", requirement: "view" },
+      { path: RISK_DETAIL_PATH, requirement: "view" },
+      { path: "/app/risks/new", requirement: "manage" },
+      { path: RISK_EDIT_PATH, requirement: "manage" },
+      { path: "/app/risks/import", requirement: "manage" },
+      { path: "/api/app/risks/export", requirement: "manage" },
+    ],
+    viewRoles: new Set(["owner", "admin"]),
+    navigationGroups: { owner: "Work", admin: "Work" },
+    manageCapability: "manage_risk_matrix",
+    manageDeniedMessage: "Only workspace operators can update risks",
   },
 };
 

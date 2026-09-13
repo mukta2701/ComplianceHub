@@ -7,6 +7,7 @@ import { requireAppContext } from "@/lib/app-context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { riskInputSchema } from "@/features/risks/application/risk";
 import { createRiskAction } from "../actions";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 
 export type RiskFormState = { error?: string; fieldErrors?: Record<string, string[] | undefined>; conflict?: boolean };
 
@@ -16,7 +17,7 @@ function riskValidationState(error: z.ZodError): RiskFormState {
 
 export async function updateRiskAction(formData: FormData) {
   const { supabase, user, organisation, membership } = await requireAppContext();
-  if (membership.role !== "owner" && membership.role !== "admin") throw new Error("Only workspace operators can update risks");
+  if (!workspaceAccess(membership.role).section("risks").canManage) throw new Error("Only workspace operators can update risks");
   await enforceRateLimit(`risk:${user.id}`, { limit: 30, windowMs: 60_000 });
   const id = z.uuid().parse(formData.get("id"));
   const expectedUpdatedAt = z.iso.datetime({ offset: true }).parse(String(formData.get("expectedUpdatedAt")));

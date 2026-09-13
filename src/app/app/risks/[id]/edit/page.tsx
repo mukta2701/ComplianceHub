@@ -4,12 +4,13 @@ import { requireAppContext } from "@/lib/app-context";
 import { one } from "@/lib/supabase/one";
 import { Card, PageIntro } from "@/components/ui";
 import { RiskForm } from "../../risk-form";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import styles from "../../risk-form.module.css";
 
 export default async function EditRiskPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { supabase, organisation, membership } = await requireAppContext();
-  if (membership.role !== "owner" && membership.role !== "admin") redirect(`/app/risks/${id}`);
+  if (!workspaceAccess(membership.role).section("risks").canManage) redirect(`/app/risks/${id}`);
   const { data: risk, error } = await supabase.from("risks")
     .select("id,reference,title,description,category_id,owner_id,likelihood,impact,residual_likelihood,residual_impact,treatment,treatment_plan,review_date,status,evidence,updated_at")
     .eq("id", id).eq("organisation_id", organisation.id).maybeSingle();

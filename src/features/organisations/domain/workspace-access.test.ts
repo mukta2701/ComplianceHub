@@ -165,3 +165,69 @@ describe("Readiness assessment workspace access", () => {
     expect(assessments.canAccessPath("/api/app/assessment/complete")).toBe(false);
   });
 });
+
+describe("Risk register workspace access", () => {
+  const riskId = "53000000-0000-4000-8000-000000000001";
+
+  it("keeps the Risk register and all of its routes unavailable to Members", () => {
+    const access = workspaceAccess("member");
+    const risks = access.section("risks");
+
+    expect(risks).toMatchObject({
+      id: "risks",
+      href: "/app/risks",
+      label: "Risk register",
+      title: "Risk register",
+      icon: "alert",
+      canView: false,
+      canManage: false,
+      navigation: null,
+    });
+    for (const pathname of [
+      "/app/risks",
+      `/app/risks/${riskId}`,
+      "/app/risks/new",
+      `/app/risks/${riskId}/edit`,
+      "/app/risks/import",
+      "/api/app/risks/export",
+    ]) {
+      expect(access.sectionForPath(pathname)?.id).toBe("risks");
+      expect(access.sectionForPath(pathname)?.canAccessPath(pathname)).toBe(false);
+    }
+    expect(access.sectionForPath("/app/risks/not-a-risk-id")).toBeNull();
+    expect(access.sectionForPath(`/app/risks/${riskId}/history`)).toBeNull();
+    expect(access.sectionForPath("/api/app/risks/export-extra")).toBeNull();
+  });
+
+  it.each(["owner", "admin"] as const)(
+    "keeps Risk-register access, management and Work navigation available to %ss",
+    (role) => {
+      const access = workspaceAccess(role);
+      const risks = access.section("risks");
+
+      expect(risks).toMatchObject({
+        canView: true,
+        canManage: true,
+        navigation: {
+          group: "Work",
+          href: "/app/risks",
+          label: "Risk register",
+          icon: "alert",
+        },
+      });
+      expect(access.sectionForPath(`/app/risks/${riskId}`)?.canAccessPath(`/app/risks/${riskId}`)).toBe(true);
+      expect(access.sectionForPath(`/app/risks/${riskId}/edit`)?.canAccessPath(`/app/risks/${riskId}/edit`)).toBe(true);
+      expect(access.sectionForPath("/api/app/risks/export")?.canAccessPath("/api/app/risks/export")).toBe(true);
+    },
+  );
+
+  it("does not grant Risk-register access before Workspace membership exists", () => {
+    const risks = workspaceAccess(null).section("risks");
+
+    expect(risks).toMatchObject({
+      canView: false,
+      canManage: false,
+      navigation: null,
+    });
+  });
+});

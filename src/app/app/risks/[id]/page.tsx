@@ -7,6 +7,7 @@ import { Card, PageIntro, Pill } from "@/components/ui";
 import { one } from "@/lib/supabase/one";
 import { createRtpAction, updateRtpStatusAction, deleteRtpAction } from "../rtp-actions";
 import { AiSuggestionPanel } from "@/components/ai-suggestion-panel";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import styles from "../risk-workspace.module.css";
 
 const TREATMENT_LABEL: Record<string, string> = { mitigate: "Mitigate", avoid: "Avoid", transfer: "Transfer", accept: "Accept" };
@@ -15,7 +16,7 @@ const EVIDENCE_TONE: Record<string, string> = { current: "green", expiring: "amb
 export default async function RiskDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { supabase, organisation, membership } = await requireAppContext();
-  const canManage = membership.role !== "member";
+  const canManage = workspaceAccess(membership.role).section("risks").canManage;
   const { data: risk, error: riskError } = await supabase.from("risks").select("id,reference,title,description,owner_id,evidence,likelihood,impact,residual_likelihood,residual_impact,status,review_date,treatment,treatment_plan,risk_categories(name)").eq("id", id).eq("organisation_id", organisation.id).maybeSingle();
   if (riskError) throw new Error("Could not load the risk");
   if (!risk) notFound();

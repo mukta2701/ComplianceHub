@@ -14,6 +14,7 @@ import { assetInputSchema } from "@/features/assets/application/asset";
 import { soaItemReviewSchema } from "@/features/soa/application/review";
 import type { SoaStatus } from "@/features/soa/domain/soa";
 import { hasCapability } from "@/features/organisations/domain/access";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import { createHash } from "node:crypto";
 
 export type AnalyseResult = { headers: string[]; rows: string[][]; suggestion: Record<string, string> } | { error: string };
@@ -33,7 +34,11 @@ const MODULES = new Set<ImportModule>(["risk", "soa", "asset"]);
 
 export async function analyseImportAction(formData: FormData): Promise<AnalyseResult> {
   const { user, membership } = await requireAppContext();
-  if (!hasCapability(membership.role, "manage_imports")) {
+  const moduleName = String(formData.get("module")) as ImportModule;
+  const canManage = moduleName === "risk"
+    ? workspaceAccess(membership.role).section("risks").canManage
+    : hasCapability(membership.role, "manage_imports");
+  if (!canManage) {
     return { error: "You do not have permission to manage imports." };
   }
   try {
@@ -41,7 +46,6 @@ export async function analyseImportAction(formData: FormData): Promise<AnalyseRe
   } catch {
     return { error: "Too many import attempts. Please wait and try again." };
   }
-  const moduleName = String(formData.get("module")) as ImportModule;
   if (!MODULES.has(moduleName)) return { error: "Unknown import type." };
   const file = formData.get("file");
   if (!(file instanceof File) || file.size === 0) return { error: "Choose a file to upload." };
@@ -176,7 +180,10 @@ type RunImportInput = { module: ImportModule; headers: string[]; rows: string[][
 
 export async function runImportAction(input: RunImportInput): Promise<ImportRunResult> {
   const { supabase, user, organisation, membership } = await requireAppContext();
-  if (!hasCapability(membership.role, "manage_imports")) {
+  const canManage = input.module === "risk"
+    ? workspaceAccess(membership.role).section("risks").canManage
+    : hasCapability(membership.role, "manage_imports");
+  if (!canManage) {
     throw new Error("You do not have permission to manage imports.");
   }
   if (!MODULES.has(input.module)) return emptyResult(input.commit);

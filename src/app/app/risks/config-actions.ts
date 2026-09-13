@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireAppContext } from "@/lib/app-context";
-import { hasCapability } from "@/features/organisations/domain/access";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 
 const configSchema = z.object({
   lowMax: z.coerce.number().int().min(1).max(23),
@@ -14,7 +14,7 @@ const configSchema = z.object({
 
 export async function updateRiskMatrixConfigAction(formData: FormData) {
   const { supabase, user, organisation, membership } = await requireAppContext();
-  if (!hasCapability(membership.role, "manage_risk_matrix")) {
+  if (!workspaceAccess(membership.role).section("risks").canManage) {
     throw new Error("Only workspace operators can manage risk matrix configuration");
   }
   const parsed = configSchema.parse(Object.fromEntries(formData));

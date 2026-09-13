@@ -12,11 +12,12 @@ import styles from "./app-shell.module.css";
 
 const operatorLeadershipNavigation = workspaceAccess("owner").section("leadership-report").navigation!;
 const operatorAssessmentNavigation = workspaceAccess("owner").section("assessments").navigation!;
+const operatorRiskNavigation = workspaceAccess("owner").section("risks").navigation!;
 
 const navGroups = [
   { label: "Work", items: [
     ["/app/tasks", "check", "Tasks"],
-    ["/app/risks", "alert", "Risk register"],
+    [operatorRiskNavigation.href, operatorRiskNavigation.icon, operatorRiskNavigation.label],
     ["/app/evidence", "file", "Evidence"],
   ] },
   { label: "Programme", items: [

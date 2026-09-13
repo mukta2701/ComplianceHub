@@ -10,7 +10,7 @@ import { getModuleGuidance } from "@/features/education/domain/guidance";
 import { Icon } from "@/components/icons";
 import { SubTabs } from "@/components/sub-tabs";
 import { one } from "@/lib/supabase/one";
-import { hasCapability } from "@/features/organisations/domain/access";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import styles from "./risk-workspace.module.css";
 
 const BAND_TONE: Record<string, string> = { low:"green",moderate:"amber",high:"red",very_high:"critical" };
@@ -18,7 +18,8 @@ const BAND_COLOR: Record<string, string> = { low:"var(--rag-low)",moderate:"var(
 
 export default async function RisksPage() {
   const { supabase, organisation, membership } = await requireAppContext();
-  const canManage = membership.role !== "member";
+  const riskAccess = workspaceAccess(membership.role).section("risks");
+  const canManage = riskAccess.canManage;
   const [risksResult, gapsResult, tasksResult, evidenceResult, configResult, membersResult] = await Promise.all([
     supabase.from("risks").select("id,reference,title,category_id,owner_id,risk_categories(name),likelihood,impact,residual_likelihood,residual_impact,status,review_date", { count:"exact" }).eq("organisation_id", organisation.id).order("updated_at", { ascending:false }).limit(500),
     supabase.from("assessment_responses").select("session_id,question_id,answer,catalogue_questions!assessment_responses_question_id_fkey(code,prompt)").eq("organisation_id", organisation.id).in("answer", ["no","partially"]).limit(10),
@@ -123,7 +124,7 @@ export default async function RisksPage() {
       <details className={styles.config}>
         <summary>Risk bands and appetite</summary>
         <div className={styles.configBody}><p>Set the highest score for each band on the 1–25 scale. Scores above appetite are highlighted for attention.</p>
-          {hasCapability(membership.role, "manage_risk_matrix") ? <form action={updateRiskMatrixConfigAction} className={styles.configForm}>
+          {riskAccess.canManage ? <form action={updateRiskMatrixConfigAction} className={styles.configForm}>
             <label>Low up to<input name="lowMax" type="number" min={1} max={23} defaultValue={config.lowMax} /></label>
             <label>Medium up to<input name="moderateMax" type="number" min={2} max={24} defaultValue={config.moderateMax} /></label>
             <label>High up to<input name="highMax" type="number" min={3} max={24} defaultValue={config.highMax} /></label>

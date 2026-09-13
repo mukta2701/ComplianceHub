@@ -5,10 +5,11 @@ import { revalidatePath } from "next/cache";
 import { requireAppContext } from "@/lib/app-context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { rtpInputSchema } from "@/features/risks/application/rtp";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 
 export async function createRtpAction(formData: FormData) {
   const { supabase, user, organisation, membership } = await requireAppContext();
-  if (membership.role === "member") throw new Error("Only workspace operators can create treatment plans");
+  if (!workspaceAccess(membership.role).section("risks").canManage) throw new Error("Only workspace operators can create treatment plans");
   await enforceRateLimit(`rtp:${user.id}`, { limit: 30, windowMs: 60_000 });
   const parsed = rtpInputSchema.parse({ ...Object.fromEntries(formData), organisationId: organisation.id });
   const { data, error } = await supabase.rpc("create_treatment_with_task", {
@@ -26,7 +27,7 @@ export async function createRtpAction(formData: FormData) {
 
 export async function updateRtpStatusAction(formData: FormData) {
   const { supabase, organisation, membership } = await requireAppContext();
-  if (membership.role === "member") throw new Error("Only workspace operators can update treatment plans");
+  if (!workspaceAccess(membership.role).section("risks").canManage) throw new Error("Only workspace operators can update treatment plans");
   const status = String(formData.get("status"));
   if (!["planned", "in_progress", "completed", "cancelled"].includes(status)) throw new Error("Invalid RTP status");
   const riskId = String(formData.get("riskId"));
@@ -46,7 +47,7 @@ export async function updateRtpStatusAction(formData: FormData) {
 
 export async function deleteRtpAction(formData: FormData) {
   const { supabase, organisation, membership } = await requireAppContext();
-  if (membership.role === "member") throw new Error("Only workspace operators can delete treatment plans");
+  if (!workspaceAccess(membership.role).section("risks").canManage) throw new Error("Only workspace operators can delete treatment plans");
   const riskId = String(formData.get("riskId"));
   const { data, error } = await supabase.from("risk_treatment_plans").delete().eq("id", String(formData.get("id"))).eq("risk_id", riskId).eq("organisation_id", organisation.id).select("id").maybeSingle();
   if (error || !data) throw new Error("Could not delete the treatment plan");

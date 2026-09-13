@@ -8,10 +8,11 @@ import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { one } from "@/lib/supabase/one";
 import { nextRiskReference } from "@/features/risks/domain/risks";
 import { riskInputSchema } from "@/features/risks/application/risk";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 
 export async function createRiskAction(formData: FormData) {
   const { supabase, user, organisation, membership } = await requireAppContext();
-  if (membership.role === "member") throw new Error("Only workspace operators can create risks");
+  if (!workspaceAccess(membership.role).section("risks").canManage) throw new Error("Only workspace operators can create risks");
   await enforceRateLimit(`risk:${user.id}`, { limit: 30, windowMs: 60_000 });
   const parsed = riskInputSchema.parse({ ...Object.fromEntries(formData), organisationId: organisation.id, ownerId: formData.get("ownerId") || null });
   const { error } = await supabase.from("risks").insert({ organisation_id: organisation.id, reference: parsed.reference, title: parsed.title, description: parsed.description, category_id: parsed.categoryId, owner_id: parsed.ownerId || null, likelihood: parsed.likelihood, impact: parsed.impact, treatment: parsed.treatment, treatment_plan: parsed.treatmentPlan, residual_likelihood: parsed.residualLikelihood, residual_impact: parsed.residualImpact, review_date: parsed.reviewDate || null, status: parsed.status, evidence: parsed.evidence, source_assessment_session_id: parsed.sourceAssessmentSessionId || null, source_soa_register_id: parsed.sourceSoaRegisterId || null, created_by: user.id });
@@ -21,7 +22,7 @@ export async function createRiskAction(formData: FormData) {
 
 export async function deleteRiskAction(formData: FormData) {
   const { supabase, organisation, membership } = await requireAppContext();
-  if (membership.role === "member") throw new Error("Only workspace operators can delete risks");
+  if (!workspaceAccess(membership.role).section("risks").canManage) throw new Error("Only workspace operators can delete risks");
   const { data, error } = await supabase.from("risks").delete().eq("id", String(formData.get("id"))).eq("organisation_id", organisation.id).select("id").maybeSingle();
   if (error || !data) throw new Error("Could not delete the risk");
   revalidatePath("/app/risks");
@@ -29,7 +30,7 @@ export async function deleteRiskAction(formData: FormData) {
 
 export async function updateRiskStatusAction(formData: FormData) {
   const { supabase, organisation, membership } = await requireAppContext();
-  if (membership.role === "member") throw new Error("Only workspace operators can update risks");
+  if (!workspaceAccess(membership.role).section("risks").canManage) throw new Error("Only workspace operators can update risks");
   const status = String(formData.get("status")); if (!["open","treating","accepted","closed"].includes(status)) throw new Error("Invalid risk status");
   const { data, error } = await supabase.from("risks").update({ status, updated_at: new Date().toISOString() }).eq("id", String(formData.get("id"))).eq("organisation_id", organisation.id).select("id").maybeSingle();
   if (error || !data) throw new Error("Could not update risk");
@@ -38,7 +39,7 @@ export async function updateRiskStatusAction(formData: FormData) {
 
 export async function acceptRiskSuggestionAction(formData: FormData) {
   const { supabase, user, organisation, membership } = await requireAppContext();
-  if (membership.role === "member") throw new Error("Only workspace operators can accept risk suggestions");
+  if (!workspaceAccess(membership.role).section("risks").canManage) throw new Error("Only workspace operators can accept risk suggestions");
   const questionId = z.uuid().parse(formData.get("questionId"));
   const sessionId = z.uuid().parse(formData.get("sessionId"));
   const { data: response, error: responseError } = await supabase.from("assessment_responses")
