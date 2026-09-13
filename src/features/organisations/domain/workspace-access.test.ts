@@ -1,6 +1,46 @@
 import { describe, expect, it } from "vitest";
 import { workspaceAccess } from "./workspace-access";
 
+describe("Evidence workspace access", () => {
+  it.each(["owner", "admin"] as const)("keeps Evidence management available to %ss", (role) => {
+    const access = workspaceAccess(role);
+    const evidence = access.section("evidence");
+
+    expect(evidence).toMatchObject({
+      id: "evidence",
+      href: "/app/evidence",
+      label: "Evidence",
+      title: "Evidence",
+      icon: "file",
+      canView: true,
+      canManage: true,
+      navigation: { group: "Work", href: "/app/evidence", label: "Evidence", icon: "file" },
+      manageDeniedMessage: "Only workspace operators can manage evidence",
+    });
+    expect(access.sectionForPath("/app/evidence")?.canAccessPath("/app/evidence")).toBe(true);
+    expect(access.sectionForPath("/app/evidence/new")?.canAccessPath("/app/evidence/new")).toBe(true);
+    expect(access.sectionForPath("/api/app/evidence/export")?.canAccessPath("/api/app/evidence/export")).toBe(true);
+    expect(() => evidence.requireManage()).not.toThrow();
+  });
+
+  it.each(["member", null] as const)("does not grant the Evidence vault to %s", (role) => {
+    const evidence = workspaceAccess(role).section("evidence");
+
+    expect(evidence.canView).toBe(false);
+    expect(evidence.canManage).toBe(false);
+    expect(evidence.navigation).toBeNull();
+    expect(evidence.canAccessPath("/app/evidence")).toBe(false);
+    expect(evidence.canAccessPath("/app/evidence/new")).toBe(false);
+    expect(evidence.canAccessPath("/api/app/evidence/export")).toBe(false);
+    expect(() => evidence.requireManage()).toThrow("Only workspace operators can manage evidence");
+  });
+
+  it("does not match invented Evidence routes", () => {
+    expect(workspaceAccess("owner").sectionForPath("/app/evidence/extra")).toBeNull();
+    expect(workspaceAccess("owner").sectionForPath("/api/app/evidence/export/extra")).toBeNull();
+  });
+});
+
 describe("Overview workspace access", () => {
   it.each(["owner", "admin"] as const)("keeps the operator Dashboard presentation for %ss", (role) => {
     const overview = workspaceAccess(role).section("overview");

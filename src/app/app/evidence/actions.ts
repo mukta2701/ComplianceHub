@@ -7,11 +7,11 @@ import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { ALLOWED_EVIDENCE_MIME_TYPES, MAX_EVIDENCE_FILE_BYTES, evidenceInputSchema, persistEvidenceWithCompensation } from "@/features/evidence/application/evidence";
 import { deriveEvidenceStatus } from "@/features/evidence/domain/evidence";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
+import type { MembershipRole } from "@/features/organisations/domain/access";
 
-function requireEvidenceOperator(membership: { role: string }) {
-  if (membership.role !== "owner" && membership.role !== "admin") {
-    throw new Error("Only workspace operators can manage evidence");
-  }
+function requireEvidenceOperator(membership: { role: MembershipRole }) {
+  workspaceAccess(membership.role).section("evidence").requireManage();
 }
 
 export async function createEvidenceAction(formData: FormData) {

@@ -11,6 +11,7 @@ import { AiSuggestionPanel } from "@/components/ai-suggestion-panel";
 import { addIsoDays, deriveEffectiveEvidenceStatus, EXPIRY_WARNING_DAYS, type EvidenceStatus } from "@/features/evidence/domain/evidence";
 import { EVIDENCE_PROVIDER_LABELS } from "@/features/integrations/domain/evidence-provider";
 import styles from "./evidence.module.css";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 
 const PAGE_SIZE = 25;
 const STATUSES = ["all", "current", "expiring", "expired", "superseded", "withdrawn"] as const;
@@ -59,7 +60,9 @@ function filterCondition(filter: EvidenceFilter, today: string, warningDate: str
 
 export default async function EvidencePage({ searchParams }: { searchParams: Promise<SearchParams> } = { searchParams: Promise.resolve({}) }) {
   const { supabase, organisation, membership } = await requireAppContext();
-  const isMember = membership?.role === "member";
+  const isMember = membership
+    ? !workspaceAccess(membership.role).section("evidence").canManage
+    : false;
   const params = await searchParams;
   const filter = parseFilter(params.status);
   const today = new Date().toISOString().slice(0, 10);

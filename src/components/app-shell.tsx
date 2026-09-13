@@ -19,12 +19,13 @@ const operatorSoaNavigation = workspaceAccess("owner").section("soa").navigation
 const operatorTrustCenterNavigation = workspaceAccess("owner").section("trust-center").navigation!;
 const notificationsMetadata = workspaceAccess("owner").section("notifications");
 const operatorOverviewNavigation = workspaceAccess("owner").section("overview").navigation!;
+const operatorEvidenceNavigation = workspaceAccess("owner").section("evidence").navigation!;
 
 const navGroups = [
   { label: "Work", items: [
     ["/app/tasks", "check", "Tasks"],
     [operatorRiskNavigation.href, operatorRiskNavigation.icon, operatorRiskNavigation.label],
-    ["/app/evidence", "file", "Evidence"],
+    [operatorEvidenceNavigation.href, operatorEvidenceNavigation.icon, operatorEvidenceNavigation.label],
   ] },
   { label: "Programme", items: [
     [operatorAssessmentNavigation.href, operatorAssessmentNavigation.icon, operatorAssessmentNavigation.label],

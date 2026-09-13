@@ -1,6 +1,6 @@
 import { hasCapability, type MembershipRole, type WorkspaceCapability } from "./access";
 
-export type WorkspaceSectionId = "assets" | "assessments" | "baseline" | "frameworks" | "leadership-report" | "notifications" | "overview" | "policies" | "risks" | "scope" | "soa" | "trust-center";
+export type WorkspaceSectionId = "assets" | "assessments" | "baseline" | "evidence" | "frameworks" | "leadership-report" | "notifications" | "overview" | "policies" | "risks" | "scope" | "soa" | "trust-center";
 
 export type WorkspaceSectionPresentation = "member" | "operator";
 
@@ -101,6 +101,22 @@ const sectionPolicies: Record<WorkspaceSectionId, WorkspaceSectionPolicy> = {
     navigationGroups: { owner: "Programme", admin: "Programme" },
     manageCapability: "manage_assessments",
     manageDeniedMessage: "Only workspace operators can complete assessments.",
+  },
+  evidence: {
+    id: "evidence",
+    href: "/app/evidence",
+    label: "Evidence",
+    title: "Evidence",
+    icon: "file",
+    paths: [
+      { path: "/app/evidence", requirement: "view" },
+      { path: "/app/evidence/new", requirement: "manage" },
+      { path: "/api/app/evidence/export", requirement: "manage" },
+    ],
+    viewRoles: new Set(["owner", "admin"]),
+    navigationGroups: { owner: "Work", admin: "Work" },
+    manageCapability: "manage_evidence",
+    manageDeniedMessage: "Only workspace operators can manage evidence",
   },
   baseline: {
     id: "baseline",

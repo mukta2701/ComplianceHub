@@ -53,6 +53,8 @@ describe("workspace portal route access", () => {
     `/app/policies/${POLICY_ID}/edit`,
     "/app/policies-evil",
     "/app/monitoring/connections",
+    "/app/evidence",
+    "/app/evidence/new",
     "/app/risks",
     `/app/risks/${RISK_ID}`,
     "/app/risks/new",
@@ -78,6 +80,7 @@ describe("workspace portal route access", () => {
     expect(workspaceRequestAccess("/api/app/tasks/export", { authenticated: true, role: "member" })).toBe("forbidden");
     expect(workspaceRequestAccess("/api/app/risks/export", { authenticated: true, role: "member" })).toBe("forbidden");
     expect(workspaceRequestAccess("/api/app/assets/export", { authenticated: true, role: "member" })).toBe("forbidden");
+    expect(workspaceRequestAccess("/api/app/evidence/export", { authenticated: true, role: "member" })).toBe("forbidden");
     expect(workspaceRequestAccess("/api/app/reports/readiness/pdf-extra", { authenticated: true, role: "member" })).toBe("forbidden");
   });
 

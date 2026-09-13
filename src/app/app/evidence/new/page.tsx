@@ -8,11 +8,12 @@ import { z } from "zod";
 import Link from "next/link";
 import { EvidenceSourceFields } from "@/features/evidence/components/evidence-source-fields";
 import styles from "../evidence.module.css";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 
 export default async function NewEvidencePage({ searchParams }: { searchParams: Promise<{ replaces?: string; message?: string }> }) {
   const { replaces, message } = await searchParams;
   const { supabase, organisation, membership } = await requireAppContext();
-  if (membership.role === "member") redirect("/app/evidence");
+  if (!workspaceAccess(membership.role).section("evidence").canManage) redirect("/app/evidence");
   const replacementId = z.uuid().safeParse(replaces).data;
   const [{ data: members, error: membersError }, replacementResult] = await Promise.all([
     supabase.from("memberships").select("user_id,profiles(display_name)").eq("organisation_id", organisation.id),

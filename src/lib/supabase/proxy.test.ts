@@ -159,11 +159,14 @@ describe("workspace request session and capability guard", () => {
 
     const settings = await refreshSupabaseSession(request("/app/settings"));
     const exportApi = await refreshSupabaseSession(request("/api/app/assets/export"));
+    const evidenceExportApi = await refreshSupabaseSession(request("/api/app/evidence/export"));
     const reportApi = await refreshSupabaseSession(request("/api/app/reports/readiness/pdf"));
 
     expect(settings.headers.get("location")).toBe("https://compliancehub.example/app");
     expect(exportApi.status).toBe(403);
     await expect(exportApi.json()).resolves.toEqual({ error: "Workspace operator access required" });
+    expect(evidenceExportApi.status).toBe(403);
+    await expect(evidenceExportApi.json()).resolves.toEqual({ error: "Workspace operator access required" });
     expect(reportApi.headers.get("x-middleware-next")).toBe("1");
   });
 
@@ -172,6 +175,7 @@ describe("workspace request session and capability guard", () => {
 
     expect((await refreshSupabaseSession(request("/app/settings"))).headers.get("x-middleware-next")).toBe("1");
     expect((await refreshSupabaseSession(request("/api/app/tasks/export"))).headers.get("x-middleware-next")).toBe("1");
+    expect((await refreshSupabaseSession(request("/api/app/evidence/export"))).headers.get("x-middleware-next")).toBe("1");
   });
 
   it("redirects users with a membership away from onboarding without creating a loop", async () => {
