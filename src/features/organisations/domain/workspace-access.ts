@@ -1,6 +1,6 @@
 import { hasCapability, type MembershipRole, type WorkspaceCapability } from "./access";
 
-export type WorkspaceSectionId = "assets" | "assessments" | "frameworks" | "leadership-report" | "policies" | "risks";
+export type WorkspaceSectionId = "assets" | "assessments" | "frameworks" | "leadership-report" | "policies" | "risks" | "soa";
 
 type WorkspaceNavigationGroup = "Compliance" | "Programme" | "Share" | "Work" | null;
 
@@ -51,6 +51,8 @@ const ASSET_EDIT_PATH = /^\/app\/assets\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-
 const POLICY_DETAIL_PATH = /^\/app\/policies\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const RISK_DETAIL_PATH = /^\/app\/risks\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const RISK_EDIT_PATH = /^\/app\/risks\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/edit$/i;
+const SOA_DETAIL_PATH = /^\/app\/soa\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SOA_SNAPSHOT_EXPORT_PATH = /^\/api\/app\/soa\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/(?:pdf|docx)$/i;
 
 function pathMatches(rule: WorkspacePathRule, pathname: string): boolean {
   return typeof rule.path === "string" ? rule.path === pathname : rule.path.test(pathname);
@@ -153,6 +155,24 @@ const sectionPolicies: Record<WorkspaceSectionId, WorkspaceSectionPolicy> = {
     navigationGroups: { owner: "Work", admin: "Work" },
     manageCapability: "manage_risk_matrix",
     manageDeniedMessage: "Only workspace operators can update risks",
+  },
+  soa: {
+    id: "soa",
+    href: "/app/soa",
+    label: "Controls & applicability",
+    title: "Controls & applicability",
+    icon: "file",
+    paths: [
+      { path: "/app/soa", requirement: "view" },
+      { path: SOA_DETAIL_PATH, requirement: "view" },
+      { path: "/app/soa/import", requirement: "manage" },
+      { path: "/api/app/soa/export", requirement: "manage" },
+      { path: SOA_SNAPSHOT_EXPORT_PATH, requirement: "manage" },
+    ],
+    viewRoles: new Set(["owner", "admin", "member"]),
+    navigationGroups: { owner: "Programme", admin: "Programme", member: "Compliance" },
+    manageCapability: "manage_imports",
+    manageDeniedMessage: "Only workspace Owners and Admins can finalise a Statement of Applicability",
   },
 };
 

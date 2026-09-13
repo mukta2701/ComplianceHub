@@ -13,7 +13,6 @@ import { riskInputSchema } from "@/features/risks/application/risk";
 import { assetInputSchema } from "@/features/assets/application/asset";
 import { soaItemReviewSchema } from "@/features/soa/application/review";
 import type { SoaStatus } from "@/features/soa/domain/soa";
-import { hasCapability } from "@/features/organisations/domain/access";
 import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import { createHash } from "node:crypto";
 
@@ -39,7 +38,7 @@ export async function analyseImportAction(formData: FormData): Promise<AnalyseRe
     ? workspaceAccess(membership.role).section("risks").canManage
     : moduleName === "asset"
       ? workspaceAccess(membership.role).section("assets").canManage
-      : hasCapability(membership.role, "manage_imports");
+      : workspaceAccess(membership.role).section("soa").canManage;
   if (!canManage) {
     return { error: "You do not have permission to manage imports." };
   }
@@ -186,7 +185,7 @@ export async function runImportAction(input: RunImportInput): Promise<ImportRunR
     ? workspaceAccess(membership.role).section("risks").canManage
     : input.module === "asset"
       ? workspaceAccess(membership.role).section("assets").canManage
-      : hasCapability(membership.role, "manage_imports");
+      : workspaceAccess(membership.role).section("soa").canManage;
   if (!canManage) {
     throw new Error("You do not have permission to manage imports.");
   }

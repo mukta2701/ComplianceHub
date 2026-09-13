@@ -3,6 +3,7 @@ import { requireAppContext } from "@/lib/app-context";
 import { Card, EmptyState, ModuleExplainer, PageIntro } from "@/components/ui";
 import { SubTabs } from "@/components/sub-tabs";
 import { getModuleGuidance } from "@/features/education/domain/guidance";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import { createSoaAction, createSoaSuccessorAction } from "../actions";
 
 const REVIEW_DISPLAY_LIMIT = 50;
@@ -36,6 +37,7 @@ function assessmentStateLabel(state: string) {
 
 export default async function SoaPage() {
   const { supabase, organisation, membership } = await requireAppContext();
+  const access = workspaceAccess(membership.role).section("soa");
   const [assessmentResult, registerResult, snapshotResult] = await Promise.all([
     supabase.from("assessment_sessions").select("id,title,state,revision,catalogue_version_id", { count: "exact" }).eq("organisation_id", organisation.id).order("updated_at", { ascending: false }).limit(REVIEW_DISPLAY_LIMIT),
     supabase.from("soa_registers").select("id,title,assessment_session_id,version,updated_at,soa_snapshots!soa_snapshots_register_tenant_fk(id)", { count: "exact" }).eq("organisation_id", organisation.id).order("updated_at", { ascending: false }).order("version", { ascending: false }).order("id", { ascending: false }).limit(REVIEW_DISPLAY_LIMIT),
@@ -51,8 +53,8 @@ export default async function SoaPage() {
   const activeReviewTotal = Math.max(0, registerTotal - snapshotTotal);
   const activeReviews = registers.filter((register) => !register.soa_snapshots?.length);
 
-  let assessmentChoices: AssessmentChoice[] | null = membership.role === "member" || assessments.length === 0 ? [] : null;
-  if (membership.role !== "member" && assessments.length) {
+  let assessmentChoices: AssessmentChoice[] | null = !access.canManage || assessments.length === 0 ? [] : null;
+  if (access.canManage && assessments.length) {
     const assessmentIds = assessments.map((assessment) => assessment.id);
     const catalogueIds = [...new Set(assessments.map((assessment) => assessment.catalogue_version_id))];
     const [catalogueResult, questionResult, responseResult] = await Promise.all([
@@ -90,7 +92,7 @@ export default async function SoaPage() {
       eyebrow="CONTROLS"
       title="Controls & applicability"
       body="Use current assessment context to make accountable control decisions, then preserve an immutable Statement of Applicability."
-      action={membership.role !== "member" ? <span className="soa-page-actions">
+      action={access.canManage ? <span className="soa-page-actions">
         <a className="button secondary" href="/api/app/soa/export?format=xlsx" download>Export XLSX</a>
         <a className="button secondary" href="/api/app/soa/export?format=csv" download>CSV</a>
         <Link className="button secondary" href="/app/soa/import">Import</Link>
@@ -116,7 +118,7 @@ export default async function SoaPage() {
           <small>This shows record state, not certification or control effectiveness.</small>
         </Card>
 
-        {membership.role === "member" ? <Card className="soa-start-panel">
+        {!access.canManage ? <Card className="soa-start-panel">
           <span className="eyebrow">READ-ONLY ACCESS</span><h2>Review the programme record</h2><p>You can open control reviews and finalised statements. A workspace operator must start a review or create its next version.</p>
         </Card> : assessmentChoices === null ? <Card className="soa-start-panel" role="alert">
           <span className="eyebrow">SOURCE DETAILS UNAVAILABLE</span><h2>Assessment progress could not be verified</h2><p>Starting a review is unavailable until the complete question and answer counts for these assessments can be checked.</p><Link href="/app/soa">Retry</Link>
@@ -152,7 +154,7 @@ export default async function SoaPage() {
         <Card className="soa-record-list soa-formal-list">{snapshots.length ? snapshots.map((snapshot) => <article key={snapshot.id}>
           <div className="soa-record-title"><div><small>STATEMENT OF APPLICABILITY · VERSION {snapshot.version}</small><h3>{snapshot.title}</h3></div><span className="pill green">Finalised</span></div>
           <dl><div><dt>Finalised</dt><dd><time dateTime={snapshot.finalised_at}>{formatActivity(snapshot.finalised_at)}</time></dd></div><div><dt>Source</dt><dd><Link href={`/app/assessment/${snapshot.assessment_session_id}`}>{assessments.find((assessment) => assessment.id === snapshot.assessment_session_id)?.title ?? "Source assessment"}</Link></dd></div><div><dt>State</dt><dd>Saved and immutable</dd></div></dl>
-          <div className="soa-record-actions"><Link className="button secondary" href={`/app/soa/${snapshot.soa_register_id}`}>Review finalised statement</Link>{membership.role !== "member" && <><a href={`/api/app/soa/${snapshot.id}/pdf`}>Download PDF</a><a href={`/api/app/soa/${snapshot.id}/docx`}>Download DOCX</a><form action={createSoaSuccessorAction}><input type="hidden" name="registerId" value={snapshot.soa_register_id} /><button className="button secondary">Create next version</button></form></>}</div>
+          <div className="soa-record-actions"><Link className="button secondary" href={`/app/soa/${snapshot.soa_register_id}`}>Review finalised statement</Link>{access.canManage && <><a href={`/api/app/soa/${snapshot.id}/pdf`}>Download PDF</a><a href={`/api/app/soa/${snapshot.id}/docx`}>Download DOCX</a><form action={createSoaSuccessorAction}><input type="hidden" name="registerId" value={snapshot.soa_register_id} /><button className="button secondary">Create next version</button></form></>}</div>
         </article>) : <p className="soa-list-empty">No finalised statements yet. Finalise a reviewed control review when its decisions and evidence references are ready.</p>}</Card>
         {snapshotTotal > snapshots.length && <p className="soa-list-note">Showing {snapshots.length} of {snapshotTotal} finalised statements. Open the source assessment to locate an older statement or review.</p>}
       </section>

@@ -7,6 +7,7 @@ import { requireAppContext } from "@/lib/app-context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { soaItemReviewSchema } from "@/features/soa/application/review";
 import { collectSoaFinalisationBlockers, countSoaFinalisationBlockers, loadSoaFinalisationPreflight, SOA_CATALOGUE_SIZE } from "@/features/soa/application/finalisation";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 
 export async function createAssessmentAction() {
   const { supabase, user, organisation } = await requireAppContext();
@@ -120,7 +121,7 @@ export async function reviewSoaItemAction(formData: FormData): Promise<SaveSoaDe
 
 export async function finaliseSoaAction(formData: FormData) {
   const { supabase, user, organisation, membership } = await requireAppContext();
-  if (membership.role === "member") throw new Error("Only workspace Owners and Admins can finalise a Statement of Applicability");
+  workspaceAccess(membership.role).section("soa").requireManage();
   await enforceRateLimit(`soa-finalise:${user.id}`, { limit: 5, windowMs: 60_000 });
   const requestedRegisterId = z.uuid().parse(formData.get("registerId"));
   const { data: register, error: registerError } = await supabase

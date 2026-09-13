@@ -16,13 +16,10 @@ type WorkspaceIdentity = {
 
 const TASK_DETAIL_PATH = /^\/app\/tasks\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const SOA_DETAIL_PATH = /^\/app\/soa\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 const MEMBER_APP_PATHS = new Set([
   "/app",
   "/app/tasks",
   "/app/monitoring",
-  "/app/soa",
   "/app/notifications",
   "/app/baseline",
 ]);
@@ -34,8 +31,7 @@ function normalisePath(pathname: string): string {
 
 function isMemberAppPath(pathname: string): boolean {
   return MEMBER_APP_PATHS.has(pathname)
-    || TASK_DETAIL_PATH.test(pathname)
-    || SOA_DETAIL_PATH.test(pathname);
+    || TASK_DETAIL_PATH.test(pathname);
 }
 
 export function workspaceRequestAccess(

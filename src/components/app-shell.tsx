@@ -15,6 +15,7 @@ const operatorAssessmentNavigation = workspaceAccess("owner").section("assessmen
 const operatorRiskNavigation = workspaceAccess("owner").section("risks").navigation!;
 const operatorAssetNavigation = workspaceAccess("owner").section("assets").navigation!;
 const operatorPolicyNavigation = workspaceAccess("owner").section("policies").navigation!;
+const operatorSoaNavigation = workspaceAccess("owner").section("soa").navigation!;
 
 const navGroups = [
   { label: "Work", items: [
@@ -24,7 +25,7 @@ const navGroups = [
   ] },
   { label: "Programme", items: [
     [operatorAssessmentNavigation.href, operatorAssessmentNavigation.icon, operatorAssessmentNavigation.label],
-    ["/app/soa", "file", "Controls & applicability"],
+    [operatorSoaNavigation.href, operatorSoaNavigation.icon, operatorSoaNavigation.label],
     [operatorPolicyNavigation.href, operatorPolicyNavigation.icon, operatorPolicyNavigation.label],
     [operatorAssetNavigation.href, operatorAssetNavigation.icon, operatorAssetNavigation.label],
   ] },
@@ -54,12 +55,13 @@ const drawerSnapshot = () => window.matchMedia(DRAWER_QUERY).matches;
 const memberFrameworkNavigation = workspaceAccess("member").section("frameworks").navigation!;
 const memberLeadershipNavigation = workspaceAccess("member").section("leadership-report").navigation!;
 const memberPolicyNavigation = workspaceAccess("member").section("policies").navigation!;
+const memberSoaNavigation = workspaceAccess("member").section("soa").navigation!;
 const memberNavGroups = [
   { label: null, items: [["/app", "home", "Overview"]] },
   { label: "Compliance", items: [
     ["/app/tasks?filter=assigned", "check", "Assigned tasks"],
     [memberPolicyNavigation.href, memberPolicyNavigation.icon, memberPolicyNavigation.label],
-    ["/app/soa", "file", "Controls & applicability"],
+    [memberSoaNavigation.href, memberSoaNavigation.icon, memberSoaNavigation.label],
     [memberFrameworkNavigation.href, memberFrameworkNavigation.icon, memberFrameworkNavigation.label],
   ] },
   { label: memberLeadershipNavigation.group, items: [

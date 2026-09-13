@@ -365,3 +365,82 @@ describe("Policy library workspace access", () => {
     expect(policies.canAccessPath("/app/policies")).toBe(false);
   });
 });
+
+describe("Statement of Applicability workspace access", () => {
+  const registerId = "56000000-0000-4000-8000-000000000001";
+  const snapshotId = "56000000-0000-4000-8000-000000000002";
+
+  it("keeps control reviews visible and read-only for Members", () => {
+    const access = workspaceAccess("member");
+    const soa = access.section("soa");
+
+    expect(soa).toMatchObject({
+      id: "soa",
+      href: "/app/soa",
+      label: "Controls & applicability",
+      title: "Controls & applicability",
+      icon: "file",
+      canView: true,
+      canManage: false,
+      navigation: {
+        group: "Compliance",
+        href: "/app/soa",
+        label: "Controls & applicability",
+        icon: "file",
+      },
+      manageDeniedMessage: "Only workspace Owners and Admins can finalise a Statement of Applicability",
+    });
+    expect(access.sectionForPath("/app/soa")?.canAccessPath("/app/soa")).toBe(true);
+    expect(access.sectionForPath(`/app/soa/${registerId}`)?.canAccessPath(`/app/soa/${registerId}`)).toBe(true);
+    for (const pathname of [
+      "/app/soa/import",
+      "/api/app/soa/export",
+      `/api/app/soa/${snapshotId}/pdf`,
+      `/api/app/soa/${snapshotId}/docx`,
+    ]) {
+      expect(access.sectionForPath(pathname)?.id).toBe("soa");
+      expect(access.sectionForPath(pathname)?.canAccessPath(pathname)).toBe(false);
+    }
+    expect(access.sectionForPath("/app/soa/not-a-register-id")).toBeNull();
+    expect(access.sectionForPath(`/app/soa/${registerId}/history`)).toBeNull();
+    expect(access.sectionForPath(`/api/app/soa/${snapshotId}/txt`)).toBeNull();
+    expect(() => soa.requireManage()).toThrow(
+      "Only workspace Owners and Admins can finalise a Statement of Applicability",
+    );
+  });
+
+  it.each(["owner", "admin"] as const)(
+    "keeps SoA management and Programme navigation available to %ss",
+    (role) => {
+      const access = workspaceAccess(role);
+      const soa = access.section("soa");
+
+      expect(soa).toMatchObject({
+        canView: true,
+        canManage: true,
+        navigation: {
+          group: "Programme",
+          href: "/app/soa",
+          label: "Controls & applicability",
+          icon: "file",
+        },
+      });
+      expect(access.sectionForPath("/app/soa/import")?.canAccessPath("/app/soa/import")).toBe(true);
+      expect(access.sectionForPath("/api/app/soa/export")?.canAccessPath("/api/app/soa/export")).toBe(true);
+      expect(access.sectionForPath(`/api/app/soa/${snapshotId}/pdf`)?.canAccessPath(`/api/app/soa/${snapshotId}/pdf`)).toBe(true);
+      expect(() => soa.requireManage()).not.toThrow();
+    },
+  );
+
+  it("does not grant SoA access before Workspace membership exists", () => {
+    const soa = workspaceAccess(null).section("soa");
+
+    expect(soa).toMatchObject({
+      canView: false,
+      canManage: false,
+      navigation: null,
+    });
+    expect(soa.canAccessPath("/app/soa")).toBe(false);
+    expect(soa.canAccessPath("/app/soa/import")).toBe(false);
+  });
+});

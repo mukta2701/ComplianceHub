@@ -3,6 +3,7 @@ import { PageIntro } from "@/components/ui";
 import { loadControlReview, type ControlReviewLoadResult } from "@/features/soa/application/load-control-review";
 import { SOA_CATALOGUE_SIZE } from "@/features/soa/application/finalisation";
 import { summariseSoaQueue } from "@/features/soa/application/review-queue";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import { requireAppContext } from "@/lib/app-context";
 import { finaliseSoaAction, reviewSoaItemAction } from "../../actions";
 import { SoaReviewWorkspace } from "./soa-review-workspace";
@@ -20,6 +21,7 @@ function CatalogueContext({ catalogues }: { catalogues: ControlReviewLoadResult[
 export default async function SoaReviewPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { supabase, user, organisation, membership } = await requireAppContext();
+  const access = workspaceAccess(membership.role).section("soa");
   const review = await loadControlReview(supabase, { organisationId: organisation.id, registerId: id });
   const { register, finalisation } = review;
 
@@ -44,7 +46,7 @@ export default async function SoaReviewPage({ params }: { params: Promise<{ id: 
         <CatalogueContext catalogues={review.catalogues} />
         <p><Link href={`/app/assessment/${register.sourceAssessment.id}`}>Open current source assessment</Link>. Its current answers, state and revision are not part of this saved statement.</p>
         <p>Current owners, linked work and evidence freshness are not re-evaluated here. The evidence notes below are the notes saved at finalisation.</p>
-        {membership.role !== "member" && <p><a href={`/api/app/soa/${statement.id}/pdf`}>Download saved PDF</a> · <a href={`/api/app/soa/${statement.id}/docx`}>Download saved DOCX</a></p>}
+        {access.canManage && <p><a href={`/api/app/soa/${statement.id}/pdf`}>Download saved PDF</a> · <a href={`/api/app/soa/${statement.id}/docx`}>Download saved DOCX</a></p>}
       </section>
       {review.optionalUnavailable.length > 0 && <p role="status">Unavailable labels: {review.optionalUnavailable.join(", ")}. Saved identities and decisions remain available.</p>}
       <section aria-label="Saved control decisions">
@@ -76,7 +78,7 @@ export default async function SoaReviewPage({ params }: { params: Promise<{ id: 
       eyebrow={`CONTROL REVIEW - V${register.version}`}
       title={register.title}
       body={`Work through the ${SOA_CATALOGUE_SIZE} ISO controls and record applicability, progress, ownership, rationale and evidence. Decisions remain editable until you create the formal statement.`}
-      action={canFinalise && membership.role !== "member" ? (
+      action={canFinalise && access.canManage ? (
         <form action={finaliseSoaAction} data-soa-finalise-form>
           <input type="hidden" name="registerId" value={id} />
           <button className="button primary">Finalise immutable v{register.version}</button>
@@ -99,7 +101,7 @@ export default async function SoaReviewPage({ params }: { params: Promise<{ id: 
     {review.relatedRisks.length > 0 && <section className="panel" aria-label="Related risks">
       <h2>Related risks</h2>
       <p>These links describe the assessment or register as a whole.</p>
-      <ul>{review.relatedRisks.map((risk) => <li key={`${risk.relationship}-${risk.id}`}>{membership.role === "member" ? <span>{risk.reference}: {risk.title}</span> : <Link href={`/app/risks/${risk.id}`}>{risk.reference}: {risk.title}</Link>} — {risk.relationship === "assessment" ? "Assessment" : "Register"} context, {risk.status}</li>)}</ul>
+      <ul>{review.relatedRisks.map((risk) => <li key={`${risk.relationship}-${risk.id}`}>{!access.canManage ? <span>{risk.reference}: {risk.title}</span> : <Link href={`/app/risks/${risk.id}`}>{risk.reference}: {risk.title}</Link>} — {risk.relationship === "assessment" ? "Assessment" : "Register"} context, {risk.status}</li>)}</ul>
       {(["assessment", "register"] as const).map((relationship) => {
         const list = review.riskLists[relationship];
         return list.truncated ? <p key={relationship}>Showing {list.shown} of {list.total} {relationship}-related risks (limit {list.limit}).</p> : null;
@@ -107,7 +109,7 @@ export default async function SoaReviewPage({ params }: { params: Promise<{ id: 
     </section>}
     <SoaReviewWorkspace
       aiEnabled={review.aiEnabled}
-      readOnly={membership.role === "member"}
+      readOnly={!access.canManage}
       items={review.items}
       members={review.members}
       currentUserId={user.id}
