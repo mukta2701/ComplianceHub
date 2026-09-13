@@ -1,6 +1,41 @@
 import { describe, expect, it } from "vitest";
 import { workspaceAccess } from "./workspace-access";
 
+describe("Notifications workspace access", () => {
+  it.each(["owner", "admin", "member"] as const)(
+    "keeps the personal Notifications inbox available to %ss without adding sidebar navigation",
+    (role) => {
+      const notifications = workspaceAccess(role).section("notifications");
+
+      expect(notifications).toMatchObject({
+        id: "notifications",
+        href: "/app/notifications",
+        label: "Notifications",
+        title: "Notifications",
+        icon: "bell",
+        canView: true,
+        canManage: false,
+        navigation: null,
+        manageDeniedMessage: null,
+      });
+      expect(notifications.canAccessPath("/app/notifications")).toBe(true);
+    },
+  );
+
+  it("does not grant Notifications access before Workspace membership exists", () => {
+    const notifications = workspaceAccess(null).section("notifications");
+
+    expect(notifications.canView).toBe(false);
+    expect(notifications.canManage).toBe(false);
+    expect(notifications.navigation).toBeNull();
+    expect(notifications.canAccessPath("/app/notifications")).toBe(false);
+  });
+
+  it("does not match nested Notifications routes", () => {
+    expect(workspaceAccess("member").sectionForPath("/app/notifications/extra")).toBeNull();
+  });
+});
+
 describe("Trust Center workspace access", () => {
   it.each(["owner", "admin"] as const)(
     "keeps Trust Center management and Share navigation available to %ss",

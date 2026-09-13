@@ -20,7 +20,6 @@ const MEMBER_APP_PATHS = new Set([
   "/app",
   "/app/tasks",
   "/app/monitoring",
-  "/app/notifications",
 ]);
 
 function normalisePath(pathname: string): string {

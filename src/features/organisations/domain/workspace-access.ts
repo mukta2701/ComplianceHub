@@ -1,6 +1,6 @@
 import { hasCapability, type MembershipRole, type WorkspaceCapability } from "./access";
 
-export type WorkspaceSectionId = "assets" | "assessments" | "baseline" | "frameworks" | "leadership-report" | "policies" | "risks" | "scope" | "soa" | "trust-center";
+export type WorkspaceSectionId = "assets" | "assessments" | "baseline" | "frameworks" | "leadership-report" | "notifications" | "policies" | "risks" | "scope" | "soa" | "trust-center";
 
 type WorkspaceNavigationGroup = "Compliance" | "Programme" | "Share" | "Work" | null;
 
@@ -27,7 +27,7 @@ export type WorkspaceSectionAccess = {
   canView: boolean;
   canManage: boolean;
   navigation: WorkspaceNavigationItem | null;
-  manageDeniedMessage: string;
+  manageDeniedMessage: string | null;
   canAccessPath: (pathname: string) => boolean;
   requireManage: () => void;
 };
@@ -41,8 +41,8 @@ type WorkspaceSectionPolicy = {
   paths: readonly WorkspacePathRule[];
   viewRoles: ReadonlySet<MembershipRole>;
   navigationGroups: Partial<Record<MembershipRole, WorkspaceNavigationGroup>>;
-  manageCapability: WorkspaceCapability;
-  manageDeniedMessage: string;
+  manageCapability?: WorkspaceCapability;
+  manageDeniedMessage: string | null;
 };
 
 const ASSESSMENT_DETAIL_PATH = /^\/app\/assessment\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -133,6 +133,17 @@ const sectionPolicies: Record<WorkspaceSectionId, WorkspaceSectionPolicy> = {
     manageCapability: "manage_policies",
     manageDeniedMessage: "Only workspace operators can publish leadership reports",
   },
+  notifications: {
+    id: "notifications",
+    href: "/app/notifications",
+    label: "Notifications",
+    title: "Notifications",
+    icon: "bell",
+    paths: [{ path: "/app/notifications", requirement: "view" }],
+    viewRoles: new Set(["owner", "admin", "member"]),
+    navigationGroups: {},
+    manageDeniedMessage: null,
+  },
   policies: {
     id: "policies",
     href: "/app/policies",
@@ -217,7 +228,9 @@ function sectionAccess(
   role: MembershipRole | null,
 ): WorkspaceSectionAccess {
   const canView = role !== null && policy.viewRoles.has(role);
-  const canManage = role !== null && hasCapability(role, policy.manageCapability);
+  const canManage = role !== null
+    && policy.manageCapability !== undefined
+    && hasCapability(role, policy.manageCapability);
   const navigationGroup = role === null ? undefined : policy.navigationGroups[role];
   return {
     id: policy.id,
@@ -242,7 +255,7 @@ function sectionAccess(
       return rule.requirement === "manage" ? canManage : canView;
     },
     requireManage: () => {
-      if (!canManage) throw new Error(policy.manageDeniedMessage);
+      if (!canManage) throw new Error(policy.manageDeniedMessage ?? "Workspace management access is unavailable");
     },
   };
 }

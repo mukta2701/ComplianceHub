@@ -17,6 +17,7 @@ const operatorAssetNavigation = workspaceAccess("owner").section("assets").navig
 const operatorPolicyNavigation = workspaceAccess("owner").section("policies").navigation!;
 const operatorSoaNavigation = workspaceAccess("owner").section("soa").navigation!;
 const operatorTrustCenterNavigation = workspaceAccess("owner").section("trust-center").navigation!;
+const notificationsMetadata = workspaceAccess("owner").section("notifications");
 
 const navGroups = [
   { label: "Work", items: [
@@ -76,7 +77,7 @@ const EXTRA_TITLES: Array<[string, string]> = [
   ["/app", "Dashboard"],
   ["/app/assets/import", "Import asset inventory"],
   ["/app/activity", "Audit trail"],
-  ["/app/notifications", "Notifications"],
+  [notificationsMetadata.href, notificationsMetadata.title],
   ["/app/integrations", "Connections"],
   ["/app/risks/import", "Import risk register"],
   ["/app/soa/import", "Import Statement of Applicability"],
@@ -197,7 +198,7 @@ export function AppShell({ organisationId, orgName, orgInitials, userInitials, u
         </nav>
         <div className="header-actions">
           <span className="pill neutral" aria-label="Portal access">{accessCue}</span>
-          <Link href="/app/notifications" className="notif-bell" aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"}><Icon name="bell" />{unreadCount > 0 && <span className="notif-count">{unreadCount}</span>}</Link>
+          <Link href={notificationsMetadata.href} className="notif-bell" aria-label={unreadCount > 0 ? `${notificationsMetadata.label}, ${unreadCount} unread` : notificationsMetadata.label}><Icon name={notificationsMetadata.icon} />{unreadCount > 0 && <span className="notif-count">{unreadCount}</span>}</Link>
           <span className="user-avatar">{userInitials}</span>
         </div>
       </header>
