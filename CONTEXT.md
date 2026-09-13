@@ -53,3 +53,18 @@ _Avoid_: current live state, leadership approval.
 **Dated observation**: A preserved normalized result for a resource on its recorded collection date. Later dates or changed facts produce distinct observations; an identical retry reuses one. Generic collection records dates at day precision. An observation is not human acceptance or proof of every polling attempt.
 
 **Legacy observation identity**: An older collected record whose original observation identity cannot be established. Keep its recorded facts, dates and links without inventing missing history.
+
+**Platform automation**: ComplianceHub's built-in facility for planning and performing repeatable recurring work across workspaces. It operates without a user-facing master enablement step; external work still requires an authorised connection and scope.
+_Avoid_: treating automation as a page that users turn on, or treating a provider connection as the automation engine.
+
+**Connection**: An approved relationship with an external system, including its permitted scope and current access condition. A connection makes provider work eligible for Platform automation; it does not enable or disable internal recurring administration.
+
+**Automation schedule**: A rule describing when a kind of recurring work becomes due. Internal schedules apply from workspace creation; provider schedules depend on an authorised Connection.
+
+**Automation execution**: One bounded invocation that discovers and attempts due work. Successful execution does not mean every compliance check passed.
+
+**Automation job**: One durable occurrence of bounded recurring work for one workspace and purpose. Its completion is operational history, not compliance Evidence.
+
+**Action-required automation**: A condition that automated retry cannot truthfully resolve without authorised human or external-system action, such as revoked access or missing provider permission.
+
+**Operational recovery**: Confirmation that a later execution completed the previously interrupted or failing operation. A retry request alone is not recovery.
