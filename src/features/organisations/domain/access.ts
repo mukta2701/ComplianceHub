@@ -6,6 +6,7 @@ export type WorkspaceCapability =
   | "manage_monitoring"
   | "manage_monitoring_findings"
   | "manage_baselines"
+  | "manage_scope"
   | "manage_risk_matrix"
   | "manage_assessments"
   | "manage_policies"
@@ -18,7 +19,7 @@ export type WorkspaceCapability =
 
 const capabilities: Record<MembershipRole, ReadonlySet<WorkspaceCapability>> = {
   owner: new Set([
-    "run_monitoring", "manage_monitoring", "manage_monitoring_findings", "manage_baselines", "manage_risk_matrix", "manage_assessments", "manage_policies",
+    "run_monitoring", "manage_monitoring", "manage_monitoring_findings", "manage_baselines", "manage_scope", "manage_risk_matrix", "manage_assessments", "manage_policies",
     "manage_connections", "manage_frameworks", "manage_trust_center", "manage_imports", "manage_members", "manage_owners",
   ]),
   admin: new Set([

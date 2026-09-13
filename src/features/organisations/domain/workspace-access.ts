@@ -1,6 +1,6 @@
 import { hasCapability, type MembershipRole, type WorkspaceCapability } from "./access";
 
-export type WorkspaceSectionId = "assets" | "assessments" | "baseline" | "frameworks" | "leadership-report" | "policies" | "risks" | "soa";
+export type WorkspaceSectionId = "assets" | "assessments" | "baseline" | "frameworks" | "leadership-report" | "policies" | "risks" | "scope" | "soa";
 
 type WorkspaceNavigationGroup = "Compliance" | "Programme" | "Share" | "Work" | null;
 
@@ -167,6 +167,18 @@ const sectionPolicies: Record<WorkspaceSectionId, WorkspaceSectionPolicy> = {
     navigationGroups: { owner: "Work", admin: "Work" },
     manageCapability: "manage_risk_matrix",
     manageDeniedMessage: "Only workspace operators can update risks",
+  },
+  scope: {
+    id: "scope",
+    href: "/app/scope",
+    label: "Scope & context",
+    title: "Scope & context",
+    icon: "file",
+    paths: [{ path: "/app/scope", requirement: "view" }],
+    viewRoles: new Set(["owner", "admin"]),
+    navigationGroups: {},
+    manageCapability: "manage_scope",
+    manageDeniedMessage: "Only workspace owners can update the organisation scope",
   },
   soa: {
     id: "soa",

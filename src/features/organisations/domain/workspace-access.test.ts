@@ -46,6 +46,52 @@ describe("Saved baseline workspace access", () => {
   });
 });
 
+describe("Scope and context workspace access", () => {
+  it("keeps Scope & context viewable and manageable only by an Owner", () => {
+    const access = workspaceAccess("owner");
+    const scope = access.section("scope");
+
+    expect(scope).toMatchObject({
+      id: "scope",
+      href: "/app/scope",
+      label: "Scope & context",
+      title: "Scope & context",
+      icon: "file",
+      canView: true,
+      canManage: true,
+      navigation: null,
+      manageDeniedMessage: "Only workspace owners can update the organisation scope",
+    });
+    expect(scope.canAccessPath("/app/scope")).toBe(true);
+    expect(access.sectionForPath("/app/scope/edit")).toBeNull();
+    expect(() => scope.requireManage()).not.toThrow();
+  });
+
+  it("keeps Scope & context visible but read-only for Admins", () => {
+    const scope = workspaceAccess("admin").section("scope");
+
+    expect(scope.canView).toBe(true);
+    expect(scope.canManage).toBe(false);
+    expect(scope.navigation).toBeNull();
+    expect(scope.canAccessPath("/app/scope")).toBe(true);
+    expect(() => scope.requireManage()).toThrow(
+      "Only workspace owners can update the organisation scope",
+    );
+  });
+
+  it.each(["member", null] as const)(
+    "does not grant Scope & context access to %s",
+    (role) => {
+      const scope = workspaceAccess(role).section("scope");
+
+      expect(scope.canView).toBe(false);
+      expect(scope.canManage).toBe(false);
+      expect(scope.navigation).toBeNull();
+      expect(scope.canAccessPath("/app/scope")).toBe(false);
+    },
+  );
+});
+
 describe("Framework coverage workspace access", () => {
   it("keeps Framework coverage visible and read-only for Members", () => {
     const access = workspaceAccess("member");

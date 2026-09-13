@@ -1,5 +1,6 @@
 import { ModuleExplainer, PageIntro, Pill } from "@/components/ui";
 import { getModuleGuidance } from "@/features/education/domain/guidance";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import { assessScopeProfile } from "@/features/scope/domain/scope-profile";
 import { requireAppContext } from "@/lib/app-context";
 import { saveScopeProfileAction } from "./actions";
@@ -9,7 +10,7 @@ export default async function ScopePage() {
   const { data } = await supabase.from("organisation_scope_profiles").select("scope_statement,services,locations,information_types,dependencies,exclusions,updated_at").eq("organisation_id", organisation.id).maybeSingle();
   const profile = { scopeStatement: data?.scope_statement ?? "", services: data?.services ?? "", locations: data?.locations ?? "", informationTypes: data?.information_types ?? "", dependencies: data?.dependencies ?? "", exclusions: data?.exclusions ?? "" };
   const gaps = assessScopeProfile(profile);
-  const editable = membership.role === "owner";
+  const editable = workspaceAccess(membership.role).section("scope").canManage;
   return <>
     <PageIntro eyebrow="FOUNDATION" title="Scope & context" body="Set the documented ISMS boundary that informs assessment, control applicability, risks, and audits." action={<Pill tone={gaps.length ? "amber" : "green"}>{gaps.length ? `${gaps.length} decisions needed` : "Reviewable scope"}</Pill>} />
     <ModuleExplainer guidance={getModuleGuidance("scope")} />

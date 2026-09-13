@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import { requireAppContext } from "@/lib/app-context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 
@@ -12,7 +13,7 @@ const scopeSchema = z.object({
 
 export async function saveScopeProfileAction(formData: FormData) {
   const { supabase, user, organisation, membership } = await requireAppContext();
-  if (membership.role !== "owner") throw new Error("Only workspace owners can update the organisation scope");
+  workspaceAccess(membership.role).section("scope").requireManage();
   await enforceRateLimit(`scope:${user.id}`, { limit: 20, windowMs: 60_000 });
   const parsed = scopeSchema.parse(Object.fromEntries(formData));
   const { error } = await supabase.from("organisation_scope_profiles").upsert({

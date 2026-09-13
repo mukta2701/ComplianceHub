@@ -38,6 +38,7 @@ describe("workspace portal route access", () => {
     "/app/assessment/not-an-assessment-id",
     `/app/assessment/${ASSESSMENT_ID}/edit`,
     "/app/setup",
+    "/app/scope",
     "/app/settings",
     "/app/integrations",
     "/app/tasks/new",
