@@ -3,12 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireAppContext } from "@/lib/app-context";
-import { hasCapability } from "@/features/organisations/domain/access";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 
 async function requirePolicyEvidenceManager() {
   const context = await requireAppContext();
-  if (!hasCapability(context.membership.role, "manage_policies")) {
+  if (!workspaceAccess(context.membership.role).section("policies").canManage) {
     throw new Error("Only workspace operators can manage policy evidence");
   }
   return context;

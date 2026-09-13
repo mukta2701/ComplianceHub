@@ -3,7 +3,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireAppContext } from "@/lib/app-context";
 import { POLICY_STATUS_LABEL, POLICY_STATUS_TONE, type PolicyStatus } from "@/features/policies/domain/policies";
-import { policyAcceptancePresentation, policyPortalAccess } from "@/features/policies/domain/policy-access";
+import { policyAcceptancePresentation } from "@/features/policies/domain/policy-access";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import { Card, PageIntro, Pill, Progress } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { one } from "@/lib/supabase/one";
@@ -16,13 +17,13 @@ import { PolicyAcceptanceForm, PolicyApproveForm, PolicyStatusForm } from "../po
 export default async function PolicyDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { supabase, user, membership, organisation } = await requireAppContext();
-  const access = policyPortalAccess(membership.role);
+  const access = workspaceAccess(membership.role).section("policies");
   const { data: policy, error: policyError } = await supabase.from("policies").select("id,reference,title,body,version,status,review_due,owner_id,edit_revision").eq("id", id).eq("organisation_id", organisation.id).maybeSingle();
   if (policyError) return <Card><h2>Policy unavailable</h2><p>We could not load this policy. Your records have not changed.</p><Link href="/app/policies">Back to policies</Link></Card>;
   if (!policy) notFound();
   const [acceptanceResult, memberResult, linkResult, optionResult, feedbackResult, commentResult, reviewTaskResult] = await Promise.all([
     loadPolicyRows((from, to) => supabase.from("policy_acceptances").select("user_id,accepted_version").eq("policy_id", id).eq("organisation_id", organisation.id).order("id").range(from, to)),
-    access.loadRoster
+    access.canManage
       ? loadPolicyRows((from, to) => supabase.from("memberships").select("user_id,profiles(display_name)").eq("organisation_id", organisation.id).order("user_id").range(from, to))
       : Promise.resolve({ data: [], error: null }),
     loadPolicyRows((from, to) => supabase.from("evidence_links").select("id,evidence(id,title,status)").eq("policy_id", id).eq("organisation_id", organisation.id).order("id").range(from, to)),
@@ -120,7 +121,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
       </aside>
     </div>
     <div className={styles.relatedGrid}>
-      {access.loadRoster && <Card className={styles.panel}>
+      {access.canManage && <Card className={styles.panel}>
         <h2>Acceptance roster</h2>
         <p className={styles.help}>{status === "approved" ? `Acceptance of version ${policy.version} by current workspace members.` : "Historical acceptance records. New acceptance is not open."}</p>
         {acceptanceUnavailable ? <p role="alert">The acceptance roster could not be loaded.</p> : <ul className={styles.list}>

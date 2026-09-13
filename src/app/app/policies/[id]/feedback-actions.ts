@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireAppContext } from "@/lib/app-context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
-import { hasCapability } from "@/features/organisations/domain/access";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import {
   createPolicyFeedbackSchema,
   feedbackStatusSchema,
@@ -47,7 +47,7 @@ export async function replyPolicyFeedbackAction(formData: FormData) {
 
 export async function setPolicyFeedbackStatusAction(formData: FormData) {
   const { supabase, user, organisation, membership } = await requireAppContext();
-  if (!hasCapability(membership.role, "manage_policies")) {
+  if (!workspaceAccess(membership.role).section("policies").canManage) {
     throw new Error("Only workspace operators can manage feedback");
   }
   await enforceRateLimit(`policy-feedback:${user.id}`, RATE_LIMIT);

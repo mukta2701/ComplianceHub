@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { requireAppContext } from "@/lib/app-context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { policyInputSchema } from "@/features/policies/application/policy";
-import { hasCapability } from "@/features/organisations/domain/access";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import { z } from "zod";
 
 const policyConflict = "This policy changed while you were editing it. Refresh and try again.";
@@ -18,9 +18,7 @@ function expectedPolicyState(formData: FormData) {
 }
 
 function requirePolicyManager(role: "owner" | "admin" | "member") {
-  if (!hasCapability(role, "manage_policies")) {
-    throw new Error("Only workspace operators can manage policies");
-  }
+  workspaceAccess(role).section("policies").requireManage();
 }
 
 export async function createPolicyAction(formData: FormData) {

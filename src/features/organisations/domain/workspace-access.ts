@@ -1,6 +1,6 @@
 import { hasCapability, type MembershipRole, type WorkspaceCapability } from "./access";
 
-export type WorkspaceSectionId = "assets" | "assessments" | "frameworks" | "leadership-report" | "risks";
+export type WorkspaceSectionId = "assets" | "assessments" | "frameworks" | "leadership-report" | "policies" | "risks";
 
 type WorkspaceNavigationGroup = "Compliance" | "Programme" | "Share" | "Work" | null;
 
@@ -48,6 +48,7 @@ type WorkspaceSectionPolicy = {
 const ASSESSMENT_DETAIL_PATH = /^\/app\/assessment\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ASSET_DETAIL_PATH = /^\/app\/assets\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ASSET_EDIT_PATH = /^\/app\/assets\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/edit$/i;
+const POLICY_DETAIL_PATH = /^\/app\/policies\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const RISK_DETAIL_PATH = /^\/app\/risks\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const RISK_EDIT_PATH = /^\/app\/risks\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/edit$/i;
 
@@ -117,6 +118,22 @@ const sectionPolicies: Record<WorkspaceSectionId, WorkspaceSectionPolicy> = {
     navigationGroups: { owner: "Share", admin: "Share", member: null },
     manageCapability: "manage_policies",
     manageDeniedMessage: "Only workspace operators can publish leadership reports",
+  },
+  policies: {
+    id: "policies",
+    href: "/app/policies",
+    label: "Policies",
+    title: "Policies",
+    icon: "file",
+    paths: [
+      { path: "/app/policies", requirement: "view" },
+      { path: POLICY_DETAIL_PATH, requirement: "view" },
+      { path: "/app/policies/new", requirement: "manage" },
+    ],
+    viewRoles: new Set(["owner", "admin", "member"]),
+    navigationGroups: { owner: "Programme", admin: "Programme", member: "Compliance" },
+    manageCapability: "manage_policies",
+    manageDeniedMessage: "Only workspace operators can manage policies",
   },
   risks: {
     id: "risks",

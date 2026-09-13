@@ -300,3 +300,68 @@ describe("Asset inventory workspace access", () => {
     });
   });
 });
+
+describe("Policy library workspace access", () => {
+  const policyId = "55000000-0000-4000-8000-000000000001";
+
+  it("keeps policy reading and Compliance navigation available to Members without management access", () => {
+    const access = workspaceAccess("member");
+    const policies = access.section("policies");
+
+    expect(policies).toMatchObject({
+      id: "policies",
+      href: "/app/policies",
+      label: "Policies",
+      title: "Policies",
+      icon: "file",
+      canView: true,
+      canManage: false,
+      navigation: {
+        group: "Compliance",
+        href: "/app/policies",
+        label: "Policies",
+        icon: "file",
+      },
+      manageDeniedMessage: "Only workspace operators can manage policies",
+    });
+    expect(access.sectionForPath("/app/policies")?.canAccessPath("/app/policies")).toBe(true);
+    expect(access.sectionForPath(`/app/policies/${policyId}`)?.canAccessPath(`/app/policies/${policyId}`)).toBe(true);
+    expect(access.sectionForPath("/app/policies/new")?.canAccessPath("/app/policies/new")).toBe(false);
+    expect(access.sectionForPath("/app/policies/not-a-policy-id")).toBeNull();
+    expect(access.sectionForPath(`/app/policies/${policyId}/edit`)).toBeNull();
+    expect(() => policies.requireManage()).toThrow("Only workspace operators can manage policies");
+  });
+
+  it.each(["owner", "admin"] as const)(
+    "keeps policy reading, management and Programme navigation available to %ss",
+    (role) => {
+      const access = workspaceAccess(role);
+      const policies = access.section("policies");
+
+      expect(policies).toMatchObject({
+        canView: true,
+        canManage: true,
+        navigation: {
+          group: "Programme",
+          href: "/app/policies",
+          label: "Policies",
+          icon: "file",
+        },
+      });
+      expect(access.sectionForPath(`/app/policies/${policyId}`)?.canAccessPath(`/app/policies/${policyId}`)).toBe(true);
+      expect(access.sectionForPath("/app/policies/new")?.canAccessPath("/app/policies/new")).toBe(true);
+      expect(() => policies.requireManage()).not.toThrow();
+    },
+  );
+
+  it("does not grant policy access before Workspace membership exists", () => {
+    const policies = workspaceAccess(null).section("policies");
+
+    expect(policies).toMatchObject({
+      canView: false,
+      canManage: false,
+      navigation: null,
+    });
+    expect(policies.canAccessPath("/app/policies")).toBe(false);
+  });
+});

@@ -7,11 +7,11 @@ import { POLICY_TEMPLATES, policyTemplateBySlug } from "@/features/policies/doma
 import { one } from "@/lib/supabase/one";
 import { PolicyCreateForm } from "../policy-create-form";
 import styles from "../policy-workspace.module.css";
-import { hasCapability } from "@/features/organisations/domain/access";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 
 export default async function NewPolicyPage({ searchParams }: { searchParams: Promise<{ template?: string }> }) {
   const { supabase, membership, organisation } = await requireAppContext();
-  if (!hasCapability(membership.role, "manage_policies")) notFound();
+  if (!workspaceAccess(membership.role).section("policies").canManage) notFound();
   const { template: templateSlug } = await searchParams;
   // Pre-fill is presentation only: pick a template by slug and seed the form's
   // defaultValues. The blank-form path (no/unknown slug) keeps its current empty
