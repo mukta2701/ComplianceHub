@@ -6,6 +6,7 @@ import { one } from "@/lib/supabase/one";
 import { collectIdPages,collectStringCursorPages } from "@/lib/supabase/paginate";
 import { ASSET_CLASSIFICATION_LABEL,ASSET_VALUE_LABEL,CLASSIFICATION_TONE,VALUE_TONE,type AssetClassification,type AssetValue } from "@/features/assets/domain/assets";
 import { calculateRiskScore,RISK_STATUS_LABEL,type RiskStatus } from "@/features/risks/domain/risks";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import { linkAssetRiskAction,unlinkAssetRiskAction,deleteAssetAction } from "../actions";
 import styles from "../asset-workspace.module.css";
 
@@ -15,7 +16,7 @@ type Risk={id:string;reference:string;title:string;status:string;residual_likeli
 type LinkRow={risk_id:string;risks:Risk|Risk[]|null};
 
 export default async function AssetDetailPage({params}:{params:Promise<{id:string}>}) {
-  const {id}=await params; const {supabase,organisation,membership}=await requireAppContext(); const canManage=membership.role!=="member";
+  const {id}=await params; const {supabase,organisation,membership}=await requireAppContext(); const canManage=workspaceAccess(membership.role).section("assets").canManage;
   const {data:asset,error:assetError}=await supabase.from("assets").select("id,reference,description,owner_location,owner_id,classification,value_criticality,security_controls,lifespan,last_updated,remarks,created_at,updated_at,asset_categories(name)").eq("id",id).eq("organisation_id", organisation.id).maybeSingle();
   if(assetError) throw new Error("Could not load the asset"); if(!asset) notFound();
   let linked:LinkRow[]=[]; let linkedError=false;

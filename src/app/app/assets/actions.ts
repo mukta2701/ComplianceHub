@@ -5,10 +5,11 @@ import { revalidatePath } from "next/cache";
 import { requireAppContext } from "@/lib/app-context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { assetInputSchema } from "@/features/assets/application/asset";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import { z } from "zod";
 
 function requireAssetManager(role: "owner" | "admin" | "member") {
-  if (role === "member") throw new Error("Only workspace operators can manage assets");
+  workspaceAccess(role).section("assets").requireManage();
 }
 
 function toRow(parsed: ReturnType<typeof assetInputSchema.parse>, organisationId: string) {

@@ -1,6 +1,6 @@
 import { hasCapability, type MembershipRole, type WorkspaceCapability } from "./access";
 
-export type WorkspaceSectionId = "assessments" | "frameworks" | "leadership-report" | "risks";
+export type WorkspaceSectionId = "assets" | "assessments" | "frameworks" | "leadership-report" | "risks";
 
 type WorkspaceNavigationGroup = "Compliance" | "Programme" | "Share" | "Work" | null;
 
@@ -46,6 +46,8 @@ type WorkspaceSectionPolicy = {
 };
 
 const ASSESSMENT_DETAIL_PATH = /^\/app\/assessment\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const ASSET_DETAIL_PATH = /^\/app\/assets\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const ASSET_EDIT_PATH = /^\/app\/assets\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/edit$/i;
 const RISK_DETAIL_PATH = /^\/app\/risks\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const RISK_EDIT_PATH = /^\/app\/risks\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/edit$/i;
 
@@ -54,6 +56,25 @@ function pathMatches(rule: WorkspacePathRule, pathname: string): boolean {
 }
 
 const sectionPolicies: Record<WorkspaceSectionId, WorkspaceSectionPolicy> = {
+  assets: {
+    id: "assets",
+    href: "/app/assets",
+    label: "Asset inventory",
+    title: "Asset inventory",
+    icon: "file",
+    paths: [
+      { path: "/app/assets", requirement: "view" },
+      { path: ASSET_DETAIL_PATH, requirement: "view" },
+      { path: "/app/assets/new", requirement: "manage" },
+      { path: ASSET_EDIT_PATH, requirement: "manage" },
+      { path: "/app/assets/import", requirement: "manage" },
+      { path: "/api/app/assets/export", requirement: "manage" },
+    ],
+    viewRoles: new Set(["owner", "admin"]),
+    navigationGroups: { owner: "Programme", admin: "Programme" },
+    manageCapability: "manage_imports",
+    manageDeniedMessage: "Only workspace operators can manage assets",
+  },
   assessments: {
     id: "assessments",
     href: "/app/assessment",

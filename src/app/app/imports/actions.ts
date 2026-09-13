@@ -37,7 +37,9 @@ export async function analyseImportAction(formData: FormData): Promise<AnalyseRe
   const moduleName = String(formData.get("module")) as ImportModule;
   const canManage = moduleName === "risk"
     ? workspaceAccess(membership.role).section("risks").canManage
-    : hasCapability(membership.role, "manage_imports");
+    : moduleName === "asset"
+      ? workspaceAccess(membership.role).section("assets").canManage
+      : hasCapability(membership.role, "manage_imports");
   if (!canManage) {
     return { error: "You do not have permission to manage imports." };
   }
@@ -182,7 +184,9 @@ export async function runImportAction(input: RunImportInput): Promise<ImportRunR
   const { supabase, user, organisation, membership } = await requireAppContext();
   const canManage = input.module === "risk"
     ? workspaceAccess(membership.role).section("risks").canManage
-    : hasCapability(membership.role, "manage_imports");
+    : input.module === "asset"
+      ? workspaceAccess(membership.role).section("assets").canManage
+      : hasCapability(membership.role, "manage_imports");
   if (!canManage) {
     throw new Error("You do not have permission to manage imports.");
   }

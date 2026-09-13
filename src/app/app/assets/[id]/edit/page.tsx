@@ -4,11 +4,12 @@ import { requireAppContext } from "@/lib/app-context";
 import { Card,PageIntro } from "@/components/ui";
 import { one } from "@/lib/supabase/one";
 import { AssetForm } from "../../asset-form";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import styles from "../../../risks/risk-form.module.css";
 
 export default async function EditAssetPage({params}:{params:Promise<{id:string}>}) {
   const {id}=await params; const {supabase,organisation,membership}=await requireAppContext();
-  if (membership.role === "member") redirect(`/app/assets/${id}`);
+  if (!workspaceAccess(membership.role).section("assets").canManage) redirect(`/app/assets/${id}`);
   const {data:asset,error}=await supabase.from("assets").select("id,reference,description,owner_location,owner_id,classification,value_criticality,category_id,security_controls,lifespan,last_updated,remarks,updated_at").eq("id",id).eq("organisation_id", organisation.id).maybeSingle();
   if (error) throw new Error("Could not load the asset"); if (!asset) notFound();
   const [categoriesResult,membersResult,selectedCategoryResult,selectedOwnerResult]=await Promise.all([

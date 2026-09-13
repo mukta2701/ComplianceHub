@@ -231,3 +231,72 @@ describe("Risk register workspace access", () => {
     });
   });
 });
+
+describe("Asset inventory workspace access", () => {
+  const assetId = "54000000-0000-4000-8000-000000000001";
+
+  it("keeps the Asset inventory and all of its routes unavailable to Members", () => {
+    const access = workspaceAccess("member");
+    const assets = access.section("assets");
+
+    expect(assets).toMatchObject({
+      id: "assets",
+      href: "/app/assets",
+      label: "Asset inventory",
+      title: "Asset inventory",
+      icon: "file",
+      canView: false,
+      canManage: false,
+      navigation: null,
+      manageDeniedMessage: "Only workspace operators can manage assets",
+    });
+    for (const pathname of [
+      "/app/assets",
+      `/app/assets/${assetId}`,
+      "/app/assets/new",
+      `/app/assets/${assetId}/edit`,
+      "/app/assets/import",
+      "/api/app/assets/export",
+    ]) {
+      expect(access.sectionForPath(pathname)?.id).toBe("assets");
+      expect(access.sectionForPath(pathname)?.canAccessPath(pathname)).toBe(false);
+    }
+    expect(access.sectionForPath("/app/assets/not-an-asset-id")).toBeNull();
+    expect(access.sectionForPath(`/app/assets/${assetId}/history`)).toBeNull();
+    expect(access.sectionForPath("/api/app/assets/export-extra")).toBeNull();
+    expect(() => assets.requireManage()).toThrow("Only workspace operators can manage assets");
+  });
+
+  it.each(["owner", "admin"] as const)(
+    "keeps Asset-inventory access, management and Programme navigation available to %ss",
+    (role) => {
+      const access = workspaceAccess(role);
+      const assets = access.section("assets");
+
+      expect(assets).toMatchObject({
+        canView: true,
+        canManage: true,
+        navigation: {
+          group: "Programme",
+          href: "/app/assets",
+          label: "Asset inventory",
+          icon: "file",
+        },
+      });
+      expect(access.sectionForPath(`/app/assets/${assetId}`)?.canAccessPath(`/app/assets/${assetId}`)).toBe(true);
+      expect(access.sectionForPath(`/app/assets/${assetId}/edit`)?.canAccessPath(`/app/assets/${assetId}/edit`)).toBe(true);
+      expect(access.sectionForPath("/api/app/assets/export")?.canAccessPath("/api/app/assets/export")).toBe(true);
+      expect(() => assets.requireManage()).not.toThrow();
+    },
+  );
+
+  it("does not grant Asset-inventory access before Workspace membership exists", () => {
+    const assets = workspaceAccess(null).section("assets");
+
+    expect(assets).toMatchObject({
+      canView: false,
+      canManage: false,
+      navigation: null,
+    });
+  });
+});

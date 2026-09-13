@@ -6,13 +6,14 @@ import { SubTabs } from "@/components/sub-tabs";
 import { one } from "@/lib/supabase/one";
 import { deleteAssetAction } from "./actions";
 import { ASSET_CLASSIFICATION_LABEL, ASSET_VALUE_LABEL, CLASSIFICATION_TONE, VALUE_TONE, type AssetClassification, type AssetValue } from "@/features/assets/domain/assets";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import styles from "./asset-workspace.module.css";
 
 type AssetRow = { id:string;reference:string;description:string;owner_location:string;owner_id:string|null;classification:AssetClassification;value_criticality:AssetValue;asset_categories:{name:string}|{name:string}[]|null };
 
 export default async function AssetsPage() {
   const { supabase, organisation, membership } = await requireAppContext();
-  const canManage = membership.role !== "member";
+  const canManage = workspaceAccess(membership.role).section("assets").canManage;
   const [assetsResult, highResult, sensitiveResult, unassignedResult, linksResult, membersResult] = await Promise.all([
     supabase.from("assets").select("id,reference,description,owner_location,owner_id,classification,value_criticality,asset_categories(name)", { count:"exact" }).eq("organisation_id", organisation.id).order("updated_at", { ascending:false }).limit(500),
     supabase.from("assets").select("id", { count:"exact",head:true }).eq("organisation_id", organisation.id).eq("value_criticality", "high"),

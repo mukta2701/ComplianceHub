@@ -13,6 +13,7 @@ import styles from "./app-shell.module.css";
 const operatorLeadershipNavigation = workspaceAccess("owner").section("leadership-report").navigation!;
 const operatorAssessmentNavigation = workspaceAccess("owner").section("assessments").navigation!;
 const operatorRiskNavigation = workspaceAccess("owner").section("risks").navigation!;
+const operatorAssetNavigation = workspaceAccess("owner").section("assets").navigation!;
 
 const navGroups = [
   { label: "Work", items: [
@@ -24,7 +25,7 @@ const navGroups = [
     [operatorAssessmentNavigation.href, operatorAssessmentNavigation.icon, operatorAssessmentNavigation.label],
     ["/app/soa", "file", "Controls & applicability"],
     ["/app/policies", "file", "Policies"],
-    ["/app/assets", "file", "Asset inventory"],
+    [operatorAssetNavigation.href, operatorAssetNavigation.icon, operatorAssetNavigation.label],
   ] },
   { label: "Oversight", items: [
     ["/app/monitoring", "activity", "Monitoring"],
@@ -69,7 +70,6 @@ const memberNavGroups = [
 const EXTRA_TITLES: Array<[string, string]> = [
   ["/app", "Dashboard"],
   ["/app/assets/import", "Import asset inventory"],
-  ["/app/assets", "Asset inventory"],
   ["/app/activity", "Audit trail"],
   ["/app/notifications", "Notifications"],
   ["/app/integrations", "Connections"],
