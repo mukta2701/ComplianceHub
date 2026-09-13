@@ -1,6 +1,50 @@
 import { describe, expect, it } from "vitest";
 import { workspaceAccess } from "./workspace-access";
 
+describe("Overview workspace access", () => {
+  it.each(["owner", "admin"] as const)("keeps the operator Dashboard presentation for %ss", (role) => {
+    const overview = workspaceAccess(role).section("overview");
+
+    expect(overview).toMatchObject({
+      id: "overview",
+      href: "/app",
+      label: "Dashboard",
+      title: "Dashboard",
+      icon: "home",
+      presentation: "operator",
+      canView: true,
+      canManage: false,
+      navigation: { group: null, href: "/app", label: "Dashboard", icon: "home" },
+    });
+    expect(overview.canAccessPath("/app")).toBe(true);
+  });
+
+  it("keeps the restricted Member Overview presentation", () => {
+    const overview = workspaceAccess("member").section("overview");
+
+    expect(overview).toMatchObject({
+      label: "Overview",
+      title: "Overview",
+      presentation: "member",
+      canView: true,
+      canManage: false,
+      navigation: { group: null, href: "/app", label: "Overview", icon: "home" },
+    });
+  });
+
+  it("denies no-membership access and does not match nested routes", () => {
+    const access = workspaceAccess(null);
+    const overview = access.section("overview");
+
+    expect(overview.canView).toBe(false);
+    expect(overview.canManage).toBe(false);
+    expect(overview.presentation).toBeNull();
+    expect(overview.navigation).toBeNull();
+    expect(overview.canAccessPath("/app")).toBe(false);
+    expect(access.sectionForPath("/app/extra")).toBeNull();
+  });
+});
+
 describe("Notifications workspace access", () => {
   it.each(["owner", "admin", "member"] as const)(
     "keeps the personal Notifications inbox available to %ss without adding sidebar navigation",

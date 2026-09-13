@@ -18,6 +18,7 @@ const operatorPolicyNavigation = workspaceAccess("owner").section("policies").na
 const operatorSoaNavigation = workspaceAccess("owner").section("soa").navigation!;
 const operatorTrustCenterNavigation = workspaceAccess("owner").section("trust-center").navigation!;
 const notificationsMetadata = workspaceAccess("owner").section("notifications");
+const operatorOverviewNavigation = workspaceAccess("owner").section("overview").navigation!;
 
 const navGroups = [
   { label: "Work", items: [
@@ -58,8 +59,9 @@ const memberFrameworkNavigation = workspaceAccess("member").section("frameworks"
 const memberLeadershipNavigation = workspaceAccess("member").section("leadership-report").navigation!;
 const memberPolicyNavigation = workspaceAccess("member").section("policies").navigation!;
 const memberSoaNavigation = workspaceAccess("member").section("soa").navigation!;
+const memberOverviewNavigation = workspaceAccess("member").section("overview").navigation!;
 const memberNavGroups = [
-  { label: null, items: [["/app", "home", "Overview"]] },
+  { label: memberOverviewNavigation.group, items: [[memberOverviewNavigation.href, memberOverviewNavigation.icon, memberOverviewNavigation.label]] },
   { label: "Compliance", items: [
     ["/app/tasks?filter=assigned", "check", "Assigned tasks"],
     [memberPolicyNavigation.href, memberPolicyNavigation.icon, memberPolicyNavigation.label],
@@ -74,7 +76,6 @@ const memberNavGroups = [
 
 // Routes not in the sidebar still need a header title.
 const EXTRA_TITLES: Array<[string, string]> = [
-  ["/app", "Dashboard"],
   ["/app/assets/import", "Import asset inventory"],
   ["/app/activity", "Audit trail"],
   [notificationsMetadata.href, notificationsMetadata.title],
@@ -137,11 +138,12 @@ export function AppShell({ organisationId, orgName, orgInitials, userInitials, u
     document.addEventListener("keydown", keydown);
     return () => { cancelAnimationFrame(focusFrame); document.body.style.overflow = previousOverflow; document.removeEventListener("keydown", keydown); };
   }, [drawerOpen, closeNavigation]);
-  const isMember = role === "member";
-  const isOperator = role === "owner" || role === "admin";
+  const overviewAccess = workspaceAccess(role).section("overview");
+  const isMember = overviewAccess.presentation === "member";
+  const isOperator = overviewAccess.presentation === "operator";
   const frameworkAccess = workspaceAccess(role).section("frameworks");
-  const title = isMember && path === "/app"
-    ? "Overview"
+  const title = isActive(path, overviewAccess.href)
+    ? overviewAccess.title
     : isActive(path, frameworkAccess.href)
       ? frameworkAccess.title
       : TITLE_ROUTES.find(([href]) => isActive(path, href))?.[1] ?? "ComplianceHub";
@@ -170,8 +172,8 @@ export function AppShell({ organisationId, orgName, orgInitials, userInitials, u
       </nav>}
       {isOperator && <nav aria-label="Workspace">
         <div className="nav-group">
-          <Link ref={firstNav} href="/app" className={isActive(path, "/app") ? "active" : ""} aria-current={isActive(path, "/app") ? "page" : undefined} onClick={() => setOpen(false)}>
-            <Icon name="home" />Dashboard
+          <Link ref={firstNav} href={operatorOverviewNavigation.href} className={isActive(path, operatorOverviewNavigation.href) ? "active" : ""} aria-current={isActive(path, operatorOverviewNavigation.href) ? "page" : undefined} onClick={() => setOpen(false)}>
+            <Icon name={operatorOverviewNavigation.icon} />{operatorOverviewNavigation.label}
           </Link>
         </div>
         {navGroups.map((group) => (

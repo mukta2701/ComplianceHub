@@ -22,6 +22,7 @@ import { Icon } from "@/components/icons";
 import { acceptCalendarSeedAction } from "./tasks/actions";
 import { loadMemberOverview } from "@/features/dashboard/application/load-member-overview";
 import { MemberOverview } from "@/features/dashboard/components/member-overview";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 
 const SOURCE_LABEL: Record<string, string> = {
   gap: "From assessment gap",
@@ -63,7 +64,8 @@ function toneForAction(action: PrioritisedAction): StatusTone {
 
 export default async function AppHome() {
   const { supabase, organisation, membership } = await requireAppContext();
-  if (membership.role === "member") {
+  const overviewAccess = workspaceAccess(membership.role).section("overview");
+  if (overviewAccess.presentation === "member") {
     const overview = await loadMemberOverview(supabase, {
       organisationId: organisation.id,
       organisationName: organisation.name,

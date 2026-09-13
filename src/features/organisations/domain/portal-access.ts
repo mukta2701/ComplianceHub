@@ -17,7 +17,6 @@ type WorkspaceIdentity = {
 const TASK_DETAIL_PATH = /^\/app\/tasks\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const MEMBER_APP_PATHS = new Set([
-  "/app",
   "/app/tasks",
   "/app/monitoring",
 ]);

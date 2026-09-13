@@ -1,6 +1,8 @@
 import { hasCapability, type MembershipRole, type WorkspaceCapability } from "./access";
 
-export type WorkspaceSectionId = "assets" | "assessments" | "baseline" | "frameworks" | "leadership-report" | "notifications" | "policies" | "risks" | "scope" | "soa" | "trust-center";
+export type WorkspaceSectionId = "assets" | "assessments" | "baseline" | "frameworks" | "leadership-report" | "notifications" | "overview" | "policies" | "risks" | "scope" | "soa" | "trust-center";
+
+export type WorkspaceSectionPresentation = "member" | "operator";
 
 type WorkspaceNavigationGroup = "Compliance" | "Programme" | "Share" | "Work" | null;
 
@@ -27,6 +29,7 @@ export type WorkspaceSectionAccess = {
   canView: boolean;
   canManage: boolean;
   navigation: WorkspaceNavigationItem | null;
+  presentation: WorkspaceSectionPresentation | null;
   manageDeniedMessage: string | null;
   canAccessPath: (pathname: string) => boolean;
   requireManage: () => void;
@@ -41,6 +44,11 @@ type WorkspaceSectionPolicy = {
   paths: readonly WorkspacePathRule[];
   viewRoles: ReadonlySet<MembershipRole>;
   navigationGroups: Partial<Record<MembershipRole, WorkspaceNavigationGroup>>;
+  rolePresentation?: Partial<Record<MembershipRole, {
+    label: string;
+    title: string;
+    presentation: WorkspaceSectionPresentation;
+  }>>;
   manageCapability?: WorkspaceCapability;
   manageDeniedMessage: string | null;
 };
@@ -144,6 +152,22 @@ const sectionPolicies: Record<WorkspaceSectionId, WorkspaceSectionPolicy> = {
     navigationGroups: {},
     manageDeniedMessage: null,
   },
+  overview: {
+    id: "overview",
+    href: "/app",
+    label: "Dashboard",
+    title: "Dashboard",
+    icon: "home",
+    paths: [{ path: "/app", requirement: "view" }],
+    viewRoles: new Set(["owner", "admin", "member"]),
+    navigationGroups: { owner: null, admin: null, member: null },
+    rolePresentation: {
+      owner: { label: "Dashboard", title: "Dashboard", presentation: "operator" },
+      admin: { label: "Dashboard", title: "Dashboard", presentation: "operator" },
+      member: { label: "Overview", title: "Overview", presentation: "member" },
+    },
+    manageDeniedMessage: null,
+  },
   policies: {
     id: "policies",
     href: "/app/policies",
@@ -232,11 +256,14 @@ function sectionAccess(
     && policy.manageCapability !== undefined
     && hasCapability(role, policy.manageCapability);
   const navigationGroup = role === null ? undefined : policy.navigationGroups[role];
+  const rolePresentation = role === null ? undefined : policy.rolePresentation?.[role];
+  const label = rolePresentation?.label ?? policy.label;
+  const title = rolePresentation?.title ?? policy.title;
   return {
     id: policy.id,
     href: policy.href,
-    label: policy.label,
-    title: policy.title,
+    label,
+    title,
     icon: policy.icon,
     canView,
     canManage,
@@ -244,10 +271,11 @@ function sectionAccess(
       ? {
           group: navigationGroup,
           href: policy.href,
-          label: policy.label,
+          label,
           icon: policy.icon,
         }
       : null,
+    presentation: rolePresentation?.presentation ?? null,
     manageDeniedMessage: policy.manageDeniedMessage,
     canAccessPath: (pathname) => {
       const rule = policy.paths.find((candidate) => pathMatches(candidate, pathname));
