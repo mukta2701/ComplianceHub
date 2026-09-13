@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-05
 **Status:** Draft for founder review
-**Parent roadmap:** `2026-07-05-product-roadmap-v3.md` §Phase B (approved, phase ordering B → C → D)
+**Historical context:** This document records the already-delivered Phase B design. Its former parent roadmap has been removed from the active tree. Future work follows the [trusted compliance platform roadmap](2026-09-13-trusted-compliance-platform-roadmap.md).
 **Ground truth:** `.superpowers/research/iso-toolkit-structures.md` (structural digest of the six toolkit workbooks), `.superpowers/research/isms-reference-features.md`
 **Binding architecture principles:** `2026-07-02-compliancehub-v2-design.md` §3, §3a, §10 (RLS + attack tests on every tenant table, tenant-validation + audit triggers, domain-first testing, e2e + axe gates, en-GB, original content — no toolkit text copied verbatim).
 

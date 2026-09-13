@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-06
 **Status:** Draft for founder review
-**Parent roadmap:** `2026-07-05-product-roadmap-v3.md` §Phase C (approved, order B → C → D).
+**Historical context:** This document records the already-delivered Phase C design. Its former parent roadmap has been removed from the active tree. Future work follows the [trusted compliance platform roadmap](2026-09-13-trusted-compliance-platform-roadmap.md).
 **Ground truth:** `.superpowers/research/iso-toolkit-structures.md` §4 (Internal Audit Checklist), §6 (Management Review / Performance Measurement), and the Internal Audit Plan .docx methodology summary.
 **Binding:** v2 §10 — RLS + pgTAP attack tests (all 4 cross-tenant verbs) on every new tenant table; tenant-validation + audit triggers; domain-first testing; e2e + axe (zero violations); en-GB; ORIGINAL content (no toolkit text verbatim). Presentation matches the Phase A design system (fragments, single h1, `PageIntro`/`Card`/`Pill`/`Stat`). Findings/corrective actions reuse the existing tasks engine — no parallel task machinery.
 

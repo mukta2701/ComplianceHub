@@ -421,7 +421,7 @@ Conversation context reviewed through Codex task history:
 
 Selected local references used in this review:
 
-- [Architecture](../../architecture.md), [release status and saved evidence](../../release-checklist.md), [roadmap v3](2026-07-05-product-roadmap-v3.md), [approved company-wide MCP design](2026-09-03-phase-3-company-wide-mcp-assistant-design.md).
+- [Architecture](../../architecture.md), [release status and saved evidence](../../release-checklist.md), [current product requirements](2026-09-13-trusted-compliance-platform-prd.md), and [current five-milestone roadmap](2026-09-13-trusted-compliance-platform-roadmap.md).
 - [Current roles](../../../src/features/organisations/domain/access.ts), [access matrix](../../access-control-matrix.md), [older persona notes](../../user-personas.md).
 - [Onboarding form](../../../src/app/app/onboarding/page.tsx), [checklist](../../../src/features/onboarding/domain/checklist.ts), [scope fields](../../../src/features/scope/domain/scope-profile.ts).
 - [Existing baseline proposal logic](../../../src/features/automation/domain/baseline.ts), [automation actions](../../../src/app/app/automation/actions.ts), [integration job interface](../../../src/features/integrations/application/sync-jobs.ts), [daily sweep route](../../../src/app/api/cron/daily/route.ts).
