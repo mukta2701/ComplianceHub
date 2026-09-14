@@ -400,7 +400,8 @@ test("a treatment plan spawns an owned, dated task", async ({ page }, testInfo) 
   // Open its detail page and add a treatment plan that spawns a task.
   await page.getByRole("link", { name: "Unencrypted laptops", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Treatment plans" })).toBeVisible();
-  await page.getByLabel("Reference", { exact: true }).fill("RTP-001");
+  await page.getByText("Add a treatment plan", { exact: true }).click();
+  await expect(page.getByLabel("Reference", { exact: true })).toHaveValue("RTP-001");
   await page.locator("select[name=assignedLeadId]").selectOption({ index: 1 });
   await page.getByLabel("Target completion").fill("2026-12-31");
   await page.getByLabel(/create an owned, dated task/).check();
@@ -468,7 +469,7 @@ test("an audit runs from plan through checklist to a corrective-action task", as
   expect(await checklistRows.count(), "re-running must not duplicate rows").toBe(populatedCount);
 
   // Set that row's result to Non-compliant and save.
-  await expect(page.getByRole("cell", { name: "Are leavers de-provisioned within 24 hours?", exact: true })).toBeVisible();
+  await expect(checklistRows.getByText("Are leavers de-provisioned within 24 hours?", { exact: true }).first()).toBeVisible();
   const leaverRow = checklistRows.filter({ hasText: "Are leavers de-provisioned within 24 hours?" });
   await leaverRow.getByLabel("Result for Are leavers de-provisioned within 24 hours?").selectOption("non_compliant");
   await leaverRow.getByRole("button", { name: "Save review", exact: true }).click();
@@ -731,10 +732,10 @@ test("a SoA workbook import updates a matched control in the selected register",
     organisationPrefix: "SoA Import Workspace",
   });
 
-  // Seed an assessment session and generate a SoA draft so there is a real register + control to update.
+  // Seed an assessment session and start a control review so there is a real register + control to update.
   await createAssessmentSession(page);
   const registerUrl = await createControlReview(page);
-  await expect(page.getByRole("heading", { name: "Statement of Applicability", level: 1 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Statement of Applicability", level: 2 })).toBeVisible();
 
   const firstHeading = await page.locator(".soa-detail-heading h2").textContent();
   const code = (firstHeading ?? "").split(" ")[0].trim();
@@ -800,7 +801,7 @@ test("the SoA review workspace supports focused review, persistence, accessibili
     await page.getByRole("region", { name: "SoA review queue" }).getByRole("button", { name: /^Review / }).nth(0).click();
   }
   await expect(page.getByRole("textbox", { name: "Rationale" })).toHaveValue("The owner reviewed this control in the live workspace.");
-  await expect(page.getByRole("link", { name: /Review \d+ attention items/ })).toHaveAttribute("href", "#soa-review-blockers");
+  await expect(page.getByRole("link", { name: "Review attention filters" })).toHaveAttribute("href", "#soa-review-blockers");
 
   const axe = await new AxeBuilder({ page }).analyze();
   expect(axe.violations).toEqual([]);
@@ -817,9 +818,9 @@ test("every register can be downloaded as an XLSX export", async ({ page }, test
   // Seed an assessment session so the assessment export has a session to default to.
   await createAssessmentSession(page);
 
-  // Generate an SoA draft from that assessment so the SoA export finds a register.
+  // Start a control review from that assessment so the SoA export finds a register.
   await createControlReview(page);
-  await expect(page.getByRole("heading", { name: "Statement of Applicability", level: 1 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Statement of Applicability", level: 2 })).toBeVisible();
 
   for (const path of ["/api/app/risks/export?format=xlsx", "/api/app/soa/export?format=xlsx", "/api/app/assets/export?format=xlsx", "/api/app/tasks/export?format=xlsx", "/api/app/evidence/export?format=xlsx", "/api/app/assessment/export?format=xlsx"]) {
     const res = await page.request.get(path);
@@ -965,7 +966,8 @@ test("a policy is authored, approved, accepted, and re-accepted after a material
   await page.getByText("Edit policy", { exact: true }).click();
   await page.getByLabel("Policy content").fill("Access to systems is granted on least privilege and reviewed quarterly.");
   await page.getByRole("button", { name: "Save changes" }).click();
-
+  await expect(page.getByRole("status")).toHaveText("Policy changes saved.");
+  await page.reload();
   await expect(page.getByText("POLICY POL-001 · v2")).toBeVisible();
   await expect(page.getByText("Re-accept (accepted v1)")).toBeVisible();
 
@@ -1049,7 +1051,8 @@ test("a task is pushed to a sandbox tracker, polled to In Progress, then the con
   //    organisation settings and the focused provider catalogue.
   await page.goto("/app/settings");
   const workspaceNavigation = page.getByRole("navigation", { name: "Workspace" });
-  await expect(workspaceNavigation.getByRole("link", { name: "Settings" })).toHaveAttribute("aria-current", "page");
+  const settingsNavLink = workspaceNavigation.getByRole("link", { name: "Settings", includeHidden: true });
+  await expect(settingsNavLink).toHaveAttribute("aria-current", "page");
   await expect(workspaceNavigation.getByRole("link", { name: "Connections" })).toHaveCount(0);
   if (testInfo.project.name === "mobile") {
     const appHeader = page.getByRole("banner");
@@ -1058,9 +1061,8 @@ test("a task is pushed to a sandbox tracker, polled to In Progress, then the con
     await openNavigation.click();
     const closeNavigation = appHeader.getByRole("button", { name: "Close navigation" });
     await expect(closeNavigation).toHaveAttribute("aria-expanded", "true");
-    const visibleSettingsLink = workspaceNavigation.getByRole("link", { name: "Settings" });
-    await expect(visibleSettingsLink).toBeVisible();
-    await visibleSettingsLink.click();
+    await expect(settingsNavLink).toBeVisible();
+    await settingsNavLink.click();
     await expect(openNavigation).toHaveAttribute("aria-expanded", "false");
   }
   const settingsTabs = page.getByRole("navigation", { name: "Section" });
@@ -1068,7 +1070,7 @@ test("a task is pushed to a sandbox tracker, polled to In Progress, then the con
   await settingsTabs.getByRole("link", { name: "Connections" }).click();
   await page.waitForURL(/\/app\/integrations$/);
   await expect(settingsTabs.getByRole("link", { name: "Connections" })).toHaveAttribute("aria-current", "page");
-  await expect(workspaceNavigation.getByRole("link", { name: "Settings" })).toHaveAttribute("aria-current", "page");
+  await expect(settingsNavLink).toHaveAttribute("aria-current", "page");
 
   // This deterministic local scenario uses the development-only sample-data
   // forms; provider prompts remain untouched.
