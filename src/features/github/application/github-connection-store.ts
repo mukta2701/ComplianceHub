@@ -10,14 +10,17 @@ import { hasExactReadPermissions, READ_PERMISSIONS } from "./github-app-auth";
 import type { UserInstallationRepository } from "./github-user-oauth";
 
 type QueryResult = { data: unknown; error: unknown };
-type QueryBuilder = PromiseLike<QueryResult> & {
+type CancellableQueryResult = PromiseLike<QueryResult> & {
+  abortSignal(signal: AbortSignal): CancellableQueryResult;
+};
+type QueryBuilder = CancellableQueryResult & {
   eq(column: string, value: unknown): QueryBuilder;
   order(column: string, options: { ascending: boolean }): QueryBuilder;
   limit(count: number): QueryBuilder;
 };
 type SupabaseServiceClient = {
   from(table: string): { select(columns: string): QueryBuilder };
-  rpc(name: string, args: Record<string, unknown>): PromiseLike<QueryResult>;
+  rpc(name: string, args: Record<string, unknown>): CancellableQueryResult;
 };
 
 export type GitHubConnectionReconciliationOutcome =
@@ -167,6 +170,7 @@ const claimInputSchema = z.object({
   workerId: uuid,
   limit: z.number().int().min(1).max(100),
   now: timestamp,
+  signal: z.instanceof(AbortSignal).optional(),
 }).strict();
 const incidentTransitionSchema = z.enum(["none", "opened", "remained_open", "recovered"]);
 
@@ -176,6 +180,10 @@ function failure(): Error {
 
 function oneRow(value: unknown): unknown {
   return Array.isArray(value) && value.length === 1 ? value[0] : undefined;
+}
+
+function withSignal<T extends CancellableQueryResult>(query: T, signal?: AbortSignal): T {
+  return (signal ? query.abortSignal(signal) : query) as T;
 }
 
 function validateCanonicalSnapshot(
@@ -199,10 +207,16 @@ function validateCanonicalSnapshot(
 }
 
 export function buildGitHubConnectionStore(serviceInput: unknown): {
-  claimDue(input: { workerId: string; limit: number; now: string }): Promise<ClaimedGitHubConnectionReconciliation[]>;
+  claimDue(input: {
+    workerId: string;
+    limit: number;
+    now: string;
+    signal?: AbortSignal;
+  }): Promise<ClaimedGitHubConnectionReconciliation[]>;
   finalize(
     claim: ClaimedGitHubConnectionReconciliation,
     finalization: GitHubConnectionFinalization,
+    signal?: AbortSignal,
   ): Promise<GitHubConnectionIncidentTransition>;
 } {
   const service = serviceInput as SupabaseServiceClient;
@@ -210,38 +224,34 @@ export function buildGitHubConnectionStore(serviceInput: unknown): {
     async claimDue(input) {
       try {
         const parsedInput = claimInputSchema.parse(input);
-        const { data, error } = await service.rpc("claim_due_github_connection_reconciliations_server", {
+        const { data, error } = await withSignal(service.rpc("claim_due_github_connection_reconciliations_server", {
           target_worker_id: parsedInput.workerId,
           target_limit: parsedInput.limit,
           target_now: parsedInput.now,
-        });
+        }), parsedInput.signal);
         if (error || !Array.isArray(data)) throw failure();
         const runs = data.map((value) => runRowSchema.parse(value));
         const claims: ClaimedGitHubConnectionReconciliation[] = [];
         for (const run of runs) {
-          const installationResponse = await service
+          const installationResponse = await withSignal(service
             .from("github_installations")
             .select("id,organisation_id,provider_installation_id,account_id,account_login,account_type,repository_selection,status,permissions,permissions_ok,health,consecutive_reconciliation_failures,reconciliation_version")
             .eq("id", run.installation_id)
             .eq("organisation_id", run.organisation_id)
-            .limit(2);
+            .limit(2), parsedInput.signal);
           if (installationResponse.error) throw failure();
           const installation = installationRowSchema.parse(oneRow(installationResponse.data));
           if (installation.id !== run.installation_id || installation.organisation_id !== run.organisation_id) throw failure();
-          const activeAndPermissionValid = installation.status === "active" && installation.permissions_ok;
-          if (
-            run.reconciliation_version > installation.reconciliation_version
-            || (!activeAndPermissionValid && run.reconciliation_version !== installation.reconciliation_version)
-          ) throw failure();
+          if (run.reconciliation_version > installation.reconciliation_version) throw failure();
 
-          const repositoryResponse = await service
+          const repositoryResponse = await withSignal(service
             .from("github_repositories")
             .select("id,organisation_id,installation_id,provider_repository_id,owner_login,name,full_name,selected")
             .eq("organisation_id", run.organisation_id)
             .eq("installation_id", run.installation_id)
             .eq("selected", true)
             .order("provider_repository_id", { ascending: true })
-            .limit(10_001);
+            .limit(10_001), parsedInput.signal);
           if (repositoryResponse.error || !Array.isArray(repositoryResponse.data)) throw failure();
           const repositories = repositoryResponse.data.map((value) => selectedRepositoryRowSchema.parse(value));
           if (repositories.length > 10_000) throw failure();
@@ -284,7 +294,7 @@ export function buildGitHubConnectionStore(serviceInput: unknown): {
         throw failure();
       }
     },
-    async finalize(claim, finalization) {
+    async finalize(claim, finalization, signal) {
       try {
         const parsedClaim = z.object({
           runId: uuid,
@@ -295,14 +305,14 @@ export function buildGitHubConnectionStore(serviceInput: unknown): {
         }).passthrough().parse(claim);
         const parsedFinalization = finalizationSchema.parse(finalization);
         validateCanonicalSnapshot(parsedFinalization, parsedClaim.account.login);
-        const { data, error } = await service.rpc("finalize_github_connection_reconciliation_server", {
+        const { data, error } = await withSignal(service.rpc("finalize_github_connection_reconciliation_server", {
           target_run_id: parsedClaim.runId,
           target_worker_id: parsedClaim.workerId,
           target_outcome: parsedFinalization.outcome,
           target_diagnostic_code: parsedFinalization.diagnostic,
           target_next_attempt_at: parsedFinalization.nextAttemptAt,
           target_repository_snapshot: parsedFinalization.repositorySnapshot,
-        });
+        }), signal);
         if (error) throw failure();
         return incidentTransitionSchema.parse(data);
       } catch {

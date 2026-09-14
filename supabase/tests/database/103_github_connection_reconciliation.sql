@@ -917,6 +917,54 @@ select is(
   current_setting('app.installation_audit_before_disconnect')::integer + 1,
   'the first local disconnect is audited once and its replay emits no second installation audit'
 );
+select set_config(
+  'app.post_disconnect_version',
+  (select reconciliation_version::text
+   from public.github_installations
+   where id = 'a3200000-0000-4000-8000-000000000001'),
+  true
+);
+insert into public.github_webhook_deliveries(
+  id, provider_installation_id, provider_delivery_id,
+  event_name, payload_sha256, received_at
+) values (
+  'a3520000-0000-4000-8000-000000000001', 930001,
+  'post-local-disconnect', 'installation', repeat('1', 64), now()
+);
+create temporary table post_disconnect_connection_webhook
+as select * from public.github_webhook_deliveries with no data;
+grant select, insert on post_disconnect_connection_webhook to service_role;
+set local role service_role;
+insert into post_disconnect_connection_webhook
+select * from public.claim_github_connection_webhook_deliveries_server(1);
+select ok(
+  public.finalize_github_webhook_delivery_server(
+    (select id from post_disconnect_connection_webhook),
+    (select attempt_count from post_disconnect_connection_webhook),
+    'ignored', null
+  ),
+  'a post-disconnect connection event is finalized as ignored'
+);
+reset role;
+select ok(
+  (select organisation_id is null and installation_id is null and repository_id is null
+   from post_disconnect_connection_webhook),
+  'a post-disconnect event receives no usable tenant installation resolution'
+);
+select ok(
+  (select reconciliation_version = current_setting('app.post_disconnect_version')::bigint
+      and next_reconciliation_at is null
+      and health = 'disconnected'
+   from public.github_installations
+   where id = 'a3200000-0000-4000-8000-000000000001'),
+  'an ignored post-disconnect event cannot schedule work or alter local lifecycle state'
+);
+select ok(
+  (select pg_catalog.bool_and(not available and not selected)
+   from public.github_repositories
+   where installation_id = 'a3200000-0000-4000-8000-000000000001'),
+  'an ignored post-disconnect event cannot restore repository scope'
+);
 update public.github_installations
 set next_reconciliation_at = now() - interval '3 seconds',
     reconciliation_locked_by = null,
@@ -1191,16 +1239,195 @@ select is(
   2,
   'the reclaimed fail-closed follow-up advances only its run attempt'
 );
+insert into public.github_webhook_deliveries(
+  id, provider_installation_id, provider_delivery_id,
+  event_name, payload_sha256, received_at
+) values (
+  'a3510000-0000-4000-8000-000000000017', 931014,
+  'version-action-during-run', 'installation', repeat('1', 64), now()
+);
+create temporary table version_matrix_action_during_run_webhook
+as select * from public.github_webhook_deliveries with no data;
+grant select, insert on version_matrix_action_during_run_webhook to service_role;
+set local role service_role;
+insert into version_matrix_action_during_run_webhook
+select * from public.claim_github_connection_webhook_deliveries_server(1);
+select ok(
+  public.finalize_github_webhook_delivery_server(
+    (select id from version_matrix_action_during_run_webhook),
+    (select attempt_count from version_matrix_action_during_run_webhook),
+    'processed', null
+  ),
+  'a connection event during the relevant fail-closed run is processed once'
+);
+reset role;
+select is(
+  (select reconciliation_version
+   from public.github_installations
+   where id = 'a3210000-0000-4000-8000-000000000014'),
+  3::bigint,
+  'the during-run event preserves one newer follow-up occurrence'
+);
+select ok(
+  (select health = 'owner_action_required'
+      and status = 'needs_attention'
+      and not permissions_ok
+      and consecutive_reconciliation_failures = 1
+      and health_diagnostic_code = 'permission_mismatch'
+      and next_reconciliation_at is not null
+   from public.github_installations
+   where id = 'a3210000-0000-4000-8000-000000000014'),
+  'the newer event does not alter the installation incident before verification'
+);
 set local role service_role;
 select is(public.finalize_github_connection_reconciliation_server(
   (select id from version_matrix_followup_runs where installation_id = 'a3210000-0000-4000-8000-000000000014'),
-  'a3410000-0000-4000-8000-000000000005', 'action_required', 'permission_mismatch', null, '[]'::jsonb
-), 'remained_open', 'the action-required follow-up finalizes without another occurrence');
+  'a3410000-0000-4000-8000-000000000005', 'success', null,
+  current_setting('app.version_matrix_claim_time')::timestamptz + interval '1 day',
+  '[{"id":951014,"owner":"Version-Action","name":"superseded-name","fullName":"Version-Action/superseded-name","htmlUrl":"https://github.com/Version-Action/superseded-name","visibility":"private","archived":false,"defaultBranch":"main"}]'::jsonb
+), 'remained_open', 'a superseded success cannot report a false incident recovery');
+reset role;
+select ok(
+  (select health = 'owner_action_required'
+      and status = 'needs_attention'
+      and not permissions_ok
+      and consecutive_reconciliation_failures = 1
+      and health_diagnostic_code = 'permission_mismatch'
+      and last_successful_reconciliation_at is null
+      and reconciliation_version = 3
+      and next_reconciliation_at is not null
+   from public.github_installations
+   where id = 'a3210000-0000-4000-8000-000000000014'),
+  'a superseded success preserves fail-closed installation state and the newer due occurrence'
+);
+select ok(
+  (select not available and name = 'repo-action'
+   from public.github_repositories
+   where installation_id = 'a3210000-0000-4000-8000-000000000014'
+     and provider_repository_id = 951014),
+  'a superseded success cannot restore or rewrite repository scope'
+);
+select ok(
+  (select status = 'success'
+      and incident_transition = 'remained_open'
+      and reconciliation_version = 2
+   from public.github_connection_reconciliation_runs
+   where id = (select id from version_matrix_followup_runs
+               where installation_id = 'a3210000-0000-4000-8000-000000000014')),
+  'the superseded version is recorded safely in the run ledger'
+);
+
+create temporary table version_matrix_latest_action_run
+as select * from public.github_connection_reconciliation_runs with no data;
+grant select, insert on version_matrix_latest_action_run to service_role;
+set local role service_role;
+insert into version_matrix_latest_action_run
+select * from public.claim_due_github_connection_reconciliations_server(
+  'a3410000-0000-4000-8000-000000000006', 100,
+  current_setting('app.version_matrix_claim_time')::timestamptz + interval '11 minutes'
+);
+reset role;
+select is(
+  (select count(*)::integer from version_matrix_latest_action_run
+   where installation_id = 'a3210000-0000-4000-8000-000000000014'
+     and reconciliation_version = 3),
+  1,
+  'the newer occurrence becomes exactly one latest-version follow-up run'
+);
+set local role service_role;
+select is(public.finalize_github_connection_reconciliation_server(
+  (select id from version_matrix_latest_action_run
+   where installation_id = 'a3210000-0000-4000-8000-000000000014'),
+  'a3410000-0000-4000-8000-000000000006', 'success', null,
+  current_setting('app.version_matrix_claim_time')::timestamptz + interval '1 day',
+  '[{"id":951014,"owner":"Version-Action","name":"repo-restored","fullName":"Version-Action/repo-restored","htmlUrl":"https://github.com/Version-Action/repo-restored","visibility":"private","archived":false,"defaultBranch":"main"}]'::jsonb
+), 'recovered', 'only the newest-version success recovers the incident');
+reset role;
+select ok(
+  (select health = 'healthy'
+      and status = 'active'
+      and permissions_ok
+      and consecutive_reconciliation_failures = 0
+      and health_diagnostic_code is null
+      and last_successful_reconciliation_at is not null
+   from public.github_installations
+   where id = 'a3210000-0000-4000-8000-000000000014'),
+  'the newest-version success alone restores usable installation state'
+);
+select ok(
+  (select available and name = 'repo-restored'
+   from public.github_repositories
+   where installation_id = 'a3210000-0000-4000-8000-000000000014'
+     and provider_repository_id = 951014),
+  'the newest-version success alone restores the verified repository snapshot'
+);
+select is(
+  (select count(*)::integer
+   from public.github_connection_reconciliation_runs
+   where installation_id = 'a3210000-0000-4000-8000-000000000014'
+     and incident_transition = 'recovered'),
+  1,
+  'the interleaved sequence emits exactly one recovery'
+);
+
+update public.github_installations
+set next_reconciliation_at = current_setting('app.version_matrix_claim_time')::timestamptz
+  + interval '11 minutes'
+where id = 'a3210000-0000-4000-8000-000000000014';
+create temporary table version_matrix_terminal_action_run
+as select * from public.github_connection_reconciliation_runs with no data;
+grant select, insert on version_matrix_terminal_action_run to service_role;
+set local role service_role;
+insert into version_matrix_terminal_action_run
+select * from public.claim_due_github_connection_reconciliations_server(
+  'a3410000-0000-4000-8000-000000000007', 100,
+  current_setting('app.version_matrix_claim_time')::timestamptz + interval '12 minutes'
+);
+select is(public.finalize_github_connection_reconciliation_server(
+  (select id from version_matrix_terminal_action_run
+   where installation_id = 'a3210000-0000-4000-8000-000000000014'),
+  'a3410000-0000-4000-8000-000000000007', 'action_required',
+  'permission_mismatch', null, '[]'::jsonb
+), 'opened', 'a newest-version serious failure still opens its incident');
 select is(public.finalize_github_connection_reconciliation_server(
   (select id from version_matrix_followup_runs where installation_id = 'a3210000-0000-4000-8000-000000000015'),
   'a3410000-0000-4000-8000-000000000002', 'disconnected', 'installation_revoked', null, '[]'::jsonb
 ), 'remained_open', 'the disconnected follow-up finalizes without another occurrence');
 reset role;
+insert into public.github_webhook_deliveries(
+  id, provider_installation_id, provider_delivery_id,
+  event_name, payload_sha256, received_at
+) values (
+  'a3510000-0000-4000-8000-000000000018', 931014,
+  'version-action-after-settlement', 'installation', repeat('2', 64), now()
+);
+create temporary table version_matrix_settled_action_webhook
+as select * from public.github_webhook_deliveries with no data;
+grant select, insert on version_matrix_settled_action_webhook to service_role;
+set local role service_role;
+insert into version_matrix_settled_action_webhook
+select * from public.claim_github_connection_webhook_deliveries_server(1);
+select ok(
+  public.finalize_github_webhook_delivery_server(
+    (select id from version_matrix_settled_action_webhook),
+    (select attempt_count from version_matrix_settled_action_webhook),
+    'ignored', null
+  ),
+  'a webhook after action-required settlement is finalized as ignored'
+);
+reset role;
+select ok(
+  (select organisation_id is null and installation_id is null
+   from version_matrix_settled_action_webhook),
+  'a settled action-required installation receives no automatic webhook schedule'
+);
+select is(
+  (select reconciliation_version
+   from public.github_installations
+   where id = 'a3210000-0000-4000-8000-000000000014'),
+  4::bigint,
+  'an ignored settled action-required webhook does not advance its occurrence version'
+);
 select ok(
   (select pg_catalog.bool_and(installation.next_reconciliation_at is null)
    from public.github_installations installation

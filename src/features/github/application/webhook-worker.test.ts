@@ -20,6 +20,34 @@ const terminalRuns = [{
   status: "succeeded" as const,
 }];
 
+type RpcResult = { data: unknown; error: unknown };
+
+function abortableRpcResult(result?: RpcResult) {
+  let signal: AbortSignal | undefined;
+  let started = false;
+  const query = {
+    abortSignal(value: AbortSignal) {
+      signal = value;
+      return query;
+    },
+    then<TResult1 = RpcResult, TResult2 = never>(
+      onfulfilled?: ((value: RpcResult) => TResult1 | PromiseLike<TResult1>) | null,
+      onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+    ): PromiseLike<TResult1 | TResult2> {
+      started = true;
+      const pending = result
+        ? Promise.resolve(result)
+        : new Promise<RpcResult>((_resolve, reject) => {
+            const stop = () => reject(signal?.reason);
+            if (signal?.aborted) stop();
+            else signal?.addEventListener("abort", stop, { once: true });
+          });
+      return pending.then(onfulfilled, onrejected);
+    },
+  };
+  return { query, get signal() { return signal; }, get started() { return started; } };
+}
+
 function row(overrides: Partial<ClaimedWebhookDelivery> = {}): ClaimedWebhookDelivery {
   return {
     id: "33333333-3333-4333-8333-333333333333",
@@ -361,5 +389,76 @@ describe("drainGitHubConnectionWebhookDeliveries", () => {
       ownershipLost: 0,
     });
     expect(input.finalise).toHaveBeenCalledWith(expect.anything(), "failed", "unsupported_event");
+  });
+
+  it("aborts the real connection claim request without starting finalization", async () => {
+    const controller = new AbortController();
+    const claim = abortableRpcResult();
+    const service = { rpc: vi.fn().mockReturnValue(claim.query) };
+    const dependencies = buildGitHubConnectionWebhookDependencies(service);
+
+    const pending = drainGitHubConnectionWebhookDeliveries(dependencies, {
+      limit: 5,
+      signal: controller.signal,
+    });
+    await Promise.resolve();
+    controller.abort(new Error("private abort reason"));
+
+    await expect(pending).rejects.toThrow("GitHub webhook persistence failed");
+    expect(claim.started).toBe(true);
+    expect(claim.signal).toBe(controller.signal);
+    expect(service.rpc).toHaveBeenCalledOnce();
+  });
+
+  it("aborts the real connection finalizer once and does not retry an ambiguous CAS", async () => {
+    const controller = new AbortController();
+    const claimed = abortableRpcResult({ data: [
+      {
+        id: row().id,
+        provider_delivery_id: row().providerDeliveryId,
+        event_name: "installation",
+        attempt_count: 1,
+        provider_installation_id: row().providerInstallationId,
+        provider_repository_id: null,
+        installation_id: row().installationId,
+        repository_id: null,
+      },
+      {
+        id: "44444444-4444-4444-8444-444444444444",
+        provider_delivery_id: "second-connection-delivery",
+        event_name: "installation",
+        attempt_count: 1,
+        provider_installation_id: row().providerInstallationId,
+        provider_repository_id: null,
+        installation_id: row().installationId,
+        repository_id: null,
+      },
+    ], error: null });
+    const finalization = abortableRpcResult();
+    const service = {
+      rpc: vi.fn()
+        .mockReturnValueOnce(claimed.query)
+        .mockReturnValueOnce(finalization.query),
+    };
+    const dependencies = buildGitHubConnectionWebhookDependencies(service);
+
+    const pending = drainGitHubConnectionWebhookDeliveries(dependencies, {
+      limit: 5,
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(finalization.started).toBe(true));
+    controller.abort(new Error("private abort reason"));
+
+    await expect(pending).resolves.toEqual({
+      claimed: 2,
+      processed: 0,
+      ignored: 0,
+      failed: 0,
+      ownershipLost: 2,
+    });
+    expect(claimed.signal).toBe(controller.signal);
+    expect(finalization.signal).toBe(controller.signal);
+    expect(finalization.started).toBe(true);
+    expect(service.rpc).toHaveBeenCalledTimes(2);
   });
 });

@@ -34,8 +34,13 @@ export type WebhookOutcome = "processed" | "ignored" | "failed";
 export type WebhookDiagnostic = DiagnosticCode | "invalid_payload" | "unsupported_event" | "internal_error";
 
 export type WebhookWorkerDependencies = {
-  claim(limit: number): Promise<unknown[]>;
-  finalise(delivery: WebhookDeliveryLease, outcome: WebhookOutcome, diagnosticCode: WebhookDiagnostic | null): Promise<boolean>;
+  claim(limit: number, signal?: AbortSignal): Promise<unknown[]>;
+  finalise(
+    delivery: WebhookDeliveryLease,
+    outcome: WebhookOutcome,
+    diagnosticCode: WebhookDiagnostic | null,
+    signal?: AbortSignal,
+  ): Promise<boolean>;
   runCollection(request: CollectionRequest): Promise<CollectionSummary>;
   reconcile(scope: ReconciliationScope): Promise<ReconciliationSummary>;
 };
@@ -54,7 +59,12 @@ export type WebhookDrainSummary = {
 };
 
 type QueryResult = { data: unknown; error: unknown };
-type SupabaseServiceClient = { rpc(name: string, args: Record<string, unknown>): PromiseLike<QueryResult> };
+type CancellableQueryResult = PromiseLike<QueryResult> & {
+  abortSignal(signal: AbortSignal): CancellableQueryResult;
+};
+type SupabaseServiceClient = {
+  rpc(name: string, args: Record<string, unknown>): CancellableQueryResult;
+};
 
 const uuid = z.string().uuid();
 const connectionEvents = new Set(["installation", "installation_repositories", "repository"]);
@@ -105,16 +115,24 @@ function mapClaimedRow(value: unknown): unknown {
   };
 }
 
+function withSignal(query: CancellableQueryResult, signal?: AbortSignal): CancellableQueryResult {
+  return signal ? query.abortSignal(signal) : query;
+}
+
 function buildFinaliser(service: SupabaseServiceClient): WebhookWorkerDependencies["finalise"] {
-  return async (delivery, outcome, diagnosticCode) => {
-    const { data, error } = await service.rpc("finalize_github_webhook_delivery_server", {
-      target_delivery_id: delivery.id,
-      target_attempt_count: delivery.attemptCount,
-      target_status: outcome,
-      target_diagnostic_code: diagnosticCode,
-    });
-    if (error || typeof data !== "boolean") throw safeFailure();
-    return data;
+  return async (delivery, outcome, diagnosticCode, signal) => {
+    try {
+      const { data, error } = await withSignal(service.rpc("finalize_github_webhook_delivery_server", {
+        target_delivery_id: delivery.id,
+        target_attempt_count: delivery.attemptCount,
+        target_status: outcome,
+        target_diagnostic_code: diagnosticCode,
+      }), signal);
+      if (error || typeof data !== "boolean") throw safeFailure();
+      return data;
+    } catch {
+      throw safeFailure();
+    }
   };
 }
 
@@ -125,10 +143,17 @@ export function buildWebhookWorkerDependencies(
   const service = serviceInput as SupabaseServiceClient;
   const materialisationDependencies = buildMaterialisationDependencies(service);
   return {
-    async claim(limit) {
-      const { data, error } = await service.rpc("claim_github_webhook_deliveries_server", { target_limit: limit });
-      if (error || !Array.isArray(data)) throw safeFailure();
-      return data.map(mapClaimedRow);
+    async claim(limit, signal) {
+      try {
+        const { data, error } = await withSignal(
+          service.rpc("claim_github_webhook_deliveries_server", { target_limit: limit }),
+          signal,
+        );
+        if (error || !Array.isArray(data)) throw safeFailure();
+        return data.map(mapClaimedRow);
+      } catch {
+        throw safeFailure();
+      }
     },
     finalise: buildFinaliser(service),
     runCollection: (request) => runGitHubCollection(collectionDependencies, request),
@@ -141,13 +166,17 @@ export function buildGitHubConnectionWebhookDependencies(
 ): GitHubConnectionWebhookDependencies {
   const service = serviceInput as SupabaseServiceClient;
   return {
-    async claim(limit) {
-      const { data, error } = await service.rpc(
-        "claim_github_connection_webhook_deliveries_server",
-        { target_limit: limit },
-      );
-      if (error || !Array.isArray(data)) throw safeFailure();
-      return data.map(mapClaimedRow);
+    async claim(limit, signal) {
+      try {
+        const { data, error } = await withSignal(service.rpc(
+          "claim_github_connection_webhook_deliveries_server",
+          { target_limit: limit },
+        ), signal);
+        if (error || !Array.isArray(data)) throw safeFailure();
+        return data.map(mapClaimedRow);
+      } catch {
+        throw safeFailure();
+      }
     },
     finalise: buildFinaliser(service),
   };
@@ -162,7 +191,9 @@ export async function drainGitHubWebhookDeliveries(
   input: { limit: number; signal?: AbortSignal },
 ): Promise<WebhookDrainSummary> {
   if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 100) throw safeFailure();
-  const deliveries = await deps.claim(input.limit);
+  const deliveries = input.signal
+    ? await deps.claim(input.limit, input.signal)
+    : await deps.claim(input.limit);
   if (deliveries.length > input.limit) throw safeFailure();
   const summary: WebhookDrainSummary = { claimed: deliveries.length, processed: 0, ignored: 0, failed: 0, ownershipLost: 0 };
 
@@ -257,7 +288,9 @@ export async function drainGitHubConnectionWebhookDeliveries(
   input: { limit: number; signal?: AbortSignal },
 ): Promise<WebhookDrainSummary> {
   if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 100) throw safeFailure();
-  const deliveries = await deps.claim(input.limit);
+  const deliveries = input.signal
+    ? await deps.claim(input.limit, input.signal)
+    : await deps.claim(input.limit);
   if (deliveries.length > input.limit) throw safeFailure();
   const summary: WebhookDrainSummary = {
     claimed: deliveries.length,
@@ -268,6 +301,10 @@ export async function drainGitHubConnectionWebhookDeliveries(
   };
 
   for (const value of deliveries) {
+    if (input.signal?.aborted) {
+      summary.ownershipLost += 1;
+      continue;
+    }
     const lease = leaseSchema.safeParse(value);
     if (!lease.success) {
       summary.ownershipLost += 1;
@@ -291,7 +328,10 @@ export async function drainGitHubConnectionWebhookDeliveries(
     }
 
     try {
-      if (!await deps.finalise(lease.data, outcome, diagnosticCode)) {
+      const finalized = input.signal
+        ? await deps.finalise(lease.data, outcome, diagnosticCode, input.signal)
+        : await deps.finalise(lease.data, outcome, diagnosticCode);
+      if (!finalized) {
         summary.ownershipLost += 1;
         continue;
       }

@@ -314,6 +314,7 @@ declare
   resolved_installation public.github_installations;
   resolved_repository_id uuid;
   installation_found boolean;
+  schedule_installation boolean;
   scheduled_at timestamptz;
 begin
   if target_limit is null or target_limit < 1 or target_limit > 100 then
@@ -348,9 +349,29 @@ begin
     where delivery.id = candidate.id
     for update of installation;
     installation_found := found;
+    schedule_installation := false;
+
+    if installation_found then
+      select (
+        (
+          resolved_installation.status = 'active'
+          and resolved_installation.permissions_ok
+          and resolved_installation.health not in (
+            'owner_action_required', 'disconnected'
+          )
+        )
+        or exists (
+          select 1
+          from public.github_connection_reconciliation_runs run
+          where run.installation_id = resolved_installation.id
+            and run.organisation_id = resolved_installation.organisation_id
+            and run.status = 'running'
+        )
+      ) into schedule_installation;
+    end if;
 
     resolved_repository_id := null;
-    if installation_found then
+    if schedule_installation then
       select repository.id into resolved_repository_id
       from public.github_repositories repository
       where repository.installation_id = resolved_installation.id
@@ -376,8 +397,10 @@ begin
     end if;
 
     update public.github_webhook_deliveries delivery
-    set organisation_id = resolved_installation.organisation_id,
-        installation_id = resolved_installation.id,
+    set organisation_id = case when schedule_installation
+          then resolved_installation.organisation_id else null end,
+        installation_id = case when schedule_installation
+          then resolved_installation.id else null end,
         repository_id = resolved_repository_id,
         status = 'processing',
         attempt_count = delivery.attempt_count + 1,
@@ -579,6 +602,7 @@ declare
   transition text;
   completed_time timestamptz;
   has_newer_occurrence boolean;
+  superseded_success boolean;
   repository_total integer;
   repository_available integer;
   repository_unavailable integer;
@@ -637,6 +661,7 @@ begin
   completed_time := greatest(pg_catalog.clock_timestamp(), run_row.last_attempted_at);
   has_newer_occurrence := installation_row.reconciliation_version
     > run_row.reconciliation_version;
+  superseded_success := has_newer_occurrence and target_outcome = 'success';
 
   if installation_row.reconciliation_locked_by is distinct from target_worker_id
     or installation_row.reconciliation_locked_until is null
@@ -747,12 +772,19 @@ begin
     installation_row.health = 'retrying'
     and installation_row.consecutive_reconciliation_failures >= 3
   );
-  next_failure_count := case when target_outcome = 'success'
-    then 0 else installation_row.consecutive_reconciliation_failures + 1 end;
-  next_incident_open := (
-    prior_incident_open and target_outcome <> 'success'
-  ) or target_outcome in ('partial', 'action_required', 'disconnected')
-    or (target_outcome = 'temporary_failure' and next_failure_count >= 3);
+  next_failure_count := case
+    when superseded_success then installation_row.consecutive_reconciliation_failures
+    when target_outcome = 'success' then 0
+    else installation_row.consecutive_reconciliation_failures + 1
+  end;
+  next_incident_open := case
+    when superseded_success then prior_incident_open
+    else (
+      (prior_incident_open and target_outcome <> 'success')
+      or target_outcome in ('partial', 'action_required', 'disconnected')
+      or (target_outcome = 'temporary_failure' and next_failure_count >= 3)
+    )
+  end;
   transition := case
     when next_incident_open and prior_incident_open then 'remained_open'
     when next_incident_open then 'opened'
@@ -782,7 +814,7 @@ begin
     end;
   end if;
 
-  if target_outcome in ('success', 'partial') then
+  if target_outcome in ('success', 'partial') and not superseded_success then
     for repository_value in
       select value
       from pg_catalog.jsonb_array_elements(target_repository_snapshot)
@@ -841,8 +873,9 @@ begin
   end if;
 
   update public.github_installations installation
-  set health = next_health,
-      last_successful_reconciliation_at = case when target_outcome = 'success'
+  set health = case when superseded_success then installation.health else next_health end,
+      last_successful_reconciliation_at = case
+        when target_outcome = 'success' and not superseded_success
         then run_row.last_attempted_at
         else installation.last_successful_reconciliation_at
       end,
@@ -854,10 +887,12 @@ begin
           then installation.next_reconciliation_at
         else effective_next_attempt_at
       end,
-      health_diagnostic_code = target_diagnostic_code,
+      health_diagnostic_code = case when superseded_success
+        then installation.health_diagnostic_code else target_diagnostic_code end,
       reconciliation_locked_by = null,
       reconciliation_locked_until = null,
       status = case
+        when superseded_success then installation.status
         when target_outcome in ('success', 'partial') then 'active'::public.github_installation_status
         when target_outcome = 'action_required' and target_diagnostic_code = 'installation_suspended' then 'suspended'::public.github_installation_status
         when target_outcome = 'action_required' then 'needs_attention'::public.github_installation_status
@@ -865,11 +900,13 @@ begin
         else installation.status
       end,
       permissions_ok = case
+        when superseded_success then installation.permissions_ok
         when target_outcome in ('success', 'partial') then true
         when target_outcome in ('action_required', 'disconnected') then false
         else installation.permissions_ok
       end,
       revoked_at = case
+        when superseded_success then installation.revoked_at
         when target_outcome = 'disconnected' then run_row.last_attempted_at
         when target_outcome in ('success', 'partial', 'action_required') then null
         else installation.revoked_at

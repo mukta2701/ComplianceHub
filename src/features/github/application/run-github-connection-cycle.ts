@@ -48,6 +48,7 @@ export type GitHubConnectionCycleDependencies = {
     workerId: string;
     limit: number;
     now: string;
+    signal?: AbortSignal;
   }): Promise<ClaimedGitHubConnectionReconciliation[]>;
   reconcile(
     claim: ClaimedGitHubConnectionReconciliation,
@@ -144,11 +145,17 @@ export function buildGitHubConnectionCycleRunner(
       ensureActive(dependencies, cycle.signal, deadlineAt);
 
       const claimTime = currentTime(dependencies).toISOString();
-      const claims = await dependencies.claimDue({
-        workerId: parsed.data.executionId,
-        limit: parsed.data.maximumInstallations,
-        now: claimTime,
-      });
+      let claims: ClaimedGitHubConnectionReconciliation[];
+      try {
+        claims = await dependencies.claimDue({
+          workerId: parsed.data.executionId,
+          limit: parsed.data.maximumInstallations,
+          now: claimTime,
+          signal: cycle.signal,
+        });
+      } catch {
+        throw cycleFailure();
+      }
       if (!Array.isArray(claims) || claims.length > parsed.data.maximumInstallations) throw cycleFailure();
       ensureActive(dependencies, cycle.signal, deadlineAt);
 

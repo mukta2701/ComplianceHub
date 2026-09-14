@@ -39,6 +39,7 @@ export type ReconcileGitHubConnectionDependencies = {
   finalize(
     claim: ClaimedGitHubConnectionReconciliation,
     finalization: GitHubConnectionFinalization,
+    signal?: AbortSignal,
   ): Promise<GitHubConnectionIncidentTransition>;
   now(): Date;
 };
@@ -272,6 +273,13 @@ export async function reconcileGitHubConnection(
 
   if (externalSignal?.aborted) throw reconciliationInterrupted();
   const finalization = toFinalization(claim, classified);
-  const incidentTransition = await deps.finalize(claim, finalization);
-  return { ...finalization, incidentTransition };
+  try {
+    const incidentTransition = externalSignal
+      ? await deps.finalize(claim, finalization, externalSignal)
+      : await deps.finalize(claim, finalization);
+    return { ...finalization, incidentTransition };
+  } catch (error) {
+    if (externalSignal?.aborted) throw reconciliationInterrupted();
+    throw error;
+  }
 }

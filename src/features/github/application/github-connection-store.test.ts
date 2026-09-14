@@ -66,23 +66,76 @@ const repositoryRows = [101, 102].map((providerId) => ({
 
 type Row = Record<string, unknown>;
 
-class Query implements PromiseLike<{ data: unknown; error: unknown }> {
+type QueryResult = { data: unknown; error: unknown };
+
+class ResultQuery implements PromiseLike<QueryResult> {
+  observedSignal: AbortSignal | undefined;
+
+  constructor(
+    private readonly result: QueryResult,
+    private readonly pending = false,
+  ) {}
+
+  abortSignal(signal: AbortSignal) {
+    this.observedSignal = signal;
+    return this;
+  }
+
+  then<TResult1 = QueryResult, TResult2 = never>(
+    onfulfilled?: ((value: QueryResult) => TResult1 | PromiseLike<TResult1>) | null,
+    onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+  ): PromiseLike<TResult1 | TResult2> {
+    const result = this.pending
+      ? this.pendingResult()
+      : Promise.resolve(this.result);
+    return result.then(onfulfilled, onrejected);
+  }
+
+  private pendingResult(): Promise<QueryResult> {
+    if (!this.observedSignal) return Promise.reject(new Error("missing abort signal"));
+    return new Promise((_resolve, reject) => {
+      const stop = () => reject(this.observedSignal?.reason);
+      if (this.observedSignal?.aborted) stop();
+      else this.observedSignal?.addEventListener("abort", stop, { once: true });
+    });
+  }
+}
+
+class Query implements PromiseLike<QueryResult> {
   private readonly filters: Array<[string, unknown]> = [];
   private maximum: number | null = null;
+  observedSignal: AbortSignal | undefined;
 
-  constructor(private readonly rows: Row[], private readonly ignoreFilters = false) {}
+  constructor(
+    private readonly rows: Row[],
+    private readonly ignoreFilters = false,
+    private readonly pending = false,
+  ) {}
   eq(column: string, value: unknown) { this.filters.push([column, value]); return this; }
   order() { return this; }
   limit(value: number) { this.maximum = value; return this; }
-  then<TResult1 = { data: unknown; error: unknown }, TResult2 = never>(
-    onfulfilled?: ((value: { data: unknown; error: unknown }) => TResult1 | PromiseLike<TResult1>) | null,
+  abortSignal(signal: AbortSignal) { this.observedSignal = signal; return this; }
+  then<TResult1 = QueryResult, TResult2 = never>(
+    onfulfilled?: ((value: QueryResult) => TResult1 | PromiseLike<TResult1>) | null,
     onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
   ): PromiseLike<TResult1 | TResult2> {
     let rows = this.ignoreFilters
       ? this.rows
       : this.rows.filter((row) => this.filters.every(([key, value]) => row[key] === value));
     if (this.maximum !== null) rows = rows.slice(0, this.maximum);
-    return Promise.resolve({ data: rows, error: null }).then(onfulfilled, onrejected);
+    const result = this.pending
+      ? this.pendingResult()
+      : Promise.resolve({ data: rows, error: null });
+    return result.then(onfulfilled, onrejected);
+  }
+
+  private pendingResult(): Promise<QueryResult> {
+    if (!this.observedSignal) return Promise.reject(new Error("missing abort signal"));
+    return new Promise((_resolve, reject) => {
+      const stop = () => reject(this.observedSignal?.reason);
+      if (this.observedSignal?.aborted) stop();
+      else this.observedSignal?.addEventListener("abort", stop, { once: true });
+    });
   }
 }
 
@@ -92,25 +145,47 @@ function service(overrides: {
   claim?: unknown;
   finalize?: unknown;
   ignoreFilters?: boolean;
+  pendingRpc?: "claim" | "finalize";
+  pendingTable?: "github_installations" | "github_repositories";
 } = {}) {
   const rows = {
     github_installations: overrides.installation ?? [installationRow],
     github_repositories: overrides.repositories ?? repositoryRows,
   } as Record<string, Row[]>;
-  const rpc = vi.fn(async (name: string) => {
+  const rpcQueries: ResultQuery[] = [];
+  const queries: Query[] = [];
+  const rpc = vi.fn((name: string) => {
     if (name === "claim_due_github_connection_reconciliations_server") {
-      return { data: overrides.claim ?? [runRow], error: null };
+      const query = new ResultQuery(
+        { data: overrides.claim ?? [runRow], error: null },
+        overrides.pendingRpc === "claim",
+      );
+      rpcQueries.push(query);
+      return query;
     }
     const data = Object.prototype.hasOwnProperty.call(overrides, "finalize")
       ? overrides.finalize
       : "none";
-    return { data, error: null };
+    const query = new ResultQuery(
+      { data, error: null },
+      overrides.pendingRpc === "finalize",
+    );
+    rpcQueries.push(query);
+    return query;
   });
   return {
     rpc,
-    from: vi.fn((table: string) => ({
-      select: () => new Query(rows[table] ?? [], overrides.ignoreFilters === true),
-    })),
+    rpcQueries,
+    queries,
+    from: vi.fn((table: string) => ({ select: () => {
+      const query = new Query(
+        rows[table] ?? [],
+        overrides.ignoreFilters === true,
+        overrides.pendingTable === table,
+      );
+      queries.push(query);
+      return query;
+    } })),
   };
 }
 
@@ -175,14 +250,37 @@ describe("buildGitHubConnectionStore", () => {
     expect(database.from).toHaveBeenCalledWith("github_installations");
   });
 
+  it("accepts a claimed fail-closed run below the current installation version", async () => {
+    const database = service({
+      claim: [{ ...runRow, reconciliation_version: 2 }],
+      installation: [{
+        ...installationRow,
+        status: "revoked",
+        health: "disconnected",
+        permissions_ok: false,
+        reconciliation_version: 3,
+      }],
+    });
+    const store = buildGitHubConnectionStore(database);
+
+    await expect(store.claimDue({
+      workerId,
+      limit: 1,
+      now: "2026-09-14T12:00:00.000Z",
+    })).resolves.toEqual([expect.objectContaining({
+      runId,
+      installationId,
+      previousHealth: "disconnected",
+    })]);
+  });
+
   it.each([
     ["run ancestry", { claim: [{ ...runRow, organisation_id: "55555555-5555-4555-8555-555555555555" }], ignoreFilters: true }],
     ["installation ancestry", { installation: [{ ...installationRow, organisation_id: "55555555-5555-4555-8555-555555555555" }], ignoreFilters: true }],
     ["repository ancestry", { repositories: [{ ...repositoryRows[0]!, organisation_id: "55555555-5555-4555-8555-555555555555" }], ignoreFilters: true }],
     ["stored permissions", { installation: [{ ...installationRow, permissions: { ...READ_PERMISSIONS, contents: "read" } }] }],
     ["duplicate repository identity", { repositories: [repositoryRows[0]!, { ...repositoryRows[0]!, id: "99999999-9999-4999-8999-999999999999" }] }],
-    ["run occurrence version", { claim: [{ ...runRow, reconciliation_version: 2 }] }],
-    ["stale fail-closed occurrence", { claim: [{ ...runRow, reconciliation_version: 1 }], installation: [{ ...installationRow, status: "revoked", health: "disconnected", permissions_ok: false, reconciliation_version: 2 }] }],
+    ["future run occurrence version", { claim: [{ ...runRow, reconciliation_version: 2 }] }],
   ])("rejects malformed or cross-tenant %s rows", async (_label, overrides) => {
     const store = buildGitHubConnectionStore(service(overrides));
     await expect(store.claimDue({ workerId, limit: 1, now: "2026-09-14T12:00:00.000Z" }))
@@ -219,6 +317,78 @@ describe("buildGitHubConnectionStore", () => {
       target_repository_snapshot: [expect.objectContaining({ id: 101, fullName: "Adtecher/renamed" })],
     });
     expect(JSON.stringify(database.rpc.mock.calls)).not.toMatch(/credential|token|provider body/i);
+  });
+
+  it("aborts a pending reconciliation claim request before selecting installation state", async () => {
+    const controller = new AbortController();
+    const database = service({ pendingRpc: "claim" });
+    const store = buildGitHubConnectionStore(database);
+
+    const pending = store.claimDue({
+      workerId,
+      limit: 1,
+      now: "2026-09-14T12:00:00.000Z",
+      signal: controller.signal,
+    });
+    const rejected = expect(pending).rejects.toThrow("GitHub connection persistence failed");
+    await Promise.resolve();
+    controller.abort(new Error("private abort reason"));
+
+    await rejected;
+    expect(database.rpcQueries[0]?.observedSignal).toBe(controller.signal);
+    expect(database.from).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["installation", "github_installations"],
+    ["repository", "github_repositories"],
+  ] as const)("aborts a pending %s selection without starting later persistence", async (_label, table) => {
+    const controller = new AbortController();
+    const database = service({ pendingTable: table });
+    const store = buildGitHubConnectionStore(database);
+
+    const pending = store.claimDue({
+      workerId,
+      limit: 1,
+      now: "2026-09-14T12:00:00.000Z",
+      signal: controller.signal,
+    });
+    const rejected = expect(pending).rejects.toThrow("GitHub connection persistence failed");
+    await Promise.resolve();
+    await Promise.resolve();
+    controller.abort(new Error("private abort reason"));
+
+    await rejected;
+    const selected = database.queries.find((query) => query.observedSignal === controller.signal);
+    expect(selected).toBeDefined();
+    if (table === "github_installations") {
+      expect(database.from).not.toHaveBeenCalledWith("github_repositories");
+    }
+  });
+
+  it("aborts one pending reconciliation finalization without retrying its CAS", async () => {
+    const controller = new AbortController();
+    const database = service({ pendingRpc: "finalize" });
+    const store = buildGitHubConnectionStore(database);
+    const [claimed] = await store.claimDue({
+      workerId,
+      limit: 1,
+      now: "2026-09-14T12:00:00.000Z",
+    });
+
+    const pending = store.finalize(claimed!, {
+      outcome: "success",
+      diagnostic: null,
+      nextAttemptAt: "2026-09-15T12:00:00.000Z",
+      repositorySnapshot: [],
+    }, controller.signal);
+    const rejected = expect(pending).rejects.toThrow("GitHub connection persistence failed");
+    await Promise.resolve();
+    controller.abort(new Error("private abort reason"));
+
+    await rejected;
+    expect(database.rpcQueries.at(-1)?.observedSignal).toBe(controller.signal);
+    expect(database.rpc).toHaveBeenCalledTimes(2);
   });
 
   it.each([

@@ -135,6 +135,7 @@ describe("runGitHubConnectionCycle", () => {
       workerId: executionId,
       limit: 2,
       now: "2026-09-14T12:00:00.000Z",
+      signal: expect.any(AbortSignal),
     });
     expect(maximumActive).toBe(1);
     expect(result).toMatchObject({ installationsClaimed: 2, retrying: 2 });
@@ -207,6 +208,38 @@ describe("runGitHubConnectionCycle", () => {
       await rejected;
       expect(observedSignal?.aborted).toBe(true);
       expect(deps.claimDue).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("aborts a pending installation claim at the cycle budget without later work", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-14T12:00:00.000Z"));
+    try {
+      let observedSignal: AbortSignal | undefined;
+      const deps = dependencies({ now: () => new Date() });
+      deps.claimDue.mockImplementation(({ signal }: { signal?: AbortSignal }) => {
+        observedSignal = signal;
+        if (!signal) return Promise.reject(new Error("missing cycle signal"));
+        return new Promise((_resolve, reject) => {
+          const stop = () => reject(signal.reason);
+          if (signal.aborted) stop();
+          else signal.addEventListener("abort", stop, { once: true });
+        });
+      });
+
+      const pending = buildGitHubConnectionCycleRunner(deps)({
+        ...cycleInput,
+        timeBudgetMs: 10,
+      });
+      const rejected = expect(pending).rejects.toThrow("GitHub connection cycle failed");
+      await vi.advanceTimersByTimeAsync(10);
+
+      await rejected;
+      expect(observedSignal?.aborted).toBe(true);
+      expect(deps.reconcile).not.toHaveBeenCalled();
       expect(vi.getTimerCount()).toBe(0);
     } finally {
       vi.useRealTimers();

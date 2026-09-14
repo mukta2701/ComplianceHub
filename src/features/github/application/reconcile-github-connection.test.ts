@@ -472,6 +472,30 @@ describe("reconcileGitHubConnection", () => {
     }
   });
 
+  it("aborts one pending persistence finalization without a later retry", async () => {
+    const controller = new AbortController();
+    const deps = dependencies();
+    let observedSignal: AbortSignal | undefined;
+    deps.finalize.mockImplementation((_claim, _finalization, signal?: AbortSignal) => {
+      observedSignal = signal;
+      if (!signal) return Promise.reject(new Error("missing reconciliation signal"));
+      return new Promise((_resolve, reject) => {
+        const stop = () => reject(signal.reason);
+        if (signal.aborted) stop();
+        else signal.addEventListener("abort", stop, { once: true });
+      });
+    });
+
+    const pending = reconcileGitHubConnection(deps, claim, controller.signal);
+    const rejected = expect(pending).rejects.toThrow("GitHub reconciliation interrupted");
+    await vi.waitFor(() => expect(deps.finalize).toHaveBeenCalledOnce());
+    controller.abort(new Error("private abort reason"));
+
+    await rejected;
+    expect(observedSignal).toBe(controller.signal);
+    expect(deps.finalize).toHaveBeenCalledOnce();
+  });
+
   it("finalizes an already-expired claim without starting provider work", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-14T12:04:00.000Z"));
