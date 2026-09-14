@@ -1,7 +1,6 @@
 import "server-only";
 
 import { GitHubInstallationTokenError, hasExactReadPermissions } from "./github-app-auth";
-import { GitHubRateLimitError } from "./github-collection-error";
 import type {
   ClaimedGitHubConnectionReconciliation,
   GitHubConnectionFinalization,
@@ -10,6 +9,7 @@ import type {
 } from "./github-connection-store";
 import {
   GitHubInstallationApiError,
+  type InstallationMetadata,
   type InstallationSnapshot,
 } from "./github-installation-api";
 import { decideConnectionReconciliation } from "../domain/connection-health";
@@ -24,12 +24,18 @@ export type ReconcileGitHubConnectionDependencies = {
     installationId: number;
     appJwt: string;
     now: Date;
+    signal: AbortSignal;
   }): Promise<InstallationCredential>;
-  readSnapshot(input: {
+  readMetadata(input: {
     installationId: number;
     appJwt: string;
+    signal: AbortSignal;
+  }): Promise<InstallationMetadata>;
+  readRepositories(input: {
     installationToken: string;
-  }): Promise<InstallationSnapshot>;
+    accountLogin: string;
+    signal: AbortSignal;
+  }): Promise<InstallationSnapshot["repositories"]>;
   finalize(
     claim: ClaimedGitHubConnectionReconciliation,
     finalization: GitHubConnectionFinalization,
@@ -49,8 +55,9 @@ type ClassifiedOutcome = {
 };
 
 const SUCCESS_INTERVAL_MS = 24 * 60 * 60_000;
+const RECONCILIATION_DEADLINE_MS = 4 * 60_000;
 
-function safeRateLimitTime(error: GitHubRateLimitError, now: Date): string | null {
+function safeRateLimitTime(error: GitHubInstallationTokenError, now: Date): string | null {
   const candidates: number[] = [];
   if (error.retryAfterSeconds !== undefined) {
     candidates.push(now.getTime() + error.retryAfterSeconds * 1_000);
@@ -73,6 +80,16 @@ function classifyError(error: unknown, now: Date): ClassifiedOutcome {
         return { outcome: "action_required", diagnostic: "permission_mismatch" };
       case "not_found":
         return { outcome: "disconnected", diagnostic: "installation_revoked" };
+      case "permission_mismatch":
+        return { outcome: "action_required", diagnostic: "permission_mismatch" };
+      case "invalid_response":
+        return { outcome: "temporary_failure", diagnostic: "invalid_provider_response" };
+      case "rate_limited":
+        return {
+          outcome: "temporary_failure",
+          diagnostic: "provider_rate_limited",
+          providerRetryAt: safeRateLimitTime(error, now),
+        };
       case "provider_failure":
       case "timeout":
         return { outcome: "temporary_failure", diagnostic: "provider_temporary_failure" };
@@ -98,45 +115,48 @@ function classifyError(error: unknown, now: Date): ClassifiedOutcome {
         return { outcome: "temporary_failure", diagnostic: "invalid_provider_response" };
     }
   }
-  if (error instanceof GitHubRateLimitError) {
-    return {
-      outcome: "temporary_failure",
-      diagnostic: "provider_rate_limited",
-      providerRetryAt: safeRateLimitTime(error, now),
-    };
+  if (error instanceof DOMException && (error.name === "AbortError" || error.name === "TimeoutError")) {
+    return { outcome: "temporary_failure", diagnostic: "provider_temporary_failure" };
   }
   return { outcome: "temporary_failure", diagnostic: "internal_failure" };
 }
 
-function classifySnapshot(
+function classifyMetadata(
   claim: ClaimedGitHubConnectionReconciliation,
-  snapshot: InstallationSnapshot,
-): ClassifiedOutcome {
-  if (snapshot.installationId !== claim.providerInstallationId) {
+  metadata: InstallationMetadata,
+): ClassifiedOutcome | null {
+  if (metadata.installationId !== claim.providerInstallationId) {
     return { outcome: "temporary_failure", diagnostic: "invalid_provider_response" };
   }
-  if (snapshot.suspendedAt !== null) {
+  if (metadata.suspendedAt !== null) {
     return { outcome: "action_required", diagnostic: "installation_suspended" };
   }
   if (
-    snapshot.repositorySelection !== "selected"
-    || !hasExactReadPermissions(snapshot.permissions)
+    metadata.repositorySelection !== "selected"
+    || !hasExactReadPermissions(metadata.permissions)
   ) {
     return { outcome: "action_required", diagnostic: "permission_mismatch" };
   }
   if (
-    snapshot.account.id !== claim.account.id
-    || snapshot.account.type !== claim.account.type
-    || snapshot.account.login.toLowerCase() !== claim.account.login.toLowerCase()
+    metadata.account.id !== claim.account.id
+    || metadata.account.type !== claim.account.type
+    || metadata.account.login.toLowerCase() !== claim.account.login.toLowerCase()
   ) {
     return { outcome: "action_required", diagnostic: "account_mismatch" };
   }
-  const availableIds = new Set(snapshot.repositories.map((repository) => repository.id));
+  return null;
+}
+
+function classifyRepositories(
+  claim: ClaimedGitHubConnectionReconciliation,
+  repositories: InstallationSnapshot["repositories"],
+): ClassifiedOutcome {
+  const availableIds = new Set(repositories.map((repository) => repository.id));
   const selectedRepositoryUnavailable = claim.selectedRepositoryIds.some((id) => !availableIds.has(id));
   return {
     outcome: selectedRepositoryUnavailable ? "partial" : "success",
     diagnostic: selectedRepositoryUnavailable ? "repository_unavailable" : null,
-    repositories: [...snapshot.repositories].sort((left, right) => left.id - right.id),
+    repositories: [...repositories].sort((left, right) => left.id - right.id),
   };
 }
 
@@ -165,16 +185,26 @@ function toFinalization(
   };
 }
 
-async function readProviderSnapshot(
+async function readProviderState(
   deps: ReconcileGitHubConnectionDependencies,
   claim: ClaimedGitHubConnectionReconciliation,
   now: Date,
-): Promise<InstallationSnapshot> {
+  signal: AbortSignal,
+): Promise<ClassifiedOutcome> {
   const appJwt = await deps.createAppJwt();
+  const metadata = await deps.readMetadata({
+    installationId: claim.providerInstallationId,
+    appJwt,
+    signal,
+  });
+  const metadataOutcome = classifyMetadata(claim, metadata);
+  if (metadataOutcome) return metadataOutcome;
+
   const installationCredential = await deps.createInstallationToken({
     installationId: claim.providerInstallationId,
     appJwt,
     now,
+    signal,
   });
   const expiresAt = Date.parse(installationCredential.expiresAt);
   if (
@@ -183,12 +213,13 @@ async function readProviderSnapshot(
     || !Number.isFinite(expiresAt)
     || expiresAt <= now.getTime()
     || expiresAt > now.getTime() + 60 * 60_000
-  ) throw new Error("invalid installation credential");
-  return deps.readSnapshot({
-    installationId: claim.providerInstallationId,
-    appJwt,
+  ) throw new GitHubInstallationTokenError("invalid_response");
+  const repositories = await deps.readRepositories({
     installationToken: installationCredential.token,
+    accountLogin: metadata.account.login,
+    signal,
   });
+  return classifyRepositories(claim, repositories);
 }
 
 export async function reconcileGitHubConnection(
@@ -196,13 +227,18 @@ export async function reconcileGitHubConnection(
   claim: ClaimedGitHubConnectionReconciliation,
 ): Promise<GitHubConnectionReconciliationResult> {
   const now = deps.now();
+  const deadline = new AbortController();
+  const deadlineTimer = setTimeout(() => {
+    deadline.abort(new DOMException("GitHub reconciliation deadline reached", "TimeoutError"));
+  }, RECONCILIATION_DEADLINE_MS);
   let classified: ClassifiedOutcome;
   try {
     if (!Number.isFinite(now.getTime())) throw new Error("invalid reconciliation time");
-    const snapshot = await readProviderSnapshot(deps, claim, now);
-    classified = classifySnapshot(claim, snapshot);
+    classified = await readProviderState(deps, claim, now, deadline.signal);
   } catch (error) {
     classified = classifyError(error, now);
+  } finally {
+    clearTimeout(deadlineTimer);
   }
 
   const finalization = toFinalization(claim, classified);

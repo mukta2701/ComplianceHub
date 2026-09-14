@@ -3,7 +3,7 @@ import "server-only";
 import { importPKCS8, SignJWT } from "jose";
 import { z } from "zod";
 
-import { throwIfGitHubRateLimited } from "./github-collection-error";
+import { GitHubRateLimitError, throwIfGitHubRateLimited } from "./github-collection-error";
 
 type FetchLike = typeof fetch;
 
@@ -41,14 +41,25 @@ export const READ_PERMISSIONS = {
 
 export type GitHubInstallationTokenDiagnostic =
   | "authentication_failed"
+  | "invalid_response"
   | "not_found"
+  | "permission_mismatch"
   | "provider_failure"
+  | "rate_limited"
   | "timeout";
 
 export class GitHubInstallationTokenError extends Error {
-  constructor(public readonly diagnosticCode: GitHubInstallationTokenDiagnostic) {
+  readonly retryAfterSeconds?: number;
+  readonly resetAtEpochSeconds?: number;
+
+  constructor(
+    public readonly diagnosticCode: GitHubInstallationTokenDiagnostic,
+    rateLimit: { retryAfterSeconds?: number; resetAtEpochSeconds?: number } = {},
+  ) {
     super("GitHub installation token request failed");
     this.name = "GitHubInstallationTokenError";
+    this.retryAfterSeconds = rateLimit.retryAfterSeconds;
+    this.resetAtEpochSeconds = rateLimit.resetAtEpochSeconds;
   }
 }
 
@@ -141,6 +152,7 @@ export async function createInstallationInventoryToken(input: {
   installationId: number;
   appJwt: string;
   now: Date;
+  signal?: AbortSignal;
   fetchImpl?: FetchLike;
 }): Promise<{ token: string; expiresAt: string }> {
   const parsed = installationInventoryTokenInputSchema.safeParse({
@@ -166,7 +178,9 @@ export async function createInstallationInventoryToken(input: {
         body: JSON.stringify({ permissions: READ_PERMISSIONS }),
         cache: "no-store",
         redirect: "error",
-        signal: AbortSignal.timeout(15_000),
+        signal: input.signal
+          ? AbortSignal.any([input.signal, AbortSignal.timeout(15_000)])
+          : AbortSignal.timeout(15_000),
       },
     );
   } catch (error) {
@@ -176,14 +190,25 @@ export async function createInstallationInventoryToken(input: {
     throw new GitHubInstallationTokenError("provider_failure");
   }
 
-  throwIfGitHubRateLimited(response);
+  try {
+    throwIfGitHubRateLimited(response);
+  } catch (error) {
+    if (error instanceof GitHubRateLimitError) {
+      throw new GitHubInstallationTokenError("rate_limited", {
+        retryAfterSeconds: error.retryAfterSeconds,
+        resetAtEpochSeconds: error.resetAtEpochSeconds,
+      });
+    }
+    throw error;
+  }
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) {
       throw new GitHubInstallationTokenError("authentication_failed");
     }
     if (response.status === 404) throw new GitHubInstallationTokenError("not_found");
+    if (response.status === 422) throw new GitHubInstallationTokenError("permission_mismatch");
     if (response.status >= 500) throw new GitHubInstallationTokenError("provider_failure");
-    throw new Error("Could not create GitHub installation token");
+    throw new GitHubInstallationTokenError("invalid_response");
   }
 
   try {
@@ -192,7 +217,8 @@ export async function createInstallationInventoryToken(input: {
     const now = parsed.data.now.getTime();
     if (expiresAt <= now || expiresAt > now + 60 * 60_000) throw new Error("invalid lifetime");
     return { token: token.token, expiresAt: token.expires_at };
-  } catch {
-    throw new Error("GitHub returned an invalid installation token response");
+  } catch (error) {
+    if (error instanceof GitHubInstallationTokenError) throw error;
+    throw new GitHubInstallationTokenError("invalid_response");
   }
 }

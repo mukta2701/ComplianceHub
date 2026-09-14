@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 import { READ_PERMISSIONS } from "./github-app-auth";
 import {
   GitHubInstallationApiError,
+  readInstallationMetadata,
+  readInstallationRepositories,
   readInstallationSnapshot,
 } from "./github-installation-api";
 
@@ -42,6 +44,34 @@ function jsonResponse(body: unknown, init: ResponseInit = {}) {
 }
 
 describe("readInstallationSnapshot", () => {
+  it("offers separate metadata and repository reads while the public snapshot API composes them", async () => {
+    const metadataFetch = vi.fn().mockResolvedValue(jsonResponse(installation()));
+    const metadata = await readInstallationMetadata({
+      installationId: 77,
+      appJwt: APP_CREDENTIAL,
+      fetchImpl: metadataFetch,
+    });
+    expect(metadata).toEqual({
+      installationId: 77,
+      account: { id: 99, login: "Adtecher", type: "Organization" },
+      repositorySelection: "selected",
+      permissions: READ_PERMISSIONS,
+      suspendedAt: null,
+    });
+    expect(metadataFetch).toHaveBeenCalledOnce();
+
+    const repositoryFetch = vi.fn().mockResolvedValue(jsonResponse({
+      total_count: 1,
+      repositories: [repository(101)],
+    }));
+    await expect(readInstallationRepositories({
+      installationToken: INSTALLATION_CREDENTIAL,
+      accountLogin: "Adtecher",
+      fetchImpl: repositoryFetch,
+    })).resolves.toEqual([expect.objectContaining({ id: 101 })]);
+    expect(repositoryFetch).toHaveBeenCalledOnce();
+  });
+
   it("uses the fixed API origin and version while keeping each credential on its required endpoint", async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(jsonResponse(installation()))
@@ -212,6 +242,27 @@ describe("readInstallationSnapshot", () => {
 
     expect(error).toMatchObject({ diagnosticCode: "timeout" });
     expect(String(error)).not.toContain("fictional detail");
+  });
+
+  it("combines one reconciliation deadline with each metadata and repository request timeout", async () => {
+    const deadline = new AbortController();
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(installation()))
+      .mockResolvedValueOnce(jsonResponse({ total_count: 1, repositories: [repository(101)] }));
+
+    await readInstallationSnapshot({
+      installationId: 77,
+      appJwt: APP_CREDENTIAL,
+      installationToken: INSTALLATION_CREDENTIAL,
+      signal: deadline.signal,
+      fetchImpl,
+    });
+
+    const requestSignals = fetchImpl.mock.calls.map((call) => (call[1] as RequestInit).signal);
+    expect(requestSignals).toHaveLength(2);
+    expect(requestSignals.every((signal) => signal !== deadline.signal)).toBe(true);
+    deadline.abort(new DOMException("deadline", "TimeoutError"));
+    expect(requestSignals.every((signal) => signal?.aborted)).toBe(true);
   });
 
   it("surfaces only a bounded canonical rate-limit reset time", async () => {

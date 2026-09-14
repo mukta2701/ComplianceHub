@@ -171,7 +171,8 @@ describe("GitHub App authentication", () => {
       }), { status: 201 })),
     }).catch((caught: unknown) => caught);
 
-    expect(String(error)).toBe("Error: GitHub returned an invalid installation token response");
+    expect(error).toBeInstanceOf(GitHubInstallationTokenError);
+    expect(error).toMatchObject({ diagnosticCode: "invalid_response" });
     expect(String(error)).not.toContain(providerCredential);
   });
 
@@ -179,6 +180,7 @@ describe("GitHub App authentication", () => {
     [401, "authentication_failed"],
     [403, "authentication_failed"],
     [404, "not_found"],
+    [422, "permission_mismatch"],
     [500, "provider_failure"],
     [503, "provider_failure"],
   ] as const)("classifies inventory-token HTTP %s without exposing provider content", async (status, diagnosticCode) => {
@@ -205,6 +207,64 @@ describe("GitHub App authentication", () => {
 
     expect(error).toMatchObject({ diagnosticCode: "timeout" });
     expect(String(error)).not.toContain("provider detail");
+  });
+
+  it("translates inventory-token rate limiting into a connection-specific typed signal", async () => {
+    const error = await createInstallationInventoryToken({
+      installationId: 77,
+      appJwt: "signed-app-jwt",
+      now: new Date("2026-09-14T12:00:00.000Z"),
+      fetchImpl: vi.fn().mockResolvedValue(new Response(crypto.randomUUID(), {
+        status: 429,
+        headers: { "retry-after": "60", "x-ratelimit-reset": "1789388100" },
+      })),
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(GitHubInstallationTokenError);
+    expect(error).toMatchObject({
+      diagnosticCode: "rate_limited",
+      retryAfterSeconds: 60,
+      resetAtEpochSeconds: 1_789_388_100,
+    });
+    expect(error).not.toBeInstanceOf(GitHubRateLimitError);
+  });
+
+  it("combines the reconciliation deadline with the token request timeout", async () => {
+    const deadline = new AbortController();
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      token: TEST_INVENTORY_AUTHORIZATION,
+      expires_at: "2026-09-14T13:00:00.000Z",
+    }), { status: 201 }));
+
+    await createInstallationInventoryToken({
+      installationId: 77,
+      appJwt: "signed-app-jwt",
+      now: new Date("2026-09-14T12:00:00.000Z"),
+      signal: deadline.signal,
+      fetchImpl,
+    });
+
+    const requestSignal = (fetchImpl.mock.calls[0]?.[1] as RequestInit).signal;
+    expect(requestSignal).toBeInstanceOf(AbortSignal);
+    expect(requestSignal).not.toBe(deadline.signal);
+    deadline.abort(new DOMException("deadline", "TimeoutError"));
+    expect(requestSignal?.aborted).toBe(true);
+  });
+
+  it("classifies a malformed successful inventory-token payload without retaining it", async () => {
+    const providerValue = crypto.randomUUID();
+    const error = await createInstallationInventoryToken({
+      installationId: 77,
+      appJwt: "signed-app-jwt",
+      now: new Date("2026-09-14T12:00:00.000Z"),
+      fetchImpl: vi.fn().mockResolvedValue(new Response(JSON.stringify({
+        token: providerValue,
+        expires_at: 123,
+      }), { status: 201 })),
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({ diagnosticCode: "invalid_response" });
+    expect(String(error)).not.toContain(providerValue);
   });
 
   it.each([

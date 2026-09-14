@@ -59,6 +59,14 @@ export type InstallationSnapshot = {
   repositories: UserInstallationRepository[];
 };
 
+export type InstallationMetadata = {
+  installationId: number;
+  account: { id: number; login: string; type: "Organization" | "User" };
+  repositorySelection: "all" | "selected";
+  permissions: Record<string, string>;
+  suspendedAt: string | null;
+};
+
 export type GitHubInstallationApiDiagnostic =
   | "authentication_failed"
   | "not_found"
@@ -82,7 +90,7 @@ function invalidResponse(): GitHubInstallationApiError {
   return new GitHubInstallationApiError("invalid_response");
 }
 
-function safeFetchInit(credential: string): RequestInit {
+function safeFetchInit(credential: string, signal?: AbortSignal): RequestInit {
   if (!credential || credential.length > 2_000) throw invalidResponse();
   return {
     method: "GET",
@@ -94,7 +102,9 @@ function safeFetchInit(credential: string): RequestInit {
     },
     cache: "no-store",
     redirect: "error",
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    signal: signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)])
+      : AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   };
 }
 
@@ -129,11 +139,16 @@ function responseError(response: Response): GitHubInstallationApiError {
   return invalidResponse();
 }
 
-async function request(url: URL, credential: string, fetchImpl: FetchLike): Promise<Response> {
+async function request(
+  url: URL,
+  credential: string,
+  fetchImpl: FetchLike,
+  signal?: AbortSignal,
+): Promise<Response> {
   if (url.origin !== API_ORIGIN || url.username || url.password || url.hash) throw invalidResponse();
   let response: Response;
   try {
-    response = await fetchImpl(url.toString(), safeFetchInit(credential));
+    response = await fetchImpl(url.toString(), safeFetchInit(credential, signal));
   } catch (error) {
     if (error instanceof GitHubInstallationApiError) throw error;
     if (error instanceof DOMException && (error.name === "AbortError" || error.name === "TimeoutError")) {
@@ -211,33 +226,35 @@ function canonicalRepository(
   };
 }
 
-export async function readInstallationSnapshot(input: {
+export async function readInstallationMetadata(input: {
   installationId: number;
   appJwt: string;
-  installationToken: string;
+  signal?: AbortSignal;
   fetchImpl?: FetchLike;
-}): Promise<InstallationSnapshot> {
+}): Promise<InstallationMetadata> {
   if (!positiveId.safeParse(input.installationId).success) throw invalidResponse();
   const fetchImpl = input.fetchImpl ?? fetch;
   const installationUrl = new URL(`/app/installations/${input.installationId}`, API_ORIGIN);
-  const installationResponse = await request(installationUrl, input.appJwt, fetchImpl);
+  const installationResponse = await request(installationUrl, input.appJwt, fetchImpl, input.signal);
   const installation = await parseJson(installationResponse, installationSchema);
   if (installation.id !== input.installationId) throw invalidResponse();
-  if (
-    installation.repository_selection !== "selected"
-    || !hasExactReadPermissions(installation.permissions)
-  ) {
-    throw new GitHubInstallationApiError("permission_mismatch");
-  }
-
-  const base = {
+  return {
     installationId: installation.id,
     account: installation.account,
-    repositorySelection: "selected" as const,
-    permissions: READ_PERMISSIONS,
+    repositorySelection: installation.repository_selection,
+    permissions: installation.permissions,
     suspendedAt: installation.suspended_at,
   };
-  if (installation.suspended_at !== null) return { ...base, repositories: [] };
+}
+
+export async function readInstallationRepositories(input: {
+  installationToken: string;
+  accountLogin: string;
+  signal?: AbortSignal;
+  fetchImpl?: FetchLike;
+}): Promise<UserInstallationRepository[]> {
+  if (!login.safeParse(input.accountLogin).success) throw invalidResponse();
+  const fetchImpl = input.fetchImpl ?? fetch;
 
   const seenUrls = new Set<string>();
   const repositoryIds = new Set<number>();
@@ -251,7 +268,7 @@ export async function readInstallationSnapshot(input: {
     const currentUrl = url.toString();
     if (seenUrls.has(currentUrl)) throw invalidResponse();
     seenUrls.add(currentUrl);
-    const response = await request(url, input.installationToken, fetchImpl);
+    const response = await request(url, input.installationToken, fetchImpl, input.signal);
     const parsed = await parseJson(response, repositoryPageSchema);
     expectedCount ??= parsed.total_count;
     if (parsed.total_count !== expectedCount) throw invalidResponse();
@@ -259,7 +276,7 @@ export async function readInstallationSnapshot(input: {
     const next = nextRepositoryUrl(response, currentPage);
     if (next && parsed.repositories.length !== 100) throw invalidResponse();
     for (const providerRepository of parsed.repositories) {
-      const repository = canonicalRepository(providerRepository, installation.account.login);
+      const repository = canonicalRepository(providerRepository, input.accountLogin);
       const canonicalName = repository.fullName.toLowerCase();
       if (repositoryIds.has(repository.id) || repositoryNames.has(canonicalName)) throw invalidResponse();
       repositoryIds.add(repository.id);
@@ -270,11 +287,42 @@ export async function readInstallationSnapshot(input: {
 
     if (!next) {
       if (repositories.length !== expectedCount) throw invalidResponse();
-      return { ...base, repositories: repositories.sort((left, right) => left.id - right.id) };
+      return repositories.sort((left, right) => left.id - right.id);
     }
     if (page === MAX_PAGES - 1 || seenUrls.has(next.toString())) throw invalidResponse();
     currentPage = Number(next.searchParams.get("page"));
     url = next;
   }
   throw invalidResponse();
+}
+
+export async function readInstallationSnapshot(input: {
+  installationId: number;
+  appJwt: string;
+  installationToken: string;
+  signal?: AbortSignal;
+  fetchImpl?: FetchLike;
+}): Promise<InstallationSnapshot> {
+  const metadata = await readInstallationMetadata(input);
+  if (
+    metadata.repositorySelection !== "selected"
+    || !hasExactReadPermissions(metadata.permissions)
+  ) {
+    throw new GitHubInstallationApiError("permission_mismatch");
+  }
+
+  const base = {
+    ...metadata,
+    repositorySelection: "selected" as const,
+    permissions: READ_PERMISSIONS,
+  };
+  if (metadata.suspendedAt !== null) return { ...base, repositories: [] };
+
+  const repositories = await readInstallationRepositories({
+    installationToken: input.installationToken,
+    accountLogin: metadata.account.login,
+    signal: input.signal,
+    fetchImpl: input.fetchImpl,
+  });
+  return { ...base, repositories };
 }

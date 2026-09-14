@@ -3,8 +3,18 @@ import { readFile } from "node:fs/promises";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { GitHubInstallationTokenError, READ_PERMISSIONS } from "./github-app-auth";
-import { GitHubInstallationApiError, type InstallationSnapshot } from "./github-installation-api";
+import {
+  createInstallationInventoryToken,
+  GitHubInstallationTokenError,
+  READ_PERMISSIONS,
+} from "./github-app-auth";
+import {
+  GitHubInstallationApiError,
+  readInstallationMetadata,
+  readInstallationRepositories,
+  type InstallationMetadata,
+  type InstallationSnapshot,
+} from "./github-installation-api";
 import {
   reconcileGitHubConnection,
   type ClaimedGitHubConnectionReconciliation,
@@ -51,9 +61,20 @@ function snapshot(overrides: Partial<InstallationSnapshot> = {}): InstallationSn
   };
 }
 
+function metadata(providerSnapshot: InstallationSnapshot = snapshot()): InstallationMetadata {
+  return {
+    installationId: providerSnapshot.installationId,
+    account: providerSnapshot.account,
+    repositorySelection: providerSnapshot.repositorySelection,
+    permissions: providerSnapshot.permissions,
+    suspendedAt: providerSnapshot.suspendedAt,
+  };
+}
+
 function dependencies(providerSnapshot: InstallationSnapshot = snapshot()): ReconcileGitHubConnectionDependencies & {
   finalize: ReturnType<typeof vi.fn>;
-  readSnapshot: ReturnType<typeof vi.fn>;
+  readMetadata: ReturnType<typeof vi.fn>;
+  readRepositories: ReturnType<typeof vi.fn>;
 } {
   return {
     createAppJwt: vi.fn().mockResolvedValue(["fictional", "app", "credential"].join("-")),
@@ -61,7 +82,8 @@ function dependencies(providerSnapshot: InstallationSnapshot = snapshot()): Reco
       token: ["fictional", "installation", "credential"].join("-"),
       expiresAt: "2026-09-14T13:00:00.000Z",
     }),
-    readSnapshot: vi.fn().mockResolvedValue(providerSnapshot),
+    readMetadata: vi.fn().mockResolvedValue(metadata(providerSnapshot)),
+    readRepositories: vi.fn().mockResolvedValue(providerSnapshot.repositories),
     finalize: vi.fn().mockResolvedValue("none"),
     now: () => new Date("2026-09-14T12:00:00.000Z"),
   };
@@ -125,6 +147,24 @@ describe("reconcileGitHubConnection", () => {
       nextAttemptAt: null,
       repositorySnapshot: [],
     });
+    expect(deps.createInstallationToken).not.toHaveBeenCalled();
+    expect(deps.readRepositories).not.toHaveBeenCalled();
+  });
+
+  it("classifies changed permissions from metadata before requesting an installation token", async () => {
+    const deps = dependencies();
+    deps.readMetadata.mockResolvedValue({
+      ...metadata(),
+      permissions: { ...READ_PERMISSIONS, contents: "read" },
+    });
+
+    await expect(reconcileGitHubConnection(deps, claim)).resolves.toMatchObject({
+      outcome: "action_required",
+      diagnostic: "permission_mismatch",
+    });
+    expect(deps.createInstallationToken).not.toHaveBeenCalled();
+    expect(deps.readRepositories).not.toHaveBeenCalled();
+    expect(deps.finalize).toHaveBeenCalledOnce();
   });
 
   it.each([
@@ -137,7 +177,7 @@ describe("reconcileGitHubConnection", () => {
     [new GitHubInstallationApiError("invalid_response"), "temporary_failure", "invalid_provider_response", "2026-09-14T12:01:00.000Z"],
   ] as const)("maps provider failure %s and finalizes exactly once", async (error, outcome, diagnostic, nextAttemptAt) => {
     const deps = dependencies();
-    deps.readSnapshot.mockRejectedValue(error);
+    deps.readMetadata.mockRejectedValue(error);
 
     const result = await reconcileGitHubConnection(deps, claim);
 
@@ -167,6 +207,8 @@ describe("reconcileGitHubConnection", () => {
   it.each([
     [new GitHubInstallationTokenError("authentication_failed"), "action_required", "permission_mismatch"],
     [new GitHubInstallationTokenError("not_found"), "disconnected", "installation_revoked"],
+    [new GitHubInstallationTokenError("permission_mismatch"), "action_required", "permission_mismatch"],
+    [new GitHubInstallationTokenError("invalid_response"), "temporary_failure", "invalid_provider_response"],
     [new GitHubInstallationTokenError("provider_failure"), "temporary_failure", "provider_temporary_failure"],
     [new GitHubInstallationTokenError("timeout"), "temporary_failure", "provider_temporary_failure"],
   ] as const)("maps inventory-token failure %s to a safe finalization", async (error, outcome, diagnostic) => {
@@ -174,11 +216,26 @@ describe("reconcileGitHubConnection", () => {
     vi.mocked(deps.createInstallationToken).mockRejectedValue(error);
 
     await expect(reconcileGitHubConnection(deps, claim)).resolves.toMatchObject({ outcome, diagnostic });
-    expect(deps.readSnapshot).not.toHaveBeenCalled();
+    expect(deps.readRepositories).not.toHaveBeenCalled();
     expect(deps.finalize).toHaveBeenCalledOnce();
   });
 
-  it("refuses an expired or overlong installation credential before provider reads and still finalizes once", async () => {
+  it("maps inventory-token rate limiting without importing a collection error", async () => {
+    const deps = dependencies();
+    vi.mocked(deps.createInstallationToken).mockRejectedValue(new GitHubInstallationTokenError(
+      "rate_limited",
+      { retryAfterSeconds: 60, resetAtEpochSeconds: 1_789_388_100 },
+    ));
+
+    await expect(reconcileGitHubConnection(deps, claim)).resolves.toMatchObject({
+      outcome: "temporary_failure",
+      diagnostic: "provider_rate_limited",
+      nextAttemptAt: "2026-09-14T12:15:00.000Z",
+    });
+    expect(deps.finalize).toHaveBeenCalledOnce();
+  });
+
+  it("classifies an expired or overlong installation credential as an invalid provider response", async () => {
     for (const expiresAt of ["2026-09-14T12:00:00.000Z", "2026-09-14T13:00:00.001Z", "not-a-date"]) {
       const deps = dependencies();
       vi.mocked(deps.createInstallationToken).mockResolvedValue({
@@ -186,9 +243,137 @@ describe("reconcileGitHubConnection", () => {
         expiresAt,
       });
 
-      await expect(reconcileGitHubConnection(deps, claim)).resolves.toMatchObject({ diagnostic: "internal_failure" });
-      expect(deps.readSnapshot).not.toHaveBeenCalled();
+      await expect(reconcileGitHubConnection(deps, claim)).resolves.toMatchObject({
+        outcome: "temporary_failure",
+        diagnostic: "invalid_provider_response",
+      });
+      expect(deps.readRepositories).not.toHaveBeenCalled();
       expect(deps.finalize).toHaveBeenCalledOnce();
+    }
+  });
+
+  it("composes metadata, token and repository adapters in provider order", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        id: 77,
+        account: { id: 99, login: "Adtecher", type: "Organization" },
+        repository_selection: "selected",
+        permissions: READ_PERMISSIONS,
+        suspended_at: null,
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        token: ["unit", "fixture", "inventory", "authorization"].join(":"),
+        expires_at: "2026-09-14T13:00:00.000Z",
+      }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        total_count: 2,
+        repositories: [
+          {
+            id: 101, owner: { login: "Adtecher" }, name: "repo-101",
+            full_name: "Adtecher/repo-101", html_url: "https://github.com/Adtecher/repo-101",
+            visibility: "private", archived: false, default_branch: "main",
+          },
+          {
+            id: 102, owner: { login: "Adtecher" }, name: "repo-102",
+            full_name: "Adtecher/repo-102", html_url: "https://github.com/Adtecher/repo-102",
+            visibility: "private", archived: false, default_branch: "main",
+          },
+        ],
+      }), { status: 200 }));
+    const deps = dependencies();
+    deps.readMetadata.mockImplementation((input) => readInstallationMetadata({ ...input, fetchImpl }));
+    vi.mocked(deps.createInstallationToken).mockImplementation((input) => (
+      createInstallationInventoryToken({ ...input, fetchImpl })
+    ));
+    deps.readRepositories.mockImplementation((input) => readInstallationRepositories({ ...input, fetchImpl }));
+
+    await expect(reconcileGitHubConnection(deps, claim)).resolves.toMatchObject({ outcome: "success" });
+
+    expect(fetchImpl.mock.calls.map(([url]) => url)).toEqual([
+      "https://api.github.com/app/installations/77",
+      "https://api.github.com/app/installations/77/access_tokens",
+      "https://api.github.com/installation/repositories?per_page=100",
+    ]);
+    expect(deps.finalize).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    [
+      {
+        id: 77,
+        account: { id: 99, login: "Adtecher", type: "Organization" },
+        repository_selection: "selected",
+        permissions: READ_PERMISSIONS,
+        suspended_at: "2026-09-14T11:00:00.000Z",
+      },
+      "installation_suspended",
+    ],
+    [
+      {
+        id: 77,
+        account: { id: 99, login: "Adtecher", type: "Organization" },
+        repository_selection: "selected",
+        permissions: { ...READ_PERMISSIONS, contents: "read" },
+        suspended_at: null,
+      },
+      "permission_mismatch",
+    ],
+  ] as const)("finalizes provider metadata drift as %s before token exchange", async (body, diagnostic) => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status: 200 }));
+    const deps = dependencies();
+    deps.readMetadata.mockImplementation((input) => readInstallationMetadata({ ...input, fetchImpl }));
+
+    await expect(reconcileGitHubConnection(deps, claim)).resolves.toMatchObject({
+      outcome: "action_required",
+      diagnostic,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(deps.createInstallationToken).not.toHaveBeenCalled();
+    expect(deps.readRepositories).not.toHaveBeenCalled();
+    expect(deps.finalize).toHaveBeenCalledOnce();
+  });
+
+  it("aborts and finalizes a whole reconciliation with a one-minute lease margin", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-14T12:00:00.000Z"));
+    try {
+      const deps = dependencies();
+      deps.now = () => new Date();
+      deps.readRepositories.mockImplementation(({ signal }: { signal: AbortSignal }) => (
+        new Promise((_resolve, reject) => {
+          const fail = () => reject(signal.reason);
+          if (signal.aborted) fail();
+          else signal.addEventListener("abort", fail, { once: true });
+        })
+      ));
+      let finalizedAt = 0;
+      deps.finalize.mockImplementation(async () => {
+        finalizedAt = Date.now();
+        return "none";
+      });
+
+      const pending = reconcileGitHubConnection(deps, claim);
+      await vi.advanceTimersByTimeAsync(239_999);
+      expect(deps.finalize).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      const result = await pending;
+
+      expect(result).toMatchObject({
+        outcome: "temporary_failure",
+        diagnostic: "provider_temporary_failure",
+      });
+      expect(finalizedAt).toBe(new Date("2026-09-14T12:04:00.000Z").getTime());
+      expect(finalizedAt).toBeLessThan(new Date("2026-09-14T12:05:00.000Z").getTime());
+      expect(deps.finalize).toHaveBeenCalledOnce();
+      const metadataSignal = deps.readMetadata.mock.calls[0]?.[0].signal as AbortSignal;
+      const tokenSignal = vi.mocked(deps.createInstallationToken).mock.calls[0]?.[0].signal as AbortSignal;
+      const repositorySignal = deps.readRepositories.mock.calls[0]?.[0].signal as AbortSignal;
+      expect(metadataSignal).toBe(tokenSignal);
+      expect(tokenSignal).toBe(repositorySignal);
+      expect(repositorySignal.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
     }
   });
 
@@ -201,6 +386,7 @@ describe("reconcileGitHubConnection", () => {
       "../domain/rules",
       "./materialise-approved-observations",
     ]));
+    expect(imports.some((path) => /(?:collection|observation)/i.test(path))).toBe(false);
     expect(source).not.toMatch(/features\/(?:evidence|findings|tasks)|domain\/(?:observation|rules)/i);
   });
 });
