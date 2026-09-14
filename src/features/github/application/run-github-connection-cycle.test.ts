@@ -405,7 +405,7 @@ describe("runGitHubConnectionCycle", () => {
     }, expect.any(AbortSignal));
   });
 
-  it("queues only the atomic opening transition for an immediate serious failure", async () => {
+  it("acknowledges only the atomic opening transition for an immediate serious failure", async () => {
     const deps = dependencies();
     deps.claimDue.mockResolvedValue([claim(1)]);
     deps.reconcile.mockResolvedValue({
@@ -473,7 +473,7 @@ describe("runGitHubConnectionCycle", () => {
     }), expect.any(AbortSignal));
   });
 
-  it("projects a repeated open observation without synthesizing another transition", async () => {
+  it("acknowledges a repeated open observation without synthesizing another transition", async () => {
     const deps = dependencies();
     deps.claimDue.mockResolvedValue([claim(1)]);
     deps.reconcile.mockResolvedValue({
@@ -494,7 +494,7 @@ describe("runGitHubConnectionCycle", () => {
     }), expect.any(AbortSignal));
   });
 
-  it("queues recovery only from the verified recovered transition", async () => {
+  it("acknowledges recovery only from the verified recovered transition", async () => {
     const deps = dependencies();
     deps.claimDue.mockResolvedValue([claim(1)]);
     deps.reconcile.mockResolvedValue({
