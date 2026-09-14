@@ -783,3 +783,81 @@ describe("Audit activity workspace access", () => {
     expect(activity.canAccessPath("/app/activity")).toBe(false);
   });
 });
+
+describe("Tasks and member contributions workspace access", () => {
+  const taskId = "57000000-0000-4000-8000-000000000001";
+
+  it.each(["owner", "admin"] as const)("gives %s the existing task routes, navigation, and controls", (role) => {
+    const tasks = workspaceAccess(role).section("tasks");
+
+    expect(tasks).toMatchObject({
+      id: "tasks",
+      href: "/app/tasks",
+      label: "Tasks",
+      title: "Tasks",
+      icon: "check",
+      canView: true,
+      canManage: true,
+      presentation: "operator",
+      navigation: {
+        group: "Work",
+        href: "/app/tasks",
+        label: "Tasks",
+        icon: "check",
+      },
+    });
+    for (const pathname of [
+      "/app/tasks",
+      `/app/tasks/${taskId}`,
+      "/app/tasks/new",
+      `/app/tasks/${taskId}/edit`,
+      "/app/tasks/from-gap",
+      "/api/app/tasks/export",
+    ]) expect(tasks.canAccessPath(pathname)).toBe(true);
+    expect(() => tasks.requireManage("create-task")).not.toThrow();
+    expect(() => tasks.requireManage("update-task-status")).not.toThrow();
+    expect(() => tasks.requireManage("edit-task")).not.toThrow();
+    expect(() => tasks.requireManage("review-task-contributions")).not.toThrow();
+    expect(tasks.canManageOperation("push-task-to-tracker")).toBe(true);
+    expect(() => tasks.requireManage("push-task-to-tracker")).not.toThrow();
+  });
+
+  it("keeps the Member task register, detail, assigned-work navigation, and contribution presentation read-only", () => {
+    const tasks = workspaceAccess("member").section("tasks");
+
+    expect(tasks).toMatchObject({
+      canView: true,
+      canManage: false,
+      label: "Assigned tasks",
+      title: "Tasks",
+      presentation: "member",
+      navigation: {
+        group: "Compliance",
+        href: "/app/tasks?filter=assigned",
+        label: "Assigned tasks",
+        icon: "check",
+      },
+    });
+    expect(tasks.canAccessPath("/app/tasks")).toBe(true);
+    expect(tasks.canAccessPath(`/app/tasks/${taskId}`)).toBe(true);
+    expect(tasks.canAccessPath("/app/tasks/new")).toBe(false);
+    expect(tasks.canAccessPath(`/app/tasks/${taskId}/edit`)).toBe(false);
+    expect(tasks.canAccessPath("/app/tasks/from-gap")).toBe(false);
+    expect(tasks.canAccessPath("/api/app/tasks/export")).toBe(false);
+    expect(() => tasks.requireManage("create-task")).toThrow("Only workspace operators can create tasks");
+    expect(() => tasks.requireManage("update-task-status")).toThrow("Only workspace operators can update task status");
+    expect(() => tasks.requireManage("edit-task")).toThrow("Only workspace operators can edit tasks");
+    expect(tasks.manageDeniedMessageFor("review-task-contributions")).toBe("Only a workspace coordinator can review contributions.");
+    expect(tasks.canManageOperation("push-task-to-tracker")).toBe(false);
+    expect(() => tasks.requireManage("push-task-to-tracker")).toThrow("Only workspace operators can push tracker tickets");
+  });
+
+  it("does not grant task access before Workspace membership exists or to invented subpaths", () => {
+    const tasks = workspaceAccess(null).section("tasks");
+
+    expect(tasks).toMatchObject({ canView: false, canManage: false, presentation: null, navigation: null });
+    expect(tasks.canAccessPath("/app/tasks")).toBe(false);
+    expect(workspaceAccess("owner").sectionForPath("/app/tasks/not-a-task-id")).toBeNull();
+    expect(workspaceAccess("owner").sectionForPath(`/app/tasks/${taskId}/extra`)).toBeNull();
+  });
+});

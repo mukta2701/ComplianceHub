@@ -7,7 +7,7 @@ import { contributionPermissions, contributionTime, type Contribution, type Cont
 import { submitTaskContributionAction, reviewTaskContributionAction } from "./contribution-actions";
 import styles from "./task-contributions.module.css";
 
-type Props = { taskId: string; ownerId: string | null; userId: string; role: string; status: string; assignmentRevision: number; requestId: string; names: Record<string,string>; contributions: (Contribution & { reviewRequestId: string })[] };
+type Props = { taskId: string; ownerId: string | null; userId: string; canManage: boolean; status: string; assignmentRevision: number; requestId: string; names: Record<string,string>; contributions: (Contribution & { reviewRequestId: string })[] };
 
 function Result({ state }: { state: ContributionState }) {
   return <>{state.error && <p role="alert" className={styles.error}>{state.error}</p>}{state.success && <p role="status" className={styles.success}>{state.success}</p>}</>;
@@ -50,7 +50,7 @@ function ReviewForm({ taskId, contributionId, requestId }: { taskId: string; con
 }
 
 export function TaskContributions(props: Props) {
-  const { canSubmit, reviewableIds } = contributionPermissions(props);
+  const { canSubmit, reviewableIds } = contributionPermissions({ ...props, canReview: props.canManage });
   const closed = props.status === "done" || props.status === "cancelled";
   const currentContributions = props.contributions.filter((item) => item.assignment_revision === props.assignmentRevision);
   const latest = currentContributions[0];
@@ -92,7 +92,7 @@ export function TaskContributions(props: Props) {
             <p><strong>{props.names[item.reviewer_id ?? ""] ?? "Former coordinator"}</strong> · Reviewed <time dateTime={item.reviewed_at}>{contributionTime(item.reviewed_at)}</time></p>
             <p>{item.rationale}</p>
           </div>}
-          {item.evidence_id && <p className={styles.evidenceLink}>{props.role === "owner" || props.role === "admin" ? <Link href={"/app/evidence?evidence=" + item.evidence_id + "#evidence-" + item.evidence_id}>Open accepted evidence</Link> : "This accepted note is saved as linked evidence."}</p>}
+          {item.evidence_id && <p className={styles.evidenceLink}>{props.canManage ? <Link href={"/app/evidence?evidence=" + item.evidence_id + "#evidence-" + item.evidence_id}>Open accepted evidence</Link> : "This accepted note is saved as linked evidence."}</p>}
           {reviewableIds.includes(item.id) && <ReviewForm taskId={props.taskId} contributionId={item.id} requestId={item.reviewRequestId} />}
         </article>;
       })}

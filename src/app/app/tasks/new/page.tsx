@@ -5,10 +5,11 @@ import { Card, PageIntro } from "@/components/ui";
 import { one } from "@/lib/supabase/one";
 import { TaskForm } from "../task-form";
 import styles from "../task-form.module.css";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 
 export default async function NewTaskPage() {
   const { supabase, organisation, membership } = await requireAppContext();
-  if (membership.role === "member") redirect("/app/tasks");
+  if (!workspaceAccess(membership.role).section("tasks").canManage) redirect("/app/tasks");
   const [membersResult, controlsResult, risksResult] = await Promise.all([
     supabase.from("memberships").select("user_id,profiles(display_name)").eq("organisation_id", organisation.id),
     supabase.from("controls").select("id,code,title").order("position"),

@@ -5,6 +5,7 @@ import { isOverdue, type TaskStatus } from "@/features/tasks/domain/tasks";
 import { Card, PageIntro, Pill } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { one } from "@/lib/supabase/one";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import { acceptCalendarSeedAction, updateTaskStatusAction } from "./actions";
 import styles from "./tasks.module.css";
 
@@ -23,7 +24,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
   const requested = (await searchParams).filter ?? "all";
   const filter: TaskFilter = FILTERS.includes(requested as TaskFilter) ? requested as TaskFilter : "all";
   const { supabase, organisation, membership, user } = await requireAppContext();
-  const canManage = membership.role !== "member";
+  const canManage = workspaceAccess(membership.role).section("tasks").canManage;
   const today = new Date().toISOString().slice(0, 10);
 
   let query = supabase.from("tasks").select("id,title,detail,status,due_on,recurrence,source,owner_id,profiles:owner_id(display_name)").eq("organisation_id", organisation.id);

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireAppContext } from "@/lib/app-context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { contributionInputSchema, reviewInputSchema, type ContributionState } from "@/features/tasks/domain/contributions";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 
 const messages: Record<string, string> = {
   "task assignment changed; reload the task": "The assignment changed. Reload this task before continuing.",
@@ -38,7 +39,8 @@ export async function submitTaskContributionAction(_state: ContributionState, fo
 }
 export async function reviewTaskContributionAction(_state: ContributionState, form: FormData): Promise<ContributionState> {
   const { supabase, organisation, membership, user } = await requireAppContext();
-  if (membership.role !== "owner" && membership.role !== "admin") return { error: "Only a workspace coordinator can review contributions." };
+  const taskAccess = workspaceAccess(membership.role).section("tasks");
+  if (!taskAccess.canManage) return { error: taskAccess.manageDeniedMessageFor("review-task-contributions") };
   const parsed = reviewInputSchema.safeParse(Object.fromEntries(form));
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check your review details." };
   await enforceRateLimit(`task-contribution-review:${user.id}`, { limit: 30, windowMs: 60_000 });

@@ -22,10 +22,11 @@ const operatorOverviewNavigation = workspaceAccess("owner").section("overview").
 const operatorEvidenceNavigation = workspaceAccess("owner").section("evidence").navigation!;
 const operatorAuditNavigation = workspaceAccess("owner").section("audits").navigation!;
 const operatorAuditActivityMetadata = workspaceAccess("owner").section("audit-activity");
+const operatorTaskNavigation = workspaceAccess("owner").section("tasks").navigation!;
 
 const navGroups = [
   { label: "Work", items: [
-    ["/app/tasks", "check", "Tasks"],
+    [operatorTaskNavigation.href, operatorTaskNavigation.icon, operatorTaskNavigation.label],
     [operatorRiskNavigation.href, operatorRiskNavigation.icon, operatorRiskNavigation.label],
     [operatorEvidenceNavigation.href, operatorEvidenceNavigation.icon, operatorEvidenceNavigation.label],
   ] },
@@ -63,10 +64,11 @@ const memberLeadershipNavigation = workspaceAccess("member").section("leadership
 const memberPolicyNavigation = workspaceAccess("member").section("policies").navigation!;
 const memberSoaNavigation = workspaceAccess("member").section("soa").navigation!;
 const memberOverviewNavigation = workspaceAccess("member").section("overview").navigation!;
+const memberTaskNavigation = workspaceAccess("member").section("tasks").navigation!;
 const memberNavGroups = [
   { label: memberOverviewNavigation.group, items: [[memberOverviewNavigation.href, memberOverviewNavigation.icon, memberOverviewNavigation.label]] },
   { label: "Compliance", items: [
-    ["/app/tasks?filter=assigned", "check", "Assigned tasks"],
+    [memberTaskNavigation.href, memberTaskNavigation.icon, memberTaskNavigation.label],
     [memberPolicyNavigation.href, memberPolicyNavigation.icon, memberPolicyNavigation.label],
     [memberSoaNavigation.href, memberSoaNavigation.icon, memberSoaNavigation.label],
     [memberFrameworkNavigation.href, memberFrameworkNavigation.icon, memberFrameworkNavigation.label],

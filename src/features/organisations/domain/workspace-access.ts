@@ -1,6 +1,6 @@
 import { hasCapability, type MembershipRole, type WorkspaceCapability } from "./access";
 
-export type WorkspaceSectionId = "assets" | "assessments" | "audit-activity" | "audits" | "baseline" | "evidence" | "frameworks" | "leadership-report" | "notifications" | "overview" | "policies" | "risks" | "scope" | "soa" | "trust-center";
+export type WorkspaceSectionId = "assets" | "assessments" | "audit-activity" | "audits" | "baseline" | "evidence" | "frameworks" | "leadership-report" | "notifications" | "overview" | "policies" | "risks" | "scope" | "soa" | "tasks" | "trust-center";
 
 export type WorkspaceSectionPresentation = "member" | "operator";
 
@@ -14,7 +14,13 @@ type WorkspacePathRule = {
   title?: string;
 };
 
-type WorkspaceManageOperation = "auditor-access";
+type WorkspaceManageOperation =
+  | "auditor-access"
+  | "create-task"
+  | "edit-task"
+  | "push-task-to-tracker"
+  | "review-task-contributions"
+  | "update-task-status";
 
 type WorkspaceNavigationItem = {
   group: WorkspaceNavigationGroup;
@@ -36,6 +42,8 @@ export type WorkspaceSectionAccess = {
   manageDeniedMessage: string | null;
   canAccessPath: (pathname: string) => boolean;
   titleForPath: (pathname: string) => string | null;
+  canManageOperation: (operation?: WorkspaceManageOperation) => boolean;
+  manageDeniedMessageFor: (operation?: WorkspaceManageOperation) => string;
   requireManage: (operation?: WorkspaceManageOperation) => void;
 };
 
@@ -52,9 +60,11 @@ type WorkspaceSectionPolicy = {
     label: string;
     title: string;
     presentation: WorkspaceSectionPresentation;
+    navigationHref?: string;
   }>>;
   manageCapability?: WorkspaceCapability;
   manageDeniedMessage: string | null;
+  operationCapabilities?: Partial<Record<WorkspaceManageOperation, WorkspaceCapability>>;
   operationDeniedMessages?: Partial<Record<WorkspaceManageOperation, string>>;
 };
 
@@ -69,6 +79,8 @@ const RISK_DETAIL_PATH = /^\/app\/risks\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-
 const RISK_EDIT_PATH = /^\/app\/risks\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/edit$/i;
 const SOA_DETAIL_PATH = /^\/app\/soa\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SOA_SNAPSHOT_EXPORT_PATH = /^\/api\/app\/soa\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/(?:pdf|docx)$/i;
+const TASK_DETAIL_PATH = /^\/app\/tasks\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const TASK_EDIT_PATH = /^\/app\/tasks\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/edit$/i;
 
 function pathMatches(rule: WorkspacePathRule, pathname: string): boolean {
   return typeof rule.path === "string" ? rule.path === pathname : rule.path.test(pathname);
@@ -294,6 +306,40 @@ const sectionPolicies: Record<WorkspaceSectionId, WorkspaceSectionPolicy> = {
     manageCapability: "manage_imports",
     manageDeniedMessage: "Only workspace Owners and Admins can finalise a Statement of Applicability",
   },
+  tasks: {
+    id: "tasks",
+    href: "/app/tasks",
+    label: "Tasks",
+    title: "Tasks",
+    icon: "check",
+    paths: [
+      { path: "/app/tasks", requirement: "view" },
+      { path: TASK_DETAIL_PATH, requirement: "view" },
+      { path: "/app/tasks/new", requirement: "manage" },
+      { path: TASK_EDIT_PATH, requirement: "manage" },
+      { path: "/app/tasks/from-gap", requirement: "manage" },
+      { path: "/api/app/tasks/export", requirement: "manage" },
+    ],
+    viewRoles: new Set(["owner", "admin", "member"]),
+    navigationGroups: { owner: "Work", admin: "Work", member: "Compliance" },
+    rolePresentation: {
+      owner: { label: "Tasks", title: "Tasks", presentation: "operator" },
+      admin: { label: "Tasks", title: "Tasks", presentation: "operator" },
+      member: { label: "Assigned tasks", title: "Tasks", presentation: "member", navigationHref: "/app/tasks?filter=assigned" },
+    },
+    manageCapability: "manage_tasks",
+    manageDeniedMessage: "Only workspace operators can edit tasks",
+    operationCapabilities: {
+      "push-task-to-tracker": "manage_connections",
+    },
+    operationDeniedMessages: {
+      "create-task": "Only workspace operators can create tasks",
+      "edit-task": "Only workspace operators can edit tasks",
+      "push-task-to-tracker": "Only workspace operators can push tracker tickets",
+      "review-task-contributions": "Only a workspace coordinator can review contributions.",
+      "update-task-status": "Only workspace operators can update task status",
+    },
+  },
   "trust-center": {
     id: "trust-center",
     href: "/app/trust",
@@ -320,6 +366,12 @@ function sectionAccess(
   const rolePresentation = role === null ? undefined : policy.rolePresentation?.[role];
   const label = rolePresentation?.label ?? policy.label;
   const title = rolePresentation?.title ?? policy.title;
+  const canManageOperation = (operation?: WorkspaceManageOperation) => {
+    const capability = operation
+      ? policy.operationCapabilities?.[operation] ?? policy.manageCapability
+      : policy.manageCapability;
+    return role !== null && capability !== undefined && hasCapability(role, capability);
+  };
   return {
     id: policy.id,
     href: policy.href,
@@ -331,7 +383,7 @@ function sectionAccess(
     navigation: navigationGroup !== undefined
       ? {
           group: navigationGroup,
-          href: policy.href,
+          href: rolePresentation?.navigationHref ?? policy.href,
           label,
           icon: policy.icon,
         }
@@ -347,9 +399,15 @@ function sectionAccess(
       const rule = policy.paths.find((candidate) => pathMatches(candidate, pathname));
       return rule ? rule.title ?? title : null;
     },
+    canManageOperation,
+    manageDeniedMessageFor: (operation) => operation
+      ? policy.operationDeniedMessages?.[operation] ?? policy.manageDeniedMessage ?? "Workspace management access is unavailable"
+      : policy.manageDeniedMessage ?? "Workspace management access is unavailable",
     requireManage: (operation) => {
-      const deniedMessage = operation ? policy.operationDeniedMessages?.[operation] : policy.manageDeniedMessage;
-      if (!canManage) throw new Error(deniedMessage ?? policy.manageDeniedMessage ?? "Workspace management access is unavailable");
+      const deniedMessage = operation
+        ? policy.operationDeniedMessages?.[operation] ?? policy.manageDeniedMessage
+        : policy.manageDeniedMessage;
+      if (!canManageOperation(operation)) throw new Error(deniedMessage ?? "Workspace management access is unavailable");
     },
   };
 }

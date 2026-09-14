@@ -16,7 +16,7 @@ describe("task contribution input", () => {
   });
 });
 describe("contribution visibility", () => {
-  const base = { userId: "assignee", ownerId: "assignee", role: "member", status: "open", assignmentRevision: 2, contributions: [] };
+  const base = { userId: "assignee", ownerId: "assignee", canReview: false, status: "open", assignmentRevision: 2, contributions: [] };
   it("offers submission only to the current assignee on active work", () => {
     expect(contributionPermissions(base).canSubmit).toBe(true);
     expect(contributionPermissions({ ...base, userId: "other" }).canSubmit).toBe(false);
@@ -28,8 +28,8 @@ describe("contribution visibility", () => {
   });
   it("allows only an independent operator to review the active version", () => {
     const contributions = [{ id, submitter_id: "assignee", assignment_revision: 2, decision: "pending" }];
-    expect(contributionPermissions({ ...base, contributions, userId: "reviewer", role: "admin" }).reviewableIds).toEqual([id]);
-    expect(contributionPermissions({ ...base, contributions, role: "owner" }).reviewableIds).toEqual([]);
+    expect(contributionPermissions({ ...base, contributions, userId: "reviewer", canReview: true }).reviewableIds).toEqual([id]);
+    expect(contributionPermissions({ ...base, contributions, canReview: true }).reviewableIds).toEqual([]);
     expect(contributionPermissions({ ...base, contributions, userId: "other" }).reviewableIds).toEqual([]);
   });
 });

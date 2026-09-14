@@ -164,6 +164,12 @@ describe("workspace request session and capability guard", () => {
     const evidenceExportApi = await refreshSupabaseSession(request("/api/app/evidence/export"));
     const auditPackApi = await refreshSupabaseSession(request(`/api/app/audits/${ORG_A}/pack`));
     const auditorLinkApi = await refreshSupabaseSession(request(`/api/app/audits/${ORG_A}/auditor-link`));
+    const taskList = await refreshSupabaseSession(request("/app/tasks"));
+    const taskDetail = await refreshSupabaseSession(request(`/app/tasks/${ORG_A}`));
+    const newTask = await refreshSupabaseSession(request("/app/tasks/new"));
+    const editTask = await refreshSupabaseSession(request(`/app/tasks/${ORG_A}/edit`));
+    const gapTask = await refreshSupabaseSession(request("/app/tasks/from-gap"));
+    const taskExportApi = await refreshSupabaseSession(request("/api/app/tasks/export"));
     const reportApi = await refreshSupabaseSession(request("/api/app/reports/readiness/pdf"));
 
     expect(settings.headers.get("location")).toBe("https://compliancehub.example/app");
@@ -177,6 +183,13 @@ describe("workspace request session and capability guard", () => {
     await expect(auditPackApi.json()).resolves.toEqual({ error: "Workspace operator access required" });
     expect(auditorLinkApi.status).toBe(403);
     await expect(auditorLinkApi.json()).resolves.toEqual({ error: "Workspace operator access required" });
+    expect(taskList.headers.get("x-middleware-next")).toBe("1");
+    expect(taskDetail.headers.get("x-middleware-next")).toBe("1");
+    expect(newTask.headers.get("location")).toBe("https://compliancehub.example/app");
+    expect(editTask.headers.get("location")).toBe("https://compliancehub.example/app");
+    expect(gapTask.headers.get("location")).toBe("https://compliancehub.example/app");
+    expect(taskExportApi.status).toBe(403);
+    await expect(taskExportApi.json()).resolves.toEqual({ error: "Workspace operator access required" });
     expect(reportApi.headers.get("x-middleware-next")).toBe("1");
   });
 
@@ -186,6 +199,9 @@ describe("workspace request session and capability guard", () => {
     expect((await refreshSupabaseSession(request("/app/settings"))).headers.get("x-middleware-next")).toBe("1");
     expect((await refreshSupabaseSession(request("/app/audits"))).headers.get("x-middleware-next")).toBe("1");
     expect((await refreshSupabaseSession(request("/app/activity"))).headers.get("x-middleware-next")).toBe("1");
+    expect((await refreshSupabaseSession(request("/app/tasks/new"))).headers.get("x-middleware-next")).toBe("1");
+    expect((await refreshSupabaseSession(request(`/app/tasks/${ORG_A}/edit`))).headers.get("x-middleware-next")).toBe("1");
+    expect((await refreshSupabaseSession(request("/app/tasks/from-gap"))).headers.get("x-middleware-next")).toBe("1");
     expect((await refreshSupabaseSession(request("/api/app/tasks/export"))).headers.get("x-middleware-next")).toBe("1");
     expect((await refreshSupabaseSession(request(`/api/app/audits/${ORG_A}/pack`))).headers.get("x-middleware-next")).toBe("1");
     expect((await refreshSupabaseSession(request(`/api/app/audits/${ORG_A}/auditor-link`))).headers.get("x-middleware-next")).toBe("1");

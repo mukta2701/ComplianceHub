@@ -125,6 +125,18 @@ describe("AppShell role-specific navigation", () => {
     expect(screen.getByRole("heading", { name: "Audit trail", level: 1 })).toBeInTheDocument();
   });
 
+  it("keeps role-specific task navigation and the Tasks breadcrumb unchanged", () => {
+    hoisted.pathname = "/app/tasks/57000000-0000-4000-8000-000000000001";
+    const member = renderShell("member");
+    expect(screen.getByRole("link", { name: "Assigned tasks" })).toHaveAttribute("href", "/app/tasks?filter=assigned");
+    expect(screen.getByRole("heading", { name: "Tasks", level: 1 })).toBeInTheDocument();
+    member.unmount();
+
+    renderShell("owner");
+    expect(screen.getByRole("link", { name: "Tasks" })).toHaveAttribute("href", "/app/tasks");
+    expect(screen.getByRole("heading", { name: "Tasks", level: 1 })).toBeInTheDocument();
+  });
+
   it("shows workspace setup without operational navigation before membership exists", () => {
     hoisted.pathname = "/app/onboarding";
     renderShell(null);

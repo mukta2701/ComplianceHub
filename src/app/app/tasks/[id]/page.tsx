@@ -11,6 +11,7 @@ import { pushTaskToTrackerAction } from "./tracker-actions";
 import { AiSuggestionPanel } from "@/components/ai-suggestion-panel";
 import { TaskContributions } from "../task-contributions";
 import type { Contribution } from "@/features/tasks/domain/contributions";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import styles from "./task-detail.module.css";
 
 const EVIDENCE_TONE: Record<string, string> = { current: "green", expiring: "amber", expired: "red", superseded: "neutral", withdrawn: "neutral" };
@@ -29,7 +30,9 @@ function taskStatusLabel(status: string) {
 export default async function TaskDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { supabase, organisation, membership, user } = await requireAppContext();
-  const canManage = membership.role !== "member";
+  const taskAccess = workspaceAccess(membership.role).section("tasks");
+  const canManage = taskAccess.canManage;
+  const canPushToTracker = taskAccess.canManageOperation("push-task-to-tracker");
   const taskResult = await supabase.from("tasks").select("id,title,detail,status,due_on,recurrence,source,owner_id,control_id,risk_id,created_at,updated_at,assignment_revision").eq("id", id).eq("organisation_id", organisation.id).maybeSingle();
   if (taskResult.error) throw new Error("Could not load task");
   const task = taskResult.data;
@@ -92,7 +95,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
 
     <div className={styles.primaryGrid}>
       <div className={styles.mainColumn}>
-        <TaskContributions taskId={task.id} ownerId={task.owner_id} userId={user.id} role={membership.role} status={task.status} assignmentRevision={task.assignment_revision}
+        <TaskContributions taskId={task.id} ownerId={task.owner_id} userId={user.id} canManage={canManage} status={task.status} assignmentRevision={task.assignment_revision}
           requestId={randomUUID()} names={names} contributions={contributions.map((item) => ({ ...item, reviewRequestId: randomUUID() }))} />
         {task.detail && <Card className={styles.detailCard}><span className={styles.kicker}>Task brief</span><h2>What needs to be done</h2><p>{task.detail}</p></Card>}
         {(monitoringFindings.length > 0 || auditFindings.length > 0) && <Card className={styles.findings}>
@@ -118,7 +121,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
           {canManage && <form action={updateTaskStatusAction} className={styles.statusForm}><input type="hidden" name="id" value={task.id} /><label>Update task status<select name="status" defaultValue={task.status}><option value="open">Open</option><option value="in_progress">In progress</option><option value="done">Done</option><option value="cancelled">Cancelled</option></select></label><button className="button primary">Save status</button></form>}
         </Card>
         {evidence.length > 0 && <Card className={styles.evidence}><span className={styles.kicker}>Supporting records</span><h2>Linked evidence</h2><ul>{evidence.map((item) => <li key={item.id}>{canManage ? <Link href={"/app/evidence?evidence=" + item.id + "#evidence-" + item.id}>{item.title}</Link> : <span>{item.title}</span>}<Pill tone={EVIDENCE_TONE[item.status] ?? "neutral"}>{item.status}</Pill></li>)}</ul></Card>}
-        {canManage && tickets.length === 0 && (connections?.length ?? 0) > 0 && <form action={pushTaskToTrackerAction} className={"card " + styles.trackerForm}>
+        {canPushToTracker && tickets.length === 0 && (connections?.length ?? 0) > 0 && <form action={pushTaskToTrackerAction} className={"card " + styles.trackerForm}>
           <input type="hidden" name="taskId" value={task.id} />
           <label>Send to tracker<select name="connectionId" defaultValue={connections![0].id}>{connections!.map((connection) => <option key={connection.id} value={connection.id}>{connection.label || connection.provider}</option>)}</select></label>
           <button className="button secondary">Send to tracker</button>

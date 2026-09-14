@@ -3,12 +3,13 @@ import { requireAppContext } from "@/lib/app-context";
 import { PageIntro } from "@/components/ui";
 import { one } from "@/lib/supabase/one";
 import { createGapTaskAction } from "../actions";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 
 export default async function FromGapPage({ searchParams }: { searchParams: Promise<{ questionId?: string }> }) {
   const { questionId } = await searchParams;
   if (!questionId) notFound();
   const { supabase, organisation, membership } = await requireAppContext();
-  if (membership.role === "member") redirect("/app/tasks");
+  if (!workspaceAccess(membership.role).section("tasks").canManage) redirect("/app/tasks");
   const { data: question } = await supabase.from("catalogue_questions").select("id,code,prompt,remediation").eq("id", questionId).maybeSingle();
   if (!question) notFound();
   const { data: acm } = await supabase.from("assessment_control_mappings").select("control_id").eq("catalogue_question_id", questionId).limit(1).maybeSingle();

@@ -5,7 +5,7 @@ const actionState = vi.hoisted(() => ({ result: {} as { error?: string } }));
 vi.mock("./contribution-actions", () => ({ submitTaskContributionAction: async () => actionState.result, reviewTaskContributionAction: async () => actionState.result }));
 beforeEach(() => { actionState.result = {}; });
 import { TaskContributions } from "./task-contributions";
-const base = { taskId: "task", ownerId: "author", userId: "author", role: "member", status: "open", assignmentRevision: 2, requestId: "request", names: { author: "Alex", reviewer: "Mukta" }, contributions: [] };
+const base = { taskId: "task", ownerId: "author", userId: "author", canManage: false, status: "open", assignmentRevision: 2, requestId: "request", names: { author: "Alex", reviewer: "Mukta" }, contributions: [] };
 const pending = { id: "submission", submitter_id: "author", assignment_revision: 2, decision: "pending", note: "Restore took 5 minutes", created_at: "2026-09-09T10:00:00Z", reviewer_id: null, reviewed_at: null, rationale: null, evidence_id: null, reviewRequestId: "review-request" };
 describe("task contributions", () => {
   it("offers assigned member a note form with review limitations", () => {
@@ -36,7 +36,7 @@ describe("task contributions", () => {
   });
   it("retains review rationale when the database rejects a stale review", async () => {
     actionState.result = { error: "This submission has already been reviewed." };
-    render(<TaskContributions {...base} userId="reviewer" role="admin" contributions={[pending]} />);
+    render(<TaskContributions {...base} userId="reviewer" canManage contributions={[pending]} />);
     const user = userEvent.setup();
     await user.type(screen.getByRole("textbox", { name: "Review note" }), "My review rationale");
     await user.click(screen.getByRole("button", { name: "Accept evidence" }));
@@ -44,7 +44,7 @@ describe("task contributions", () => {
     expect(screen.getByRole("textbox", { name: "Review note" })).toHaveValue("My review rationale");
   });
   it("shows pending history without another submit form or self review", () => {
-    render(<TaskContributions {...base} role="owner" contributions={[pending]} />);
+    render(<TaskContributions {...base} canManage contributions={[pending]} />);
     const progress = within(screen.getByRole("list", { name: "Task review progress" }));
     expect(progress.getByText("Submitted")).toBeInTheDocument();
     expect(progress.getByText("Review pending")).toBeInTheDocument();
@@ -65,7 +65,7 @@ describe("task contributions", () => {
     expect(screen.queryByRole("button", { name: "Accept evidence" })).not.toBeInTheDocument();
   });
   it.each(["done", "cancelled"])("tells the coordinator to reopen a %s task before reviewing its pending note", (status) => {
-    render(<TaskContributions {...base} userId="reviewer" role="admin" status={status} contributions={[pending]} />);
+    render(<TaskContributions {...base} userId="reviewer" canManage status={status} contributions={[pending]} />);
     expect(screen.getByText("Task closed — no longer reviewable")).toBeInTheDocument();
     expect(screen.getByText("This task is closed. A workspace coordinator must reopen it before this saved note can be reviewed.")).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Review note" })).not.toBeInTheDocument();
@@ -79,7 +79,7 @@ describe("task contributions", () => {
     expect(screen.queryByText(/must reopen/)).not.toBeInTheDocument();
   });
   it("gives independent coordinator exact-version review controls", () => {
-    render(<TaskContributions {...base} userId="reviewer" role="admin" contributions={[pending]} />);
+    render(<TaskContributions {...base} userId="reviewer" canManage contributions={[pending]} />);
     expect(screen.getByRole("textbox", { name: "Review note" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Request changes" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Accept evidence" })).toBeInTheDocument();
@@ -95,7 +95,7 @@ describe("task contributions", () => {
     expect(screen.queryByRole("link", { name: "Open accepted evidence" })).not.toBeInTheDocument();
   });
   it("retains review rationale and links accepted evidence", () => {
-    render(<TaskContributions {...base} role="admin" userId="reviewer" contributions={[{ ...pending, decision: "accepted", reviewer_id: "reviewer", reviewed_at: "2026-09-09T11:00:00Z", rationale: "Timing checked", evidence_id: "evidence" }]} />);
+    render(<TaskContributions {...base} canManage userId="reviewer" contributions={[{ ...pending, decision: "accepted", reviewer_id: "reviewer", reviewed_at: "2026-09-09T11:00:00Z", rationale: "Timing checked", evidence_id: "evidence" }]} />);
     const progress = within(screen.getByRole("list", { name: "Task review progress" }));
     expect(progress.getByText("Submitted")).toBeInTheDocument();
     expect(progress.getByText("Accepted")).toBeInTheDocument();

@@ -14,10 +14,7 @@ type WorkspaceIdentity = {
   role: MembershipRole | null;
 };
 
-const TASK_DETAIL_PATH = /^\/app\/tasks\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 const MEMBER_APP_PATHS = new Set([
-  "/app/tasks",
   "/app/monitoring",
 ]);
 
@@ -27,8 +24,7 @@ function normalisePath(pathname: string): string {
 }
 
 function isMemberAppPath(pathname: string): boolean {
-  return MEMBER_APP_PATHS.has(pathname)
-    || TASK_DETAIL_PATH.test(pathname);
+  return MEMBER_APP_PATHS.has(pathname);
 }
 
 export function workspaceRequestAccess(

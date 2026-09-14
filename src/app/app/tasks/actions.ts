@@ -6,13 +6,14 @@ import { requireAppContext } from "@/lib/app-context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { gapTaskInputSchema, taskInputSchema } from "@/features/tasks/application/task";
 import { nextDueDate, type TaskRecurrence } from "@/features/tasks/domain/tasks";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import { z } from "zod";
 
 const today = () => new Date().toISOString().slice(0, 10);
 
 export async function createTaskAction(formData: FormData) {
   const { supabase, user, organisation, membership } = await requireAppContext();
-  if (membership.role !== "owner" && membership.role !== "admin") throw new Error("Only workspace operators can create tasks");
+  workspaceAccess(membership.role).section("tasks").requireManage("create-task");
   await enforceRateLimit(`task:${user.id}`, { limit: 30, windowMs: 60_000 });
   const parsed = taskInputSchema.parse({ ...Object.fromEntries(formData), organisationId: organisation.id });
   const { error } = await supabase.from("tasks").insert({
@@ -26,7 +27,7 @@ export async function createTaskAction(formData: FormData) {
 
 export async function updateTaskStatusAction(formData: FormData) {
   const { supabase, organisation, membership, user } = await requireAppContext();
-  if (membership.role !== "owner" && membership.role !== "admin") throw new Error("Only workspace operators can update task status");
+  workspaceAccess(membership.role).section("tasks").requireManage("update-task-status");
   await enforceRateLimit(`task-status:${user.id}`, { limit: 30, windowMs: 60_000 });
   const status = String(formData.get("status"));
   if (!["open", "in_progress", "done", "cancelled"].includes(status)) throw new Error("Invalid task status");
@@ -48,7 +49,7 @@ export async function updateTaskStatusAction(formData: FormData) {
 
 export async function updateTaskAction(formData: FormData) {
   const { supabase, organisation, membership, user } = await requireAppContext();
-  if (membership.role !== "owner" && membership.role !== "admin") throw new Error("Only workspace operators can edit tasks");
+  workspaceAccess(membership.role).section("tasks").requireManage("edit-task");
   await enforceRateLimit(`task-edit:${user.id}`, { limit: 30, windowMs: 60_000 });
   const id = z.uuid().parse(String(formData.get("id")));
   const expectedUpdatedAt = z.iso.datetime({ offset: true }).parse(String(formData.get("expectedUpdatedAt")));

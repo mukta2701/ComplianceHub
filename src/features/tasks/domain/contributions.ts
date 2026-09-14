@@ -19,14 +19,14 @@ export type ContributionState = { error?: string; success?: string };
 
 // Display hints only: the transactional RPC independently checks live authority.
 export function contributionPermissions(input: {
-  userId: string; ownerId: string | null; role: string; status: string; assignmentRevision: number;
+  userId: string; ownerId: string | null; canReview: boolean; status: string; assignmentRevision: number;
   contributions: Pick<Contribution, "id" | "submitter_id" | "assignment_revision" | "decision">[];
 }) {
   const open = input.status === "open" || input.status === "in_progress";
   const pending = input.contributions.filter((c) => c.decision === "pending" && c.assignment_revision === input.assignmentRevision);
   return {
     canSubmit: open && input.ownerId === input.userId && pending.length === 0,
-    reviewableIds: open && (input.role === "owner" || input.role === "admin")
+    reviewableIds: open && input.canReview
       ? pending.filter((c) => c.submitter_id !== input.userId && c.submitter_id === input.ownerId).map((c) => c.id) : [],
   };
 }

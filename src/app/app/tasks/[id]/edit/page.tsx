@@ -5,11 +5,12 @@ import { Card, PageIntro } from "@/components/ui";
 import { one } from "@/lib/supabase/one";
 import { TaskForm } from "../../task-form";
 import styles from "../../task-form.module.css";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 
 export default async function EditTaskPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { supabase, organisation, membership } = await requireAppContext();
-  if (membership.role === "member") redirect(`/app/tasks/${id}`);
+  if (!workspaceAccess(membership.role).section("tasks").canManage) redirect(`/app/tasks/${id}`);
   const { data: task, error: taskError } = await supabase.from("tasks").select("id,title,detail,status,due_on,recurrence,owner_id,control_id,risk_id,updated_at").eq("id", id).eq("organisation_id", organisation.id).maybeSingle();
   if (taskError) throw new Error("Could not load task");
   if (!task) notFound();

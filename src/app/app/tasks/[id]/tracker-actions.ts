@@ -9,14 +9,12 @@ import { decryptSecret } from "@/lib/security/secrets";
 import { resolveTicketProvider } from "@/features/integrations/application/registry";
 import { buildTicketPayload } from "@/features/integrations/domain/mapping";
 import type { IntegrationProvider } from "@/features/integrations/domain/provider";
-import { hasCapability } from "@/features/organisations/domain/access";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import { z } from "zod";
 
 export async function pushTaskToTrackerAction(formData: FormData) {
   const { supabase, user, organisation, membership } = await requireAppContext();
-  if (!hasCapability(membership.role, "manage_connections")) {
-    throw new Error("Only workspace operators can push tracker tickets");
-  }
+  workspaceAccess(membership.role).section("tasks").requireManage("push-task-to-tracker");
   await enforceRateLimit(`ticket-push:${user.id}`, { limit: 20, windowMs: 60_000 });
   const taskId = z.uuid().parse(String(formData.get("taskId")));
   const connectionId = z.uuid().parse(String(formData.get("connectionId")));
