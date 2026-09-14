@@ -244,6 +244,25 @@ describe("readInstallationSnapshot", () => {
     expect(String(error)).not.toContain("fictional detail");
   });
 
+  it.each(["AbortError", "TimeoutError"])(
+    "preserves %s when installation response body decoding is aborted",
+    async (name) => {
+      const providerDetail = crypto.randomUUID();
+      const response = jsonResponse(installation());
+      vi.spyOn(response, "json").mockRejectedValue(new DOMException(providerDetail, name));
+
+      const error = await readInstallationMetadata({
+        installationId: 77,
+        appJwt: APP_CREDENTIAL,
+        fetchImpl: vi.fn().mockResolvedValue(response),
+      }).catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(GitHubInstallationApiError);
+      expect(error).toMatchObject({ diagnosticCode: "timeout" });
+      expect(String(error)).not.toContain(providerDetail);
+    },
+  );
+
   it("combines one reconciliation deadline with each metadata and repository request timeout", async () => {
     const deadline = new AbortController();
     const fetchImpl = vi.fn()

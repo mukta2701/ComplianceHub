@@ -43,7 +43,6 @@ export type GitHubInstallationTokenDiagnostic =
   | "authentication_failed"
   | "invalid_response"
   | "not_found"
-  | "permission_mismatch"
   | "provider_failure"
   | "rate_limited"
   | "timeout";
@@ -206,7 +205,7 @@ export async function createInstallationInventoryToken(input: {
       throw new GitHubInstallationTokenError("authentication_failed");
     }
     if (response.status === 404) throw new GitHubInstallationTokenError("not_found");
-    if (response.status === 422) throw new GitHubInstallationTokenError("permission_mismatch");
+    if (response.status === 422) throw new GitHubInstallationTokenError("provider_failure");
     if (response.status >= 500) throw new GitHubInstallationTokenError("provider_failure");
     throw new GitHubInstallationTokenError("invalid_response");
   }
@@ -219,6 +218,9 @@ export async function createInstallationInventoryToken(input: {
     return { token: token.token, expiresAt: token.expires_at };
   } catch (error) {
     if (error instanceof GitHubInstallationTokenError) throw error;
+    if (error instanceof DOMException && (error.name === "AbortError" || error.name === "TimeoutError")) {
+      throw new GitHubInstallationTokenError("timeout");
+    }
     throw new GitHubInstallationTokenError("invalid_response");
   }
 }

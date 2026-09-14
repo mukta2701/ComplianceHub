@@ -180,7 +180,7 @@ describe("GitHub App authentication", () => {
     [401, "authentication_failed"],
     [403, "authentication_failed"],
     [404, "not_found"],
-    [422, "permission_mismatch"],
+    [422, "provider_failure"],
     [500, "provider_failure"],
     [503, "provider_failure"],
   ] as const)("classifies inventory-token HTTP %s without exposing provider content", async (status, diagnosticCode) => {
@@ -208,6 +208,26 @@ describe("GitHub App authentication", () => {
     expect(error).toMatchObject({ diagnosticCode: "timeout" });
     expect(String(error)).not.toContain("provider detail");
   });
+
+  it.each(["AbortError", "TimeoutError"])(
+    "preserves %s when inventory-token response body decoding is aborted",
+    async (name) => {
+      const providerDetail = crypto.randomUUID();
+      const response = new Response("", { status: 201 });
+      vi.spyOn(response, "json").mockRejectedValue(new DOMException(providerDetail, name));
+
+      const error = await createInstallationInventoryToken({
+        installationId: 77,
+        appJwt: "signed-app-jwt",
+        now: new Date("2026-09-14T12:00:00.000Z"),
+        fetchImpl: vi.fn().mockResolvedValue(response),
+      }).catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(GitHubInstallationTokenError);
+      expect(error).toMatchObject({ diagnosticCode: "timeout" });
+      expect(String(error)).not.toContain(providerDetail);
+    },
+  );
 
   it("translates inventory-token rate limiting into a connection-specific typed signal", async () => {
     const error = await createInstallationInventoryToken({

@@ -163,7 +163,10 @@ async function request(
 async function parseJson<T>(response: Response, schema: z.ZodType<T>): Promise<T> {
   try {
     return schema.parse(await response.json());
-  } catch {
+  } catch (error) {
+    if (error instanceof DOMException && (error.name === "AbortError" || error.name === "TimeoutError")) {
+      throw new GitHubInstallationApiError("timeout");
+    }
     throw invalidResponse();
   }
 }

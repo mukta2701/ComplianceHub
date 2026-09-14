@@ -57,6 +57,10 @@ type ClassifiedOutcome = {
 const SUCCESS_INTERVAL_MS = 24 * 60 * 60_000;
 const RECONCILIATION_DEADLINE_MS = 4 * 60_000;
 
+function reconciliationTimeout(): DOMException {
+  return new DOMException("GitHub reconciliation deadline reached", "TimeoutError");
+}
+
 function safeRateLimitTime(error: GitHubInstallationTokenError, now: Date): string | null {
   const candidates: number[] = [];
   if (error.retryAfterSeconds !== undefined) {
@@ -80,8 +84,6 @@ function classifyError(error: unknown, now: Date): ClassifiedOutcome {
         return { outcome: "action_required", diagnostic: "permission_mismatch" };
       case "not_found":
         return { outcome: "disconnected", diagnostic: "installation_revoked" };
-      case "permission_mismatch":
-        return { outcome: "action_required", diagnostic: "permission_mismatch" };
       case "invalid_response":
         return { outcome: "temporary_failure", diagnostic: "invalid_provider_response" };
       case "rate_limited":
@@ -228,17 +230,22 @@ export async function reconcileGitHubConnection(
 ): Promise<GitHubConnectionReconciliationResult> {
   const now = deps.now();
   const deadline = new AbortController();
-  const deadlineTimer = setTimeout(() => {
-    deadline.abort(new DOMException("GitHub reconciliation deadline reached", "TimeoutError"));
-  }, RECONCILIATION_DEADLINE_MS);
+  let deadlineTimer: ReturnType<typeof setTimeout> | null = null;
   let classified: ClassifiedOutcome;
   try {
     if (!Number.isFinite(now.getTime())) throw new Error("invalid reconciliation time");
+    const deadlineAt = Date.parse(claim.attemptedAt) + RECONCILIATION_DEADLINE_MS;
+    if (!Number.isFinite(deadlineAt)) throw new Error("invalid reconciliation deadline");
+    const remainingMs = deadlineAt - now.getTime();
+    if (remainingMs <= 0) throw reconciliationTimeout();
+    deadlineTimer = setTimeout(() => {
+      deadline.abort(reconciliationTimeout());
+    }, remainingMs);
     classified = await readProviderState(deps, claim, now, deadline.signal);
   } catch (error) {
     classified = classifyError(error, now);
   } finally {
-    clearTimeout(deadlineTimer);
+    if (deadlineTimer !== null) clearTimeout(deadlineTimer);
   }
 
   const finalization = toFinalization(claim, classified);

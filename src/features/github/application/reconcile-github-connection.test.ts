@@ -207,7 +207,6 @@ describe("reconcileGitHubConnection", () => {
   it.each([
     [new GitHubInstallationTokenError("authentication_failed"), "action_required", "permission_mismatch"],
     [new GitHubInstallationTokenError("not_found"), "disconnected", "installation_revoked"],
-    [new GitHubInstallationTokenError("permission_mismatch"), "action_required", "permission_mismatch"],
     [new GitHubInstallationTokenError("invalid_response"), "temporary_failure", "invalid_provider_response"],
     [new GitHubInstallationTokenError("provider_failure"), "temporary_failure", "provider_temporary_failure"],
     [new GitHubInstallationTokenError("timeout"), "temporary_failure", "provider_temporary_failure"],
@@ -297,6 +296,35 @@ describe("reconcileGitHubConnection", () => {
     expect(deps.finalize).toHaveBeenCalledOnce();
   });
 
+  it("keeps an ambiguous token 422 retryable after exact metadata validation", async () => {
+    const providerDetail = crypto.randomUUID();
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        id: 77,
+        account: { id: 99, login: "Adtecher", type: "Organization" },
+        repository_selection: "selected",
+        permissions: READ_PERMISSIONS,
+        suspended_at: null,
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(providerDetail, { status: 422 }));
+    const deps = dependencies();
+    deps.readMetadata.mockImplementation((input) => readInstallationMetadata({ ...input, fetchImpl }));
+    vi.mocked(deps.createInstallationToken).mockImplementation((input) => (
+      createInstallationInventoryToken({ ...input, fetchImpl })
+    ));
+    deps.readRepositories.mockImplementation((input) => readInstallationRepositories({ ...input, fetchImpl }));
+
+    await expect(reconcileGitHubConnection(deps, claim)).resolves.toMatchObject({
+      outcome: "temporary_failure",
+      diagnostic: "provider_temporary_failure",
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(deps.readRepositories).not.toHaveBeenCalled();
+    expect(deps.finalize).toHaveBeenCalledOnce();
+    expect(JSON.stringify(deps.finalize.mock.calls)).not.toContain(providerDetail);
+  });
+
   it.each([
     [
       {
@@ -372,6 +400,63 @@ describe("reconcileGitHubConnection", () => {
       expect(metadataSignal).toBe(tokenSignal);
       expect(tokenSignal).toBe(repositorySignal);
       expect(repositorySignal.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("uses only the time remaining before the claim's absolute four-minute deadline", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-14T12:03:00.000Z"));
+    try {
+      const deps = dependencies();
+      deps.now = () => new Date();
+      deps.readRepositories.mockImplementation(({ signal }: { signal: AbortSignal }) => (
+        new Promise((_resolve, reject) => {
+          const fail = () => reject(signal.reason);
+          if (signal.aborted) fail();
+          else signal.addEventListener("abort", fail, { once: true });
+        })
+      ));
+      let finalizedAt = 0;
+      deps.finalize.mockImplementation(async () => {
+        finalizedAt = Date.now();
+        return "none";
+      });
+
+      const pending = reconcileGitHubConnection(deps, claim);
+      await vi.advanceTimersByTimeAsync(59_999);
+      expect(deps.finalize).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+
+      await expect(pending).resolves.toMatchObject({
+        outcome: "temporary_failure",
+        diagnostic: "provider_temporary_failure",
+      });
+      expect(finalizedAt).toBe(new Date("2026-09-14T12:04:00.000Z").getTime());
+      expect(deps.finalize).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("finalizes an already-expired claim without starting provider work", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-14T12:04:00.000Z"));
+    try {
+      const deps = dependencies();
+      deps.now = () => new Date();
+
+      await expect(reconcileGitHubConnection(deps, claim)).resolves.toMatchObject({
+        outcome: "temporary_failure",
+        diagnostic: "provider_temporary_failure",
+      });
+
+      expect(deps.createAppJwt).not.toHaveBeenCalled();
+      expect(deps.readMetadata).not.toHaveBeenCalled();
+      expect(deps.createInstallationToken).not.toHaveBeenCalled();
+      expect(deps.readRepositories).not.toHaveBeenCalled();
+      expect(deps.finalize).toHaveBeenCalledOnce();
     } finally {
       vi.useRealTimers();
     }
