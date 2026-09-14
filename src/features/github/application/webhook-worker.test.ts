@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { buildWebhookWorkerDependencies, drainGitHubWebhookDeliveries, type ClaimedWebhookDelivery, type WebhookWorkerDependencies } from "./webhook-worker";
+import {
+  buildGitHubConnectionWebhookDependencies,
+  buildWebhookWorkerDependencies,
+  drainGitHubConnectionWebhookDeliveries,
+  drainGitHubWebhookDeliveries,
+  type ClaimedWebhookDelivery,
+  type WebhookWorkerDependencies,
+} from "./webhook-worker";
 
 const installationId = "11111111-1111-4111-8111-111111111111";
 const repositoryId = "22222222-2222-4222-8222-222222222222";
@@ -17,6 +24,7 @@ function row(overrides: Partial<ClaimedWebhookDelivery> = {}): ClaimedWebhookDel
   return {
     id: "33333333-3333-4333-8333-333333333333",
     providerDeliveryId: "123e4567-e89b-12d3-a456-426614174000",
+    eventName: "workflow_run",
     attemptCount: 1,
     providerInstallationId: 71,
     providerRepositoryId: 91,
@@ -163,6 +171,7 @@ describe("drainGitHubWebhookDeliveries", () => {
       {
         id: row().id,
         provider_delivery_id: "has space",
+        event_name: "workflow_run",
         attempt_count: 1,
         provider_installation_id: 71,
         provider_repository_id: 91,
@@ -172,6 +181,7 @@ describe("drainGitHubWebhookDeliveries", () => {
       {
         id: "44444444-4444-4444-8444-444444444444",
         provider_delivery_id: "delivery:retry/v2!",
+        event_name: "workflow_run",
         attempt_count: 1,
         provider_installation_id: 71,
         provider_repository_id: 92,
@@ -264,5 +274,92 @@ describe("drainGitHubWebhookDeliveries", () => {
     expect(input.finalise).toHaveBeenNthCalledWith(1, row(), "failed", "internal_error");
     expect(input.finalise).toHaveBeenNthCalledWith(2, second, "failed", "internal_error");
     expect(result).toEqual({ claimed: 2, processed: 0, ignored: 0, failed: 2, ownershipLost: 0 });
+  });
+
+  it("fails closed if a connection event crosses the Monitoring claim boundary", async () => {
+    const input = deps([row({ eventName: "repository" })]);
+
+    const result = await drainGitHubWebhookDeliveries(input, { limit: 5 });
+
+    expect(input.runCollection).not.toHaveBeenCalled();
+    expect(input.reconcile).not.toHaveBeenCalled();
+    expect(input.finalise).toHaveBeenCalledWith(expect.anything(), "failed", "unsupported_event");
+    expect(result).toEqual({ claimed: 1, processed: 0, ignored: 0, failed: 1, ownershipLost: 0 });
+  });
+});
+
+describe("drainGitHubConnectionWebhookDeliveries", () => {
+  it.each(["installation", "installation_repositories", "repository"] as const)(
+    "schedules %s verification through the dedicated claim and invokes no Monitoring work",
+    async (eventName) => {
+      const service = {
+        rpc: vi.fn()
+          .mockResolvedValueOnce({ data: [{
+            id: row().id,
+            provider_delivery_id: row().providerDeliveryId,
+            event_name: eventName,
+            attempt_count: 1,
+            provider_installation_id: row().providerInstallationId,
+            provider_repository_id: eventName === "repository" ? row().providerRepositoryId : null,
+            installation_id: row().installationId,
+            repository_id: eventName === "repository" ? row().repositoryId : null,
+          }], error: null })
+          .mockResolvedValueOnce({ data: true, error: null }),
+      };
+      const dependencies = buildGitHubConnectionWebhookDependencies(service);
+
+      await expect(drainGitHubConnectionWebhookDeliveries(dependencies, { limit: 5 })).resolves.toEqual({
+        claimed: 1,
+        processed: 1,
+        ignored: 0,
+        failed: 0,
+        ownershipLost: 0,
+      });
+
+      expect(service.rpc).toHaveBeenNthCalledWith(1, "claim_github_connection_webhook_deliveries_server", {
+        target_limit: 5,
+      });
+      expect(service.rpc).toHaveBeenNthCalledWith(2, "finalize_github_webhook_delivery_server", expect.objectContaining({
+        target_delivery_id: row().id,
+        target_status: "processed",
+        target_diagnostic_code: null,
+      }));
+      expect(JSON.stringify(service.rpc.mock.calls)).not.toContain("run_github_collection");
+      expect(JSON.stringify(service.rpc.mock.calls)).not.toContain("material");
+    },
+  );
+
+  it("ignores an event that has no tenant-bound installation after the dedicated claim", async () => {
+    const input = {
+      claim: vi.fn().mockResolvedValue([row({
+        eventName: "installation",
+        installationId: null,
+        repositoryId: null,
+        providerRepositoryId: null,
+      })]),
+      finalise: vi.fn().mockResolvedValue(true),
+    };
+
+    await expect(drainGitHubConnectionWebhookDeliveries(input, { limit: 5 })).resolves.toMatchObject({
+      claimed: 1,
+      ignored: 1,
+    });
+    expect(input.finalise).toHaveBeenCalledWith(expect.anything(), "ignored", null);
+  });
+
+  it("fails closed if a Monitoring event crosses the connection claim boundary", async () => {
+    const input = {
+      claim: vi.fn().mockResolvedValue([row({ eventName: "workflow_run" })]),
+      finalise: vi.fn().mockResolvedValue(true),
+    };
+
+    await expect(drainGitHubConnectionWebhookDeliveries(input, { limit: 5 })).resolves.toEqual({
+      claimed: 1,
+      processed: 0,
+      ignored: 0,
+      failed: 1,
+      ownershipLost: 0,
+    });
+    expect(input.finalise).toHaveBeenCalledWith(expect.anything(), "failed", "unsupported_event");
   });
 });

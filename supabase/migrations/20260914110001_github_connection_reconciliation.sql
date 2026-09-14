@@ -201,6 +201,190 @@ create trigger github_installations_00_schedule_reconciliation
 after update of connected_by, permissions on public.github_installations
 for each row execute function public.schedule_github_reconciliation_after_claim();
 
+create or replace function public.claim_github_webhook_deliveries_server(
+  target_limit integer
+)
+returns setof public.github_webhook_deliveries
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  candidate record;
+  claimed_delivery public.github_webhook_deliveries;
+  resolved_installation public.github_installations;
+  resolved_repository_id uuid;
+begin
+  if target_limit is null or target_limit < 1 or target_limit > 100 then
+    raise exception 'webhook claim limit must be between 1 and 100'
+      using errcode = '22023';
+  end if;
+
+  for candidate in
+    select delivery.id
+    from public.github_webhook_deliveries delivery
+    where delivery.event_name not in (
+        'installation', 'installation_repositories', 'repository'
+      )
+      and delivery.attempt_count < 10
+      and (
+        delivery.status in ('queued', 'failed')
+        or (
+          delivery.status = 'processing'
+          and delivery.last_attempted_at < pg_catalog.now() - interval '15 minutes'
+        )
+      )
+    order by delivery.received_at, delivery.id
+    limit target_limit
+    for update skip locked
+  loop
+    resolved_installation := null;
+    select * into resolved_installation
+    from public.github_installations installation
+    where installation.provider_installation_id = (
+      select delivery.provider_installation_id
+      from public.github_webhook_deliveries delivery
+      where delivery.id = candidate.id
+    )
+      and installation.status = 'active'
+      and installation.permissions_ok;
+
+    resolved_repository_id := null;
+    if found then
+      select repository.id into resolved_repository_id
+      from public.github_repositories repository
+      where repository.installation_id = resolved_installation.id
+        and repository.organisation_id = resolved_installation.organisation_id
+        and repository.selected
+        and repository.available
+        and repository.provider_repository_id = (
+          select delivery.provider_repository_id
+          from public.github_webhook_deliveries delivery
+          where delivery.id = candidate.id
+        );
+    end if;
+
+    update public.github_webhook_deliveries delivery
+    set organisation_id = resolved_installation.organisation_id,
+        installation_id = resolved_installation.id,
+        repository_id = resolved_repository_id,
+        status = 'processing',
+        attempt_count = delivery.attempt_count + 1,
+        diagnostic_code = null,
+        last_attempted_at = pg_catalog.now(),
+        processed_at = null
+    where delivery.id = candidate.id
+    returning delivery.* into claimed_delivery;
+
+    return next claimed_delivery;
+  end loop;
+end;
+$$;
+
+alter function public.claim_github_webhook_deliveries_server(integer) owner to postgres;
+revoke all on function public.claim_github_webhook_deliveries_server(integer)
+from public, anon, authenticated, service_role;
+grant execute on function public.claim_github_webhook_deliveries_server(integer)
+to service_role;
+
+create or replace function public.claim_github_connection_webhook_deliveries_server(
+  target_limit integer
+)
+returns setof public.github_webhook_deliveries
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  candidate record;
+  claimed_delivery public.github_webhook_deliveries;
+  resolved_installation public.github_installations;
+  resolved_repository_id uuid;
+  installation_found boolean;
+  scheduled_at timestamptz;
+begin
+  if target_limit is null or target_limit < 1 or target_limit > 100 then
+    raise exception 'connection webhook claim limit must be between 1 and 100'
+      using errcode = '22023';
+  end if;
+
+  for candidate in
+    select delivery.id
+    from public.github_webhook_deliveries delivery
+    where delivery.event_name in (
+        'installation', 'installation_repositories', 'repository'
+      )
+      and delivery.attempt_count < 10
+      and (
+        delivery.status in ('queued', 'failed')
+        or (
+          delivery.status = 'processing'
+          and delivery.last_attempted_at < pg_catalog.now() - interval '15 minutes'
+        )
+      )
+    order by delivery.received_at, delivery.id
+    limit target_limit
+    for update skip locked
+  loop
+    scheduled_at := pg_catalog.now();
+    resolved_installation := null;
+    select installation.* into resolved_installation
+    from public.github_installations installation
+    join public.github_webhook_deliveries delivery
+      on delivery.provider_installation_id = installation.provider_installation_id
+    where delivery.id = candidate.id
+      and installation.status = 'active'
+      and installation.permissions_ok
+    for update of installation;
+    installation_found := found;
+
+    resolved_repository_id := null;
+    if installation_found then
+      select repository.id into resolved_repository_id
+      from public.github_repositories repository
+      where repository.installation_id = resolved_installation.id
+        and repository.organisation_id = resolved_installation.organisation_id
+        and repository.selected
+        and repository.available
+        and repository.provider_repository_id = (
+          select delivery.provider_repository_id
+          from public.github_webhook_deliveries delivery
+          where delivery.id = candidate.id
+        );
+
+      update public.github_installations installation
+      set next_reconciliation_at = least(
+        coalesce(installation.next_reconciliation_at, scheduled_at),
+        scheduled_at
+      )
+      where installation.id = resolved_installation.id
+        and installation.organisation_id = resolved_installation.organisation_id;
+    end if;
+
+    update public.github_webhook_deliveries delivery
+    set organisation_id = resolved_installation.organisation_id,
+        installation_id = resolved_installation.id,
+        repository_id = resolved_repository_id,
+        status = 'processing',
+        attempt_count = delivery.attempt_count + 1,
+        diagnostic_code = null,
+        last_attempted_at = scheduled_at,
+        processed_at = null
+    where delivery.id = candidate.id
+    returning delivery.* into claimed_delivery;
+
+    return next claimed_delivery;
+  end loop;
+end;
+$$;
+
+alter function public.claim_github_connection_webhook_deliveries_server(integer)
+owner to postgres;
+revoke all on function public.claim_github_connection_webhook_deliveries_server(integer)
+from public, anon, authenticated, service_role;
+grant execute on function public.claim_github_connection_webhook_deliveries_server(integer)
+to service_role;
+
 create or replace function public.claim_due_github_connection_reconciliations_server(
   target_worker_id uuid,
   target_limit integer,

@@ -10,11 +10,17 @@ import {
   type ReconciliationScope,
   type ReconciliationSummary,
 } from "./materialise-approved-observations";
-import { runGitHubCollection, type CollectionDependencies, type CollectionRequest, type CollectionSummary } from "./run-collection";
+import {
+  runGitHubCollection,
+  type CollectionDependencies,
+  type CollectionRequest,
+  type CollectionSummary,
+} from "./run-collection";
 
 export type ClaimedWebhookDelivery = {
   id: string;
   providerDeliveryId: string;
+  eventName: string;
   attemptCount: number;
   providerInstallationId: number;
   providerRepositoryId: number | null;
@@ -34,6 +40,11 @@ export type WebhookWorkerDependencies = {
   reconcile(scope: ReconciliationScope): Promise<ReconciliationSummary>;
 };
 
+export type GitHubConnectionWebhookDependencies = Pick<
+  WebhookWorkerDependencies,
+  "claim" | "finalise"
+>;
+
 export type WebhookDrainSummary = {
   claimed: number;
   processed: number;
@@ -46,9 +57,11 @@ type QueryResult = { data: unknown; error: unknown };
 type SupabaseServiceClient = { rpc(name: string, args: Record<string, unknown>): PromiseLike<QueryResult> };
 
 const uuid = z.string().uuid();
+const connectionEvents = new Set(["installation", "installation_repositories", "repository"]);
 const claimedSchema = z.object({
   id: uuid,
   providerDeliveryId: z.string().regex(/^[!-~]{1,100}$/),
+  eventName: z.string().regex(/^[a-z][a-z0-9_]{0,99}$/),
   attemptCount: z.number().int().min(1).max(10),
   providerInstallationId: z.number().int().positive().safe(),
   providerRepositoryId: z.number().int().positive().safe().nullable(),
@@ -77,6 +90,34 @@ function safeFailure(): Error {
   return new Error("GitHub webhook persistence failed");
 }
 
+function mapClaimedRow(value: unknown): unknown {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
+  const row = value as Record<string, unknown>;
+  return {
+    id: row.id,
+    providerDeliveryId: row.provider_delivery_id,
+    eventName: row.event_name,
+    attemptCount: row.attempt_count,
+    providerInstallationId: row.provider_installation_id,
+    providerRepositoryId: row.provider_repository_id,
+    installationId: row.installation_id,
+    repositoryId: row.repository_id,
+  };
+}
+
+function buildFinaliser(service: SupabaseServiceClient): WebhookWorkerDependencies["finalise"] {
+  return async (delivery, outcome, diagnosticCode) => {
+    const { data, error } = await service.rpc("finalize_github_webhook_delivery_server", {
+      target_delivery_id: delivery.id,
+      target_attempt_count: delivery.attemptCount,
+      target_status: outcome,
+      target_diagnostic_code: diagnosticCode,
+    });
+    if (error || typeof data !== "boolean") throw safeFailure();
+    return data;
+  };
+}
+
 export function buildWebhookWorkerDependencies(
   serviceInput: unknown,
   collectionDependencies: CollectionDependencies,
@@ -87,32 +128,28 @@ export function buildWebhookWorkerDependencies(
     async claim(limit) {
       const { data, error } = await service.rpc("claim_github_webhook_deliveries_server", { target_limit: limit });
       if (error || !Array.isArray(data)) throw safeFailure();
-      return data.map((value) => {
-        if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
-        const row = value as Record<string, unknown>;
-        return {
-          id: row.id,
-          providerDeliveryId: row.provider_delivery_id,
-          attemptCount: row.attempt_count,
-          providerInstallationId: row.provider_installation_id,
-          providerRepositoryId: row.provider_repository_id,
-          installationId: row.installation_id,
-          repositoryId: row.repository_id,
-        };
-      });
+      return data.map(mapClaimedRow);
     },
-    async finalise(delivery, outcome, diagnosticCode) {
-      const { data, error } = await service.rpc("finalize_github_webhook_delivery_server", {
-        target_delivery_id: delivery.id,
-        target_attempt_count: delivery.attemptCount,
-        target_status: outcome,
-        target_diagnostic_code: diagnosticCode,
-      });
-      if (error || typeof data !== "boolean") throw safeFailure();
-      return data;
-    },
+    finalise: buildFinaliser(service),
     runCollection: (request) => runGitHubCollection(collectionDependencies, request),
     reconcile: (scope) => reconcileApprovedGitHubObservations(materialisationDependencies, scope),
+  };
+}
+
+export function buildGitHubConnectionWebhookDependencies(
+  serviceInput: unknown,
+): GitHubConnectionWebhookDependencies {
+  const service = serviceInput as SupabaseServiceClient;
+  return {
+    async claim(limit) {
+      const { data, error } = await service.rpc(
+        "claim_github_connection_webhook_deliveries_server",
+        { target_limit: limit },
+      );
+      if (error || !Array.isArray(data)) throw safeFailure();
+      return data.map(mapClaimedRow);
+    },
+    finalise: buildFinaliser(service),
   };
 }
 
@@ -158,7 +195,10 @@ export async function drainGitHubWebhookDeliveries(
     let outcome: WebhookOutcome = "processed";
     let diagnosticCode: WebhookDiagnostic | null = null;
     try {
-      if (!delivery.installationId || (delivery.providerRepositoryId !== null && !delivery.repositoryId)) {
+      if (connectionEvents.has(delivery.eventName)) {
+        outcome = "failed";
+        diagnosticCode = "unsupported_event";
+      } else if (!delivery.installationId || (delivery.providerRepositoryId !== null && !delivery.repositoryId)) {
         outcome = "ignored";
       } else {
         const collection = await deps.runCollection({
@@ -209,5 +249,57 @@ export async function drainGitHubWebhookDeliveries(
       summary.ownershipLost += 1;
     }
   }
+  return summary;
+}
+
+export async function drainGitHubConnectionWebhookDeliveries(
+  deps: GitHubConnectionWebhookDependencies,
+  input: { limit: number; signal?: AbortSignal },
+): Promise<WebhookDrainSummary> {
+  if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 100) throw safeFailure();
+  const deliveries = await deps.claim(input.limit);
+  if (deliveries.length > input.limit) throw safeFailure();
+  const summary: WebhookDrainSummary = {
+    claimed: deliveries.length,
+    processed: 0,
+    ignored: 0,
+    failed: 0,
+    ownershipLost: 0,
+  };
+
+  for (const value of deliveries) {
+    const lease = leaseSchema.safeParse(value);
+    if (!lease.success) {
+      summary.ownershipLost += 1;
+      continue;
+    }
+
+    let outcome: WebhookOutcome = "processed";
+    let diagnosticCode: WebhookDiagnostic | null = null;
+    const parsed = claimedSchema.safeParse(value);
+    if (input.signal?.aborted) {
+      outcome = "failed";
+      diagnosticCode = "internal_error";
+    } else if (!parsed.success) {
+      outcome = "failed";
+      diagnosticCode = "invalid_response";
+    } else if (!connectionEvents.has(parsed.data.eventName)) {
+      outcome = "failed";
+      diagnosticCode = "unsupported_event";
+    } else if (!parsed.data.installationId) {
+      outcome = "ignored";
+    }
+
+    try {
+      if (!await deps.finalise(lease.data, outcome, diagnosticCode)) {
+        summary.ownershipLost += 1;
+        continue;
+      }
+      summary[outcome] += 1;
+    } catch {
+      summary.ownershipLost += 1;
+    }
+  }
+
   return summary;
 }

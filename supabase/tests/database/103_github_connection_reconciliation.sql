@@ -86,6 +86,10 @@ select has_function(
   'public', 'finalize_github_connection_reconciliation_server',
   array['uuid', 'uuid', 'text', 'text', 'timestamp with time zone', 'jsonb']
 );
+select has_function(
+  'public', 'claim_github_connection_webhook_deliveries_server',
+  array['integer']
+);
 select has_function('public', 'disconnect_github_installation', array['uuid']);
 select ok(has_function_privilege(
   'service_role',
@@ -108,6 +112,16 @@ select ok(not has_function_privilege(
   'EXECUTE'
 ), 'authenticated users cannot finalize reconciliation work');
 select ok(has_function_privilege(
+  'service_role',
+  'public.claim_github_connection_webhook_deliveries_server(integer)',
+  'EXECUTE'
+), 'service workers may claim connection-only webhook deliveries');
+select ok(not has_function_privilege(
+  'authenticated',
+  'public.claim_github_connection_webhook_deliveries_server(integer)',
+  'EXECUTE'
+), 'authenticated users cannot claim connection-only webhook deliveries');
+select ok(has_function_privilege(
   'authenticated', 'public.disconnect_github_installation(uuid)', 'EXECUTE'
 ), 'authenticated Owners may invoke the checked local disconnect command');
 select ok(not has_function_privilege(
@@ -119,6 +133,7 @@ select is(
     from (values
       ('public.claim_due_github_connection_reconciliations_server(uuid,integer,timestamptz)'::regprocedure),
       ('public.finalize_github_connection_reconciliation_server(uuid,uuid,text,text,timestamptz,jsonb)'::regprocedure),
+      ('public.claim_github_connection_webhook_deliveries_server(integer)'::regprocedure),
       ('public.disconnect_github_installation(uuid)'::regprocedure)
     ) expected(function_oid)
     join pg_catalog.pg_proc function_row on function_row.oid = expected.function_oid
@@ -126,7 +141,7 @@ select is(
       and function_row.proowner = 'postgres'::regrole
       and function_row.proconfig = array['search_path=""']
   ),
-  3::bigint,
+  4::bigint,
   'all reconciliation RPCs are postgres-owned security definers with empty search paths'
 );
 select ok(
@@ -210,6 +225,180 @@ insert into public.github_repositories(
   ('a3300000-0000-4000-8000-000000000002', 'a3100000-0000-4000-8000-000000000001', 'a3200000-0000-4000-8000-000000000001', 950002, 'Reconcile-Co', 'beta', 'Reconcile-Co/beta', 'https://github.com/Reconcile-Co/beta', 'private', 'main', true),
   ('a3300000-0000-4000-8000-000000000003', 'a3100000-0000-4000-8000-000000000001', 'a3200000-0000-4000-8000-000000000002', 950003, 'Reconcile-Co-2', 'gamma', 'Reconcile-Co-2/gamma', 'https://github.com/Reconcile-Co-2/gamma', 'private', 'main', true),
   ('a3300000-0000-4000-8000-000000000004', 'a3100000-0000-4000-8000-000000000001', 'a3200000-0000-4000-8000-000000000003', 950005, 'Reconcile-Co-3', 'delta', 'Reconcile-Co-3/delta', 'https://github.com/Reconcile-Co-3/delta', 'private', 'main', true);
+
+update public.github_installations
+set next_reconciliation_at = now() + interval '1 day'
+where id = 'a3200000-0000-4000-8000-000000000003';
+
+insert into public.github_webhook_deliveries(
+  id, provider_installation_id, provider_repository_id,
+  provider_delivery_id, event_name, payload_sha256, received_at
+) values
+  ('a3500000-0000-4000-8000-000000000001', 930003, null, 'connection-installation', 'installation', repeat('1', 64), now() - interval '5 minutes'),
+  ('a3500000-0000-4000-8000-000000000002', 930003, null, 'connection-installation-repositories', 'installation_repositories', repeat('2', 64), now() - interval '4 minutes'),
+  ('a3500000-0000-4000-8000-000000000003', 930003, 950005, 'connection-repository', 'repository', repeat('3', 64), now() - interval '3 minutes'),
+  ('a3500000-0000-4000-8000-000000000004', 930003, 950005, 'monitoring-workflow', 'workflow_run', repeat('4', 64), now() - interval '2 minutes'),
+  ('a3500000-0000-4000-8000-000000000005', 930003, 950005, 'monitoring-code-scanning', 'code_scanning_alert', repeat('5', 64), now() - interval '1 minute');
+
+create temporary table claimed_monitoring_webhooks
+as select * from public.github_webhook_deliveries with no data;
+create temporary table claimed_connection_webhooks
+as select * from public.github_webhook_deliveries with no data;
+grant select, insert on claimed_monitoring_webhooks to service_role;
+grant select, insert on claimed_connection_webhooks to service_role;
+
+set local role service_role;
+select throws_ok(
+  $$ select * from public.claim_github_connection_webhook_deliveries_server(0) $$,
+  '22023', 'connection webhook claim limit must be between 1 and 100',
+  'the connection webhook claim cannot be unbounded at the lower edge'
+);
+select throws_ok(
+  $$ select * from public.claim_github_connection_webhook_deliveries_server(101) $$,
+  '22023', 'connection webhook claim limit must be between 1 and 100',
+  'the connection webhook claim cannot be unbounded at the upper edge'
+);
+insert into claimed_monitoring_webhooks
+select * from public.claim_github_webhook_deliveries_server(100);
+reset role;
+
+select is(
+  (select count(*)::integer from claimed_monitoring_webhooks),
+  2,
+  'the Monitoring webhook claim receives only non-connection delivery classes'
+);
+select ok(
+  (select bool_and(event_name not in ('installation', 'installation_repositories', 'repository'))
+   from claimed_monitoring_webhooks),
+  'Monitoring claims exclude every exact connection event class'
+);
+select ok(
+  (select next_reconciliation_at > now()
+   from public.github_installations
+   where id = 'a3200000-0000-4000-8000-000000000003'),
+  'a Monitoring delivery does not schedule connection reconciliation'
+);
+
+set local role service_role;
+insert into claimed_connection_webhooks
+select * from public.claim_github_connection_webhook_deliveries_server(2);
+reset role;
+select is(
+  (select count(*)::integer from claimed_connection_webhooks),
+  2,
+  'the connection webhook claim honours its requested bound'
+);
+select ok(
+  (select bool_and(event_name in ('installation', 'installation_repositories', 'repository'))
+   from claimed_connection_webhooks),
+  'the connection claim receives only exact connection event classes'
+);
+select ok(
+  (select next_reconciliation_at <= now()
+      and organisation_id = 'a3100000-0000-4000-8000-000000000001'
+   from public.github_installations
+   where id = 'a3200000-0000-4000-8000-000000000003'),
+  'claiming a connection event schedules its tenant-bound installation immediately'
+);
+
+set local role service_role;
+insert into claimed_connection_webhooks
+select * from public.claim_github_connection_webhook_deliveries_server(100);
+reset role;
+select is(
+  (select count(*)::integer from claimed_connection_webhooks),
+  3,
+  'later connection claims receive the remaining exact delivery class once'
+);
+select is(
+  (select count(*)::integer
+   from claimed_connection_webhooks connection_delivery
+   join claimed_monitoring_webhooks monitoring_delivery using (id)),
+  0,
+  'connection and Monitoring consumers can never claim the same delivery'
+);
+select ok(
+  (select bool_and(
+     organisation_id = 'a3100000-0000-4000-8000-000000000001'
+     and installation_id = 'a3200000-0000-4000-8000-000000000003'
+   ) from claimed_connection_webhooks),
+  'connection delivery resolution preserves exact workspace and installation ancestry'
+);
+
+set local role service_role;
+select is(
+  (select count(*)::integer from public.claim_github_connection_webhook_deliveries_server(100)),
+  0,
+  'active connection webhook leases are not claimed twice'
+);
+select is(
+  (select count(*)::integer from public.claim_github_webhook_deliveries_server(100)),
+  0,
+  'active Monitoring webhook leases are not claimed twice'
+);
+reset role;
+
+update public.github_webhook_deliveries
+set received_at = now() - interval '20 minutes',
+    last_attempted_at = now() - interval '16 minutes'
+where id in (
+  'a3500000-0000-4000-8000-000000000001',
+  'a3500000-0000-4000-8000-000000000004'
+);
+
+create temporary table recovered_webhook_leases(
+  id uuid primary key,
+  event_name text not null,
+  attempt_count integer not null
+);
+grant select, insert on recovered_webhook_leases to service_role;
+set local role service_role;
+insert into recovered_webhook_leases
+select id, event_name, attempt_count
+from public.claim_github_connection_webhook_deliveries_server(100);
+insert into recovered_webhook_leases
+select id, event_name, attempt_count
+from public.claim_github_webhook_deliveries_server(100);
+reset role;
+select is(
+  (select count(*)::integer from recovered_webhook_leases),
+  2,
+  'each consumer recovers its own stale delivery lease'
+);
+select ok(
+  (select bool_and(attempt_count = 2) from recovered_webhook_leases),
+  'stale recovery increments the existing delivery attempt without duplicating it'
+);
+select is(
+  (select count(*)::integer
+   from public.github_webhook_deliveries
+   where id between 'a3500000-0000-4000-8000-000000000001'
+                and 'a3500000-0000-4000-8000-000000000005'),
+  5,
+  'claim and stale recovery preserve one replay-safe row per provider delivery'
+);
+
+set local role service_role;
+select ok(
+  (select bool_and(public.finalize_github_webhook_delivery_server(
+    delivery.id, delivery.attempt_count, 'processed', null
+  ))
+   from public.github_webhook_deliveries delivery
+   where delivery.id between 'a3500000-0000-4000-8000-000000000001'
+                         and 'a3500000-0000-4000-8000-000000000005'),
+  'both consumers terminalize their owned attempts through the same replay-safe CAS'
+);
+select is(
+  (select count(*)::integer from public.claim_github_connection_webhook_deliveries_server(100)),
+  0,
+  'processed connection deliveries never replay as new work'
+);
+select is(
+  (select count(*)::integer from public.claim_github_webhook_deliveries_server(100)),
+  0,
+  'processed Monitoring deliveries never replay as new work'
+);
+reset role;
 
 create temporary table reconciliation_compliance_counts as
 select
