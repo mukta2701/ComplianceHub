@@ -61,6 +61,24 @@ export function buildQueuedSlackPayload(payload: SafeSlackDeliveryPayload): {
   text: string;
   blocks: unknown[];
 } {
+  if (payload.type === "connection_health") {
+    const heading = `ComplianceHub connection update — ${payload.title}`;
+    return {
+      text: heading,
+      blocks: [
+        { type: "section", text: { type: "plain_text", text: heading } },
+        {
+          type: "section",
+          fields: [
+            { type: "plain_text", text: `Account: ${payload.subjectId}` },
+            { type: "plain_text", text: `State: ${payload.controlRef}` },
+          ],
+        },
+        { type: "section", text: { type: "plain_text", text: payload.detail } },
+        { type: "context", elements: [{ type: "plain_text", text: "Connection health recorded by ComplianceHub" }] },
+      ],
+    };
+  }
   const heading = `${SEVERITY_EMOJI[payload.severity]} ComplianceHub alert — ${payload.severity.toUpperCase()}`;
   return {
     text: heading,

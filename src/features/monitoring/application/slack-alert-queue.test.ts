@@ -76,6 +76,25 @@ describe("Slack alert payload safety", () => {
     expect(textObjects.map((item) => item.text).join(" ")).toContain("<@channel> *urgent*");
     expect(textObjects.map((item) => item.text).join(" ")).not.toContain("mrkdwn");
   });
+
+  it("renders a GitHub connection notice without Monitoring or repository language", () => {
+    const payload = buildQueuedSlackPayload({
+      type: "connection_health",
+      severity: "high",
+      title: "GitHub connection recovered",
+      controlRef: "GitHub connection",
+      subjectId: "Company-1",
+      detail: "GitHub access was verified again. Observed at 2026-09-14T13:00:00.000Z. Open /app/integrations.",
+    });
+    const serialized = JSON.stringify(payload);
+
+    expect(payload.text).toBe("ComplianceHub connection update — GitHub connection recovered");
+    expect(serialized).toContain("Account: Company-1");
+    expect(serialized).toContain("/app/integrations");
+    expect(serialized).not.toContain("Control:");
+    expect(serialized).not.toContain("continuous monitoring");
+    expect(serialized).not.toContain("repository");
+  });
 });
 
 describe("drainSlackAlertDeliveries", () => {

@@ -15,10 +15,10 @@ const slackLeaseIdentitySchema = z.object({
 const safeSlackPayloadSchema = z.object({
   type: z.enum(["monitoring_finding", "connection_health"]),
   severity: z.enum(["low", "medium", "high", "critical"]),
-  title: z.string().min(1).max(240),
-  controlRef: z.string().min(1).max(80),
-  subjectId: z.string().min(1).max(255),
-  detail: z.string().min(1).max(500),
+  title: z.string().min(1).max(240).refine((value) => !/[\u0000-\u001f\u007f]/.test(value)),
+  controlRef: z.string().min(1).max(80).refine((value) => !/[\u0000-\u001f\u007f]/.test(value)),
+  subjectId: z.string().min(1).max(255).refine((value) => !/[\u0000-\u001f\u007f]/.test(value)),
+  detail: z.string().min(1).max(500).refine((value) => !/[\u0000-\u001f\u007f]/.test(value)),
 }).strict();
 
 const claimedSlackDeliverySchema = slackLeaseIdentitySchema.extend({

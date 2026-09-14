@@ -14,6 +14,11 @@ import {
 } from "./github-installation-api";
 import { getGitHubConnectionConfig } from "./github-runtime-config";
 import {
+  buildGitHubConnectionAlertDependencies,
+  queueGitHubConnectionNotice,
+  type GitHubConnectionNotice,
+} from "./github-connection-alerts";
+import {
   reconcileGitHubConnection,
   type GitHubConnectionReconciliationResult,
 } from "./reconcile-github-connection";
@@ -54,6 +59,10 @@ export type GitHubConnectionCycleDependencies = {
     claim: ClaimedGitHubConnectionReconciliation,
     signal: AbortSignal,
   ): Promise<GitHubConnectionReconciliationResult>;
+  queueConnectionNotice(notice: GitHubConnectionNotice): Promise<{
+    inAppQueued: number;
+    slackQueued: number;
+  }>;
   now(): Date;
 };
 
@@ -77,6 +86,17 @@ const webhookSummarySchema = z.object({
 
 const reconciliationResultSchema = z.object({
   outcome: z.enum(["success", "partial", "temporary_failure", "action_required", "disconnected"]),
+  diagnostic: z.enum([
+    "provider_rate_limited",
+    "provider_temporary_failure",
+    "installation_suspended",
+    "installation_revoked",
+    "permission_mismatch",
+    "account_mismatch",
+    "repository_unavailable",
+    "invalid_provider_response",
+    "internal_failure",
+  ]).nullable(),
   incidentTransition: z.enum(["none", "opened", "remained_open", "recovered"]),
   effectiveHealth: z.enum([
     "healthy",
@@ -199,6 +219,18 @@ export function buildGitHubConnectionCycleRunner(
           if (!parsedResult.success) {
             summary.ownershipLost += 1;
           } else {
+            if (parsedResult.data.incidentTransition !== "none") {
+              await dependencies.queueConnectionNotice({
+                kind: parsedResult.data.incidentTransition === "recovered" ? "recovery" : "incident",
+                installationId: claim.installationId,
+                organisationId: claim.organisationId,
+                accountLogin: claim.account.login,
+                health: parsedResult.data.effectiveHealth,
+                diagnostic: parsedResult.data.diagnostic,
+                occurredAt: claim.attemptedAt,
+                connectionHref: "/app/integrations",
+              });
+            }
             switch (parsedResult.data.effectiveHealth) {
               case "healthy":
                 summary.healthy += 1;
@@ -246,6 +278,7 @@ function buildProductionDependencies(): GitHubConnectionCycleDependencies {
   });
   const webhook = buildGitHubConnectionWebhookDependencies(service);
   const store = buildGitHubConnectionStore(service);
+  const alerts = buildGitHubConnectionAlertDependencies(service);
   const reconciliationDependencies = {
     createAppJwt: () => createAppJwt(
       { appId: config.appId, privateKey: config.privateKey },
@@ -261,6 +294,7 @@ function buildProductionDependencies(): GitHubConnectionCycleDependencies {
     drainConnectionWebhooks: (input) => drainGitHubConnectionWebhookDeliveries(webhook, input),
     claimDue: store.claimDue,
     reconcile: (claim, signal) => reconcileGitHubConnection(reconciliationDependencies, claim, signal),
+    queueConnectionNotice: (notice) => queueGitHubConnectionNotice(alerts, notice),
     now: () => new Date(),
   };
 }

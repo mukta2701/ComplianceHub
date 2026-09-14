@@ -33,6 +33,7 @@ function dependencies(
   drainConnectionWebhooks: ReturnType<typeof vi.fn>;
   claimDue: ReturnType<typeof vi.fn>;
   reconcile: ReturnType<typeof vi.fn>;
+  queueConnectionNotice: ReturnType<typeof vi.fn>;
 } {
   return {
     now: () => new Date("2026-09-14T12:00:00.000Z"),
@@ -48,6 +49,7 @@ function dependencies(
       incidentTransition: "none",
       effectiveHealth: "healthy",
     }),
+    queueConnectionNotice: vi.fn().mockResolvedValue({ inAppQueued: 0, slackQueued: 0 }),
     ...overrides,
   };
 }
@@ -390,6 +392,122 @@ describe("runGitHubConnectionCycle", () => {
       recovered: 0,
       ownershipLost: 0,
     });
+    expect(deps.queueConnectionNotice).toHaveBeenCalledWith({
+      kind: "incident",
+      installationId: claim(1).installationId,
+      organisationId: claim(1).organisationId,
+      accountLogin: "Company-1",
+      health: "owner_action_required",
+      diagnostic: null,
+      occurredAt: "2026-09-14T12:00:00.000Z",
+      connectionHref: "/app/integrations",
+    });
+  });
+
+  it("queues only the atomic opening transition for an immediate serious failure", async () => {
+    const deps = dependencies();
+    deps.claimDue.mockResolvedValue([claim(1)]);
+    deps.reconcile.mockResolvedValue({
+      outcome: "action_required",
+      diagnostic: "permission_mismatch",
+      nextAttemptAt: null,
+      repositorySnapshot: [],
+      incidentTransition: "opened",
+      effectiveHealth: "owner_action_required",
+    });
+
+    await buildGitHubConnectionCycleRunner(deps)(cycleInput);
+
+    expect(deps.queueConnectionNotice).toHaveBeenCalledOnce();
+    expect(deps.queueConnectionNotice).toHaveBeenCalledWith({
+      kind: "incident",
+      installationId: claim(1).installationId,
+      organisationId: claim(1).organisationId,
+      accountLogin: "Company-1",
+      health: "owner_action_required",
+      diagnostic: "permission_mismatch",
+      occurredAt: "2026-09-14T12:00:00.000Z",
+      connectionHref: "/app/integrations",
+    });
+  });
+
+  it("keeps a one-off temporary failure quiet when finalization returns none", async () => {
+    const deps = dependencies();
+    deps.claimDue.mockResolvedValue([claim(1)]);
+    deps.reconcile.mockResolvedValue({
+      outcome: "temporary_failure",
+      diagnostic: "provider_temporary_failure",
+      nextAttemptAt: "2026-09-14T12:01:00.000Z",
+      repositorySnapshot: [],
+      incidentTransition: "none",
+      effectiveHealth: "retrying",
+    });
+
+    await buildGitHubConnectionCycleRunner(deps)(cycleInput);
+
+    expect(deps.queueConnectionNotice).not.toHaveBeenCalled();
+  });
+
+  it("projects a persistent temporary opening only when finalization reaches its threshold", async () => {
+    const deps = dependencies();
+    deps.claimDue.mockResolvedValue([claim(1)]);
+    deps.reconcile.mockResolvedValue({
+      outcome: "temporary_failure",
+      diagnostic: "provider_temporary_failure",
+      nextAttemptAt: "2026-09-14T12:15:00.000Z",
+      repositorySnapshot: [],
+      incidentTransition: "opened",
+      effectiveHealth: "retrying",
+    });
+
+    await buildGitHubConnectionCycleRunner(deps)(cycleInput);
+
+    expect(deps.queueConnectionNotice).toHaveBeenCalledOnce();
+    expect(deps.queueConnectionNotice).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "incident",
+      health: "retrying",
+      diagnostic: "provider_temporary_failure",
+    }));
+  });
+
+  it("projects a repeated open observation without synthesizing another transition", async () => {
+    const deps = dependencies();
+    deps.claimDue.mockResolvedValue([claim(1)]);
+    deps.reconcile.mockResolvedValue({
+      outcome: "action_required",
+      diagnostic: "permission_mismatch",
+      nextAttemptAt: null,
+      repositorySnapshot: [],
+      incidentTransition: "remained_open",
+      effectiveHealth: "owner_action_required",
+    });
+
+    await buildGitHubConnectionCycleRunner(deps)(cycleInput);
+
+    expect(deps.queueConnectionNotice).toHaveBeenCalledOnce();
+    expect(deps.queueConnectionNotice).toHaveBeenCalledWith(expect.objectContaining({ kind: "incident" }));
+  });
+
+  it("queues recovery only from the verified recovered transition", async () => {
+    const deps = dependencies();
+    deps.claimDue.mockResolvedValue([claim(1)]);
+    deps.reconcile.mockResolvedValue({
+      outcome: "success",
+      diagnostic: null,
+      nextAttemptAt: "2026-09-15T12:00:00.000Z",
+      repositorySnapshot: [],
+      incidentTransition: "recovered",
+      effectiveHealth: "healthy",
+    });
+
+    await buildGitHubConnectionCycleRunner(deps)(cycleInput);
+
+    expect(deps.queueConnectionNotice).toHaveBeenCalledOnce();
+    expect(deps.queueConnectionNotice).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "recovery",
+      health: "healthy",
+      diagnostic: null,
+    }));
   });
 
   it("reports partial, action-required, and disconnected results without identifiers", async () => {
