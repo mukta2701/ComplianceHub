@@ -744,6 +744,9 @@ a.heat-cell:hover{outline:2px solid var(--ink);outline-offset:-2px}
   .settings-content .fact-grid{min-width:0;overflow-wrap:anywhere}
 }
 
+/* Keep the active navigation label above WCAG AA contrast on its pale blue fill. */
+.sidebar nav a.active{color:var(--ch-primary-hover)}
+
 /* Import mapping keeps each source column beside its editable destination. */
 .import-workbook-input{max-width:100%;min-width:0}
 .import-column-mapping{border:1px solid var(--line);border-radius:10px;overflow:hidden}

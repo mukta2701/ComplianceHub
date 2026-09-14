@@ -98,7 +98,7 @@ async function createAssessmentSession(page: Page) {
   return page.url();
 }
 
-async function createSoaDraft(page: Page) {
+async function createControlReview(page: Page) {
   await page.goto("/app/soa");
   const assessmentSelect = page.locator('select[name="assessmentId"]');
   await expect(assessmentSelect).toBeVisible();
@@ -106,7 +106,7 @@ async function createSoaDraft(page: Page) {
   await assessmentSelect.selectOption({ index: 1 });
   await Promise.all([
     page.waitForURL(/\/app\/soa\/[0-9a-f-]+$/),
-    page.getByRole("button", { name: "Generate draft" }).click(),
+    page.getByRole("button", { name: "Start control review" }).click(),
   ]);
   return page.url();
 }
@@ -222,7 +222,7 @@ test("a new user creates an isolated workspace and starts an assessment", async 
   // Completed steps disappear from the first-run checklist. Workspace creation
   // is counted as done, while the first actionable assessment step remains.
   const checklist = page.locator(".onboarding-card");
-  await expect(checklist.getByRole("heading", { name: "Get certification-ready" })).toBeVisible();
+  await expect(checklist.getByRole("heading", { name: "Build your programme" })).toBeVisible();
   await expect(checklist.getByText("1 of 7 done")).toBeVisible();
   await expect(checklist.getByText("Connect a tracker", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Reduce admin later" })).toBeVisible();
@@ -398,7 +398,7 @@ test("a treatment plan spawns an owned, dated task", async ({ page }, testInfo) 
   await expect(page.getByRole("heading", { name: "Risk register" })).toBeVisible();
 
   // Open its detail page and add a treatment plan that spawns a task.
-  await page.getByRole("link", { name: "Unencrypted laptops" }).click();
+  await page.getByRole("link", { name: "Unencrypted laptops", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Treatment plans" })).toBeVisible();
   await page.getByLabel("Reference", { exact: true }).fill("RTP-001");
   await page.locator("select[name=assignedLeadId]").selectOption({ index: 1 });
@@ -457,13 +457,14 @@ test("an audit runs from plan through checklist to a corrective-action task", as
   // One-click populate the checklist from the Annex A control library (93
   // controls). It is idempotent: a second click adds no duplicates.
   const checklistRows = page.locator("table").first().locator("tbody tr");
+  const directionQuestion = "Is the control 'Direction for security policy' implemented and operating effectively?";
   await page.getByRole("button", { name: "Populate from control library" }).click();
-  await expect(page.getByRole("cell", { name: "Is the control 'Direction for security policy' implemented and operating effectively?", exact: true })).toBeVisible();
+  await expect(checklistRows.getByText(directionQuestion, { exact: true }).first()).toBeVisible();
   const populatedCount = await checklistRows.count();
   expect(populatedCount).toBeGreaterThan(90);
   expect(await page.getByRole("combobox", { name: "Evidence record" }).count(), "the proof picker must not be repeated per checklist row").toBeLessThanOrEqual(1);
   await page.getByRole("button", { name: "Populate from control library" }).click();
-  await expect(page.getByRole("cell", { name: "Is the control 'Direction for security policy' implemented and operating effectively?", exact: true })).toBeVisible();
+  await expect(checklistRows.getByText(directionQuestion, { exact: true }).first()).toBeVisible();
   expect(await checklistRows.count(), "re-running must not duplicate rows").toBe(populatedCount);
 
   // Set that row's result to Non-compliant and save.
@@ -625,7 +626,7 @@ test("the leadership readiness report aggregates the ISMS into one accessible vi
     organisationPrefix: "Report Workspace",
   });
   await createAssessmentSession(page);
-  await createSoaDraft(page);
+  await createControlReview(page);
 
   // Reach the readiness report through the workspace nav.
   const navToggle = page.getByRole("button", { name: "Open navigation" });
@@ -687,7 +688,7 @@ test("a risk register workbook can be imported through the wizard", async ({ pag
   await expect(page.getByRole("heading", { name: "Import complete" })).toBeVisible();
   await expect(page.getByText("1 row added.")).toBeVisible();
   await page.getByRole("link", { name: "View risk register" }).click();
-  await expect(page.getByRole("link", { name: "Imported laptop theft" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Imported laptop theft", exact: true })).toBeVisible();
 });
 
 test("an asset workbook can be imported through the wizard", async ({ page }, testInfo) => {
@@ -732,7 +733,7 @@ test("a SoA workbook import updates a matched control in the selected register",
 
   // Seed an assessment session and generate a SoA draft so there is a real register + control to update.
   await createAssessmentSession(page);
-  const registerUrl = await createSoaDraft(page);
+  const registerUrl = await createControlReview(page);
   await expect(page.getByRole("heading", { name: "Statement of Applicability", level: 1 })).toBeVisible();
 
   const firstHeading = await page.locator(".soa-detail-heading h2").textContent();
@@ -767,7 +768,7 @@ test("the SoA review workspace supports focused review, persistence, accessibili
     organisationPrefix: "SoA Review Workspace",
   });
   await createAssessmentSession(page);
-  await createSoaDraft(page);
+  await createControlReview(page);
 
   await expect(page.getByRole("textbox", { name: "Rationale" })).toHaveCount(1);
   for (const label of ["Needs attention", "Reviewed", "Missing rationale", "Evidence gaps", "Unassigned", "Undecided"]) {
@@ -817,7 +818,7 @@ test("every register can be downloaded as an XLSX export", async ({ page }, test
   await createAssessmentSession(page);
 
   // Generate an SoA draft from that assessment so the SoA export finds a register.
-  await createSoaDraft(page);
+  await createControlReview(page);
   await expect(page.getByRole("heading", { name: "Statement of Applicability", level: 1 })).toBeVisible();
 
   for (const path of ["/api/app/risks/export?format=xlsx", "/api/app/soa/export?format=xlsx", "/api/app/assets/export?format=xlsx", "/api/app/tasks/export?format=xlsx", "/api/app/evidence/export?format=xlsx", "/api/app/assessment/export?format=xlsx"]) {
@@ -925,14 +926,16 @@ test("a policy is authored, approved, accepted, and re-accepted after a material
   await page.getByRole("link", { name: "New policy" }).click();
   await expect(page.getByRole("heading", { name: "Author a policy", level: 2 })).toBeVisible();
 
-  // The template picker renders with zero accessibility violations.
-  await expect(page.getByRole("heading", { name: "Start from a template", level: 2 })).toBeVisible();
+  // The optional template picker renders with zero accessibility violations.
+  const templatePicker = page.getByText("Start from a template (optional)", { exact: true });
+  await expect(templatePicker).toBeVisible();
+  await templatePicker.click();
+  await expect(page.getByRole("heading", { name: "Choose a starting point", level: 2 })).toBeVisible();
   const pickerAxe = await new AxeBuilder({ page }).analyze();
   expect(pickerAxe.violations).toEqual([]);
 
   // Picking a template pre-fills the reference, title and body from that template.
-  await page.getByRole("link", { name: /Information Security Policy/ }).click();
-  await page.waitForURL(/\/app\/policies\/new\?template=information-security$/);
+  await page.getByRole("button", { name: /Information Security Policy/ }).click();
   await expect(page.getByLabel("Reference", { exact: true })).toHaveValue("POL-001");
   await expect(page.getByLabel("Title")).toHaveValue("Information Security Policy");
   await expect(page.getByLabel("Policy content")).not.toHaveValue("");
@@ -1230,11 +1233,11 @@ test("an owner adds an evidence source, the collector fills the vault, and re-co
     expect(first.ok()).toBeTruthy();
 
     // The fake Google Workspace source yields two items; both surface in the vault
-    // with the neutral "Auto" badge naming the provider.
+    // with the provider named as their source.
     await page.goto("/app/evidence");
     await expect(page.getByRole("heading", { name: "MFA enforcement report" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Access review export" })).toBeVisible();
-    await expect(page.getByText("Auto · Google Workspace")).toHaveCount(2);
+    await expect(page.getByText("Google Workspace source", { exact: true })).toHaveCount(2);
 
     // 4. Re-collect: the (source_id, external_ref) dedup means the count must NOT
     //    double — the same two items, still exactly one card each.
@@ -1242,7 +1245,7 @@ test("an owner adds an evidence source, the collector fills the vault, and re-co
     expect(second.ok()).toBeTruthy();
     await page.goto("/app/evidence");
     await expect(page.getByRole("heading", { name: "MFA enforcement report" })).toHaveCount(1);
-    await expect(page.getByText("Auto · Google Workspace")).toHaveCount(2);
+    await expect(page.getByText("Google Workspace source", { exact: true })).toHaveCount(2);
 
     // 5. Axe on the evidence vault carrying auto-collected items.
     const evidenceAxe = await new AxeBuilder({ page }).analyze();
@@ -1435,14 +1438,26 @@ test("an invited Member opens Framework Coverage from read-only navigation", asy
   expect(consoleErrors).toEqual([]);
   expect(failedRequests).toEqual([]);
 
-  // Members use the deliberately reduced portal. Core operator registers must
+  // Members use the deliberately reduced portal. Operator-only registers must
   // remain inaccessible even when their paths are entered directly.
-  for (const route of ["risks", "assets", "evidence", "assessment", "soa", "audits", "kpis"]) {
+  for (const route of ["risks", "assets", "evidence", "audits", "kpis"]) {
     await page.goto(`/app/${route}`);
     await expect(page).toHaveURL(/\/app$/);
     await expect(page.getByRole("button", { name: /^(Save|Delete|Add|Create|New assessment|Generate draft|Seed)/i })).toHaveCount(0);
     await expect(page.getByRole("link", { name: /^(Add|New|Import)/i })).toHaveCount(0);
   }
+  // Assessment and control-review context is intentionally readable by Members,
+  // while all creation, import and review-management controls remain hidden.
+  await page.goto("/app/assessment");
+  await expect(page).toHaveURL(/\/app\/assessment$/);
+  await expect(page.getByRole("heading", { name: "Gap assessment", level: 1 })).toBeVisible();
+  await expect(page.getByRole("button", { name: "New assessment", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: /^Import/i })).toHaveCount(0);
+  await page.goto("/app/soa");
+  await expect(page).toHaveURL(/\/app\/soa$/);
+  await expect(page.getByRole("heading", { name: "Controls & applicability", level: 1 })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Start control review", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: /^Import/i })).toHaveCount(0);
   // Assigned contribution access permits the Tasks register, while task
   // creation and export remain operator-only (access-control matrix).
   await page.goto("/app/tasks");
