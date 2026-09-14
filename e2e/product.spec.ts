@@ -407,7 +407,7 @@ test("a treatment plan spawns an owned, dated task", async ({ page }, testInfo) 
   await page.getByLabel(/create an owned, dated task/).check();
   await page.getByRole("button", { name: "Add treatment plan" }).click();
 
-  await expect(page.getByText("RTP-001")).toBeVisible();
+  await expect(page.getByText("RTP-001", { exact: true })).toBeVisible();
   const axe = await new AxeBuilder({ page }).analyze();
   expect(axe.violations).toEqual([]);
 
@@ -965,8 +965,7 @@ test("a policy is authored, approved, accepted, and re-accepted after a material
   // The edit form lives behind an "Edit policy" disclosure — open it first.
   await page.getByText("Edit policy", { exact: true }).click();
   await page.getByLabel("Policy content").fill("Access to systems is granted on least privilege and reviewed quarterly.");
-  await page.getByRole("button", { name: "Save changes" }).click();
-  await expect(page.getByRole("status")).toHaveText("Policy changes saved.");
+  await submitServerAction(page, page.getByRole("button", { name: "Save changes" }), new URL(policyUrl).pathname);
   await page.reload();
   await expect(page.getByText("POLICY POL-001 · v2")).toBeVisible();
   await expect(page.getByText("Re-accept (accepted v1)")).toBeVisible();
@@ -1050,20 +1049,21 @@ test("a task is pushed to a sandbox tracker, polled to In Progress, then the con
   //    one Settings destination, while the route-backed tabs switch between
   //    organisation settings and the focused provider catalogue.
   await page.goto("/app/settings");
+  if (testInfo.project.name === "mobile") {
+    const openNavigation = page.getByRole("banner").getByRole("button", { name: "Open navigation" });
+    await expect(openNavigation).toHaveAttribute("aria-expanded", "false");
+    await openNavigation.click();
+    await expect(page.getByRole("banner").getByRole("button", { name: "Close navigation" })).toHaveAttribute("aria-expanded", "true");
+  }
   const workspaceNavigation = page.getByRole("navigation", { name: "Workspace" });
-  const settingsNavLink = workspaceNavigation.getByRole("link", { name: "Settings", includeHidden: true });
+  const settingsNavLink = workspaceNavigation.getByRole("link", { name: "Settings" });
   await expect(settingsNavLink).toHaveAttribute("aria-current", "page");
   await expect(workspaceNavigation.getByRole("link", { name: "Connections" })).toHaveCount(0);
   if (testInfo.project.name === "mobile") {
     const appHeader = page.getByRole("banner");
-    const openNavigation = appHeader.getByRole("button", { name: "Open navigation" });
-    await expect(openNavigation).toHaveAttribute("aria-expanded", "false");
-    await openNavigation.click();
-    const closeNavigation = appHeader.getByRole("button", { name: "Close navigation" });
-    await expect(closeNavigation).toHaveAttribute("aria-expanded", "true");
     await expect(settingsNavLink).toBeVisible();
     await settingsNavLink.click();
-    await expect(openNavigation).toHaveAttribute("aria-expanded", "false");
+    await expect(appHeader.getByRole("button", { name: "Open navigation" })).toHaveAttribute("aria-expanded", "false");
   }
   const settingsTabs = page.getByRole("navigation", { name: "Section" });
   await expect(settingsTabs.getByRole("link", { name: "Settings" })).toHaveAttribute("aria-current", "page");

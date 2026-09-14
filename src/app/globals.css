@@ -327,7 +327,7 @@ a.heat-cell:hover{outline:2px solid var(--ink);outline-offset:-2px}
 .soa-review-summary{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:12px}
 .soa-review-summary button{min-height:54px;border:1px solid var(--ch-border);border-radius:8px;background:var(--ch-surface);color:var(--ch-text);padding:8px 10px;text-align:left;font-size:11px;font-weight:700;cursor:pointer}
 .soa-review-summary button strong{display:block;margin-top:2px;color:var(--ch-ink);font-size:18px;font-weight:700}
-.soa-review-summary button[aria-pressed="true"]{border-color:var(--ch-primary);background:var(--ch-primary-soft);color:var(--ch-primary)}
+.soa-review-summary button[aria-pressed="true"]{border-color:var(--ch-primary);background:var(--ch-primary-soft);color:var(--ch-primary-hover)}
 .soa-review-summary button:focus-visible,.soa-review-toolbar input:focus-visible,.soa-review-toolbar select:focus-visible,.soa-review-detail select:focus-visible,.soa-review-detail textarea:focus-visible,.soa-detail-tabs button:focus-visible,.soa-queue button:focus-visible{outline:none;box-shadow:var(--ch-focus-ring)}
 .soa-review-toolbar{position:sticky;top:74px;z-index:10;display:grid;grid-template-columns:minmax(170px,1.5fr) repeat(4,minmax(118px,1fr));gap:8px;align-items:end;padding:12px;margin-bottom:14px;border:1px solid var(--ch-border);border-radius:8px;background:var(--ch-surface)}
 .soa-review-toolbar label{display:flex;min-width:0;flex-direction:column;gap:4px;color:var(--ch-text);font-size:10px;font-weight:800}
@@ -344,6 +344,7 @@ a.heat-cell:hover{outline:2px solid var(--ink);outline-offset:-2px}
 .soa-queue li{display:grid;grid-template-columns:minmax(190px,1.4fr) auto auto;gap:6px 10px;align-items:center;padding:12px 14px;border-top:1px solid var(--ch-border)}
 .soa-queue li:first-child{border-top:0}
 .soa-queue li[data-selected="true"]{box-shadow:inset 3px 0 0 var(--ch-primary);background:var(--ch-primary-soft)}
+.soa-queue li[data-selected="true"] .soa-queue-control code,.soa-queue li[data-selected="true"] .soa-queue-source{color:var(--ch-primary-hover)}
 .soa-queue-control{display:grid;min-width:0;grid-template-columns:auto 1fr;column-gap:7px;align-items:baseline}
 .soa-queue-control code{color:var(--ch-primary);font-size:10.5px;font-weight:800}
 .soa-queue-control strong{min-width:0;overflow-wrap:anywhere;font-size:11.5px;line-height:1.35}
