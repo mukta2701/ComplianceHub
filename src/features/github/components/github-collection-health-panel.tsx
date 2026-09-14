@@ -8,6 +8,8 @@ import { Pill } from "@/components/ui";
 import { recheckGitHubInstallationAction, type GitHubOfficialRecheckResult } from "@/app/app/monitoring/github-actions";
 import type { GitHubInstallationSummary } from "./github-installation-panel";
 import type { GitHubRuntimeReadiness } from "@/features/github/application/github-runtime-config";
+import type { MembershipRole } from "@/features/organisations/domain/access";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import { formatMonitoringTime } from "./format-monitoring-time";
 
 export type GitHubRepositoryMonitoringSummary = {
@@ -22,8 +24,6 @@ export type GitHubRepositoryMonitoringSummary = {
   latest_failed_count: number | null;
   last_completed_collection_at: string | null;
 };
-
-type WorkspaceRole = "owner" | "admin" | "member";
 
 function isStale(repository: GitHubRepositoryMonitoringSummary, nowIso: string): boolean {
   if (!repository.last_completed_collection_at) return false;
@@ -81,14 +81,16 @@ export function GitHubCollectionHealthPanel({
   installations: GitHubInstallationSummary[];
   repositories: GitHubRepositoryMonitoringSummary[];
   nowIso: string;
-  role: WorkspaceRole;
+  role: MembershipRole;
   runtimeReadiness?: GitHubRuntimeReadiness;
 }) {
   const router = useRouter();
   const [pendingInstallations, setPendingInstallations] = useState<Set<string>>(() => new Set());
   const [messages, setMessages] = useState<Record<string, string>>({});
   const selectedRepositories = repositories.filter((repository) => repository.selected);
-  const canManageConnection = role === "owner" || role === "admin";
+  const monitoringAccess = workspaceAccess(role).section("monitoring");
+  const canRecheckGitHub = monitoringAccess.canManageOperation("recheck-github-installation");
+  const canManageConnection = workspaceAccess(role).section("connections").canManage;
 
   async function recheckInstallation(installation: GitHubInstallationSummary) {
     if (pendingInstallations.has(installation.id)) return;
@@ -160,7 +162,7 @@ export function GitHubCollectionHealthPanel({
               <h3>{installation.account_login}</h3>
               <p>{installationRepositories.length} monitored {installationRepositories.length === 1 ? "repository" : "repositories"}</p>
             </div>
-            {role === "owner" && <button
+            {canRecheckGitHub && <button
               className="button secondary"
               type="button"
               disabled={!canRunThisInstallation || pending}
@@ -183,13 +185,13 @@ export function GitHubCollectionHealthPanel({
           {!runtimeReadiness.available && <p className="github-configuration-note" role="note">
             Saved GitHub results remain visible, but fresh GitHub verification is unavailable in this app runtime.
           </p>}
-          {role === "owner" && installation.repository_selection === "selected" && installationRepositories.length === 0 && <p className="field-hint">
+          {canRecheckGitHub && installation.repository_selection === "selected" && installationRepositories.length === 0 && <p className="field-hint">
             Select at least one available repository before checking GitHub.
           </p>}
-          {role === "owner" && installation.repository_selection === "selected" && installationRepositories.length > 0 && !hasAvailableRepository && <p className="field-hint">
+          {canRecheckGitHub && installation.repository_selection === "selected" && installationRepositories.length > 0 && !hasAvailableRepository && <p className="field-hint">
             No selected repositories are currently available to check.
           </p>}
-          {role !== "owner" && <p className="field-hint">Only workspace Owners can check GitHub from here.</p>}
+          {!canRecheckGitHub && <p className="field-hint">Only workspace Owners can check GitHub from here.</p>}
 
           {installationRepositories.length === 0 ? <div className="github-repositories-empty">
             <p>No repositories are selected for GitHub monitoring.</p>

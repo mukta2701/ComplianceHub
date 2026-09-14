@@ -11,6 +11,9 @@ describe("workspace access policy", () => {
     expect(hasCapability("owner", "manage_monitoring_findings")).toBe(true);
     expect(hasCapability("admin", "manage_monitoring_findings")).toBe(false);
     expect(hasCapability("member", "manage_monitoring_findings")).toBe(false);
+    expect(hasCapability("owner", "manage_official_github_monitoring")).toBe(true);
+    expect(hasCapability("admin", "manage_official_github_monitoring")).toBe(false);
+    expect(hasCapability("member", "manage_official_github_monitoring")).toBe(false);
     expect(hasCapability("owner", "manage_scope")).toBe(true);
     expect(hasCapability("admin", "manage_scope")).toBe(false);
     expect(hasCapability("member", "manage_scope")).toBe(false);

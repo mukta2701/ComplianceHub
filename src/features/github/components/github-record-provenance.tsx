@@ -9,6 +9,8 @@ import {
   transitionGitHubFindingAction,
 } from "@/app/app/monitoring/actions";
 import { Pill } from "@/components/ui";
+import type { MembershipRole } from "@/features/organisations/domain/access";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import type { ActiveMonitoringFindingStatus } from "@/features/monitoring/domain/finding-status";
 import type {
   GitHubFindingTransitionStatus,
@@ -190,13 +192,14 @@ export function OfficialGitHubFindingCard({
   record: OfficialGitHubFindingProvenance;
   status: ActiveMonitoringFindingStatus;
   taskId: string | null;
-  role: "owner" | "admin" | "member";
+  role: MembershipRole;
   selected: boolean;
 }) {
   const presentation = githubFindingPresentation(record.checkId);
   const freshnessLabel = record.freshness === "current"
     ? `Current through ${formatTime(record.freshUntil)}`
     : `Stale since ${formatTime(record.freshUntil)}`;
+  const canReviewFinding = workspaceAccess(role).section("monitoring").canManageOperation("review-official-github-finding");
   return <FocusedOfficialRecord
     id={`finding-${record.findingId}`}
     label={`GitHub finding: ${presentation.title}`}
@@ -220,7 +223,7 @@ export function OfficialGitHubFindingCard({
       <div><dt>Observed</dt><dd><time dateTime={record.observedAt}>{formatTime(record.observedAt)}</time></dd></div>
     </dl>
     {taskId && <Link href={`/app/tasks/${taskId}`}>Open remediation task</Link>}
-    {role === "owner"
+    {canReviewFinding
       ? <OfficialFindingActions findingId={record.findingId} currentStatus={status} allowedTransitions={record.allowedTransitions} canRaiseTask={!taskId} />
       : <p className="github-read-only-note" role="note">Official finding review is read-only for your role. A workspace Owner records review-state decisions.</p>}
     <details className="github-technical-evidence">

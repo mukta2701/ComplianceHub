@@ -10,6 +10,8 @@ import {
   revokeGitHubMappingApprovalAction,
 } from "@/app/app/monitoring/github-control-room-actions";
 import { Pill } from "@/components/ui";
+import type { MembershipRole } from "@/features/organisations/domain/access";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import type { GitHubComplianceControlRoom } from "../application/github-compliance-control-room";
 import type { GitHubMappingReview } from "../application/github-mapping-review";
 import {
@@ -74,7 +76,7 @@ function MappingReviewSection({
 }: {
   room: GitHubComplianceControlRoom;
   review: GitHubMappingReview;
-  role: "owner" | "admin" | "member";
+  role: MembershipRole;
   runAction: (action: (formData: FormData) => Promise<{ ok: boolean; message: string }>, form: FormData) => Promise<void>;
   pending: boolean;
 }) {
@@ -91,6 +93,7 @@ function MappingReviewSection({
     : room.approval
       ? "Different mapping active"
       : "Approval required";
+  const canManageMapping = workspaceAccess(role).section("monitoring").canManageOperation("approve-github-mapping");
 
   function approve() {
     const form = new FormData();
@@ -128,7 +131,7 @@ function MappingReviewSection({
       <ul>{review.limitations.map((limitation) => <li key={limitation}>{limitation}</li>)}</ul>
     </div>
 
-    {role === "owner" ? room.approval && activeHistory ? <fieldset className="github-owner-decision">
+    {canManageMapping ? room.approval && activeHistory ? <fieldset className="github-owner-decision">
       <legend>Owner mapping approval</legend>
       <p>{exactApprovalActive
         ? "This exact mapping is active. Revocation stops future official processing; existing records remain historical."
@@ -197,7 +200,7 @@ function RepositoryOfficialCard({
   room: GitHubComplianceControlRoom;
   installationHealthy: boolean;
   exactReviewedApprovalActive: boolean;
-  role: "owner" | "admin" | "member";
+  role: MembershipRole;
   runAction: (action: (formData: FormData) => Promise<{ ok: boolean; message: string }>, form: FormData) => Promise<void>;
   pending: boolean;
 }) {
@@ -218,6 +221,7 @@ function RepositoryOfficialCard({
     : !run && state === "shadow"
       ? "No collection has completed yet, so no official records exist."
       : presentation.detail;
+  const canProcessResults = workspaceAccess(role).section("monitoring").canManageOperation("process-github-results");
 
   function targetForm() {
     const form = new FormData();
@@ -266,7 +270,7 @@ function RepositoryOfficialCard({
       </li>)}</ul>
     </details>}
 
-    {role === "owner" && exactReviewedApprovalActive && run && job && ["pending", "awaiting_approval", "retryable"].includes(job.status)
+    {canProcessResults && exactReviewedApprovalActive && run && job && ["pending", "awaiting_approval", "retryable"].includes(job.status)
       && <div className="github-recovery-actions">
         <button className="button primary" type="button" disabled={pending} onClick={() => void process()}>
           Process approved results
@@ -284,11 +288,12 @@ function ExhaustedRecoveryItem({
 }: {
   item: GitHubComplianceControlRoom["exhaustedAttention"]["items"][number];
   repositoryName: string | null;
-  role: "owner" | "admin" | "member";
+  role: MembershipRole;
   pending: boolean;
   runAction: (action: (formData: FormData) => Promise<{ ok: boolean; message: string }>, form: FormData) => Promise<void>;
 }) {
   const [reasonCode, setReasonCode] = useState<(typeof RETRY_REASONS)[number]["value"]>("configuration_corrected");
+  const canRetry = workspaceAccess(role).section("monitoring").canManageOperation("retry-github-materialisation");
 
   function retry() {
     const form = new FormData();
@@ -304,7 +309,7 @@ function ExhaustedRecoveryItem({
       <strong>{repositoryName ?? "Selected repository outside this page"}</strong>
       <small>Exhausted after {item.attempts} attempts · <time dateTime={item.exhaustedAt}>{item.exhaustedAt}</time></small>
     </div>
-    {role === "owner" ? <fieldset className="github-recovery-actions">
+    {canRetry ? <fieldset className="github-recovery-actions">
       <legend>Recover exhausted processing</legend>
       <label>Retry reason<select aria-label={`Retry reason for ${repositoryName ?? item.repositoryId}`} value={reasonCode} onChange={(event) => setReasonCode(event.target.value as typeof reasonCode)}>
         {RETRY_REASONS.map((reason) => <option key={reason.value} value={reason.value}>{reason.label}</option>)}
@@ -324,7 +329,7 @@ export function GitHubComplianceControlRoomPanel({
 }: {
   room: GitHubComplianceControlRoom;
   review: GitHubMappingReview;
-  role: "owner" | "admin" | "member";
+  role: MembershipRole;
   unhealthyRepositoryIds: string[];
 }) {
   const router = useRouter();

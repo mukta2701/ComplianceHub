@@ -14,17 +14,9 @@ type WorkspaceIdentity = {
   role: MembershipRole | null;
 };
 
-const MEMBER_APP_PATHS = new Set([
-  "/app/monitoring",
-]);
-
 function normalisePath(pathname: string): string {
   if (pathname.length > 1 && pathname.endsWith("/")) return pathname.slice(0, -1);
   return pathname;
-}
-
-function isMemberAppPath(pathname: string): boolean {
-  return MEMBER_APP_PATHS.has(pathname);
 }
 
 export function workspaceRequestAccess(
@@ -49,5 +41,5 @@ export function workspaceRequestAccess(
   const section = workspaceAccess(identity.role).sectionForPath(pathname);
   if (section) return section.canAccessPath(pathname) ? "allow" : isApi ? "forbidden" : "redirect-member-home";
   if (isApi) return "forbidden";
-  return isMemberAppPath(pathname) ? "allow" : "redirect-member-home";
+  return "redirect-member-home";
 }

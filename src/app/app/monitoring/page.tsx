@@ -11,7 +11,7 @@ import {
   runMonitoringNowAction,
 } from "./actions";
 import { shouldShowRunMonitoring } from "./monitoring-access";
-import { hasCapability } from "@/features/organisations/domain/access";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import { loadMemberMonitoring } from "@/features/monitoring/application/load-member-monitoring";
 import { MemberMonitoring } from "@/features/monitoring/components/member-monitoring";
 import {
@@ -159,13 +159,14 @@ export default async function MonitoringPage({
   searchParams: Promise<{ finding?: string | string[]; githubPage?: string | string[] }>;
 } = { searchParams: Promise.resolve({}) }) {
   const { supabase, organisation, membership } = await requireAppContext();
+  const monitoringAccess = workspaceAccess(membership.role).section("monitoring");
   const runtimeReadiness = getGitHubRuntimeReadiness();
   const params = await searchParams;
   const requestedFinding = parseOfficialRecordSelection(params.finding);
   const requestedPage = Array.isArray(params.githubPage) ? params.githubPage[0] : params.githubPage;
   const parsedPage = requestedPage && /^[1-9][0-9]{0,2}$/.test(requestedPage) ? Number(requestedPage) : 1;
   const repositoryOffset = Math.min((parsedPage - 1) * 20, 10_000);
-  if (membership.role === "member") {
+  if (monitoringAccess.presentation === "member") {
     const [data, installationResult, repositorySummaryResult, controlRoom, mappingReview] = await Promise.all([
       loadMemberMonitoring(supabase, organisation.id),
       supabase.from("github_installations")
@@ -209,7 +210,7 @@ export default async function MonitoringPage({
     />;
   }
 
-  const canManageMonitoringFindings = hasCapability(membership.role, "manage_monitoring_findings");
+  const canManageMonitoringFindings = monitoringAccess.canManageOperation("manage-monitoring-findings");
   const [findingResult, sourceResult, installationResult, repositorySummaryResult, controlRoom, mappingReview] = await Promise.all([
     supabase.from("monitoring_findings")
       .select("id,control_ref,subject_id,severity,title,detail,status,task_id,detected_at,finding_origin")

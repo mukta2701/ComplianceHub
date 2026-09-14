@@ -1,6 +1,72 @@
 import { describe, expect, it } from "vitest";
 import { workspaceAccess } from "./workspace-access";
 
+describe("Monitoring workspace access", () => {
+  it("keeps the full Monitoring operator presentation and general checks available to Owners and Admins", () => {
+    for (const role of ["owner", "admin"] as const) {
+      const access = workspaceAccess(role);
+      const monitoring = access.section("monitoring");
+
+      expect(monitoring).toMatchObject({
+        id: "monitoring",
+        href: "/app/monitoring",
+        label: "Monitoring",
+        title: "Monitoring",
+        icon: "activity",
+        canView: true,
+        canManage: true,
+        presentation: "operator",
+        navigation: { group: "Oversight", href: "/app/monitoring", label: "Monitoring", icon: "activity" },
+      });
+      expect(monitoring.canAccessPath("/app/monitoring")).toBe(true);
+      expect(monitoring.canManageOperation("run-monitoring")).toBe(true);
+      expect(() => monitoring.requireManage("run-monitoring")).not.toThrow();
+    }
+  });
+
+  it("keeps Monitoring visible but read-only for Members", () => {
+    const monitoring = workspaceAccess("member").section("monitoring");
+
+    expect(monitoring).toMatchObject({
+      canView: true,
+      canManage: false,
+      presentation: "member",
+      navigation: { group: "Share", href: "/app/monitoring", label: "Monitoring", icon: "activity" },
+    });
+    expect(monitoring.canAccessPath("/app/monitoring")).toBe(true);
+    expect(monitoring.canManageOperation("run-monitoring")).toBe(false);
+    expect(() => monitoring.requireManage("run-monitoring")).toThrow("Only workspace operators can run monitoring");
+  });
+
+  it("keeps every finding and official GitHub decision Owner-only with its exact denial", () => {
+    const owner = workspaceAccess("owner").section("monitoring");
+    const admin = workspaceAccess("admin").section("monitoring");
+    const member = workspaceAccess("member").section("monitoring");
+    const operations = [
+      ["manage-monitoring-findings", "Only workspace owners can manage monitoring findings"],
+      ["review-official-github-finding", "Only workspace Owners can review official GitHub findings."],
+      ["approve-github-mapping", "Only a workspace Owner can approve GitHub compliance mappings."],
+      ["revoke-github-mapping", "Only a workspace Owner can revoke GitHub compliance mappings."],
+    ] as const;
+
+    for (const [operation, message] of operations) {
+      expect(owner.canManageOperation(operation)).toBe(true);
+      expect(admin.canManageOperation(operation)).toBe(false);
+      expect(member.canManageOperation(operation)).toBe(false);
+      expect(admin.manageDeniedMessageFor(operation)).toBe(message);
+    }
+    expect(admin.canManageOperation("recheck-github-installation")).toBe(false);
+    expect(admin.canManageOperation("process-github-results")).toBe(false);
+    expect(admin.canManageOperation("retry-github-materialisation")).toBe(false);
+  });
+
+  it("does not grant Monitoring before membership or match invented nested routes", () => {
+    const access = workspaceAccess(null);
+    expect(access.section("monitoring").canView).toBe(false);
+    expect(access.sectionForPath("/app/monitoring/extra")).toBeNull();
+  });
+});
+
 describe("Evidence workspace access", () => {
   it.each(["owner", "admin"] as const)("keeps Evidence management available to %ss", (role) => {
     const access = workspaceAccess(role);

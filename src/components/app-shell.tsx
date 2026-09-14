@@ -23,6 +23,7 @@ const operatorEvidenceNavigation = workspaceAccess("owner").section("evidence").
 const operatorAuditNavigation = workspaceAccess("owner").section("audits").navigation!;
 const operatorAuditActivityMetadata = workspaceAccess("owner").section("audit-activity");
 const operatorTaskNavigation = workspaceAccess("owner").section("tasks").navigation!;
+const operatorMonitoringNavigation = workspaceAccess("owner").section("monitoring").navigation!;
 const automationSetupMetadata = workspaceAccess("owner").section("automation-setup");
 const connectionsMetadata = workspaceAccess("owner").section("connections");
 
@@ -39,7 +40,7 @@ const navGroups = [
     [operatorAssetNavigation.href, operatorAssetNavigation.icon, operatorAssetNavigation.label],
   ] },
   { label: "Oversight", items: [
-    ["/app/monitoring", "activity", "Monitoring"],
+    [operatorMonitoringNavigation.href, operatorMonitoringNavigation.icon, operatorMonitoringNavigation.label],
     ["/app/automation", "activity", "Automation inbox"],
     [operatorAuditNavigation.href, operatorAuditNavigation.icon, operatorAuditNavigation.label],
     ["/app/kpis", "check", "Performance"],
@@ -67,6 +68,7 @@ const memberPolicyNavigation = workspaceAccess("member").section("policies").nav
 const memberSoaNavigation = workspaceAccess("member").section("soa").navigation!;
 const memberOverviewNavigation = workspaceAccess("member").section("overview").navigation!;
 const memberTaskNavigation = workspaceAccess("member").section("tasks").navigation!;
+const memberMonitoringNavigation = workspaceAccess("member").section("monitoring").navigation!;
 const memberNavGroups = [
   { label: memberOverviewNavigation.group, items: [[memberOverviewNavigation.href, memberOverviewNavigation.icon, memberOverviewNavigation.label]] },
   { label: "Compliance", items: [
@@ -76,7 +78,7 @@ const memberNavGroups = [
     [memberFrameworkNavigation.href, memberFrameworkNavigation.icon, memberFrameworkNavigation.label],
   ] },
   { label: memberLeadershipNavigation.group, items: [
-    ["/app/monitoring", "activity", "Monitoring"],
+    [memberMonitoringNavigation.href, memberMonitoringNavigation.icon, memberMonitoringNavigation.label],
     [memberLeadershipNavigation.href, memberLeadershipNavigation.icon, memberLeadershipNavigation.label],
   ] },
 ] as const;

@@ -1,6 +1,6 @@
 import { hasCapability, type MembershipRole, type WorkspaceCapability } from "./access";
 
-export type WorkspaceSectionId = "assets" | "assessments" | "audit-activity" | "audits" | "automation-setup" | "baseline" | "connections" | "evidence" | "frameworks" | "leadership-report" | "notifications" | "overview" | "policies" | "risks" | "scope" | "soa" | "tasks" | "trust-center";
+export type WorkspaceSectionId = "assets" | "assessments" | "audit-activity" | "audits" | "automation-setup" | "baseline" | "connections" | "evidence" | "frameworks" | "leadership-report" | "monitoring" | "notifications" | "overview" | "policies" | "risks" | "scope" | "soa" | "tasks" | "trust-center";
 
 export type WorkspaceSectionPresentation = "member" | "operator";
 
@@ -15,12 +15,20 @@ type WorkspacePathRule = {
 };
 
 type WorkspaceManageOperation =
+  | "approve-github-mapping"
   | "auditor-access"
   | "create-task"
   | "edit-task"
   | "manage-github-app"
+  | "manage-monitoring-findings"
   | "manage-slack-destinations"
+  | "process-github-results"
   | "push-task-to-tracker"
+  | "recheck-github-installation"
+  | "retry-github-materialisation"
+  | "review-official-github-finding"
+  | "revoke-github-mapping"
+  | "run-monitoring"
   | "review-task-contributions"
   | "select-daily-digest-channel"
   | "update-task-status";
@@ -250,6 +258,43 @@ const sectionPolicies: Record<WorkspaceSectionId, WorkspaceSectionPolicy> = {
     navigationGroups: { owner: "Share", admin: "Share", member: null },
     manageCapability: "manage_policies",
     manageDeniedMessage: "Only workspace operators can publish leadership reports",
+  },
+  monitoring: {
+    id: "monitoring",
+    href: "/app/monitoring",
+    label: "Monitoring",
+    title: "Monitoring",
+    icon: "activity",
+    paths: [{ path: "/app/monitoring", requirement: "view" }],
+    viewRoles: new Set(["owner", "admin", "member"]),
+    navigationGroups: { owner: "Oversight", admin: "Oversight", member: "Share" },
+    rolePresentation: {
+      owner: { label: "Monitoring", title: "Monitoring", presentation: "operator" },
+      admin: { label: "Monitoring", title: "Monitoring", presentation: "operator" },
+      member: { label: "Monitoring", title: "Monitoring", presentation: "member" },
+    },
+    manageCapability: "manage_monitoring",
+    manageDeniedMessage: "Only workspace operators can run monitoring",
+    operationCapabilities: {
+      "run-monitoring": "run_monitoring",
+      "manage-monitoring-findings": "manage_monitoring_findings",
+      "review-official-github-finding": "manage_official_github_monitoring",
+      "recheck-github-installation": "manage_official_github_monitoring",
+      "approve-github-mapping": "manage_official_github_monitoring",
+      "revoke-github-mapping": "manage_official_github_monitoring",
+      "process-github-results": "manage_official_github_monitoring",
+      "retry-github-materialisation": "manage_official_github_monitoring",
+    },
+    operationDeniedMessages: {
+      "run-monitoring": "Only workspace operators can run monitoring",
+      "manage-monitoring-findings": "Only workspace owners can manage monitoring findings",
+      "review-official-github-finding": "Only workspace Owners can review official GitHub findings.",
+      "recheck-github-installation": "Could not run this official GitHub recheck. Please try again.",
+      "approve-github-mapping": "Only a workspace Owner can approve GitHub compliance mappings.",
+      "revoke-github-mapping": "Only a workspace Owner can revoke GitHub compliance mappings.",
+      "process-github-results": "Only a workspace Owner can process official GitHub records.",
+      "retry-github-materialisation": "Only a workspace Owner can retry GitHub processing.",
+    },
   },
   notifications: {
     id: "notifications",

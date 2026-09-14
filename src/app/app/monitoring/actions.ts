@@ -6,7 +6,7 @@ import { requireAppContext } from "@/lib/app-context";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { buildMonitorDependencies } from "@/features/monitoring/application/monitor-deps";
 import { runMonitoring } from "@/features/monitoring/application/monitor-run";
-import { hasCapability } from "@/features/organisations/domain/access";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 
 const githubFindingTransitionSchema = z.object({
@@ -32,13 +32,13 @@ const GITHUB_FINDING_TRANSITION_LABEL = {
 
 async function requireOperator() {
   const ctx = await requireAppContext();
-  if (!hasCapability(ctx.membership.role, "run_monitoring")) throw new Error("Only workspace operators can run monitoring");
+  workspaceAccess(ctx.membership.role).section("monitoring").requireManage("run-monitoring");
   return ctx;
 }
 
 async function requireMonitoringFindingManager() {
   const ctx = await requireAppContext();
-  if (!hasCapability(ctx.membership.role, "manage_monitoring_findings")) throw new Error("Only workspace owners can manage monitoring findings");
+  workspaceAccess(ctx.membership.role).section("monitoring").requireManage("manage-monitoring-findings");
   return ctx;
 }
 
@@ -84,8 +84,9 @@ export async function transitionGitHubFindingAction(
   formData: FormData,
 ): Promise<GitHubFindingTransitionActionResult> {
   const { supabase, user, organisation, membership } = await requireAppContext();
-  if (membership.role !== "owner") {
-    return { ok: false, message: "Only workspace Owners can review official GitHub findings." };
+  const monitoringAccess = workspaceAccess(membership.role).section("monitoring");
+  if (!monitoringAccess.canManageOperation("review-official-github-finding")) {
+    return { ok: false, message: monitoringAccess.manageDeniedMessageFor("review-official-github-finding") };
   }
 
   const parsed = githubFindingTransitionSchema.safeParse({

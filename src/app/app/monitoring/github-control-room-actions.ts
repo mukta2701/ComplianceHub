@@ -15,6 +15,7 @@ import { STANDARD_GITHUB_ISO_MAPPING_PACK } from "@/features/github/domain/mappi
 import { requireAppContext } from "@/lib/app-context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 
 const uuid = z.uuid();
 const checksum = z.string().regex(/^[0-9a-f]{64}$/);
@@ -101,8 +102,9 @@ async function requireExactActiveApproval(supabase: SessionClient, organisationI
 
 export async function approveGitHubMappingPackAction(formData: FormData): Promise<GitHubControlRoomActionResult> {
   const context = await requireAppContext();
-  if (context.membership.role !== "owner") {
-    return { ok: false, message: "Only a workspace Owner can approve GitHub compliance mappings." };
+  const monitoringAccess = workspaceAccess(context.membership.role).section("monitoring");
+  if (!monitoringAccess.canManageOperation("approve-github-mapping")) {
+    return { ok: false, message: monitoringAccess.manageDeniedMessageFor("approve-github-mapping") };
   }
   const parsed = approveSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
@@ -134,8 +136,9 @@ export async function approveGitHubMappingPackAction(formData: FormData): Promis
 
 export async function revokeGitHubMappingApprovalAction(formData: FormData): Promise<GitHubControlRoomActionResult> {
   const context = await requireAppContext();
-  if (context.membership.role !== "owner") {
-    return { ok: false, message: "Only a workspace Owner can revoke GitHub compliance mappings." };
+  const monitoringAccess = workspaceAccess(context.membership.role).section("monitoring");
+  if (!monitoringAccess.canManageOperation("revoke-github-mapping")) {
+    return { ok: false, message: monitoringAccess.manageDeniedMessageFor("revoke-github-mapping") };
   }
   const parsed = revokeSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { ok: false, message: "Could not revoke this GitHub mapping approval." };
@@ -189,8 +192,9 @@ async function loadExactTarget(
 
 export async function processApprovedGitHubResultsAction(formData: FormData): Promise<GitHubControlRoomActionResult> {
   const context = await requireAppContext();
-  if (context.membership.role !== "owner") {
-    return { ok: false, message: "Only a workspace Owner can process official GitHub records." };
+  const monitoringAccess = workspaceAccess(context.membership.role).section("monitoring");
+  if (!monitoringAccess.canManageOperation("process-github-results")) {
+    return { ok: false, message: monitoringAccess.manageDeniedMessageFor("process-github-results") };
   }
   const parsed = targetSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { ok: false, message: "Could not process these GitHub results." };
@@ -235,8 +239,9 @@ export async function processApprovedGitHubResultsAction(formData: FormData): Pr
 
 export async function retryExhaustedGitHubMaterialisationAction(formData: FormData): Promise<GitHubControlRoomActionResult> {
   const context = await requireAppContext();
-  if (context.membership.role !== "owner") {
-    return { ok: false, message: "Only a workspace Owner can retry GitHub processing." };
+  const monitoringAccess = workspaceAccess(context.membership.role).section("monitoring");
+  if (!monitoringAccess.canManageOperation("retry-github-materialisation")) {
+    return { ok: false, message: monitoringAccess.manageDeniedMessageFor("retry-github-materialisation") };
   }
   const parsed = retrySchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { ok: false, message: "Could not queue this GitHub processing retry." };

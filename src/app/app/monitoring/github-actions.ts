@@ -18,6 +18,7 @@ import { requireAppContext } from "@/lib/app-context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { GitHubRuntimeConfigError, readGitHubRuntimeConfig } from "@/features/github/application/github-runtime-config";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 
 const installationSchema = z.object({ installationId: z.uuid() }).strict();
 const collectionSummarySchema = z.object({
@@ -61,7 +62,7 @@ export async function recheckGitHubInstallationAction(
 ): Promise<GitHubOfficialRecheckResult> {
   try {
     const { supabase, user, organisation, membership } = await requireAppContext();
-    if (membership.role !== "owner") return failure;
+    if (!workspaceAccess(membership.role).section("monitoring").canManageOperation("recheck-github-installation")) return failure;
     const parsed = installationSchema.parse(Object.fromEntries(formData));
     const { data: installation, error } = await supabase.from("github_installations")
       .select("id,status,permissions_ok,repository_selection")
