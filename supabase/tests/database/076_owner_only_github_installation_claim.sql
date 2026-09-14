@@ -72,6 +72,11 @@ select ok(
     ~* 'membership[.]role = ''owner''[[:space:][:print:]]+for update[[:space:][:print:]]+from public[.]github_installations[[:space:][:print:]]+for update[[:space:][:print:]]+membership[.]role = ''owner''',
   'claim locks the exact Owner membership before the installation and revalidates after it'
 );
+select ok(
+  pg_catalog.pg_get_functiondef('public.claim_github_installation_server(uuid,uuid,bigint,bigint,text,text,text,jsonb,boolean,jsonb)'::pg_catalog.regprocedure)
+    ~* 'repository_count > 10000',
+  'the installation claim accepts only the reviewed complete-discovery bound'
+);
 
 begin;
 insert into auth.users(

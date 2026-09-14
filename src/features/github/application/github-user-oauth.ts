@@ -10,8 +10,10 @@ const OAUTH_ORIGIN = "https://github.com";
 const FLOW_VERSION = 1;
 const FLOW_TTL_MS = 10 * 60_000;
 const MAX_COOKIE_BYTES = 4_096;
-const MAX_PAGES = 100;
 const USER_AGENT = "ComplianceHub-GitHub-App";
+
+export const MAX_GITHUB_DISCOVERY_PAGES = 100;
+export const MAX_DISCOVERED_REPOSITORIES = 10_000;
 
 const positiveId = z.number().int().positive().safe();
 const flowSchema = z.object({
@@ -264,7 +266,7 @@ export async function listUserInstallationIds(input: { userToken: string; fetchI
   let url = new URL("/user/installations?per_page=100", API_ORIGIN);
   const ids: number[] = [];
   let expectedCount: number | null = null;
-  for (let page = 0; page < MAX_PAGES; page += 1) {
+  for (let page = 0; page < MAX_GITHUB_DISCOVERY_PAGES; page += 1) {
     const response = await fetchVerifiedGitHubApi(url, authorizationValue, fetchImpl);
     let parsed: z.infer<typeof installationListSchema>;
     try { parsed = installationListSchema.parse(await response.json()); } catch { throw verificationError(); }
@@ -277,7 +279,7 @@ export async function listUserInstallationIds(input: { userToken: string; fetchI
       if (uniqueIds.length !== ids.length || uniqueIds.length !== expectedCount) throw verificationError();
       return uniqueIds;
     }
-    if (page === MAX_PAGES - 1) throw verificationError();
+    if (page === MAX_GITHUB_DISCOVERY_PAGES - 1) throw verificationError();
     url = next;
   }
   throw verificationError();
@@ -303,22 +305,49 @@ export async function getAppInstallation(input: { appJwt: string; installationId
 
 export async function collectUserInstallationRepositories(input: { userToken: string; installationId: number; fetchImpl?: FetchLike }): Promise<UserInstallationRepository[]> {
   if (!Number.isSafeInteger(input.installationId) || input.installationId <= 0) throw verificationError();
-  const url = new URL(`/user/installations/${input.installationId}/repositories?per_page=100`, API_ORIGIN);
+  const fetchImpl = input.fetchImpl ?? fetch;
   const authorizationValue = input.userToken;
-  const response = await fetchVerifiedGitHubApi(url, authorizationValue, input.fetchImpl ?? fetch);
-  let parsed: z.infer<typeof repositoryListSchema>;
-  try { parsed = repositoryListSchema.parse(await response.json()); } catch { throw verificationError(); }
-  if (parsed.total_count > 100 || nextUrl(response)) throw verificationError();
-  const ids = new Set(parsed.repositories.map((repository) => repository.id));
-  if (ids.size !== parsed.repositories.length || parsed.total_count !== parsed.repositories.length) throw verificationError();
-  return parsed.repositories.map((repository) => ({
-    id: repository.id,
-    owner: repository.owner.login,
-    name: repository.name,
-    fullName: repository.full_name,
-    htmlUrl: repository.html_url,
-    visibility: repository.visibility,
-    archived: repository.archived,
-    defaultBranch: repository.default_branch,
-  }));
+  let url = new URL(`/user/installations/${input.installationId}/repositories?per_page=100`, API_ORIGIN);
+  const seenUrls = new Set<string>();
+  const repositoryIds = new Set<number>();
+  const repositories: UserInstallationRepository[] = [];
+  let expectedCount: number | null = null;
+
+  for (let page = 0; page < MAX_GITHUB_DISCOVERY_PAGES; page += 1) {
+    const currentUrl = url.toString();
+    if (seenUrls.has(currentUrl)) throw verificationError();
+    seenUrls.add(currentUrl);
+
+    const response = await fetchVerifiedGitHubApi(url, authorizationValue, fetchImpl);
+    let parsed: z.infer<typeof repositoryListSchema>;
+    try { parsed = repositoryListSchema.parse(await response.json()); } catch { throw verificationError(); }
+    expectedCount ??= parsed.total_count;
+    if (parsed.total_count !== expectedCount || expectedCount > MAX_DISCOVERED_REPOSITORIES) throw verificationError();
+
+    const next = nextUrl(response);
+    if (next && parsed.repositories.length !== 100) throw verificationError();
+    for (const repository of parsed.repositories) {
+      if (repositoryIds.has(repository.id)) throw verificationError();
+      repositoryIds.add(repository.id);
+      repositories.push({
+        id: repository.id,
+        owner: repository.owner.login,
+        name: repository.name,
+        fullName: repository.full_name,
+        htmlUrl: repository.html_url,
+        visibility: repository.visibility,
+        archived: repository.archived,
+        defaultBranch: repository.default_branch,
+      });
+    }
+    if (repositories.length > expectedCount || repositories.length > MAX_DISCOVERED_REPOSITORIES) throw verificationError();
+
+    if (!next) {
+      if (repositories.length !== expectedCount) throw verificationError();
+      return repositories;
+    }
+    if (page === MAX_GITHUB_DISCOVERY_PAGES - 1 || seenUrls.has(next.toString())) throw verificationError();
+    url = next;
+  }
+  throw verificationError();
 }

@@ -93,14 +93,53 @@ describe("claimInstallation", () => {
     expect(persist).not.toHaveBeenCalled();
   });
 
-  it("rejects non-canonical or duplicate repository inventory", async () => {
+  it("accepts 101 unique repositories and canonicalises them in stable provider-id order", async () => {
+    const persist = vi.fn().mockResolvedValue("installation-uuid");
+    const repositories = Array.from({ length: 101 }, (_, index) => {
+      const id = 101 - index;
+      return {
+        ...verified.repositories[0],
+        id,
+        name: `repo-${id}`,
+        fullName: `adtecher/repo-${id}`,
+      };
+    });
+
+    await expect(claimInstallation(
+      { ...verified, repositories },
+      { allowedAccountId: 99, allowedAccountType: "Organization", persist },
+    )).resolves.toBe("installation-uuid");
+
+    const persisted = persist.mock.calls[0]?.[0];
+    expect(persisted?.repositories).toHaveLength(101);
+    expect(persisted?.repositories[0]).toMatchObject({ id: 1, fullName: "adtecher/repo-1" });
+    expect(persisted?.repositories[100]).toMatchObject({ id: 101, fullName: "adtecher/repo-101" });
+  });
+
+  it("rejects an inventory above 10,000 repositories", async () => {
+    const persist = vi.fn();
+    const repositories = Array.from({ length: 10_001 }, (_, index) => ({
+      ...verified.repositories[0],
+      id: index + 1,
+      name: `repo-${index + 1}`,
+      fullName: `adtecher/repo-${index + 1}`,
+    }));
+
+    await expect(claimInstallation(
+      { ...verified, repositories },
+      { allowedAccountId: 99, allowedAccountType: "Organization", persist },
+    )).rejects.toThrow("GitHub installation verification failed");
+    expect(persist).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed repository ownership and duplicate identities", async () => {
     const persist = vi.fn();
     for (const repositories of [
       [{ ...verified.repositories[0], owner: "other" }],
       [{ ...verified.repositories[0], fullName: "adtecher/other" }],
       [{ ...verified.repositories[0], archived: "yes" as unknown as boolean }],
       [verified.repositories[0], { ...verified.repositories[0] }],
-      Array.from({ length: 101 }, (_, index) => ({ ...verified.repositories[0], id: index + 1, name: `repo-${index}`, fullName: `adtecher/repo-${index}` })),
+      [verified.repositories[0], { ...verified.repositories[0], id: 102 }],
     ]) {
       await expect(claimInstallation({ ...verified, repositories }, { allowedAccountId: 99, allowedAccountType: "Organization", persist })).rejects.toThrow("GitHub installation verification failed");
     }

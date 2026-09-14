@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import type { GitHubAccountType } from "./github-account-policy";
 import { hasExactReadPermissions, READ_PERMISSIONS } from "./github-app-auth";
+import { MAX_DISCOVERED_REPOSITORIES } from "./github-user-oauth";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
 export type VerifiedInstallationClaim = {
@@ -61,7 +62,7 @@ function canonicalizeRepositories(
   repositories: VerifiedInstallationClaim["repositories"],
   accountLogin: string,
 ): VerifiedInstallationClaim["repositories"] {
-  if (repositories.length > 100) throw failure();
+  if (repositories.length > MAX_DISCOVERED_REPOSITORIES) throw failure();
   const ids = new Set<number>();
   const names = new Set<string>();
   return repositories.map((repository) => {
@@ -88,7 +89,7 @@ function canonicalizeRepositories(
       archived: archived.data,
       defaultBranch: defaultBranch.data,
     };
-  });
+  }).sort((left, right) => left.id - right.id);
 }
 
 async function persistWithServiceRole(input: CanonicalInstallationClaim): Promise<string> {

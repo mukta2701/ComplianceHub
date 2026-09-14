@@ -123,6 +123,25 @@ describe("GET /api/github/callback", () => {
     );
   });
 
+  it("hands the complete discovered inventory to the atomic claim without truncating it", async () => {
+    const repositories = Array.from({ length: 201 }, (_, index) => ({
+      ...REPOSITORY,
+      id: index + 1,
+      name: `repo-${index + 1}`,
+      fullName: `Adtecher/repo-${index + 1}`,
+      htmlUrl: `https://github.com/Adtecher/repo-${index + 1}`,
+    }));
+    hoisted.collectRepos.mockResolvedValue(repositories);
+
+    const response = await GET(request());
+
+    expect(response.headers.get("location")).toBe("https://compliance.example/app/integrations?github=connected");
+    expect(hoisted.claim).toHaveBeenCalledWith(
+      expect.objectContaining({ repositories }),
+      { allowedAccountId: 99, allowedAccountType: "Organization" },
+    );
+  });
+
   it("accepts GitHub's optional exact canonical OAuth issuer", async () => {
     const response = await GET(request("?code=code-value&state=state-value&installation_id=77&iss=https%3A%2F%2Fgithub.com%2Flogin%2Foauth"));
 
