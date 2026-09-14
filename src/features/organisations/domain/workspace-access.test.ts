@@ -1,6 +1,53 @@
 import { describe, expect, it } from "vitest";
 import { workspaceAccess } from "./workspace-access";
 
+describe("Settings workspace access", () => {
+  it("keeps Settings and team management available to Owners and Admins", () => {
+    for (const role of ["owner", "admin"] as const) {
+      const access = workspaceAccess(role);
+      const settings = access.section("settings");
+
+      expect(settings).toMatchObject({
+        id: "settings",
+        href: "/app/settings",
+        label: "Settings",
+        title: "Settings",
+        icon: "settings",
+        canView: true,
+        canManage: true,
+        navigation: { group: "Admin", href: "/app/settings", label: "Settings", icon: "settings" },
+      });
+      expect(settings.canAccessPath("/app/settings")).toBe(true);
+      expect(settings.canManageOperation("manage-team-member")).toBe(true);
+      expect(settings.canManageOperation("manage-invitations")).toBe(true);
+    }
+  });
+
+  it("keeps Owner-only role and AI settings decisions separate from general team management", () => {
+    const owner = workspaceAccess("owner").section("settings");
+    const admin = workspaceAccess("admin").section("settings");
+
+    expect(owner.canManageOperation("change-member-role")).toBe(true);
+    expect(owner.canManageOperation("change-ai-settings")).toBe(true);
+    expect(admin.canManageOperation("change-member-role")).toBe(false);
+    expect(admin.canManageOperation("change-ai-settings")).toBe(false);
+    expect(admin.manageDeniedMessageFor("change-member-role")).toBe("Only workspace owners can change roles");
+    expect(admin.manageDeniedMessageFor("change-ai-settings")).toBe("Only workspace owners can change AI settings");
+  });
+
+  it("keeps Members and callers without membership outside Settings", () => {
+    for (const role of ["member", null] as const) {
+      const settings = workspaceAccess(role).section("settings");
+      expect(settings.canView).toBe(false);
+      expect(settings.canManage).toBe(false);
+      expect(settings.navigation).toBeNull();
+      expect(settings.canAccessPath("/app/settings")).toBe(false);
+      expect(settings.canManageOperation("manage-team-member")).toBe(false);
+    }
+    expect(workspaceAccess("owner").sectionForPath("/app/settings/extra")).toBeNull();
+  });
+});
+
 describe("Monitoring workspace access", () => {
   it("keeps the full Monitoring operator presentation and general checks available to Owners and Admins", () => {
     for (const role of ["owner", "admin"] as const) {

@@ -5,7 +5,7 @@ import { SubTabs } from "@/components/sub-tabs";
 import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import { one } from "@/lib/supabase/one";
 import { inviteMemberAction, changeMemberRoleAction, removeMemberAction, resendInvitationAction, revokeInvitationAction, updateMemberJobTitleAction } from "../actions";
-import { canInviteRole, canManageMembership, hasCapability, roleLabel, type MembershipRole } from "@/features/organisations/domain/access";
+import { canInviteRole, canManageMembership, roleLabel, type MembershipRole } from "@/features/organisations/domain/access";
 import { listUserOAuthGrants } from "@/features/auth/application/oauth-grants";
 import { ConnectedApplications } from "./connected-applications";
 import { AiWorkspaceSettings } from "./ai-settings";
@@ -35,8 +35,10 @@ function deliveryLabel(status: string) {
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ inviteStatus?: string; inviteId?: string }> }) {
   const { supabase, user, membership, organisation } = await requireAppContext();
   const { inviteStatus, inviteId } = await searchParams;
-  const isOwner = membership.role === "owner";
-  const canManageTeam = hasCapability(membership.role, "manage_members");
+  const settingsAccess = workspaceAccess(membership.role).section("settings");
+  const isOwner = settingsAccess.canManageOperation("change-member-role");
+  const canManageTeam = settingsAccess.canManage;
+  const canChangeAiSettings = settingsAccess.canManageOperation("change-ai-settings");
 
   const { data: org } = await supabase.from("organisations").select("slug,created_at").eq("id", organisation.id).maybeSingle();
   const { data: memberRows } = await supabase.from("memberships").select("user_id,role,job_title,created_at,profiles(display_name)").eq("organisation_id", organisation.id).order("created_at", { ascending: true });
@@ -188,7 +190,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       workspace={workspace}
       team={<>{statusMessage && <div className={styles.statusMessage} role="status"><b>{statusMessage}</b>{inviteId && <p>Invitation reference: {inviteId}</p>}</div>}{team}</>}
       security={security}
-      aiAssistance={<div className={styles.integratedSection}><AiWorkspaceSettings enabled={aiSettings?.enabled === true} isOwner={isOwner} /></div>}
+      aiAssistance={<div className={styles.integratedSection}><AiWorkspaceSettings enabled={aiSettings?.enabled === true} isOwner={canChangeAiSettings} /></div>}
       connectedApps={<div className={styles.integratedSection}><ConnectedApplications state={oauthGrantState} /></div>}
     />
   </>;

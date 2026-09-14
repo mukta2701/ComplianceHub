@@ -1,10 +1,10 @@
 import { hasCapability, type MembershipRole, type WorkspaceCapability } from "./access";
 
-export type WorkspaceSectionId = "assets" | "assessments" | "audit-activity" | "audits" | "automation-setup" | "baseline" | "connections" | "evidence" | "frameworks" | "leadership-report" | "monitoring" | "notifications" | "overview" | "policies" | "risks" | "scope" | "soa" | "tasks" | "trust-center";
+export type WorkspaceSectionId = "assets" | "assessments" | "audit-activity" | "audits" | "automation-setup" | "baseline" | "connections" | "evidence" | "frameworks" | "leadership-report" | "monitoring" | "notifications" | "overview" | "policies" | "risks" | "scope" | "settings" | "soa" | "tasks" | "trust-center";
 
 export type WorkspaceSectionPresentation = "member" | "operator";
 
-type WorkspaceNavigationGroup = "Compliance" | "Oversight" | "Programme" | "Share" | "Work" | null;
+type WorkspaceNavigationGroup = "Admin" | "Compliance" | "Oversight" | "Programme" | "Share" | "Work" | null;
 
 type WorkspacePathRequirement = "view" | "manage";
 
@@ -17,11 +17,15 @@ type WorkspacePathRule = {
 type WorkspaceManageOperation =
   | "approve-github-mapping"
   | "auditor-access"
+  | "change-ai-settings"
+  | "change-member-role"
   | "create-task"
   | "edit-task"
   | "manage-github-app"
   | "manage-monitoring-findings"
+  | "manage-invitations"
   | "manage-slack-destinations"
+  | "manage-team-member"
   | "process-github-results"
   | "push-task-to-tracker"
   | "recheck-github-installation"
@@ -369,6 +373,30 @@ const sectionPolicies: Record<WorkspaceSectionId, WorkspaceSectionPolicy> = {
     navigationGroups: {},
     manageCapability: "manage_scope",
     manageDeniedMessage: "Only workspace owners can update the organisation scope",
+  },
+  settings: {
+    id: "settings",
+    href: "/app/settings",
+    label: "Settings",
+    title: "Settings",
+    icon: "settings",
+    paths: [{ path: "/app/settings", requirement: "view" }],
+    viewRoles: new Set(["owner", "admin"]),
+    navigationGroups: { owner: "Admin", admin: "Admin" },
+    manageCapability: "manage_members",
+    manageDeniedMessage: "You are not allowed to manage team members",
+    operationCapabilities: {
+      "change-ai-settings": "manage_ai_settings",
+      "change-member-role": "manage_owners",
+      "manage-invitations": "manage_members",
+      "manage-team-member": "manage_members",
+    },
+    operationDeniedMessages: {
+      "change-ai-settings": "Only workspace owners can change AI settings",
+      "change-member-role": "Only workspace owners can change roles",
+      "manage-invitations": "You are not allowed to manage invitations",
+      "manage-team-member": "You are not allowed to manage team members",
+    },
   },
   soa: {
     id: "soa",

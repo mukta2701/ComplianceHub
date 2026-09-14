@@ -26,6 +26,7 @@ const operatorTaskNavigation = workspaceAccess("owner").section("tasks").navigat
 const operatorMonitoringNavigation = workspaceAccess("owner").section("monitoring").navigation!;
 const automationSetupMetadata = workspaceAccess("owner").section("automation-setup");
 const connectionsMetadata = workspaceAccess("owner").section("connections");
+const operatorSettingsNavigation = workspaceAccess("owner").section("settings").navigation!;
 
 const navGroups = [
   { label: "Work", items: [
@@ -50,7 +51,7 @@ const navGroups = [
     [operatorTrustCenterNavigation.href, operatorTrustCenterNavigation.icon, operatorTrustCenterNavigation.label],
   ] },
   { label: "Admin", items: [
-    ["/app/settings", "settings", "Settings"],
+    [operatorSettingsNavigation.href, operatorSettingsNavigation.icon, operatorSettingsNavigation.label],
   ] },
 ] as const;
 
@@ -104,7 +105,7 @@ const TITLE_ROUTES: Array<[string, string]> = [
 function isActive(path: string, href: string) {
   href = href.split("?")[0];
   if (href === "/app") return path === "/app";
-  if (href === "/app/settings" && (path === connectionsMetadata.href || path.startsWith(`${connectionsMetadata.href}/`))) return true;
+  if (href === operatorSettingsNavigation.href && (path === connectionsMetadata.href || path.startsWith(`${connectionsMetadata.href}/`))) return true;
   return path === href || path.startsWith(`${href}/`);
 }
 

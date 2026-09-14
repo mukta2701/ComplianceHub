@@ -4,7 +4,8 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createInvitationCredential, inviteMember } from "@/features/organisations/application/organisation";
-import { hasCapability, membershipRoles } from "@/features/organisations/domain/access";
+import { membershipRoles } from "@/features/organisations/domain/access";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import { sendInvitationEmail, type InvitationDeliveryOutcome } from "@/features/organisations/infrastructure/invitation-mail";
 import { requireAppContext } from "@/lib/app-context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
@@ -58,6 +59,8 @@ function redirectToInvitationStatus(outcome: InvitationDeliveryOutcome, invitati
 
 export async function inviteMemberAction(formData: FormData) {
   const { supabase, user, membership, organisation } = await requireAppContext();
+  // Keep target-role authorization in inviteMember after this rate limit. A broad
+  // Settings gate would change both the denial message and the established order.
   await enforceRateLimit(`invite:${user.id}`, { limit: 10, windowMs: 60 * 60_000 });
   let issued: IssuedInvitation | undefined;
   let issuedTokenHash: string | undefined;
@@ -89,7 +92,7 @@ export async function inviteMemberAction(formData: FormData) {
 
 export async function revokeInvitationAction(formData: FormData) {
   const { supabase, membership, organisation } = await requireAppContext();
-  if (!hasCapability(membership.role, "manage_members")) throw new Error("You are not allowed to manage invitations");
+  workspaceAccess(membership.role).section("settings").requireManage("manage-invitations");
   const invitationId = z.uuid().safeParse(formData.get("invitationId"));
   if (!invitationId.success) throw new Error("Invalid invitation");
   const { data: invitation, error: invitationError } = await supabase.from("invitations").select("id")
@@ -102,7 +105,7 @@ export async function revokeInvitationAction(formData: FormData) {
 
 export async function resendInvitationAction(formData: FormData) {
   const { supabase, user, membership, organisation } = await requireAppContext();
-  if (!hasCapability(membership.role, "manage_members")) throw new Error("You are not allowed to manage invitations");
+  workspaceAccess(membership.role).section("settings").requireManage("manage-invitations");
   const invitationId = z.uuid().safeParse(formData.get("invitationId"));
   if (!invitationId.success) throw new Error("Invalid invitation");
   await enforceRateLimit(`invite-resend:${user.id}`, { limit: 10, windowMs: 60 * 60_000 });
