@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { issueAuthorizationState } from "@/features/integrations/application/authorization-state";
 import { buildJiraAuthorizationUrl } from "@/features/integrations/application/jira-oauth";
 import { getJiraProviderConfig } from "@/features/integrations/application/provider-config";
-import { hasCapability } from "@/features/organisations/domain/access";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import { requireAppContext } from "@/lib/app-context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { siteUrl } from "@/lib/site-url";
@@ -14,7 +14,7 @@ function settingsResult(result: "setup-required" | "connection-failed"): URL {
 
 export async function GET() {
   const context = await requireAppContext();
-  if (!hasCapability(context.membership.role, "manage_connections")) {
+  if (!workspaceAccess(context.membership.role).section("connections").canManage) {
     return new Response(null, { status: 403 });
   }
   try {

@@ -12,6 +12,7 @@ import {
   parseOAuthFlowCookie,
 } from "@/features/github/application/github-user-oauth";
 import { claimInstallation } from "@/features/github/application/installation-claim";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import { requireAppContext } from "@/lib/app-context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { siteUrl } from "@/lib/site-url";
@@ -126,7 +127,7 @@ export async function GET(request: Request): Promise<NextResponse> {
   if (
     context.user.id !== flow.actorId
     || context.organisation.id !== flow.organisationId
-    || context.membership.role !== "owner"
+    || !workspaceAccess(context.membership.role).section("connections").canManageOperation("manage-github-app")
   ) return errorRedirect("not_authorized");
 
   try {

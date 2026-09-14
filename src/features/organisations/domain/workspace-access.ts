@@ -1,6 +1,6 @@
 import { hasCapability, type MembershipRole, type WorkspaceCapability } from "./access";
 
-export type WorkspaceSectionId = "assets" | "assessments" | "audit-activity" | "audits" | "automation-setup" | "baseline" | "evidence" | "frameworks" | "leadership-report" | "notifications" | "overview" | "policies" | "risks" | "scope" | "soa" | "tasks" | "trust-center";
+export type WorkspaceSectionId = "assets" | "assessments" | "audit-activity" | "audits" | "automation-setup" | "baseline" | "connections" | "evidence" | "frameworks" | "leadership-report" | "notifications" | "overview" | "policies" | "risks" | "scope" | "soa" | "tasks" | "trust-center";
 
 export type WorkspaceSectionPresentation = "member" | "operator";
 
@@ -18,8 +18,11 @@ type WorkspaceManageOperation =
   | "auditor-access"
   | "create-task"
   | "edit-task"
+  | "manage-github-app"
+  | "manage-slack-destinations"
   | "push-task-to-tracker"
   | "review-task-contributions"
+  | "select-daily-digest-channel"
   | "update-task-status";
 
 type WorkspaceNavigationItem = {
@@ -170,6 +173,28 @@ const sectionPolicies: Record<WorkspaceSectionId, WorkspaceSectionPolicy> = {
     viewRoles: new Set(["owner", "admin"]),
     navigationGroups: {},
     manageDeniedMessage: null,
+  },
+  connections: {
+    id: "connections",
+    href: "/app/integrations",
+    label: "Connections",
+    title: "Connections",
+    icon: "settings",
+    paths: [{ path: "/app/integrations", requirement: "view" }],
+    viewRoles: new Set(["owner", "admin"]),
+    navigationGroups: {},
+    manageCapability: "manage_connections",
+    manageDeniedMessage: "Only workspace operators can manage integrations",
+    operationCapabilities: {
+      "manage-github-app": "manage_github_app",
+      "manage-slack-destinations": "manage_slack_destinations",
+      "select-daily-digest-channel": "manage_daily_digest_channel",
+    },
+    operationDeniedMessages: {
+      "manage-github-app": "Only a workspace Owner can manage the GitHub App",
+      "manage-slack-destinations": "Only a workspace Owner can manage Slack destinations",
+      "select-daily-digest-channel": "Only a workspace Owner can select the daily digest channel",
+    },
   },
   evidence: {
     id: "evidence",

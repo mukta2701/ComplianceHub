@@ -6,7 +6,7 @@ import {
   type JiraPersistenceDatabase,
 } from "@/features/integrations/application/jira-token-store";
 import { getJiraProviderConfig } from "@/features/integrations/application/provider-config";
-import { hasCapability } from "@/features/organisations/domain/access";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import { requireAppContext } from "@/lib/app-context";
 import { siteUrl } from "@/lib/site-url";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
@@ -36,7 +36,7 @@ export async function GET(request: Request) {
 
   try {
     const context = await requireAppContext();
-    if (!hasCapability(context.membership.role, "manage_connections")) return fail();
+    if (!workspaceAccess(context.membership.role).section("connections").canManage) return fail();
 
     const config = getJiraProviderConfig();
     const database = createSupabaseServiceClient();

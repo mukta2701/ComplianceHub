@@ -13,7 +13,7 @@ import {
 } from "@/features/mcp/application/slack-destination-policy";
 import { connectionInputSchema, connectionTargetInputSchema } from "@/features/integrations/application/connection";
 import { evidenceSourceInputSchema } from "@/features/integrations/application/evidence-source";
-import { hasCapability } from "@/features/organisations/domain/access";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import {
   createNangoConnectSession,
   deleteNangoConnection,
@@ -61,33 +61,25 @@ const alertChannelSchema = z.object({
 
 async function requireConnectionManager() {
   const context = await requireAppContext();
-  if (!hasCapability(context.membership.role, "manage_connections")) {
-    throw new Error("Only workspace operators can manage integrations");
-  }
+  workspaceAccess(context.membership.role).section("connections").requireManage();
   return context;
 }
 
 async function requireGitHubOwner() {
   const context = await requireAppContext();
-  if (context.membership.role !== "owner") {
-    throw new Error("Only a workspace Owner can manage the GitHub App");
-  }
+  workspaceAccess(context.membership.role).section("connections").requireManage("manage-github-app");
   return context;
 }
 
 async function requireDigestOwner() {
   const context = await requireAppContext();
-  if (context.membership.role !== "owner") {
-    throw new Error("Only a workspace Owner can select the daily digest channel");
-  }
+  workspaceAccess(context.membership.role).section("connections").requireManage("select-daily-digest-channel");
   return context;
 }
 
 async function requireSlackOwner() {
   const context = await requireAppContext();
-  if (context.membership.role !== "owner") {
-    throw new Error("Only a workspace Owner can manage Slack destinations");
-  }
+  workspaceAccess(context.membership.role).section("connections").requireManage("manage-slack-destinations");
   return context;
 }
 

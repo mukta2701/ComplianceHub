@@ -1,5 +1,7 @@
 import "server-only";
 import { createHash, randomBytes } from "node:crypto";
+import { membershipRoles, type MembershipRole } from "@/features/organisations/domain/access";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import type { IntegrationProvider } from "../domain/provider";
 
 export type AuthorizationOperator = {
@@ -76,6 +78,10 @@ function validPurpose(value: unknown): value is string {
   return typeof value === "string" && purposePattern.test(value);
 }
 
+function isMembershipRole(value: unknown): value is MembershipRole {
+  return membershipRoles.some((role) => role === value);
+}
+
 function purposeMatchesProvider(provider: IntegrationProvider, purpose: string): boolean {
   return (provider === "github" && purpose === "github_install")
     || (provider === "jira" && purpose === "jira_oauth");
@@ -87,7 +93,8 @@ function validOperator(value: unknown): value is AuthorizationOperator {
     && uuidPattern.test(value.organisationId)
     && typeof value.userId === "string"
     && uuidPattern.test(value.userId)
-    && (value.role === "owner" || value.role === "admin");
+    && isMembershipRole(value.role)
+    && workspaceAccess(value.role).section("connections").canManage;
 }
 
 async function currentOperator(resolveOperator: ResolveOperator, message: string): Promise<AuthorizationOperator> {

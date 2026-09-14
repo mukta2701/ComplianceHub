@@ -913,3 +913,71 @@ describe("Automation setup workspace access", () => {
     expect(access.sectionForPath("/app/setup/extra")).toBeNull();
   });
 });
+
+describe("Connections workspace access", () => {
+  it("keeps the full Connections page and every provider operation available to Owners", () => {
+    const access = workspaceAccess("owner");
+    const connections = access.section("connections");
+
+    expect(connections).toMatchObject({
+      id: "connections",
+      href: "/app/integrations",
+      label: "Connections",
+      title: "Connections",
+      icon: "settings",
+      canView: true,
+      canManage: true,
+      navigation: null,
+      manageDeniedMessage: "Only workspace operators can manage integrations",
+    });
+    expect(access.sectionForPath("/app/integrations")?.id).toBe("connections");
+    expect(connections.canAccessPath("/app/integrations")).toBe(true);
+    expect(() => connections.requireManage()).not.toThrow();
+    expect(() => connections.requireManage("manage-github-app")).not.toThrow();
+    expect(() => connections.requireManage("manage-slack-destinations")).not.toThrow();
+    expect(() => connections.requireManage("select-daily-digest-channel")).not.toThrow();
+  });
+
+  it("keeps generic connection management available to Admins without granting Owner-only provider operations", () => {
+    const connections = workspaceAccess("admin").section("connections");
+
+    expect(connections.canView).toBe(true);
+    expect(connections.canManage).toBe(true);
+    expect(connections.navigation).toBeNull();
+    expect(connections.canAccessPath("/app/integrations")).toBe(true);
+    expect(() => connections.requireManage()).not.toThrow();
+    expect(() => connections.requireManage("manage-github-app")).toThrow(
+      "Only a workspace Owner can manage the GitHub App",
+    );
+    expect(() => connections.requireManage("manage-slack-destinations")).toThrow(
+      "Only a workspace Owner can manage Slack destinations",
+    );
+    expect(() => connections.requireManage("select-daily-digest-channel")).toThrow(
+      "Only a workspace Owner can select the daily digest channel",
+    );
+  });
+
+  it.each(["member", null] as const)("does not expose Connections to %s", (role) => {
+    const connections = workspaceAccess(role).section("connections");
+
+    expect(connections.canView).toBe(false);
+    expect(connections.canManage).toBe(false);
+    expect(connections.navigation).toBeNull();
+    expect(connections.canAccessPath("/app/integrations")).toBe(false);
+    expect(() => connections.requireManage()).toThrow(
+      "Only workspace operators can manage integrations",
+    );
+  });
+
+  it("keeps provider callbacks, webhooks, cron jobs, and invented paths outside the section route policy", () => {
+    const access = workspaceAccess("owner");
+
+    expect(access.sectionForPath("/app/integrations/extra")).toBeNull();
+    expect(access.sectionForPath("/api/github/setup")).toBeNull();
+    expect(access.sectionForPath("/api/github/callback")).toBeNull();
+    expect(access.sectionForPath("/api/github/webhook")).toBeNull();
+    expect(access.sectionForPath("/api/integrations/jira/connect")).toBeNull();
+    expect(access.sectionForPath("/api/integrations/jira/callback")).toBeNull();
+    expect(access.sectionForPath("/api/cron/integrations")).toBeNull();
+  });
+});

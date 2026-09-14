@@ -24,6 +24,7 @@ const operatorAuditNavigation = workspaceAccess("owner").section("audits").navig
 const operatorAuditActivityMetadata = workspaceAccess("owner").section("audit-activity");
 const operatorTaskNavigation = workspaceAccess("owner").section("tasks").navigation!;
 const automationSetupMetadata = workspaceAccess("owner").section("automation-setup");
+const connectionsMetadata = workspaceAccess("owner").section("connections");
 
 const navGroups = [
   { label: "Work", items: [
@@ -85,7 +86,7 @@ const EXTRA_TITLES: Array<[string, string]> = [
   ["/app/assets/import", "Import asset inventory"],
   [operatorAuditActivityMetadata.href, operatorAuditActivityMetadata.title],
   [notificationsMetadata.href, notificationsMetadata.title],
-  ["/app/integrations", "Connections"],
+  [connectionsMetadata.href, connectionsMetadata.title],
   ["/app/risks/import", "Import risk register"],
   ["/app/soa/import", "Import Statement of Applicability"],
   ["/app/policies/new", "Author a policy"],
@@ -101,7 +102,7 @@ const TITLE_ROUTES: Array<[string, string]> = [
 function isActive(path: string, href: string) {
   href = href.split("?")[0];
   if (href === "/app") return path === "/app";
-  if (href === "/app/settings" && (path === "/app/integrations" || path.startsWith("/app/integrations/"))) return true;
+  if (href === "/app/settings" && (path === connectionsMetadata.href || path.startsWith(`${connectionsMetadata.href}/`))) return true;
   return path === href || path.startsWith(`${href}/`);
 }
 

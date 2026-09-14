@@ -1,7 +1,7 @@
 import { Card, PageIntro } from "@/components/ui";
 import { z } from "zod";
 import { SubTabs } from "@/components/sub-tabs";
-import { hasCapability } from "@/features/organisations/domain/access";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import { requireAppContext } from "@/lib/app-context";
 import { canShowDeveloperTools } from "@/lib/security/developer-tools";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
@@ -136,7 +136,8 @@ export default async function IntegrationsPage({
   searchParams: Promise<{ github?: string | string[]; jira?: string | string[]; setup?: string | string[]; connection?: string | string[] }>;
 }) {
   const { supabase, membership, organisation, user } = await requireAppContext();
-  const canManageConnections = hasCapability(membership.role, "manage_connections");
+  const connectionsAccess = workspaceAccess(membership.role).section("connections");
+  const canManageConnections = connectionsAccess.canManage;
   const params = await searchParams;
   if (!canManageConnections) {
     const [installationResult, repositorySummaryResult] = await Promise.all([
@@ -155,7 +156,7 @@ export default async function IntegrationsPage({
     return <>
       <PageIntro
         eyebrow="SETTINGS · CONNECTIONS"
-        title="Connections"
+        title={connectionsAccess.title}
         body="Connected workplace systems are managed by workspace operators."
       />
       <Card style={{ padding: "18px" }} role="note">
@@ -195,7 +196,7 @@ export default async function IntegrationsPage({
       .select("id,installation_id,full_name,html_url,visibility,default_branch,archived,selected,available")
       .eq("organisation_id", organisation.id)
       .order("full_name", { ascending: true }),
-    membership.role === "owner"
+    connectionsAccess.canManageOperation("select-daily-digest-channel")
       ? supabase.from("daily_digest_deliveries")
         .select("id,digest_on,channel_id,status,attempt_count,error_code,last_attempted_at,delivered_at")
         .eq("organisation_id", organisation.id)
@@ -255,11 +256,11 @@ export default async function IntegrationsPage({
       connections={connections}
       alertChannels={alertChannels}
       nativeJiraConnections={nativeJiraConnections}
-      canManageDailyDigest={membership.role === "owner"}
+      canManageDailyDigest={connectionsAccess.canManageOperation("select-daily-digest-channel")}
       digestDeliveries={(deliveryResult.data ?? []) as DailyDigestDeliverySummary[]}
       navigation={<SubTabs tabs={[
         { href: "/app/settings", label: "Settings" },
-        { href: "/app/integrations", label: "Connections" },
+        { href: connectionsAccess.href, label: connectionsAccess.label },
       ]} />}
     />
     <GitHubInstallationPanel
@@ -268,8 +269,8 @@ export default async function IntegrationsPage({
         ...repository,
         repository_id: repository.id,
       })) as GitHubRepositoryConfigurationSummary[]}
-      canManageInstallation={membership.role === "owner"}
-      canManageRepositoryScope={membership.role === "owner"}
+      canManageInstallation={connectionsAccess.canManageOperation("manage-github-app")}
+      canManageRepositoryScope={connectionsAccess.canManageOperation("manage-github-app")}
     />
     {showDeveloperTools && <DeveloperConnectionTools />}
   </>;

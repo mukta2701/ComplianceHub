@@ -23,7 +23,7 @@ import {
 import { getJiraProviderConfig } from "@/features/integrations/application/provider-config";
 import { processNativeIntegrationSyncJobAndDrain } from "@/features/integrations/application/native-sync-worker";
 import type { IntegrationSyncRpcDatabase } from "@/features/integrations/application/sync-jobs";
-import { hasCapability } from "@/features/organisations/domain/access";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 
 const nativeToggleSchema = z.object({
   id: z.uuid(),
@@ -46,9 +46,7 @@ const jiraWebhookConfigurationRowSchema = z.object({
 
 async function requireConnectionManager() {
   const context = await requireAppContext();
-  if (!hasCapability(context.membership.role, "manage_connections")) {
-    throw new Error("Only workspace operators can manage integrations");
-  }
+  workspaceAccess(context.membership.role).section("connections").requireManage();
   return context;
 }
 
