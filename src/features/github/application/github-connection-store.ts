@@ -83,6 +83,7 @@ const runRowSchema = z.object({
   id: uuid,
   organisation_id: uuid,
   installation_id: uuid,
+  reconciliation_version: positiveId,
   trigger: z.enum(["initial", "scheduled", "webhook"]),
   request_key: z.string().min(1).max(200),
   status: z.literal("running"),
@@ -105,11 +106,12 @@ const installationRowSchema = z.object({
   account_login: login,
   account_type: z.enum(["Organization", "User"]),
   repository_selection: z.literal("selected"),
-  status: z.literal("active"),
+  status: z.enum(["active", "suspended", "revoked", "needs_attention"]),
   permissions: z.record(z.string().min(1).max(100), z.string().min(1).max(20)),
-  permissions_ok: z.literal(true),
+  permissions_ok: z.boolean(),
   health: healthSchema,
   consecutive_reconciliation_failures: z.number().int().nonnegative(),
+  reconciliation_version: positiveId,
 }).strict().refine((value) => hasExactReadPermissions(value.permissions));
 
 const selectedRepositoryRowSchema = z.object({
@@ -219,13 +221,18 @@ export function buildGitHubConnectionStore(serviceInput: unknown): {
         for (const run of runs) {
           const installationResponse = await service
             .from("github_installations")
-            .select("id,organisation_id,provider_installation_id,account_id,account_login,account_type,repository_selection,status,permissions,permissions_ok,health,consecutive_reconciliation_failures")
+            .select("id,organisation_id,provider_installation_id,account_id,account_login,account_type,repository_selection,status,permissions,permissions_ok,health,consecutive_reconciliation_failures,reconciliation_version")
             .eq("id", run.installation_id)
             .eq("organisation_id", run.organisation_id)
             .limit(2);
           if (installationResponse.error) throw failure();
           const installation = installationRowSchema.parse(oneRow(installationResponse.data));
           if (installation.id !== run.installation_id || installation.organisation_id !== run.organisation_id) throw failure();
+          const activeAndPermissionValid = installation.status === "active" && installation.permissions_ok;
+          if (
+            run.reconciliation_version > installation.reconciliation_version
+            || (!activeAndPermissionValid && run.reconciliation_version !== installation.reconciliation_version)
+          ) throw failure();
 
           const repositoryResponse = await service
             .from("github_repositories")

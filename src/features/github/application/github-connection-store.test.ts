@@ -13,6 +13,7 @@ const runRow = {
   id: runId,
   organisation_id: organisationId,
   installation_id: installationId,
+  reconciliation_version: 1,
   trigger: "scheduled",
   request_key: "opaque-request-key",
   status: "running",
@@ -40,6 +41,7 @@ const installationRow = {
   permissions_ok: true,
   health: "healthy",
   consecutive_reconciliation_failures: 0,
+  reconciliation_version: 1,
 };
 
 const repositoryRows = [101, 102].map((providerId) => ({
@@ -145,11 +147,42 @@ describe("buildGitHubConnectionStore", () => {
   });
 
   it.each([
+    ["needs_attention", "owner_action_required"],
+    ["revoked", "disconnected"],
+  ])("accepts one version-bearing %s follow-up claim without restoring scope", async (status, health) => {
+    const database = service({
+      claim: [{ ...runRow, reconciliation_version: 2 }],
+      installation: [{
+        ...installationRow,
+        status,
+        health,
+        permissions_ok: false,
+        reconciliation_version: 2,
+      }],
+    });
+    const store = buildGitHubConnectionStore(database);
+
+    await expect(store.claimDue({
+      workerId,
+      limit: 1,
+      now: "2026-09-14T12:00:00.000Z",
+    })).resolves.toEqual([expect.objectContaining({
+      runId,
+      installationId,
+      previousHealth: health,
+    })]);
+
+    expect(database.from).toHaveBeenCalledWith("github_installations");
+  });
+
+  it.each([
     ["run ancestry", { claim: [{ ...runRow, organisation_id: "55555555-5555-4555-8555-555555555555" }], ignoreFilters: true }],
     ["installation ancestry", { installation: [{ ...installationRow, organisation_id: "55555555-5555-4555-8555-555555555555" }], ignoreFilters: true }],
     ["repository ancestry", { repositories: [{ ...repositoryRows[0]!, organisation_id: "55555555-5555-4555-8555-555555555555" }], ignoreFilters: true }],
     ["stored permissions", { installation: [{ ...installationRow, permissions: { ...READ_PERMISSIONS, contents: "read" } }] }],
     ["duplicate repository identity", { repositories: [repositoryRows[0]!, { ...repositoryRows[0]!, id: "99999999-9999-4999-8999-999999999999" }] }],
+    ["run occurrence version", { claim: [{ ...runRow, reconciliation_version: 2 }] }],
+    ["stale fail-closed occurrence", { claim: [{ ...runRow, reconciliation_version: 1 }], installation: [{ ...installationRow, status: "revoked", health: "disconnected", permissions_ok: false, reconciliation_version: 2 }] }],
   ])("rejects malformed or cross-tenant %s rows", async (_label, overrides) => {
     const store = buildGitHubConnectionStore(service(overrides));
     await expect(store.claimDue({ workerId, limit: 1, now: "2026-09-14T12:00:00.000Z" }))

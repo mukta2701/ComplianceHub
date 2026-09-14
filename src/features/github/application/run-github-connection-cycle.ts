@@ -128,10 +128,16 @@ export function buildGitHubConnectionCycleRunner(
     try {
       ensureActive(dependencies, cycle.signal, deadlineAt);
 
-      const webhookResult = webhookSummarySchema.safeParse(await dependencies.drainConnectionWebhooks({
-        limit: parsed.data.maximumWebhookDeliveries,
-        signal: parsed.data.signal,
-      }));
+      let webhookResponse: WebhookDrainSummary;
+      try {
+        webhookResponse = await dependencies.drainConnectionWebhooks({
+          limit: parsed.data.maximumWebhookDeliveries,
+          signal: cycle.signal,
+        });
+      } catch {
+        throw cycleFailure();
+      }
+      const webhookResult = webhookSummarySchema.safeParse(webhookResponse);
       if (!webhookResult.success || webhookResult.data.claimed > parsed.data.maximumWebhookDeliveries) {
         throw cycleFailure();
       }

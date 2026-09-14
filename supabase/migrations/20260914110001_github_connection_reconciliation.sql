@@ -15,6 +15,7 @@ alter table public.github_installations
   add column health_diagnostic_code text,
   add column reconciliation_locked_by uuid,
   add column reconciliation_locked_until timestamptz,
+  add column reconciliation_version bigint not null default 1,
   add constraint github_installations_reconciliation_failure_count_check check (
     consecutive_reconciliation_failures >= 0
   ),
@@ -30,6 +31,9 @@ alter table public.github_installations
   add constraint github_installations_reconciliation_lease_check check (
     (reconciliation_locked_by is null and reconciliation_locked_until is null)
     or (reconciliation_locked_by is not null and reconciliation_locked_until is not null)
+  ),
+  add constraint github_installations_reconciliation_version_check check (
+    reconciliation_version between 1 and 9007199254740991
   );
 
 create index github_installations_reconciliation_due_idx
@@ -40,6 +44,7 @@ create table public.github_connection_reconciliation_runs (
   id uuid primary key default extensions.gen_random_uuid(),
   organisation_id uuid not null references public.organisations(id) on delete cascade,
   installation_id uuid not null,
+  reconciliation_version bigint not null default 1,
   trigger text not null check (trigger in ('initial', 'scheduled', 'webhook')),
   request_key text not null check (char_length(request_key) between 1 and 200),
   status text not null default 'running' check (
@@ -107,6 +112,9 @@ create table public.github_connection_reconciliation_runs (
   constraint github_connection_reconciliation_runs_count_check check (
     repository_count = available_repository_count + unavailable_repository_count
   ),
+  constraint github_connection_reconciliation_runs_version_check check (
+    reconciliation_version between 1 and 9007199254740991
+  ),
   constraint github_connection_reconciliation_runs_timestamp_check check (
     last_attempted_at >= started_at
     and (completed_at is null or completed_at >= last_attempted_at)
@@ -120,6 +128,10 @@ on public.github_connection_reconciliation_runs(
 create index github_connection_reconciliation_runs_running_idx
 on public.github_connection_reconciliation_runs(installation_id, started_at desc, id)
 where status = 'running';
+create index github_connection_reconciliation_runs_installation_version_idx
+on public.github_connection_reconciliation_runs(
+  installation_id, organisation_id, reconciliation_version desc
+);
 
 alter table public.github_connection_reconciliation_runs enable row level security;
 
@@ -184,7 +196,8 @@ set search_path = ''
 as $$
 begin
   update public.github_installations
-  set next_reconciliation_at = pg_catalog.now(),
+  set reconciliation_version = reconciliation_version + 1,
+      next_reconciliation_at = pg_catalog.now(),
       reconciliation_locked_by = null,
       reconciliation_locked_until = null
   where id = new.id
@@ -309,7 +322,7 @@ begin
   end if;
 
   for candidate in
-    select delivery.id
+    select delivery.id, delivery.attempt_count
     from public.github_webhook_deliveries delivery
     where delivery.event_name in (
         'installation', 'installation_repositories', 'repository'
@@ -333,20 +346,11 @@ begin
     join public.github_webhook_deliveries delivery
       on delivery.provider_installation_id = installation.provider_installation_id
     where delivery.id = candidate.id
-      and installation.status = 'active'
-      and installation.permissions_ok
     for update of installation;
     installation_found := found;
 
     resolved_repository_id := null;
     if installation_found then
-      if resolved_installation.last_reconciliation_attempt_at is not null
-        and scheduled_at <= resolved_installation.last_reconciliation_attempt_at
-      then
-        scheduled_at := resolved_installation.last_reconciliation_attempt_at
-          + interval '1 microsecond';
-      end if;
-
       select repository.id into resolved_repository_id
       from public.github_repositories repository
       where repository.installation_id = resolved_installation.id
@@ -359,10 +363,16 @@ begin
           where delivery.id = candidate.id
         );
 
-      update public.github_installations installation
-      set next_reconciliation_at = scheduled_at
-      where installation.id = resolved_installation.id
-        and installation.organisation_id = resolved_installation.organisation_id;
+      if candidate.attempt_count = 0 then
+        update public.github_installations installation
+        set reconciliation_version = installation.reconciliation_version + 1,
+            next_reconciliation_at = least(
+              coalesce(installation.next_reconciliation_at, scheduled_at),
+              scheduled_at
+            )
+        where installation.id = resolved_installation.id
+          and installation.organisation_id = resolved_installation.organisation_id;
+      end if;
     end if;
 
     update public.github_webhook_deliveries delivery
@@ -403,6 +413,7 @@ declare
   candidate record;
   claimed_run public.github_connection_reconciliation_runs;
   request_key_value text;
+  claim_version bigint;
 begin
   if target_worker_id is null or target_now is null then
     raise exception 'reconciliation claim requires a worker and time'
@@ -416,14 +427,38 @@ begin
   for candidate in
     select installation.id, installation.organisation_id,
            installation.next_reconciliation_at,
-           installation.last_reconciliation_attempt_at
+           installation.last_reconciliation_attempt_at,
+           installation.reconciliation_version,
+           installation.status,
+           installation.permissions_ok,
+           coalesce((
+             select max(previous_run.reconciliation_version)
+             from public.github_connection_reconciliation_runs previous_run
+             where previous_run.installation_id = installation.id
+               and previous_run.organisation_id = installation.organisation_id
+           ), 0) as latest_run_version
     from public.github_installations installation
-    where installation.status = 'active'
-      and installation.next_reconciliation_at is not null
+    where installation.next_reconciliation_at is not null
       and installation.next_reconciliation_at <= target_now
       and (
         installation.reconciliation_locked_until is null
         or installation.reconciliation_locked_until <= target_now
+      )
+      and (
+        (installation.status = 'active' and installation.permissions_ok)
+        or installation.reconciliation_version > coalesce((
+          select max(previous_run.reconciliation_version)
+          from public.github_connection_reconciliation_runs previous_run
+          where previous_run.installation_id = installation.id
+            and previous_run.organisation_id = installation.organisation_id
+        ), 0)
+        or exists (
+          select 1
+          from public.github_connection_reconciliation_runs running_run
+          where running_run.installation_id = installation.id
+            and running_run.organisation_id = installation.organisation_id
+            and running_run.status = 'running'
+        )
       )
     order by installation.next_reconciliation_at, installation.id
     limit target_limit
@@ -449,20 +484,30 @@ begin
         and run.installation_id = claimed_run.installation_id
       returning run.* into claimed_run;
     else
+      claim_version := candidate.reconciliation_version;
+      if claim_version <= candidate.latest_run_version then
+        update public.github_installations installation
+        set reconciliation_version = installation.reconciliation_version + 1
+        where installation.id = candidate.id
+          and installation.organisation_id = candidate.organisation_id
+        returning installation.reconciliation_version into claim_version;
+      end if;
+
       request_key_value := 'v1:' || pg_catalog.encode(
         extensions.digest(
-          candidate.id::text || ':' || candidate.next_reconciliation_at::text,
+          candidate.id::text || ':' || claim_version::text,
           'sha256'
         ),
         'hex'
       );
 
       insert into public.github_connection_reconciliation_runs(
-        organisation_id, installation_id, trigger, request_key,
+        organisation_id, installation_id, reconciliation_version, trigger, request_key,
         started_at, last_attempted_at
       ) values (
         candidate.organisation_id,
         candidate.id,
+        claim_version,
         case when candidate.last_reconciliation_attempt_at is null
           then 'initial' else 'scheduled' end,
         request_key_value,
@@ -532,7 +577,8 @@ declare
   prior_incident_open boolean;
   next_incident_open boolean;
   transition text;
-  completed_time timestamptz := pg_catalog.clock_timestamp();
+  completed_time timestamptz;
+  has_newer_occurrence boolean;
   repository_total integer;
   repository_available integer;
   repository_unavailable integer;
@@ -587,6 +633,10 @@ begin
     end if;
     return 'not_finalized';
   end if;
+
+  completed_time := greatest(pg_catalog.clock_timestamp(), run_row.last_attempted_at);
+  has_newer_occurrence := installation_row.reconciliation_version
+    > run_row.reconciliation_version;
 
   if installation_row.reconciliation_locked_by is distinct from target_worker_id
     or installation_row.reconciliation_locked_until is null
@@ -798,7 +848,9 @@ begin
       end,
       consecutive_reconciliation_failures = next_failure_count,
       next_reconciliation_at = case
-        when installation.next_reconciliation_at > run_row.last_attempted_at
+        when has_newer_occurrence and target_outcome = 'temporary_failure'
+          then greatest(installation.next_reconciliation_at, effective_next_attempt_at)
+        when has_newer_occurrence
           then installation.next_reconciliation_at
         else effective_next_attempt_at
       end,
