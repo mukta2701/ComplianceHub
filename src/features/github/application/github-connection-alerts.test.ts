@@ -2,9 +2,9 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  buildGitHubConnectionAlertDependencies,
-  queueGitHubConnectionNotice,
-  type GitHubConnectionAlertDependencies,
+  acknowledgeGitHubConnectionNotice,
+  buildGitHubConnectionAcknowledgementDependencies,
+  type GitHubConnectionAcknowledgementDependencies,
   type GitHubConnectionNotice,
 } from "./github-connection-alerts";
 
@@ -20,21 +20,21 @@ const incident: GitHubConnectionNotice = {
   connectionHref: "/app/integrations",
 };
 
-function dependencies(result: unknown = { inAppQueued: 2, slackQueued: 1 }):
-GitHubConnectionAlertDependencies & { project: ReturnType<typeof vi.fn> } {
-  return { project: vi.fn().mockResolvedValue(result) };
+function dependencies(result: unknown = { inAppQueued: 0, slackQueued: 0 }):
+GitHubConnectionAcknowledgementDependencies & { acknowledge: ReturnType<typeof vi.fn> } {
+  return { acknowledge: vi.fn().mockResolvedValue(result) };
 }
 
-describe("queueGitHubConnectionNotice", () => {
-  it("projects only validated incident facts through the durable database authority", async () => {
+describe("acknowledgeGitHubConnectionNotice", () => {
+  it("accepts only an exact zero-work acknowledgement from the durable database authority", async () => {
     const deps = dependencies();
 
-    await expect(queueGitHubConnectionNotice(deps, incident)).resolves.toEqual({
-      inAppQueued: 2,
-      slackQueued: 1,
+    await expect(acknowledgeGitHubConnectionNotice(deps, incident)).resolves.toEqual({
+      inAppQueued: 0,
+      slackQueued: 0,
     });
 
-    expect(deps.project).toHaveBeenCalledWith(incident, undefined);
+    expect(deps.acknowledge).toHaveBeenCalledWith(incident, undefined);
   });
 
   it("binds the immutable reconciliation run and cancellation signal to the RPC", async () => {
@@ -44,8 +44,8 @@ describe("queueGitHubConnectionNotice", () => {
     const database = { rpc: vi.fn().mockReturnValue(query) };
     const controller = new AbortController();
 
-    await expect(buildGitHubConnectionAlertDependencies(database)
-      .project(incident, controller.signal)).resolves.toEqual(response.data);
+    await expect(buildGitHubConnectionAcknowledgementDependencies(database)
+      .acknowledge(incident, controller.signal)).resolves.toEqual(response.data);
 
     expect(database.rpc).toHaveBeenCalledWith("project_github_connection_notice_server", {
       target_run_id: incident.runId,
@@ -65,13 +65,13 @@ describe("queueGitHubConnectionNotice", () => {
     const controller = new AbortController();
     controller.abort();
 
-    await expect(queueGitHubConnectionNotice(deps, incident, controller.signal))
-      .rejects.toThrow("GitHub connection alert queue failed");
-    expect(deps.project).not.toHaveBeenCalled();
+    await expect(acknowledgeGitHubConnectionNotice(deps, incident, controller.signal))
+      .rejects.toThrow("GitHub connection acknowledgement failed");
+    expect(deps.acknowledge).not.toHaveBeenCalled();
   });
 
-  it("projects verified recovery once with no stale diagnostic", async () => {
-    const deps = dependencies({ inAppQueued: 2, slackQueued: 1 });
+  it("acknowledges verified recovery once with no stale diagnostic", async () => {
+    const deps = dependencies();
     const recovery: GitHubConnectionNotice = {
       ...incident,
       kind: "recovery",
@@ -80,9 +80,9 @@ describe("queueGitHubConnectionNotice", () => {
       occurredAt: "2026-09-14T13:00:00.000Z",
     };
 
-    await queueGitHubConnectionNotice(deps, recovery);
+    await acknowledgeGitHubConnectionNotice(deps, recovery);
 
-    expect(deps.project).toHaveBeenCalledWith(expect.objectContaining({
+    expect(deps.acknowledge).toHaveBeenCalledWith(expect.objectContaining({
       kind: "recovery",
       diagnostic: null,
     }), undefined);
@@ -98,17 +98,19 @@ describe("queueGitHubConnectionNotice", () => {
   ])("rejects unsafe or contradictory notice input without persistence", async (notice) => {
     const deps = dependencies();
 
-    await expect(queueGitHubConnectionNotice(deps, notice as GitHubConnectionNotice))
-      .rejects.toThrow("GitHub connection alert queue failed");
-    expect(deps.project).not.toHaveBeenCalled();
+    await expect(acknowledgeGitHubConnectionNotice(deps, notice as GitHubConnectionNotice))
+      .rejects.toThrow("GitHub connection acknowledgement failed");
+    expect(deps.acknowledge).not.toHaveBeenCalled();
   });
 
   it.each([
     null,
     { inAppQueued: -1, slackQueued: 1 },
+    { inAppQueued: 1, slackQueued: 0 },
+    { inAppQueued: 0, slackQueued: 1 },
     { inAppQueued: 2, slackQueued: 1, rawError: "private" },
   ])("fails closed on a malformed persistence result", async (result) => {
-    await expect(queueGitHubConnectionNotice(dependencies(result), incident))
-      .rejects.toThrow("GitHub connection alert queue failed");
+    await expect(acknowledgeGitHubConnectionNotice(dependencies(result), incident))
+      .rejects.toThrow("GitHub connection acknowledgement failed");
   });
 });

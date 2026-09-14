@@ -1,7 +1,7 @@
--- Project only authoritative reconciliation transitions into durable GitHub
--- installation incidents and the existing in-app/Slack delivery foundations.
--- The finalization trigger is the atomic authority. The service RPC below is
--- only an idempotent repair/acknowledgement of the exact finalized run.
+-- Persist authoritative reconciliation transitions as durable GitHub installation
+-- incidents and acknowledgements through the existing in-app/Slack foundations.
+-- The finalization trigger is the sole mutating authority. The service RPC
+-- below only validates and acknowledges the exact finalized run with 0/0.
 
 create table public.github_connection_incidents (
   id uuid primary key default extensions.gen_random_uuid(),

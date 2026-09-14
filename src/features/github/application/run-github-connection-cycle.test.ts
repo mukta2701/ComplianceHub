@@ -33,7 +33,7 @@ function dependencies(
   drainConnectionWebhooks: ReturnType<typeof vi.fn>;
   claimDue: ReturnType<typeof vi.fn>;
   reconcile: ReturnType<typeof vi.fn>;
-  queueConnectionNotice: ReturnType<typeof vi.fn>;
+  acknowledgeConnectionNotice: ReturnType<typeof vi.fn>;
 } {
   return {
     now: () => new Date("2026-09-14T12:00:00.000Z"),
@@ -49,7 +49,7 @@ function dependencies(
       incidentTransition: "none",
       effectiveHealth: "healthy",
     }),
-    queueConnectionNotice: vi.fn().mockResolvedValue({ inAppQueued: 0, slackQueued: 0 }),
+    acknowledgeConnectionNotice: vi.fn().mockResolvedValue({ inAppQueued: 0, slackQueued: 0 }),
     ...overrides,
   };
 }
@@ -392,7 +392,7 @@ describe("runGitHubConnectionCycle", () => {
       recovered: 0,
       ownershipLost: 0,
     });
-    expect(deps.queueConnectionNotice).toHaveBeenCalledWith({
+    expect(deps.acknowledgeConnectionNotice).toHaveBeenCalledWith({
       kind: "incident",
       runId: claim(1).runId,
       installationId: claim(1).installationId,
@@ -419,8 +419,8 @@ describe("runGitHubConnectionCycle", () => {
 
     await buildGitHubConnectionCycleRunner(deps)(cycleInput);
 
-    expect(deps.queueConnectionNotice).toHaveBeenCalledOnce();
-    expect(deps.queueConnectionNotice).toHaveBeenCalledWith({
+    expect(deps.acknowledgeConnectionNotice).toHaveBeenCalledOnce();
+    expect(deps.acknowledgeConnectionNotice).toHaveBeenCalledWith({
       kind: "incident",
       runId: claim(1).runId,
       installationId: claim(1).installationId,
@@ -447,10 +447,10 @@ describe("runGitHubConnectionCycle", () => {
 
     await buildGitHubConnectionCycleRunner(deps)(cycleInput);
 
-    expect(deps.queueConnectionNotice).not.toHaveBeenCalled();
+    expect(deps.acknowledgeConnectionNotice).not.toHaveBeenCalled();
   });
 
-  it("projects a persistent temporary opening only when finalization reaches its threshold", async () => {
+  it("acknowledges a persistent temporary opening only when finalization reaches its threshold", async () => {
     const deps = dependencies();
     deps.claimDue.mockResolvedValue([claim(1)]);
     deps.reconcile.mockResolvedValue({
@@ -464,8 +464,8 @@ describe("runGitHubConnectionCycle", () => {
 
     await buildGitHubConnectionCycleRunner(deps)(cycleInput);
 
-    expect(deps.queueConnectionNotice).toHaveBeenCalledOnce();
-    expect(deps.queueConnectionNotice).toHaveBeenCalledWith(expect.objectContaining({
+    expect(deps.acknowledgeConnectionNotice).toHaveBeenCalledOnce();
+    expect(deps.acknowledgeConnectionNotice).toHaveBeenCalledWith(expect.objectContaining({
       runId: claim(1).runId,
       kind: "incident",
       health: "retrying",
@@ -487,8 +487,8 @@ describe("runGitHubConnectionCycle", () => {
 
     await buildGitHubConnectionCycleRunner(deps)(cycleInput);
 
-    expect(deps.queueConnectionNotice).toHaveBeenCalledOnce();
-    expect(deps.queueConnectionNotice).toHaveBeenCalledWith(expect.objectContaining({
+    expect(deps.acknowledgeConnectionNotice).toHaveBeenCalledOnce();
+    expect(deps.acknowledgeConnectionNotice).toHaveBeenCalledWith(expect.objectContaining({
       runId: claim(1).runId,
       kind: "incident",
     }), expect.any(AbortSignal));
@@ -508,8 +508,8 @@ describe("runGitHubConnectionCycle", () => {
 
     await buildGitHubConnectionCycleRunner(deps)(cycleInput);
 
-    expect(deps.queueConnectionNotice).toHaveBeenCalledOnce();
-    expect(deps.queueConnectionNotice).toHaveBeenCalledWith(expect.objectContaining({
+    expect(deps.acknowledgeConnectionNotice).toHaveBeenCalledOnce();
+    expect(deps.acknowledgeConnectionNotice).toHaveBeenCalledWith(expect.objectContaining({
       runId: claim(1).runId,
       kind: "recovery",
       health: "healthy",
@@ -542,7 +542,7 @@ describe("runGitHubConnectionCycle", () => {
     const deps = dependencies();
     deps.claimDue.mockResolvedValue([claim(1)]);
     deps.reconcile.mockResolvedValue(reconciliation);
-    deps.queueConnectionNotice.mockRejectedValue(new Error(`transport ${privateDetail}`));
+    deps.acknowledgeConnectionNotice.mockRejectedValue(new Error(`transport ${privateDetail}`));
 
     const result = await buildGitHubConnectionCycleRunner(deps)(cycleInput);
 
@@ -565,7 +565,7 @@ describe("runGitHubConnectionCycle", () => {
         incidentTransition: "opened",
         effectiveHealth: "owner_action_required",
       });
-      deps.queueConnectionNotice.mockImplementation((_notice, signal?: AbortSignal) => {
+      deps.acknowledgeConnectionNotice.mockImplementation((_notice, signal?: AbortSignal) => {
         observedSignal = signal;
         if (!signal) return Promise.reject(new Error("missing cycle signal"));
         return new Promise((_resolve, reject) => {
@@ -585,7 +585,7 @@ describe("runGitHubConnectionCycle", () => {
       await rejected;
       expect(observedSignal?.aborted).toBe(true);
       expect(deps.reconcile).toHaveBeenCalledOnce();
-      expect(deps.queueConnectionNotice).toHaveBeenCalledOnce();
+      expect(deps.acknowledgeConnectionNotice).toHaveBeenCalledOnce();
       expect(vi.getTimerCount()).toBe(0);
     } finally {
       vi.useRealTimers();

@@ -19,8 +19,8 @@ export type GitHubConnectionNotice = {
   connectionHref: "/app/integrations";
 };
 
-export type GitHubConnectionAlertDependencies = {
-  project(notice: GitHubConnectionNotice, signal?: AbortSignal): Promise<unknown>;
+export type GitHubConnectionAcknowledgementDependencies = {
+  acknowledge(notice: GitHubConnectionNotice, signal?: AbortSignal): Promise<unknown>;
 };
 
 type RpcResult = PromiseLike<{ data: unknown; error: unknown }> & {
@@ -67,24 +67,24 @@ const noticeSchema = z.object({
   }
 });
 
-const queueResultSchema = z.object({
-  inAppQueued: z.number().int().nonnegative(),
-  slackQueued: z.number().int().nonnegative(),
+const acknowledgementSchema = z.object({
+  inAppQueued: z.literal(0),
+  slackQueued: z.literal(0),
 }).strict();
 
-function queueFailure(): Error {
-  return new Error("GitHub connection alert queue failed");
+function acknowledgementFailure(): Error {
+  return new Error("GitHub connection acknowledgement failed");
 }
 
 function requireActive(signal?: AbortSignal): void {
-  if (signal?.aborted) throw queueFailure();
+  if (signal?.aborted) throw acknowledgementFailure();
 }
 
-export function buildGitHubConnectionAlertDependencies(
+export function buildGitHubConnectionAcknowledgementDependencies(
   database: RpcClient,
-): GitHubConnectionAlertDependencies {
+): GitHubConnectionAcknowledgementDependencies {
   return {
-    async project(notice, signal) {
+    async acknowledge(notice, signal) {
       requireActive(signal);
       const query = database.rpc("project_github_connection_notice_server", {
         target_run_id: notice.runId,
@@ -98,24 +98,24 @@ export function buildGitHubConnectionAlertDependencies(
       });
       const { data, error } = await (signal ? query.abortSignal(signal) : query);
       requireActive(signal);
-      if (error) throw queueFailure();
+      if (error) throw acknowledgementFailure();
       return data;
     },
   };
 }
 
-export async function queueGitHubConnectionNotice(
-  dependencies: GitHubConnectionAlertDependencies,
+export async function acknowledgeGitHubConnectionNotice(
+  dependencies: GitHubConnectionAcknowledgementDependencies,
   notice: GitHubConnectionNotice,
   signal?: AbortSignal,
-): Promise<{ inAppQueued: number; slackQueued: number }> {
+): Promise<{ inAppQueued: 0; slackQueued: 0 }> {
   try {
     requireActive(signal);
     const safeNotice = noticeSchema.parse(notice);
-    const result = queueResultSchema.parse(await dependencies.project(safeNotice, signal));
+    const result = acknowledgementSchema.parse(await dependencies.acknowledge(safeNotice, signal));
     requireActive(signal);
     return result;
   } catch {
-    throw queueFailure();
+    throw acknowledgementFailure();
   }
 }

@@ -14,8 +14,8 @@ import {
 } from "./github-installation-api";
 import { getGitHubConnectionConfig } from "./github-runtime-config";
 import {
-  buildGitHubConnectionAlertDependencies,
-  queueGitHubConnectionNotice,
+  acknowledgeGitHubConnectionNotice,
+  buildGitHubConnectionAcknowledgementDependencies,
   type GitHubConnectionNotice,
 } from "./github-connection-alerts";
 import {
@@ -59,9 +59,9 @@ export type GitHubConnectionCycleDependencies = {
     claim: ClaimedGitHubConnectionReconciliation,
     signal: AbortSignal,
   ): Promise<GitHubConnectionReconciliationResult>;
-  queueConnectionNotice(notice: GitHubConnectionNotice, signal?: AbortSignal): Promise<{
-    inAppQueued: number;
-    slackQueued: number;
+  acknowledgeConnectionNotice(notice: GitHubConnectionNotice, signal?: AbortSignal): Promise<{
+    inAppQueued: 0;
+    slackQueued: 0;
   }>;
   now(): Date;
 };
@@ -226,7 +226,7 @@ export function buildGitHubConnectionCycleRunner(
         } else {
           if (parsedResult.data.incidentTransition !== "none") {
             try {
-              await dependencies.queueConnectionNotice({
+              await dependencies.acknowledgeConnectionNotice({
                 kind: parsedResult.data.incidentTransition === "recovered" ? "recovery" : "incident",
                 runId: claim.runId,
                 installationId: claim.installationId,
@@ -285,7 +285,7 @@ function buildProductionDependencies(): GitHubConnectionCycleDependencies {
   });
   const webhook = buildGitHubConnectionWebhookDependencies(service);
   const store = buildGitHubConnectionStore(service);
-  const alerts = buildGitHubConnectionAlertDependencies(service);
+  const acknowledgements = buildGitHubConnectionAcknowledgementDependencies(service);
   const reconciliationDependencies = {
     createAppJwt: () => createAppJwt(
       { appId: config.appId, privateKey: config.privateKey },
@@ -301,7 +301,9 @@ function buildProductionDependencies(): GitHubConnectionCycleDependencies {
     drainConnectionWebhooks: (input) => drainGitHubConnectionWebhookDeliveries(webhook, input),
     claimDue: store.claimDue,
     reconcile: (claim, signal) => reconcileGitHubConnection(reconciliationDependencies, claim, signal),
-    queueConnectionNotice: (notice, signal) => queueGitHubConnectionNotice(alerts, notice, signal),
+    acknowledgeConnectionNotice: (notice, signal) => (
+      acknowledgeGitHubConnectionNotice(acknowledgements, notice, signal)
+    ),
     now: () => new Date(),
   };
 }
