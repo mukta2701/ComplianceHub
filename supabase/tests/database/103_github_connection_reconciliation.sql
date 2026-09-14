@@ -2021,8 +2021,7 @@ select is(public.claim_github_installation_server(
   'a3100000-0000-4000-8000-000000000001',
   'a3000000-0000-4000-8000-000000000001',
   933030, 943030, 'Receipt-Reconnect', 'Organization', 'selected',
-  '{"metadata":"read"}'::jsonb, true,
-  '[{"id":953030,"owner":"Receipt-Reconnect","name":"repo","fullName":"Receipt-Reconnect/repo","htmlUrl":"https://github.com/Receipt-Reconnect/repo","visibility":"private","archived":false,"defaultBranch":"main"}]'::jsonb
+  '{"metadata":"read"}'::jsonb, true, '[]'::jsonb
 ), 'a3230000-0000-4000-8000-000000000030'::uuid,
 'the deliberate Owner reconnect advances the cancelled installation');
 insert into receipt_provenance_runs
@@ -2079,6 +2078,62 @@ select is(
   current_setting('app.receipt_reconnect_active_scope'),
   'an ignored stale receipt cannot restore repository scope'
 );
+select ok(
+  (select installation.reconciliation_version = 2
+      and installation.health = 'disconnected'
+      and installation.health_diagnostic_code is null
+      and installation.reconciliation_locked_by = 'a3430000-0000-4000-8000-000000000031'
+      and run.status = 'running'
+      and run.reconciliation_version = 2
+   from public.github_installations installation
+   join receipt_provenance_runs run on run.installation_id = installation.id
+   where installation.id = 'a3230000-0000-4000-8000-000000000030'
+   order by run.reconciliation_version desc limit 1),
+  'the Owner-created version-two reconnect remains fail-closed while it runs'
+);
+insert into public.github_webhook_deliveries(
+  id, provider_installation_id, provider_delivery_id,
+  event_name, payload_sha256, received_at
+) values (
+  'a3530000-0000-4000-8000-000000000037', 933030,
+  'receipt-during-reconnect', 'installation', repeat('e', 64),
+  '2000-01-03 12:00:00+00'
+);
+select is(
+  (select connection_reconciliation_version
+   from public.github_webhook_deliveries
+   where id = 'a3530000-0000-4000-8000-000000000037'),
+  2::bigint,
+  'a receipt during the exact non-cancelled reconnect run binds version two'
+);
+set local role service_role;
+insert into receipt_provenance_deliveries
+select * from public.claim_github_connection_webhook_deliveries_server(1);
+select ok(
+  (select organisation_id = 'a3100000-0000-4000-8000-000000000001'
+      and installation_id = 'a3230000-0000-4000-8000-000000000030'
+   from receipt_provenance_deliveries
+   where id = 'a3530000-0000-4000-8000-000000000037'),
+  'the exact active reconnect receipt is tenant-bound while health remains disconnected'
+);
+select ok(public.finalize_github_webhook_delivery_server(
+  'a3530000-0000-4000-8000-000000000037',
+  (select attempt_count from receipt_provenance_deliveries
+   where id = 'a3530000-0000-4000-8000-000000000037'),
+  case when (
+    select installation_id is not null
+    from receipt_provenance_deliveries
+    where id = 'a3530000-0000-4000-8000-000000000037'
+  ) then 'processed' else 'ignored' end,
+  null
+), 'the reconnect-time receipt finalizes through its one claimed attempt');
+reset role;
+select is(
+  (select reconciliation_version from public.github_installations
+   where id = 'a3230000-0000-4000-8000-000000000030'),
+  3::bigint,
+  'the reconnect-time receipt schedules exactly version three'
+);
 set local role service_role;
 select is(public.finalize_github_connection_reconciliation_server(
   (select id from receipt_provenance_runs
@@ -2088,9 +2143,72 @@ select is(public.finalize_github_connection_reconciliation_server(
   'success', null, now() + interval '1 day',
   '[{"id":953030,"owner":"Receipt-Reconnect","name":"repo","fullName":"Receipt-Reconnect/repo","htmlUrl":"https://github.com/Receipt-Reconnect/repo","visibility":"private","archived":false,"defaultBranch":"main"}]'::jsonb
 ), pg_catalog.jsonb_build_object(
-  'incidentTransition', 'recovered', 'effectiveHealth', 'healthy'
-), 'the deliberate reconnect succeeds without being superseded by stale receipts');
+  'incidentTransition', 'remained_open', 'effectiveHealth', 'disconnected'
+), 'version-two success is superseded without reporting recovery');
 reset role;
+select ok(
+  (select installation.reconciliation_version = 3
+      and installation.next_reconciliation_at is not null
+      and installation.health = 'disconnected'
+      and installation.health_diagnostic_code is null
+      and installation.status = 'active'
+      and installation.permissions_ok
+      and not repository.selected
+      and not repository.available
+   from public.github_installations installation
+   join public.github_repositories repository
+     on repository.installation_id = installation.id
+     and repository.organisation_id = installation.organisation_id
+   where installation.id = 'a3230000-0000-4000-8000-000000000030'
+     and repository.id = 'a3330000-0000-4000-8000-000000000030'),
+  'the superseded success leaves fail-closed health and repository scope unchanged'
+);
+set local role service_role;
+insert into receipt_provenance_runs
+select * from public.claim_due_github_connection_reconciliations_server(
+  'a3430000-0000-4000-8000-000000000033', 1,
+  pg_catalog.clock_timestamp() + interval '1 second'
+);
+select is(
+  (select count(*)::integer from receipt_provenance_runs
+   where installation_id = 'a3230000-0000-4000-8000-000000000030'
+     and reconciliation_version = 3),
+  1,
+  'the reconnect-time receipt produces exactly one version-three follow-up'
+);
+select is(public.finalize_github_connection_reconciliation_server(
+  (select id from receipt_provenance_runs
+   where installation_id = 'a3230000-0000-4000-8000-000000000030'
+     and reconciliation_version = 3),
+  'a3430000-0000-4000-8000-000000000033',
+  'success', null, pg_catalog.clock_timestamp() + interval '1 day',
+  '[{"id":953030,"owner":"Receipt-Reconnect","name":"repo","fullName":"Receipt-Reconnect/repo","htmlUrl":"https://github.com/Receipt-Reconnect/repo","visibility":"private","archived":false,"defaultBranch":"main"}]'::jsonb
+), pg_catalog.jsonb_build_object(
+  'incidentTransition', 'recovered', 'effectiveHealth', 'healthy'
+), 'the version-three follow-up records the one real recovery');
+reset role;
+select ok(
+  (select installation.health = 'healthy'
+      and installation.health_diagnostic_code is null
+      and installation.reconciliation_version = 3
+      and repository.available
+      and not repository.selected
+   from public.github_installations installation
+   join public.github_repositories repository
+     on repository.installation_id = installation.id
+     and repository.organisation_id = installation.organisation_id
+   where installation.id = 'a3230000-0000-4000-8000-000000000030'
+     and repository.id = 'a3330000-0000-4000-8000-000000000030'),
+  'only the newest success restores healthy provider availability without selecting Owner scope'
+);
+select is(
+  (select count(*)::integer
+   from public.github_connection_reconciliation_runs
+   where installation_id = 'a3230000-0000-4000-8000-000000000030'
+     and incident_transition = 'recovered'),
+  1,
+  'the reconnect lifecycle emits exactly one recovery'
+);
 
 select set_config(
   'app.receipt_reconnect_success_state',
@@ -2185,7 +2303,7 @@ insert into public.github_webhook_deliveries(
 select is(
   (select connection_reconciliation_version from public.github_webhook_deliveries
    where id = 'a3530000-0000-4000-8000-000000000035'),
-  2::bigint,
+  3::bigint,
   'a usable installation with no running run binds its current version at receipt'
 );
 set local role service_role;
@@ -2205,7 +2323,7 @@ reset role;
 select is(
   (select reconciliation_version from public.github_installations
    where id = 'a3230000-0000-4000-8000-000000000030'),
-  3::bigint,
+  4::bigint,
   'the usable receipt advances exactly one coalesced occurrence'
 );
 

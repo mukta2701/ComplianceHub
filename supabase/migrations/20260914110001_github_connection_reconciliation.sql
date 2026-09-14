@@ -423,11 +423,6 @@ begin
         and candidate.connection_reconciliation_version
           = resolved_installation.reconciliation_version
         and resolved_installation.reconciliation_version < 9007199254740991
-        and not (
-          resolved_installation.health = 'disconnected'
-          and resolved_installation.health_diagnostic_code is distinct from
-            'installation_revoked'
-        )
         and (
           resolved_installation.health not in (
             'owner_action_required', 'disconnected'
