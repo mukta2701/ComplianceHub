@@ -201,6 +201,30 @@ describe("GitHub user OAuth", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
+  it("rejects a logical repository page replay hidden behind a distinct URL", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        total_count: 300,
+        repositories: Array.from({ length: 100 }, (_, index) => repository(index + 1)),
+      }), { headers: { Link: '<https://api.github.com/user/installations/77/repositories?page=2&cursor=first>; rel="next"' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        total_count: 300,
+        repositories: Array.from({ length: 100 }, (_, index) => repository(index + 101)),
+      }), { headers: { Link: '<https://api.github.com/user/installations/77/repositories?cursor=second&page=2>; rel="next"' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        total_count: 300,
+        repositories: Array.from({ length: 100 }, (_, index) => repository(index + 201)),
+      }), { headers: { Link: '<https://api.github.com/user/installations/77/repositories?page=3>; rel="next"' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ total_count: 300, repositories: [] })));
+
+    await expect(collectUserInstallationRepositories({
+      userToken: TEST_USER_CREDENTIAL,
+      installationId: 77,
+      fetchImpl,
+    })).rejects.toThrow("GitHub verification failed");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
   it("rejects duplicate repository IDs across pages", async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({

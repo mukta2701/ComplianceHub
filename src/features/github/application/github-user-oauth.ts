@@ -307,11 +307,13 @@ export async function collectUserInstallationRepositories(input: { userToken: st
   if (!Number.isSafeInteger(input.installationId) || input.installationId <= 0) throw verificationError();
   const fetchImpl = input.fetchImpl ?? fetch;
   const authorizationValue = input.userToken;
-  let url = new URL(`/user/installations/${input.installationId}/repositories?per_page=100`, API_ORIGIN);
+  const repositoryPath = `/user/installations/${input.installationId}/repositories`;
+  let url = new URL(`${repositoryPath}?per_page=100`, API_ORIGIN);
   const seenUrls = new Set<string>();
   const repositoryIds = new Set<number>();
   const repositories: UserInstallationRepository[] = [];
   let expectedCount: number | null = null;
+  let currentPage = 1;
 
   for (let page = 0; page < MAX_GITHUB_DISCOVERY_PAGES; page += 1) {
     const currentUrl = url.toString();
@@ -346,7 +348,18 @@ export async function collectUserInstallationRepositories(input: { userToken: st
       if (repositories.length !== expectedCount) throw verificationError();
       return repositories;
     }
+    const pageValues = next.searchParams.getAll("page");
+    const pageValue = pageValues[0] ?? "";
+    const nextPage = Number(pageValue);
+    if (
+      next.pathname !== repositoryPath
+      || pageValues.length !== 1
+      || !/^[1-9][0-9]*$/.test(pageValue)
+      || !Number.isSafeInteger(nextPage)
+      || nextPage <= currentPage
+    ) throw verificationError();
     if (page === MAX_GITHUB_DISCOVERY_PAGES - 1 || seenUrls.has(next.toString())) throw verificationError();
+    currentPage = nextPage;
     url = next;
   }
   throw verificationError();
