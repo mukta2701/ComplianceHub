@@ -908,7 +908,8 @@ test("a minted auditor link exposes a read-only view to an unauthenticated visit
 });
 
 test("a policy is authored, approved, accepted, and re-accepted after a material edit", async ({ page }, testInfo) => {
-  await createWorkspaceOwner(page, testInfo, {
+  test.setTimeout(60_000);
+  const { email, password } = await createWorkspaceOwner(page, testInfo, {
     emailPrefix: "pol",
     ownerName: "Beta Owner",
     organisationPrefix: "Policy Workspace",
@@ -950,6 +951,7 @@ test("a policy is authored, approved, accepted, and re-accepted after a material
   // On the detail page (owner is the signed-in user): approve, then accept.
   await page.waitForURL(/\/app\/policies\/[0-9a-f-]+$/);
   const policyUrl = page.url();
+  const policyId = new URL(policyUrl).pathname.split("/").pop() as string;
   await expect(page.getByText("POLICY POL-001 · v1")).toBeVisible();
   await page.getByRole("button", { name: "Approve policy" }).click();
 
@@ -968,7 +970,19 @@ test("a policy is authored, approved, accepted, and re-accepted after a material
   await page.getByText("Edit policy", { exact: true }).click();
   await page.getByLabel("Policy content").fill("Access to systems is granted on least privilege and reviewed quarterly.");
   await submitServerAction(page, page.getByRole("button", { name: "Save changes" }), new URL(policyUrl).pathname);
-  await page.reload();
+  const owner = createClient(
+    localEnvironment("NEXT_PUBLIC_SUPABASE_URL"),
+    localEnvironment("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
+    { auth: { persistSession: false, autoRefreshToken: false } },
+  );
+  const { error: signInError } = await owner.auth.signInWithPassword({ email, password });
+  expect(signInError).toBeNull();
+  await expect.poll(async () => {
+    const { data, error } = await owner.from("policies").select("version").eq("id", policyId).single();
+    expect(error).toBeNull();
+    return data?.version;
+  }).toBe(2);
+  await page.goto(`${policyUrl}?version=2`);
   await expect(page.getByText("POLICY POL-001 · v2")).toBeVisible();
   await expect(page.getByText("Re-accept (accepted v1)")).toBeVisible();
 
@@ -985,8 +999,8 @@ test("a policy is authored, approved, accepted, and re-accepted after a material
   // Author an evidence record so it can be attached to the policy.
   await page.goto("/app/evidence/new");
   await expect(page.getByRole("heading", { name: "Add evidence", level: 2 })).toBeVisible();
-  await page.getByLabel("Title").fill("Access review log");
-  await page.getByLabel("Kind").selectOption("note");
+  await page.getByLabel("Evidence title").fill("Access review log");
+  await page.getByLabel("Evidence type").selectOption("note");
   await page.getByRole("button", { name: "Save evidence" }).click();
   await page.waitForURL(/\/app\/evidence$/);
 
@@ -1077,7 +1091,8 @@ test("a task is pushed to a sandbox tracker, polled to In Progress, then the con
   }
   await expect(settingsNavLink).toHaveAttribute("aria-current", "page");
   if (testInfo.project.name === "mobile") {
-    await page.getByRole("banner").getByRole("button", { name: "Close navigation" }).click();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("banner").getByRole("button", { name: "Open navigation" })).toHaveAttribute("aria-expanded", "false");
   }
 
   // This deterministic local scenario uses the development-only sample-data
