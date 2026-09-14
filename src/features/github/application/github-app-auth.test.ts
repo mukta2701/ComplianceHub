@@ -6,7 +6,9 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   createAppJwt,
+  createInstallationInventoryToken,
   createInstallationToken,
+  GitHubInstallationTokenError,
   hasExactReadPermissions,
   READ_PERMISSIONS,
 } from "./github-app-auth";
@@ -14,6 +16,7 @@ import { GitHubRateLimitError } from "./github-collection-error";
 
 let privateKeyPem: string;
 let publicKeyPem: string;
+const TEST_INVENTORY_AUTHORIZATION = ["unit", "fixture", "inventory", "authorization"].join(":");
 
 beforeAll(() => {
   const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
@@ -127,6 +130,81 @@ describe("GitHub App authentication", () => {
         redirect: "error",
       }),
     );
+  });
+
+  it("requests a one-hour installation inventory token with exact permissions and no repository narrowing", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      token: TEST_INVENTORY_AUTHORIZATION,
+      expires_at: "2026-09-14T13:00:00.000Z",
+    }), { status: 201, headers: { "content-type": "application/json" } }));
+
+    const result = await createInstallationInventoryToken({
+      installationId: 77,
+      appJwt: "signed-app-jwt",
+      now: new Date("2026-09-14T12:00:00.000Z"),
+      fetchImpl,
+    });
+
+    expect(result).toEqual({ token: TEST_INVENTORY_AUTHORIZATION, expiresAt: "2026-09-14T13:00:00.000Z" });
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://api.github.com/app/installations/77/access_tokens",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ permissions: READ_PERMISSIONS }),
+      }),
+    );
+  });
+
+  it.each([
+    "2026-09-14T12:00:00.000Z",
+    "2026-09-14T13:00:00.001Z",
+    "not-a-date",
+  ])("rejects an invalid installation inventory credential lifetime (%s)", async (expiresAt) => {
+    const providerCredential = crypto.randomUUID();
+    const error = await createInstallationInventoryToken({
+      installationId: 77,
+      appJwt: "signed-app-jwt",
+      now: new Date("2026-09-14T12:00:00.000Z"),
+      fetchImpl: vi.fn().mockResolvedValue(new Response(JSON.stringify({
+        token: providerCredential,
+        expires_at: expiresAt,
+      }), { status: 201 })),
+    }).catch((caught: unknown) => caught);
+
+    expect(String(error)).toBe("Error: GitHub returned an invalid installation token response");
+    expect(String(error)).not.toContain(providerCredential);
+  });
+
+  it.each([
+    [401, "authentication_failed"],
+    [403, "authentication_failed"],
+    [404, "not_found"],
+    [500, "provider_failure"],
+    [503, "provider_failure"],
+  ] as const)("classifies inventory-token HTTP %s without exposing provider content", async (status, diagnosticCode) => {
+    const providerBody = crypto.randomUUID();
+    const error = await createInstallationInventoryToken({
+      installationId: 77,
+      appJwt: "signed-app-jwt",
+      now: new Date("2026-09-14T12:00:00.000Z"),
+      fetchImpl: vi.fn().mockResolvedValue(new Response(providerBody, { status })),
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(GitHubInstallationTokenError);
+    expect(error).toMatchObject({ diagnosticCode });
+    expect(String(error)).not.toContain(providerBody);
+  });
+
+  it("classifies an inventory-token timeout without retaining its thrown detail", async () => {
+    const error = await createInstallationInventoryToken({
+      installationId: 77,
+      appJwt: "signed-app-jwt",
+      now: new Date("2026-09-14T12:00:00.000Z"),
+      fetchImpl: vi.fn().mockRejectedValue(new DOMException("provider detail", "TimeoutError")),
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({ diagnosticCode: "timeout" });
+    expect(String(error)).not.toContain("provider detail");
   });
 
   it.each([

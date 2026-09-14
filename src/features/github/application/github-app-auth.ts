@@ -19,6 +19,12 @@ const installationTokenInputSchema = z.object({
   appJwt: z.string().trim().min(1),
 }).strict();
 
+const installationInventoryTokenInputSchema = z.object({
+  installationId: z.number().int().positive().safe(),
+  appJwt: z.string().trim().min(1),
+  now: z.date().refine((value) => Number.isFinite(value.getTime())),
+}).strict();
+
 const installationTokenResponseSchema = z.object({
   token: z.string().min(1),
   expires_at: z.string().datetime({ offset: true }),
@@ -32,6 +38,19 @@ export const READ_PERMISSIONS = {
   security_events: "read",
   vulnerability_alerts: "read",
 } as const;
+
+export type GitHubInstallationTokenDiagnostic =
+  | "authentication_failed"
+  | "not_found"
+  | "provider_failure"
+  | "timeout";
+
+export class GitHubInstallationTokenError extends Error {
+  constructor(public readonly diagnosticCode: GitHubInstallationTokenDiagnostic) {
+    super("GitHub installation token request failed");
+    this.name = "GitHubInstallationTokenError";
+  }
+}
 
 export function hasExactReadPermissions(value: unknown): value is typeof READ_PERMISSIONS {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
@@ -112,6 +131,66 @@ export async function createInstallationToken(input: {
 
   try {
     const token = installationTokenResponseSchema.parse(await response.json());
+    return { token: token.token, expiresAt: token.expires_at };
+  } catch {
+    throw new Error("GitHub returned an invalid installation token response");
+  }
+}
+
+export async function createInstallationInventoryToken(input: {
+  installationId: number;
+  appJwt: string;
+  now: Date;
+  fetchImpl?: FetchLike;
+}): Promise<{ token: string; expiresAt: string }> {
+  const parsed = installationInventoryTokenInputSchema.safeParse({
+    installationId: input.installationId,
+    appJwt: input.appJwt,
+    now: input.now,
+  });
+  if (!parsed.success) throw new Error("Invalid GitHub installation token request");
+
+  let response: Response;
+  try {
+    response = await (input.fetchImpl ?? fetch)(
+      `https://api.github.com/app/installations/${parsed.data.installationId}/access_tokens`,
+      {
+        method: "POST",
+        headers: {
+          Accept: "application/vnd.github+json",
+          Authorization: `Bearer ${parsed.data.appJwt}`,
+          "Content-Type": "application/json",
+          "User-Agent": "ComplianceHub-GitHub-App",
+          "X-GitHub-Api-Version": "2026-03-10",
+        },
+        body: JSON.stringify({ permissions: READ_PERMISSIONS }),
+        cache: "no-store",
+        redirect: "error",
+        signal: AbortSignal.timeout(15_000),
+      },
+    );
+  } catch (error) {
+    if (error instanceof DOMException && (error.name === "AbortError" || error.name === "TimeoutError")) {
+      throw new GitHubInstallationTokenError("timeout");
+    }
+    throw new GitHubInstallationTokenError("provider_failure");
+  }
+
+  throwIfGitHubRateLimited(response);
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      throw new GitHubInstallationTokenError("authentication_failed");
+    }
+    if (response.status === 404) throw new GitHubInstallationTokenError("not_found");
+    if (response.status >= 500) throw new GitHubInstallationTokenError("provider_failure");
+    throw new Error("Could not create GitHub installation token");
+  }
+
+  try {
+    const token = installationTokenResponseSchema.parse(await response.json());
+    const expiresAt = Date.parse(token.expires_at);
+    const now = parsed.data.now.getTime();
+    if (expiresAt <= now || expiresAt > now + 60 * 60_000) throw new Error("invalid lifetime");
     return { token: token.token, expiresAt: token.expires_at };
   } catch {
     throw new Error("GitHub returned an invalid installation token response");
