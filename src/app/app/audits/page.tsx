@@ -7,7 +7,12 @@ import { SubTabs } from "@/components/sub-tabs";
 import { assessAuditPreflight } from "@/features/audits/domain/preflight";
 import { getModuleGuidance } from "@/features/education/domain/guidance";
 import { assessScopeProfile } from "@/features/scope/domain/scope-profile";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import styles from "./audit-workspace.module.css";
+
+const auditNavigation = workspaceAccess("owner").section("audits").navigation!;
+const activityMetadata = workspaceAccess("owner").section("audit-activity");
+const auditTabs = [{ href: auditNavigation.href, label: auditNavigation.label }, { href: activityMetadata.href, label: activityMetadata.label }];
 
 type AuditRow = { id:string; reference:string; title:string; status:string; planned_start:string|null; planned_end:string|null };
 
@@ -39,7 +44,7 @@ function AuditCard({ audit }: { audit:AuditRow }) {
 
 export default async function AuditsPage() {
   const { supabase, organisation, membership } = await requireAppContext();
-  const isMember = membership.role === "member";
+  const isMember = workspaceAccess(membership.role).section("audits").presentation === "member";
   const today = new Date().toISOString().slice(0, 10);
   const registerResult = await supabase.from("soa_registers").select("id").eq("organisation_id", organisation.id).order("version", { ascending: false }).limit(1).maybeSingle();
   const [{ data: audits, error: auditsError }, { data: findings, error: findingsError }, { data: soaItems, error: soaError }, { count: expiredEvidence, error: evidenceError }, { count: overdueTasks, error: tasksError }, { data: scopeProfile, error: scopeError }] = await Promise.all([
@@ -63,7 +68,7 @@ export default async function AuditsPage() {
   return <div className={styles.page}>
     <PageIntro eyebrow="AUDIT" title="Internal audits" body="Plan independent checks, work the control checklist, and turn findings into owned corrective action." action={!isMember && <Link className="button primary" href="/app/audits/new"><Icon name="plus" />Plan an audit</Link>} />
     <AuditJourney />
-    <SubTabs tabs={[{ href: "/app/audits", label: "Internal audits" }, { href: "/app/activity", label: "Audit trail" }]} />
+    <SubTabs tabs={auditTabs} />
     <details className="section-guide"><summary>How internal audits work</summary><ModuleExplainer guidance={getModuleGuidance("audits")} /></details>
     <Card className={styles.preflight} data-clear={!preflightUnavailable && blockers.length === 0}>
       <div><h2>Audit preflight</h2>{preflightUnavailable ? <p role="alert">Preflight data is unavailable. Resolve the data-access issue before relying on this check.</p> : blockers.length ? <><p>Resolve these known programme gaps before relying on an audit-readiness decision.</p><ul>{blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul></> : <p>No deterministic blockers found. A human still needs to review scope, evidence quality and audit objectives.</p>}</div>

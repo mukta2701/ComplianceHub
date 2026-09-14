@@ -20,6 +20,8 @@ const operatorTrustCenterNavigation = workspaceAccess("owner").section("trust-ce
 const notificationsMetadata = workspaceAccess("owner").section("notifications");
 const operatorOverviewNavigation = workspaceAccess("owner").section("overview").navigation!;
 const operatorEvidenceNavigation = workspaceAccess("owner").section("evidence").navigation!;
+const operatorAuditNavigation = workspaceAccess("owner").section("audits").navigation!;
+const operatorAuditActivityMetadata = workspaceAccess("owner").section("audit-activity");
 
 const navGroups = [
   { label: "Work", items: [
@@ -36,7 +38,7 @@ const navGroups = [
   { label: "Oversight", items: [
     ["/app/monitoring", "activity", "Monitoring"],
     ["/app/automation", "activity", "Automation inbox"],
-    ["/app/audits", "shield", "Internal audits"],
+    [operatorAuditNavigation.href, operatorAuditNavigation.icon, operatorAuditNavigation.label],
     ["/app/kpis", "check", "Performance"],
   ] },
   { label: operatorLeadershipNavigation.group, items: [
@@ -78,12 +80,11 @@ const memberNavGroups = [
 // Routes not in the sidebar still need a header title.
 const EXTRA_TITLES: Array<[string, string]> = [
   ["/app/assets/import", "Import asset inventory"],
-  ["/app/activity", "Audit trail"],
+  [operatorAuditActivityMetadata.href, operatorAuditActivityMetadata.title],
   [notificationsMetadata.href, notificationsMetadata.title],
   ["/app/integrations", "Connections"],
   ["/app/risks/import", "Import risk register"],
   ["/app/soa/import", "Import Statement of Applicability"],
-  ["/app/audits/new", "Plan an audit"],
   ["/app/policies/new", "Author a policy"],
   ["/app/onboarding", "Workspace setup"],
   ["/app/invitations", "Invitation"],
@@ -143,11 +144,13 @@ export function AppShell({ organisationId, orgName, orgInitials, userInitials, u
   const isMember = overviewAccess.presentation === "member";
   const isOperator = overviewAccess.presentation === "operator";
   const frameworkAccess = workspaceAccess(role).section("frameworks");
+  const auditAccess = workspaceAccess(role).section("audits");
+  const auditTitle = auditAccess.titleForPath(path);
   const title = isActive(path, overviewAccess.href)
     ? overviewAccess.title
     : isActive(path, frameworkAccess.href)
       ? frameworkAccess.title
-      : TITLE_ROUTES.find(([href]) => isActive(path, href))?.[1] ?? "ComplianceHub";
+      : auditTitle ?? TITLE_ROUTES.find(([href]) => isActive(path, href))?.[1] ?? "ComplianceHub";
   const accessCue = isMember ? "Member view" : role ? roleLabel(role) : "Workspace setup";
   const workspaceSubtitle = isMember
     ? `${jobTitle?.trim() || "Member"} · Assigned work access`

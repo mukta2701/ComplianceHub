@@ -5,9 +5,11 @@ import { revalidatePath } from "next/cache";
 import { requireAppContext } from "@/lib/app-context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { auditInputSchema, checklistItemInputSchema, findingInputSchema } from "@/features/audits/application/audit";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
+import type { MembershipRole } from "@/features/organisations/domain/access";
 
-function requireOperator(membership: { role: string }) {
-  if (membership.role !== "owner" && membership.role !== "admin") throw new Error("Only workspace operators can modify audits");
+function requireOperator(membership: { role: MembershipRole }) {
+  workspaceAccess(membership.role).section("audits").requireManage();
 }
 
 export async function createAuditAction(formData: FormData) {

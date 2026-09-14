@@ -13,6 +13,7 @@ import type { EvidenceKind, EvidenceStatus } from "@/features/evidence/domain/ev
 import { AuditFindingForm } from "./audit-finding-form";
 import { EVIDENCE_PROVIDER_LABELS } from "@/features/integrations/domain/evidence-provider";
 import { AuditorLinkFlash } from "./auditor-link-flash";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import styles from "../audit-workspace.module.css";
 
 const RESULTS:ChecklistResult[] = ["not_tested","compliant","non_compliant","not_applicable"];
@@ -46,7 +47,7 @@ export default async function AuditDetailPage({ params,searchParams }: { params:
   const proofPageSize = 25;
 
   const { supabase, organisation, membership } = await requireAppContext();
-  const isMember = membership.role === "member";
+  const isMember = workspaceAccess(membership.role).section("audits").presentation === "member";
   const { data:audit, error:auditError } = await supabase.from("audits").select("id,reference,title,scope,status,framework,planned_start,planned_end").eq("id", id).eq("organisation_id", organisation.id).maybeSingle();
   if (auditError) throw new Error("Could not load the audit");
   if (!audit) notFound();

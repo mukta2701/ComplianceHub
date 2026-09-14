@@ -1,17 +1,20 @@
 import { hasCapability, type MembershipRole, type WorkspaceCapability } from "./access";
 
-export type WorkspaceSectionId = "assets" | "assessments" | "baseline" | "evidence" | "frameworks" | "leadership-report" | "notifications" | "overview" | "policies" | "risks" | "scope" | "soa" | "trust-center";
+export type WorkspaceSectionId = "assets" | "assessments" | "audit-activity" | "audits" | "baseline" | "evidence" | "frameworks" | "leadership-report" | "notifications" | "overview" | "policies" | "risks" | "scope" | "soa" | "trust-center";
 
 export type WorkspaceSectionPresentation = "member" | "operator";
 
-type WorkspaceNavigationGroup = "Compliance" | "Programme" | "Share" | "Work" | null;
+type WorkspaceNavigationGroup = "Compliance" | "Oversight" | "Programme" | "Share" | "Work" | null;
 
 type WorkspacePathRequirement = "view" | "manage";
 
 type WorkspacePathRule = {
   path: string | RegExp;
   requirement: WorkspacePathRequirement;
+  title?: string;
 };
+
+type WorkspaceManageOperation = "auditor-access";
 
 type WorkspaceNavigationItem = {
   group: WorkspaceNavigationGroup;
@@ -32,7 +35,8 @@ export type WorkspaceSectionAccess = {
   presentation: WorkspaceSectionPresentation | null;
   manageDeniedMessage: string | null;
   canAccessPath: (pathname: string) => boolean;
-  requireManage: () => void;
+  titleForPath: (pathname: string) => string | null;
+  requireManage: (operation?: WorkspaceManageOperation) => void;
 };
 
 type WorkspaceSectionPolicy = {
@@ -51,11 +55,15 @@ type WorkspaceSectionPolicy = {
   }>>;
   manageCapability?: WorkspaceCapability;
   manageDeniedMessage: string | null;
+  operationDeniedMessages?: Partial<Record<WorkspaceManageOperation, string>>;
 };
 
 const ASSESSMENT_DETAIL_PATH = /^\/app\/assessment\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ASSET_DETAIL_PATH = /^\/app\/assets\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ASSET_EDIT_PATH = /^\/app\/assets\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/edit$/i;
+const AUDIT_DETAIL_PATH = /^\/app\/audits\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const AUDIT_PACK_PATH = /^\/api\/app\/audits\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/pack$/i;
+const AUDITOR_LINK_PATH = /^\/api\/app\/audits\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/auditor-link$/i;
 const POLICY_DETAIL_PATH = /^\/app\/policies\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const RISK_DETAIL_PATH = /^\/app\/risks\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const RISK_EDIT_PATH = /^\/app\/risks\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/edit$/i;
@@ -101,6 +109,43 @@ const sectionPolicies: Record<WorkspaceSectionId, WorkspaceSectionPolicy> = {
     navigationGroups: { owner: "Programme", admin: "Programme" },
     manageCapability: "manage_assessments",
     manageDeniedMessage: "Only workspace operators can complete assessments.",
+  },
+  audits: {
+    id: "audits",
+    href: "/app/audits",
+    label: "Internal audits",
+    title: "Internal audits",
+    icon: "shield",
+    paths: [
+      { path: "/app/audits", requirement: "view" },
+      { path: AUDIT_DETAIL_PATH, requirement: "view" },
+      { path: "/app/audits/new", requirement: "manage", title: "Plan an audit" },
+      { path: AUDIT_PACK_PATH, requirement: "manage" },
+      { path: AUDITOR_LINK_PATH, requirement: "manage" },
+    ],
+    viewRoles: new Set(["owner", "admin"]),
+    navigationGroups: { owner: "Oversight", admin: "Oversight" },
+    rolePresentation: {
+      owner: { label: "Internal audits", title: "Internal audits", presentation: "operator" },
+      admin: { label: "Internal audits", title: "Internal audits", presentation: "operator" },
+      member: { label: "Internal audits", title: "Internal audits", presentation: "member" },
+    },
+    manageCapability: "manage_audits",
+    manageDeniedMessage: "Only workspace operators can modify audits",
+    operationDeniedMessages: {
+      "auditor-access": "Only workspace operators can manage auditor access",
+    },
+  },
+  "audit-activity": {
+    id: "audit-activity",
+    href: "/app/activity",
+    label: "Audit trail",
+    title: "Audit trail",
+    icon: "activity",
+    paths: [{ path: "/app/activity", requirement: "view" }],
+    viewRoles: new Set(["owner", "admin"]),
+    navigationGroups: {},
+    manageDeniedMessage: null,
   },
   evidence: {
     id: "evidence",
@@ -298,8 +343,13 @@ function sectionAccess(
       if (!rule) return false;
       return rule.requirement === "manage" ? canManage : canView;
     },
-    requireManage: () => {
-      if (!canManage) throw new Error(policy.manageDeniedMessage ?? "Workspace management access is unavailable");
+    titleForPath: (pathname) => {
+      const rule = policy.paths.find((candidate) => pathMatches(candidate, pathname));
+      return rule ? rule.title ?? title : null;
+    },
+    requireManage: (operation) => {
+      const deniedMessage = operation ? policy.operationDeniedMessages?.[operation] : policy.manageDeniedMessage;
+      if (!canManage) throw new Error(deniedMessage ?? policy.manageDeniedMessage ?? "Workspace management access is unavailable");
     },
   };
 }

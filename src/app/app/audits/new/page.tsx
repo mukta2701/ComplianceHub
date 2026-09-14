@@ -4,11 +4,12 @@ import { requireAppContext } from "@/lib/app-context";
 import { Card, PageIntro } from "@/components/ui";
 import { one } from "@/lib/supabase/one";
 import { createAuditAction } from "../actions";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import styles from "../audit-workspace.module.css";
 
 export default async function NewAuditPage() {
   const { supabase, organisation, membership } = await requireAppContext();
-  if (membership.role === "member") redirect("/app/audits");
+  if (!workspaceAccess(membership.role).section("audits").canManage) redirect("/app/audits");
   const { data:members,error } = await supabase.from("memberships").select("user_id,profiles(display_name)").eq("organisation_id", organisation.id);
   if (error) throw new Error("Could not load audit owners");
   return <div className={styles.page}>

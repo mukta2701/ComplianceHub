@@ -701,3 +701,85 @@ describe("Statement of Applicability workspace access", () => {
     expect(soa.canAccessPath("/app/soa/import")).toBe(false);
   });
 });
+
+describe("Internal audits workspace access", () => {
+  const auditId = "56000000-0000-4000-8000-000000000001";
+
+  it.each(["owner", "admin"] as const)("gives %s the existing Audit routes, navigation, and controls", (role) => {
+    const audits = workspaceAccess(role).section("audits");
+
+    expect(audits).toMatchObject({
+      id: "audits",
+      href: "/app/audits",
+      label: "Internal audits",
+      title: "Internal audits",
+      icon: "shield",
+      canView: true,
+      canManage: true,
+      presentation: "operator",
+      navigation: {
+        group: "Oversight",
+        href: "/app/audits",
+        label: "Internal audits",
+        icon: "shield",
+      },
+      manageDeniedMessage: "Only workspace operators can modify audits",
+    });
+    for (const pathname of [
+      "/app/audits",
+      `/app/audits/${auditId}`,
+      "/app/audits/new",
+      `/api/app/audits/${auditId}/pack`,
+      `/api/app/audits/${auditId}/auditor-link`,
+    ]) expect(audits.canAccessPath(pathname)).toBe(true);
+    expect(audits.titleForPath("/app/audits/new")).toBe("Plan an audit");
+    expect(() => audits.requireManage()).not.toThrow();
+    expect(() => audits.requireManage("auditor-access")).not.toThrow();
+  });
+
+  it("keeps the dormant Member Audit presentation without making its routes accessible", () => {
+    const audits = workspaceAccess("member").section("audits");
+
+    expect(audits).toMatchObject({ canView: false, canManage: false, presentation: "member", navigation: null });
+    expect(audits.canAccessPath("/app/audits")).toBe(false);
+    expect(audits.canAccessPath(`/app/audits/${auditId}`)).toBe(false);
+    expect(audits.canAccessPath(`/api/app/audits/${auditId}/pack`)).toBe(false);
+    expect(() => audits.requireManage()).toThrow("Only workspace operators can modify audits");
+    expect(() => audits.requireManage("auditor-access")).toThrow("Only workspace operators can manage auditor access");
+  });
+
+  it("does not grant Audit access before Workspace membership exists or to invented subpaths", () => {
+    const audits = workspaceAccess(null).section("audits");
+
+    expect(audits).toMatchObject({ canView: false, canManage: false, presentation: null, navigation: null });
+    expect(audits.canAccessPath("/app/audits")).toBe(false);
+    expect(workspaceAccess("owner").sectionForPath("/app/audits/not-an-audit-id")).toBeNull();
+    expect(workspaceAccess("owner").sectionForPath(`/app/audits/${auditId}/extra`)).toBeNull();
+  });
+});
+
+describe("Audit activity workspace access", () => {
+  it.each(["owner", "admin"] as const)("keeps Audit activity available without adding sidebar navigation for %s", (role) => {
+    const activity = workspaceAccess(role).section("audit-activity");
+
+    expect(activity).toMatchObject({
+      id: "audit-activity",
+      href: "/app/activity",
+      label: "Audit trail",
+      title: "Audit trail",
+      icon: "activity",
+      canView: true,
+      canManage: false,
+      navigation: null,
+      manageDeniedMessage: null,
+    });
+    expect(activity.canAccessPath("/app/activity")).toBe(true);
+  });
+
+  it.each(["member", null] as const)("keeps Audit activity unavailable for %s", (role) => {
+    const activity = workspaceAccess(role).section("audit-activity");
+
+    expect(activity).toMatchObject({ canView: false, canManage: false, navigation: null });
+    expect(activity.canAccessPath("/app/activity")).toBe(false);
+  });
+});

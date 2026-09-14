@@ -2,6 +2,11 @@ import { requireAppContext } from "@/lib/app-context";
 import { Card, PageIntro, Pill } from "@/components/ui";
 import { SubTabs } from "@/components/sub-tabs";
 import { one } from "@/lib/supabase/one";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
+
+const auditNavigation = workspaceAccess("owner").section("audits").navigation!;
+const activityMetadata = workspaceAccess("owner").section("audit-activity");
+const auditTabs = [{ href: auditNavigation.href, label: auditNavigation.label }, { href: activityMetadata.href, label: activityMetadata.label }];
 
 export default async function ActivityPage() {
   const { supabase, organisation } = await requireAppContext();
@@ -22,7 +27,7 @@ export default async function ActivityPage() {
 
   return <>
     <PageIntro eyebrow="AUDIT" title="Audit activity" body="Append-only record of important tenant changes." />
-    <SubTabs tabs={[{ href: "/app/audits", label: "Internal audits" }, { href: "/app/activity", label: "Audit trail" }]} />
+    <SubTabs tabs={auditTabs} />
     <Card>{groups.length
       ? groups.map((g) => <div style={{ padding: "14px 18px", borderTop: "1px solid #edf0f4", fontSize: "13px", display: "flex", alignItems: "center", gap: "8px" }} key={g.id}>
           <b style={{ textTransform: "capitalize" }}>{g.action}</b>

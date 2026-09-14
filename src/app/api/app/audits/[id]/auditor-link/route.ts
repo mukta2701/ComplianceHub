@@ -2,11 +2,12 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { requireAppContext } from "@/lib/app-context";
 import { AUDITOR_LINK_FLASH_COOKIE } from "@/features/audits/application/auditor-token";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 
 export async function GET(_request:Request,{ params }:{ params:Promise<{id:string}> }) {
   const { id } = await params;
   const { supabase,organisation,membership } = await requireAppContext();
-  if (membership.role !== "owner" && membership.role !== "admin") return NextResponse.json({ link:null },{ status:403 });
+  if (!workspaceAccess(membership.role).section("audits").canManage) return NextResponse.json({ link:null },{ status:403 });
   const { data:audit,error } = await supabase.from("audits").select("id").eq("id",id).eq("organisation_id",organisation.id).maybeSingle();
   if (error || !audit) return NextResponse.json({ link:null },{ status:404 });
   const jar = await cookies();

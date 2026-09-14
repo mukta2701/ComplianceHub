@@ -6,9 +6,11 @@ import { cookies } from "next/headers";
 import { requireAppContext } from "@/lib/app-context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { mintAuditorToken, AUDITOR_LINK_FLASH_COOKIE } from "@/features/audits/application/auditor-token";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
+import type { MembershipRole } from "@/features/organisations/domain/access";
 
-function requireAuditorAccessOperator(membership: { role:string }) {
-  if (membership.role !== "owner" && membership.role !== "admin") throw new Error("Only workspace operators can manage auditor access");
+function requireAuditorAccessOperator(membership: { role:MembershipRole }) {
+  workspaceAccess(membership.role).section("audits").requireManage("auditor-access");
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

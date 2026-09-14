@@ -110,6 +110,21 @@ describe("AppShell role-specific navigation", () => {
     expect(screen.getByRole("heading", { name: "Connections", level: 1 })).toBeInTheDocument();
   });
 
+  it("keeps Audit navigation and route-specific titles unchanged", () => {
+    const { unmount } = renderShell("owner");
+    expect(screen.getByRole("link", { name: "Internal audits" })).toHaveAttribute("href", "/app/audits");
+    unmount();
+
+    hoisted.pathname = "/app/audits/new";
+    const planned = renderShell("owner");
+    expect(screen.getByRole("heading", { name: "Plan an audit", level: 1 })).toBeInTheDocument();
+    planned.unmount();
+
+    hoisted.pathname = "/app/activity";
+    renderShell("admin");
+    expect(screen.getByRole("heading", { name: "Audit trail", level: 1 })).toBeInTheDocument();
+  });
+
   it("shows workspace setup without operational navigation before membership exists", () => {
     hoisted.pathname = "/app/onboarding";
     renderShell(null);
