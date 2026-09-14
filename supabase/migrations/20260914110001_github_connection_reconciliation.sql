@@ -749,7 +749,7 @@ begin
     set status = 'cancelled',
         diagnostic_code = null,
         incident_transition = 'none',
-        completed_at = disconnected_at,
+        completed_at = greatest(disconnected_at, run.last_attempted_at),
         repository_count = (
           select pg_catalog.count(*)::integer
           from public.github_repositories repository

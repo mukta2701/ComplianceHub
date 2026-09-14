@@ -606,11 +606,18 @@ set local role service_role;
 select set_config(
   'app.disconnect_active_run_id',
   (select id::text from public.claim_due_github_connection_reconciliations_server(
-    'a3400000-0000-4000-8000-000000000009', 1, now()
+    'a3400000-0000-4000-8000-000000000009', 1,
+    pg_catalog.clock_timestamp() + interval '1 day'
   )),
   true
 );
 reset role;
+select ok(
+  (select last_attempted_at > pg_catalog.clock_timestamp()
+   from public.github_connection_reconciliation_runs
+   where id = current_setting('app.disconnect_active_run_id')::uuid),
+  'the disconnect regression starts with a legally future-dated claimed run'
+);
 select set_config(
   'app.installation_audit_before_disconnect',
   (select count(*)::text from public.audit_events where entity_type = 'github_installations' and entity_id = 'a3200000-0000-4000-8000-000000000001'),
@@ -627,10 +634,31 @@ select set_config(
   true
 );
 
+create or replace function pg_temp.disconnect_future_claim_fixture()
+returns text
+language plpgsql
+as $$
+begin
+  return public.disconnect_github_installation(
+    'a3200000-0000-4000-8000-000000000001'
+  )::text;
+exception
+  when check_violation then return 'check_violation';
+end;
+$$;
+
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub":"a3000000-0000-4000-8000-000000000001","role":"authenticated"}', true);
-select is(public.disconnect_github_installation('a3200000-0000-4000-8000-000000000001'), true, 'an Owner disconnects only the local lifecycle state');
-select is(public.disconnect_github_installation('a3200000-0000-4000-8000-000000000001'), false, 'a repeated local disconnect is harmless');
+select is(
+  pg_temp.disconnect_future_claim_fixture(),
+  'true',
+  'an Owner can disconnect local lifecycle state after a future-dated legal claim'
+);
+select is(
+  pg_temp.disconnect_future_claim_fixture(),
+  'false',
+  'a repeated local disconnect is harmless'
+);
 
 reset role;
 select is((select health::text from public.github_installations where id = 'a3200000-0000-4000-8000-000000000001'), 'disconnected', 'local disconnect has an explicit connection state');
