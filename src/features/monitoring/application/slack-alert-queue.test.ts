@@ -90,6 +90,8 @@ describe("Slack alert payload safety", () => {
 
     expect(payload.text).toBe("ComplianceHub connection update — GitHub connection recovered");
     expect(serialized).toContain("Account: Company-1");
+    expect(serialized).toContain("Connection: GitHub connection");
+    expect(serialized).not.toContain("State:");
     expect(serialized).toContain("/app/integrations");
     expect(serialized).not.toContain("Control:");
     expect(serialized).not.toContain("continuous monitoring");

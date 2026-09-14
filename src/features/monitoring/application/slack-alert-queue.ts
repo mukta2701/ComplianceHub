@@ -71,7 +71,7 @@ export function buildQueuedSlackPayload(payload: SafeSlackDeliveryPayload): {
           type: "section",
           fields: [
             { type: "plain_text", text: `Account: ${payload.subjectId}` },
-            { type: "plain_text", text: `State: ${payload.controlRef}` },
+            { type: "plain_text", text: `Connection: ${payload.controlRef}` },
           ],
         },
         { type: "section", text: { type: "plain_text", text: payload.detail } },

@@ -2,24 +2,30 @@ import "server-only";
 
 import { z } from "zod";
 
-import type { GitHubConnectionDiagnostic } from "../domain/connection-health";
+import type {
+  GitHubConnectionDiagnostic,
+  GitHubConnectionHealth,
+} from "../domain/connection-health";
 
 export type GitHubConnectionNotice = {
   kind: "incident" | "recovery";
+  runId: string;
   installationId: string;
   organisationId: string;
   accountLogin: string;
-  health: "retrying" | "partially_unavailable" | "owner_action_required" | "disconnected" | "healthy";
+  health: GitHubConnectionHealth;
   diagnostic: GitHubConnectionDiagnostic | null;
   occurredAt: string;
   connectionHref: "/app/integrations";
 };
 
 export type GitHubConnectionAlertDependencies = {
-  project(notice: GitHubConnectionNotice): Promise<unknown>;
+  project(notice: GitHubConnectionNotice, signal?: AbortSignal): Promise<unknown>;
 };
 
-type RpcResult = PromiseLike<{ data: unknown; error: unknown }>;
+type RpcResult = PromiseLike<{ data: unknown; error: unknown }> & {
+  abortSignal(signal: AbortSignal): RpcResult;
+};
 type RpcClient = {
   rpc(name: string, args: Record<string, unknown>): RpcResult;
 };
@@ -38,6 +44,7 @@ const diagnostic = z.enum([
 
 const noticeSchema = z.object({
   kind: z.enum(["incident", "recovery"]),
+  runId: z.string().uuid(),
   installationId: z.string().uuid(),
   organisationId: z.string().uuid(),
   accountLogin: z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/),
@@ -69,19 +76,28 @@ function queueFailure(): Error {
   return new Error("GitHub connection alert queue failed");
 }
 
+function requireActive(signal?: AbortSignal): void {
+  if (signal?.aborted) throw queueFailure();
+}
+
 export function buildGitHubConnectionAlertDependencies(
   database: RpcClient,
 ): GitHubConnectionAlertDependencies {
   return {
-    async project(notice) {
-      const { data, error } = await database.rpc("project_github_connection_notice_server", {
+    async project(notice, signal) {
+      requireActive(signal);
+      const query = database.rpc("project_github_connection_notice_server", {
+        target_run_id: notice.runId,
         target_organisation_id: notice.organisationId,
         target_installation_id: notice.installationId,
+        target_account_login: notice.accountLogin,
         target_kind: notice.kind,
         target_health: notice.health,
         target_diagnostic_code: notice.diagnostic,
         target_occurred_at: notice.occurredAt,
       });
+      const { data, error } = await (signal ? query.abortSignal(signal) : query);
+      requireActive(signal);
       if (error) throw queueFailure();
       return data;
     },
@@ -91,10 +107,14 @@ export function buildGitHubConnectionAlertDependencies(
 export async function queueGitHubConnectionNotice(
   dependencies: GitHubConnectionAlertDependencies,
   notice: GitHubConnectionNotice,
+  signal?: AbortSignal,
 ): Promise<{ inAppQueued: number; slackQueued: number }> {
   try {
+    requireActive(signal);
     const safeNotice = noticeSchema.parse(notice);
-    return queueResultSchema.parse(await dependencies.project(safeNotice));
+    const result = queueResultSchema.parse(await dependencies.project(safeNotice, signal));
+    requireActive(signal);
+    return result;
   } catch {
     throw queueFailure();
   }

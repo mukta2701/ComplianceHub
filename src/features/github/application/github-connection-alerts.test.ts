@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  buildGitHubConnectionAlertDependencies,
   queueGitHubConnectionNotice,
   type GitHubConnectionAlertDependencies,
   type GitHubConnectionNotice,
@@ -9,6 +10,7 @@ import {
 
 const incident: GitHubConnectionNotice = {
   kind: "incident",
+  runId: "20000000-0000-4000-8000-000000000001",
   installationId: "40000000-0000-4000-8000-000000000001",
   organisationId: "30000000-0000-4000-8000-000000000001",
   accountLogin: "Company-1",
@@ -32,7 +34,40 @@ describe("queueGitHubConnectionNotice", () => {
       slackQueued: 1,
     });
 
-    expect(deps.project).toHaveBeenCalledWith(incident);
+    expect(deps.project).toHaveBeenCalledWith(incident, undefined);
+  });
+
+  it("binds the immutable reconciliation run and cancellation signal to the RPC", async () => {
+    const response = { data: { inAppQueued: 0, slackQueued: 0 }, error: null };
+    const query = Object.assign(Promise.resolve(response), { abortSignal: vi.fn() });
+    query.abortSignal.mockReturnValue(query);
+    const database = { rpc: vi.fn().mockReturnValue(query) };
+    const controller = new AbortController();
+
+    await expect(buildGitHubConnectionAlertDependencies(database)
+      .project(incident, controller.signal)).resolves.toEqual(response.data);
+
+    expect(database.rpc).toHaveBeenCalledWith("project_github_connection_notice_server", {
+      target_run_id: incident.runId,
+      target_organisation_id: incident.organisationId,
+      target_installation_id: incident.installationId,
+      target_account_login: incident.accountLogin,
+      target_kind: incident.kind,
+      target_health: incident.health,
+      target_diagnostic_code: incident.diagnostic,
+      target_occurred_at: incident.occurredAt,
+    });
+    expect(query.abortSignal).toHaveBeenCalledWith(controller.signal);
+  });
+
+  it("does not start acknowledgement when cancellation already happened", async () => {
+    const deps = dependencies();
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(queueGitHubConnectionNotice(deps, incident, controller.signal))
+      .rejects.toThrow("GitHub connection alert queue failed");
+    expect(deps.project).not.toHaveBeenCalled();
   });
 
   it("projects verified recovery once with no stale diagnostic", async () => {
@@ -50,10 +85,11 @@ describe("queueGitHubConnectionNotice", () => {
     expect(deps.project).toHaveBeenCalledWith(expect.objectContaining({
       kind: "recovery",
       diagnostic: null,
-    }));
+    }), undefined);
   });
 
   it.each([
+    { ...incident, runId: "not-a-run-id" },
     { ...incident, accountLogin: "private/body" },
     { ...incident, accountLogin: "a".repeat(40) },
     { ...incident, connectionHref: "https://secret.example.test" },

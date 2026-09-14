@@ -34,8 +34,8 @@ create table public.github_connection_incidents (
   )
 );
 
-create unique index github_connection_incidents_one_open_diagnostic
-on public.github_connection_incidents(installation_id, diagnostic_code)
+create unique index github_connection_incidents_one_open_episode
+on public.github_connection_incidents(installation_id)
 where resolved_at is null;
 
 create index github_connection_incidents_installation_history_idx
@@ -193,7 +193,6 @@ declare
   safe_idempotency_key text;
   in_app_count integer := 0;
   slack_count integer := 0;
-  inserted_count integer := 0;
 begin
   select * into run_row
   from public.github_connection_reconciliation_runs
@@ -221,56 +220,38 @@ begin
     then 'recovery' else 'incident' end;
 
   if notice_kind = 'incident' then
-    if run_row.diagnostic_code is null then
-      select * into incident_row
-      from public.github_connection_incidents incident
-      where incident.installation_id = run_row.installation_id
-        and incident.organisation_id = run_row.organisation_id
-        and incident.resolved_at is null
-      order by incident.last_observed_at desc, incident.id
-      limit 1
-      for update;
-      if not found then
-        return pg_catalog.jsonb_build_object('inAppQueued', 0, 'slackQueued', 0);
-      end if;
+    select * into incident_row
+    from public.github_connection_incidents incident
+    where incident.installation_id = run_row.installation_id
+      and incident.organisation_id = run_row.organisation_id
+      and incident.resolved_at is null
+    for update;
+    if found then
       update public.github_connection_incidents incident
       set last_observed_at = greatest(incident.last_observed_at, run_row.last_attempted_at),
+          diagnostic_code = coalesce(run_row.diagnostic_code, incident.diagnostic_code),
           health = run_row.effective_health,
           updated_at = pg_catalog.clock_timestamp()
       where incident.id = incident_row.id
       returning * into incident_row;
+    elsif run_row.diagnostic_code is null then
+      return pg_catalog.jsonb_build_object('inAppQueued', 0, 'slackQueued', 0);
     else
-      select * into incident_row
-      from public.github_connection_incidents incident
-      where incident.installation_id = run_row.installation_id
-        and incident.organisation_id = run_row.organisation_id
-        and incident.diagnostic_code = run_row.diagnostic_code
-        and incident.resolved_at is null
-      for update;
-      if found then
-        update public.github_connection_incidents incident
-        set last_observed_at = greatest(incident.last_observed_at, run_row.last_attempted_at),
-            health = run_row.effective_health,
-            updated_at = pg_catalog.clock_timestamp()
-        where incident.id = incident_row.id
-        returning * into incident_row;
-      else
-        insert into public.github_connection_incidents(
-          organisation_id, installation_id, incident_key, diagnostic_code,
-          health, opened_at, last_observed_at
-        ) values (
-          run_row.organisation_id,
-          run_row.installation_id,
-          pg_catalog.encode(extensions.digest(
-            run_row.installation_id::text || ':' || run_row.diagnostic_code,
-            'sha256'
-          ), 'hex'),
-          run_row.diagnostic_code,
-          run_row.effective_health,
-          run_row.last_attempted_at,
-          run_row.last_attempted_at
-        ) returning * into incident_row;
-      end if;
+      insert into public.github_connection_incidents(
+        organisation_id, installation_id, incident_key, diagnostic_code,
+        health, opened_at, last_observed_at
+      ) values (
+        run_row.organisation_id,
+        run_row.installation_id,
+        pg_catalog.encode(extensions.digest(
+          run_row.installation_id::text || ':' || run_row.id::text,
+          'sha256'
+        ), 'hex'),
+        run_row.diagnostic_code,
+        run_row.effective_health,
+        run_row.last_attempted_at,
+        run_row.last_attempted_at
+      ) returning * into incident_row;
     end if;
     if run_row.incident_transition <> 'opened' then
       return pg_catalog.jsonb_build_object('inAppQueued', 0, 'slackQueued', 0);
@@ -291,9 +272,8 @@ begin
     set last_observed_at = greatest(incident.last_observed_at, run_row.last_attempted_at),
         resolved_at = greatest(incident.last_observed_at, run_row.last_attempted_at),
         updated_at = pg_catalog.clock_timestamp()
-    where incident.installation_id = run_row.installation_id
-      and incident.organisation_id = run_row.organisation_id
-      and incident.resolved_at is null;
+    where incident.id = incident_row.id
+    returning * into incident_row;
   end if;
 
   safe_payload := public.github_connection_notice_payload(
@@ -393,8 +373,10 @@ on public.github_connection_reconciliation_runs
 for each row execute function public.project_github_connection_notice_after_finalization();
 
 create or replace function public.project_github_connection_notice_server(
+  target_run_id uuid,
   target_organisation_id uuid,
   target_installation_id uuid,
+  target_account_login text,
   target_kind text,
   target_health text,
   target_diagnostic_code text,
@@ -406,11 +388,11 @@ volatile
 security definer
 set search_path = ''
 as $$
-declare
-  run_id uuid;
 begin
-  if target_organisation_id is null
+  if target_run_id is null
+    or target_organisation_id is null
     or target_installation_id is null
+    or target_account_login is null
     or target_kind not in ('incident', 'recovery')
     or target_health not in (
       'healthy', 'retrying', 'partially_unavailable',
@@ -422,38 +404,39 @@ begin
       errcode = '22023', message = 'GitHub connection alert input is invalid';
   end if;
 
-  select run.id into run_id
-  from public.github_connection_reconciliation_runs run
-  join public.github_installations installation
-    on installation.id = run.installation_id
-   and installation.organisation_id = run.organisation_id
-  where run.organisation_id = target_organisation_id
-    and run.installation_id = target_installation_id
-    and run.last_attempted_at = target_occurred_at
-    and run.status <> 'running'
-    and run.effective_health::text = target_health
-    and run.diagnostic_code is not distinct from target_diagnostic_code
-    and (
-      (target_kind = 'incident' and run.incident_transition in ('opened', 'remained_open'))
-      or (target_kind = 'recovery' and run.incident_transition = 'recovered')
-    )
-  order by run.completed_at desc, run.id
-  limit 1;
-  if run_id is null then
+  if not exists (
+    select 1
+    from public.github_connection_reconciliation_runs run
+    join public.github_installations installation
+      on installation.id = run.installation_id
+     and installation.organisation_id = run.organisation_id
+    where run.id = target_run_id
+      and run.organisation_id = target_organisation_id
+      and run.installation_id = target_installation_id
+      and installation.account_login = target_account_login
+      and run.last_attempted_at = target_occurred_at
+      and run.status <> 'running'
+      and run.effective_health::text = target_health
+      and run.diagnostic_code is not distinct from target_diagnostic_code
+      and (
+        (target_kind = 'incident' and run.incident_transition in ('opened', 'remained_open'))
+        or (target_kind = 'recovery' and run.incident_transition = 'recovered')
+      )
+  ) then
     raise exception using
       errcode = '22023', message = 'GitHub connection alert input is invalid';
   end if;
 
-  return public.project_github_connection_notice_from_run(run_id);
+  return pg_catalog.jsonb_build_object('inAppQueued', 0, 'slackQueued', 0);
 end;
 $$;
 
 alter function public.project_github_connection_notice_server(
-  uuid, uuid, text, text, text, timestamptz
+  uuid, uuid, uuid, text, text, text, text, timestamptz
 ) owner to postgres;
 revoke all on function public.project_github_connection_notice_server(
-  uuid, uuid, text, text, text, timestamptz
+  uuid, uuid, uuid, text, text, text, text, timestamptz
 ) from public, anon, authenticated, service_role;
 grant execute on function public.project_github_connection_notice_server(
-  uuid, uuid, text, text, text, timestamptz
+  uuid, uuid, uuid, text, text, text, text, timestamptz
 ) to service_role;

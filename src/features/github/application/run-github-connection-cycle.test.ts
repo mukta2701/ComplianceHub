@@ -394,6 +394,7 @@ describe("runGitHubConnectionCycle", () => {
     });
     expect(deps.queueConnectionNotice).toHaveBeenCalledWith({
       kind: "incident",
+      runId: claim(1).runId,
       installationId: claim(1).installationId,
       organisationId: claim(1).organisationId,
       accountLogin: "Company-1",
@@ -401,7 +402,7 @@ describe("runGitHubConnectionCycle", () => {
       diagnostic: null,
       occurredAt: "2026-09-14T12:00:00.000Z",
       connectionHref: "/app/integrations",
-    });
+    }, expect.any(AbortSignal));
   });
 
   it("queues only the atomic opening transition for an immediate serious failure", async () => {
@@ -421,6 +422,7 @@ describe("runGitHubConnectionCycle", () => {
     expect(deps.queueConnectionNotice).toHaveBeenCalledOnce();
     expect(deps.queueConnectionNotice).toHaveBeenCalledWith({
       kind: "incident",
+      runId: claim(1).runId,
       installationId: claim(1).installationId,
       organisationId: claim(1).organisationId,
       accountLogin: "Company-1",
@@ -428,7 +430,7 @@ describe("runGitHubConnectionCycle", () => {
       diagnostic: "permission_mismatch",
       occurredAt: "2026-09-14T12:00:00.000Z",
       connectionHref: "/app/integrations",
-    });
+    }, expect.any(AbortSignal));
   });
 
   it("keeps a one-off temporary failure quiet when finalization returns none", async () => {
@@ -464,10 +466,11 @@ describe("runGitHubConnectionCycle", () => {
 
     expect(deps.queueConnectionNotice).toHaveBeenCalledOnce();
     expect(deps.queueConnectionNotice).toHaveBeenCalledWith(expect.objectContaining({
+      runId: claim(1).runId,
       kind: "incident",
       health: "retrying",
       diagnostic: "provider_temporary_failure",
-    }));
+    }), expect.any(AbortSignal));
   });
 
   it("projects a repeated open observation without synthesizing another transition", async () => {
@@ -485,7 +488,10 @@ describe("runGitHubConnectionCycle", () => {
     await buildGitHubConnectionCycleRunner(deps)(cycleInput);
 
     expect(deps.queueConnectionNotice).toHaveBeenCalledOnce();
-    expect(deps.queueConnectionNotice).toHaveBeenCalledWith(expect.objectContaining({ kind: "incident" }));
+    expect(deps.queueConnectionNotice).toHaveBeenCalledWith(expect.objectContaining({
+      runId: claim(1).runId,
+      kind: "incident",
+    }), expect.any(AbortSignal));
   });
 
   it("queues recovery only from the verified recovered transition", async () => {
@@ -504,10 +510,86 @@ describe("runGitHubConnectionCycle", () => {
 
     expect(deps.queueConnectionNotice).toHaveBeenCalledOnce();
     expect(deps.queueConnectionNotice).toHaveBeenCalledWith(expect.objectContaining({
+      runId: claim(1).runId,
       kind: "recovery",
       health: "healthy",
       diagnostic: null,
-    }));
+    }), expect.any(AbortSignal));
+  });
+
+  it.each([
+    [{
+      outcome: "action_required",
+      diagnostic: "permission_mismatch",
+      nextAttemptAt: null,
+      repositorySnapshot: [],
+      incidentTransition: "opened",
+      effectiveHealth: "owner_action_required",
+    }, { healthy: 0, actionRequired: 1, recovered: 0 }],
+    [{
+      outcome: "success",
+      diagnostic: null,
+      nextAttemptAt: "2026-09-15T12:00:00.000Z",
+      repositorySnapshot: [],
+      incidentTransition: "recovered",
+      effectiveHealth: "healthy",
+    }, { healthy: 1, actionRequired: 0, recovered: 1 }],
+  ])("keeps authoritative health accounting when acknowledgement transport fails", async (
+    reconciliation,
+    expected,
+  ) => {
+    const privateDetail = crypto.randomUUID();
+    const deps = dependencies();
+    deps.claimDue.mockResolvedValue([claim(1)]);
+    deps.reconcile.mockResolvedValue(reconciliation);
+    deps.queueConnectionNotice.mockRejectedValue(new Error(`transport ${privateDetail}`));
+
+    const result = await buildGitHubConnectionCycleRunner(deps)(cycleInput);
+
+    expect(result).toMatchObject({ ...expected, ownershipLost: 0 });
+    expect(JSON.stringify(result)).not.toContain(privateDetail);
+  });
+
+  it("aborts a pending acknowledgement at the cycle deadline without later work", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-14T12:00:00.000Z"));
+    try {
+      let observedSignal: AbortSignal | undefined;
+      const deps = dependencies({ now: () => new Date() });
+      deps.claimDue.mockResolvedValue([claim(1), claim(2)]);
+      deps.reconcile.mockResolvedValue({
+        outcome: "action_required",
+        diagnostic: "permission_mismatch",
+        nextAttemptAt: null,
+        repositorySnapshot: [],
+        incidentTransition: "opened",
+        effectiveHealth: "owner_action_required",
+      });
+      deps.queueConnectionNotice.mockImplementation((_notice, signal?: AbortSignal) => {
+        observedSignal = signal;
+        if (!signal) return Promise.reject(new Error("missing cycle signal"));
+        return new Promise((_resolve, reject) => {
+          const stop = () => reject(signal.reason);
+          if (signal.aborted) stop();
+          else signal.addEventListener("abort", stop, { once: true });
+        });
+      });
+
+      const pending = buildGitHubConnectionCycleRunner(deps)({
+        ...cycleInput,
+        timeBudgetMs: 10,
+      });
+      const rejected = expect(pending).rejects.toThrow("GitHub connection cycle failed");
+      await vi.advanceTimersByTimeAsync(10);
+
+      await rejected;
+      expect(observedSignal?.aborted).toBe(true);
+      expect(deps.reconcile).toHaveBeenCalledOnce();
+      expect(deps.queueConnectionNotice).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("reports partial, action-required, and disconnected results without identifiers", async () => {

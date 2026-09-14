@@ -59,7 +59,7 @@ export type GitHubConnectionCycleDependencies = {
     claim: ClaimedGitHubConnectionReconciliation,
     signal: AbortSignal,
   ): Promise<GitHubConnectionReconciliationResult>;
-  queueConnectionNotice(notice: GitHubConnectionNotice): Promise<{
+  queueConnectionNotice(notice: GitHubConnectionNotice, signal?: AbortSignal): Promise<{
     inAppQueued: number;
     slackQueued: number;
   }>;
@@ -212,16 +212,23 @@ export function buildGitHubConnectionCycleRunner(
         processedRuns.add(claim.runId);
         processedInstallations.add(claim.installationId);
 
+        let reconciliationResponse: GitHubConnectionReconciliationResult;
         try {
-          const parsedResult = reconciliationResultSchema.safeParse(
-            await dependencies.reconcile(claim, cycle.signal),
-          );
-          if (!parsedResult.success) {
-            summary.ownershipLost += 1;
-          } else {
-            if (parsedResult.data.incidentTransition !== "none") {
+          reconciliationResponse = await dependencies.reconcile(claim, cycle.signal);
+        } catch {
+          summary.ownershipLost += 1;
+          ensureActive(dependencies, cycle.signal, deadlineAt);
+          continue;
+        }
+        const parsedResult = reconciliationResultSchema.safeParse(reconciliationResponse);
+        if (!parsedResult.success) {
+          summary.ownershipLost += 1;
+        } else {
+          if (parsedResult.data.incidentTransition !== "none") {
+            try {
               await dependencies.queueConnectionNotice({
                 kind: parsedResult.data.incidentTransition === "recovered" ? "recovery" : "incident",
+                runId: claim.runId,
                 installationId: claim.installationId,
                 organisationId: claim.organisationId,
                 accountLogin: claim.account.login,
@@ -229,25 +236,25 @@ export function buildGitHubConnectionCycleRunner(
                 diagnostic: parsedResult.data.diagnostic,
                 occurredAt: claim.attemptedAt,
                 connectionHref: "/app/integrations",
-              });
+              }, cycle.signal);
+            } catch {
+              ensureActive(dependencies, cycle.signal, deadlineAt);
             }
-            switch (parsedResult.data.effectiveHealth) {
-              case "healthy":
-                summary.healthy += 1;
-                break;
-              case "retrying":
-                summary.retrying += 1;
-                break;
-              case "partially_unavailable":
-              case "owner_action_required":
-              case "disconnected":
-                summary.actionRequired += 1;
-                break;
-            }
-            if (parsedResult.data.incidentTransition === "recovered") summary.recovered += 1;
           }
-        } catch {
-          summary.ownershipLost += 1;
+          switch (parsedResult.data.effectiveHealth) {
+            case "healthy":
+              summary.healthy += 1;
+              break;
+            case "retrying":
+              summary.retrying += 1;
+              break;
+            case "partially_unavailable":
+            case "owner_action_required":
+            case "disconnected":
+              summary.actionRequired += 1;
+              break;
+          }
+          if (parsedResult.data.incidentTransition === "recovered") summary.recovered += 1;
         }
         ensureActive(dependencies, cycle.signal, deadlineAt);
       }
@@ -294,7 +301,7 @@ function buildProductionDependencies(): GitHubConnectionCycleDependencies {
     drainConnectionWebhooks: (input) => drainGitHubConnectionWebhookDeliveries(webhook, input),
     claimDue: store.claimDue,
     reconcile: (claim, signal) => reconcileGitHubConnection(reconciliationDependencies, claim, signal),
-    queueConnectionNotice: (notice) => queueGitHubConnectionNotice(alerts, notice),
+    queueConnectionNotice: (notice, signal) => queueGitHubConnectionNotice(alerts, notice, signal),
     now: () => new Date(),
   };
 }
