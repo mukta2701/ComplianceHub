@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { createAppJwt } from "@/features/github/application/github-app-auth";
-import { resolveGitHubAccountType } from "@/features/github/application/github-account-policy";
+import { getGitHubConnectionConfig } from "@/features/github/application/github-runtime-config";
 import {
   collectUserInstallationRepositories,
   exchangeGitHubUserCode,
@@ -105,12 +105,18 @@ export async function GET(request: Request): Promise<NextResponse> {
   });
 
   const callback = readCallback(new URL(request.url));
-  const clientSecret = process.env.GITHUB_APP_CLIENT_SECRET;
-  if (!callback || !cookieValue || !clientSecret) return errorRedirect("invalid_request");
+  if (!callback || !cookieValue) return errorRedirect("invalid_request");
+
+  let config;
+  try {
+    config = getGitHubConnectionConfig();
+  } catch {
+    return configurationErrorRedirect();
+  }
 
   let flow;
   try {
-    flow = parseOAuthFlowCookie(cookieValue, clientSecret);
+    flow = parseOAuthFlowCookie(cookieValue, config.clientSecret);
   } catch {
     return errorRedirect("invalid_request");
   }
@@ -136,24 +142,6 @@ export async function GET(request: Request): Promise<NextResponse> {
     return errorRedirect("rate_limited");
   }
 
-  const clientId = process.env.GITHUB_APP_CLIENT_ID;
-  const appId = process.env.GITHUB_APP_ID;
-  const privateKey = process.env.GITHUB_APP_PRIVATE_KEY;
-  const allowedAccountId = Number(process.env.GITHUB_ALLOWED_ACCOUNT_ID);
-  if (!clientId || !appId || !privateKey || !Number.isSafeInteger(allowedAccountId) || allowedAccountId <= 0) {
-    return configurationErrorRedirect();
-  }
-  let allowedAccountType;
-  try {
-    allowedAccountType = resolveGitHubAccountType({
-      configuredType: process.env.GITHUB_ALLOWED_ACCOUNT_TYPE,
-      nodeEnv: process.env.NODE_ENV,
-      siteUrl: process.env.NEXT_PUBLIC_SITE_URL,
-    });
-  } catch {
-    return configurationErrorRedirect();
-  }
-
   try {
     const stateHash = createHash("sha256").update(callback.state, "utf8").digest("hex");
     const service = createSupabaseServiceClient();
@@ -167,13 +155,13 @@ export async function GET(request: Request): Promise<NextResponse> {
 
     const callbackUrl = canonicalSiteUrl("/api/github/callback").toString();
     const userToken = await exchangeGitHubUserCode({
-      clientId,
-      clientSecret,
+      clientId: config.clientId,
+      clientSecret: config.clientSecret,
       code: callback.code,
       callbackUrl,
       codeVerifier: flow.codeVerifier,
     });
-    const appJwt = await createAppJwt({ appId, privateKey }, new Date());
+    const appJwt = await createAppJwt({ appId: config.appId, privateKey: config.privateKey }, new Date());
     const [userInstallationIds, appInstallation, repositories] = await Promise.all([
       listUserInstallationIds({ userToken }),
       getAppInstallation({ appJwt, installationId: flow.pendingInstallationId }),
@@ -188,7 +176,10 @@ export async function GET(request: Request): Promise<NextResponse> {
         appInstallation,
         repositories,
       },
-      { allowedAccountType },
+      {
+        allowedAccountId: config.allowedAccountId,
+        allowedAccountType: config.allowedAccountType,
+      },
     );
     return redirectTo(canonicalSiteUrl("/app/integrations?github=connected"));
   } catch {

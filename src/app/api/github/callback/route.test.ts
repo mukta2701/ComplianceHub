@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const ORG_ID = "11111111-1111-4111-8111-111111111111";
 const ACTOR_ID = "22222222-2222-4222-8222-222222222222";
+const CLIENT_CREDENTIAL = crypto.randomUUID();
+const WEBHOOK_CREDENTIAL = crypto.randomUUID();
 const REPOSITORY = {
   id: 101,
   owner: "Adtecher",
@@ -26,6 +28,7 @@ const hoisted = vi.hoisted(() => ({
   collectRepos: vi.fn(),
   createAppJwt: vi.fn(),
   claim: vi.fn(),
+  getConnectionConfig: vi.fn(),
   requireContext: vi.fn(),
 }));
 
@@ -45,18 +48,21 @@ vi.mock("@/features/github/application/github-user-oauth", () => ({
 }));
 vi.mock("@/features/github/application/github-app-auth", () => ({ createAppJwt: hoisted.createAppJwt }));
 vi.mock("@/features/github/application/installation-claim", () => ({ claimInstallation: hoisted.claim }));
+vi.mock("@/features/github/application/github-runtime-config", () => ({
+  getGitHubConnectionConfig: hoisted.getConnectionConfig,
+}));
 
 import { GET } from "./route";
 
 describe("GET /api/github/callback", () => {
   beforeEach(() => {
     vi.stubEnv("NEXT_PUBLIC_SITE_URL", "https://compliance.example");
-    vi.stubEnv("GITHUB_ALLOWED_ACCOUNT_TYPE", undefined);
-    vi.stubEnv("GITHUB_APP_CLIENT_ID", "client-id");
-    vi.stubEnv("GITHUB_APP_CLIENT_SECRET", "client-secret");
-    vi.stubEnv("GITHUB_APP_ID", "123");
-    vi.stubEnv("GITHUB_APP_PRIVATE_KEY", "private-key");
-    vi.stubEnv("GITHUB_ALLOWED_ACCOUNT_ID", "99");
+    vi.stubEnv("GITHUB_ALLOWED_ACCOUNT_TYPE", "Organization");
+    vi.stubEnv("GITHUB_APP_CLIENT_ID", "ambient-client-id");
+    vi.stubEnv("GITHUB_APP_CLIENT_SECRET", "ambient-client-secret");
+    vi.stubEnv("GITHUB_APP_ID", "777");
+    vi.stubEnv("GITHUB_APP_PRIVATE_KEY", "ambient-private-key");
+    vi.stubEnv("GITHUB_ALLOWED_ACCOUNT_ID", "777");
     hoisted.sequence.length = 0;
     hoisted.context = { organisation: { id: ORG_ID }, user: { id: ACTOR_ID }, membership: { role: "owner" } };
     hoisted.cookieValue = "signed-cookie";
@@ -70,6 +76,16 @@ describe("GET /api/github/callback", () => {
     hoisted.exchange.mockResolvedValue(crypto.randomUUID());
     hoisted.listIds.mockResolvedValue([77]);
     hoisted.createAppJwt.mockResolvedValue("app-jwt");
+    hoisted.getConnectionConfig.mockReturnValue({
+      appId: "123",
+      appSlug: "compliancehub-app",
+      clientId: "client-id",
+      clientSecret: CLIENT_CREDENTIAL,
+      privateKey: "private-key",
+      webhookSecret: WEBHOOK_CREDENTIAL,
+      allowedAccountId: 99,
+      allowedAccountType: "Organization",
+    });
     hoisted.getApp.mockResolvedValue({ id: 77, account: { id: 99, login: "Adtecher", type: "Organization" }, repositorySelection: "selected", permissions: {}, suspendedAt: null });
     hoisted.collectRepos.mockResolvedValue([REPOSITORY]);
     hoisted.claim.mockResolvedValue("installation-uuid");
@@ -89,13 +105,21 @@ describe("GET /api/github/callback", () => {
     expect(response.headers.get("location")).toBe("https://compliance.example/app/integrations?github=connected");
     expect(response.headers.get("referrer-policy")).toBe("no-referrer");
     expect(hoisted.exchange).toHaveBeenCalledWith(expect.objectContaining({ codeVerifier: "v".repeat(43) }));
+    expect(hoisted.exchange).toHaveBeenCalledWith(expect.objectContaining({
+      clientId: "client-id",
+      clientSecret: CLIENT_CREDENTIAL,
+    }));
+    expect(hoisted.createAppJwt).toHaveBeenCalledWith(
+      { appId: "123", privateKey: "private-key" },
+      expect.any(Date),
+    );
     expect(hoisted.claim).toHaveBeenCalledWith(
       expect.objectContaining({
         organisationId: ORG_ID, actorId: ACTOR_ID, requestedInstallationId: 77,
         userInstallationIds: [77],
         repositories: [REPOSITORY],
       }),
-      { allowedAccountType: "Organization" },
+      { allowedAccountId: 99, allowedAccountType: "Organization" },
     );
   });
 
@@ -111,6 +135,16 @@ describe("GET /api/github/callback", () => {
     vi.stubEnv("GITHUB_ALLOWED_ACCOUNT_TYPE", "User");
     vi.stubEnv("NODE_ENV", "test");
     vi.stubEnv("NEXT_PUBLIC_SITE_URL", "http://127.0.0.1:3000");
+    hoisted.getConnectionConfig.mockReturnValue({
+      appId: "123",
+      appSlug: "compliancehub-app",
+      clientId: "client-id",
+      clientSecret: CLIENT_CREDENTIAL,
+      privateKey: "private-key",
+      webhookSecret: WEBHOOK_CREDENTIAL,
+      allowedAccountId: 99,
+      allowedAccountType: "User",
+    });
     const appInstallation = {
       id: 77,
       account: { id: 99, login: "mukta2701", type: "User" },
@@ -136,7 +170,7 @@ describe("GET /api/github/callback", () => {
         appInstallation,
         repositories,
       }),
-      { allowedAccountType: "User" },
+      { allowedAccountId: 99, allowedAccountType: "User" },
     );
   });
 
@@ -156,6 +190,9 @@ describe("GET /api/github/callback", () => {
     vi.stubEnv("NODE_ENV", nodeEnv);
     vi.stubEnv("GITHUB_ALLOWED_ACCOUNT_TYPE", accountType);
     vi.stubEnv("NEXT_PUBLIC_SITE_URL", configuredSiteUrl);
+    hoisted.getConnectionConfig.mockImplementation(() => {
+      throw new Error("GitHub connection is not configured");
+    });
 
     const response = await GET(request());
 
@@ -187,14 +224,17 @@ describe("GET /api/github/callback", () => {
     vi.stubEnv("NODE_ENV", nodeEnv);
     vi.stubEnv("GITHUB_ALLOWED_ACCOUNT_TYPE", "User");
     vi.stubEnv("NEXT_PUBLIC_SITE_URL", configuredSiteUrl);
+    hoisted.getConnectionConfig.mockImplementation(() => {
+      throw new Error("GitHub connection is not configured");
+    });
 
     const response = await GET(request());
 
-    expect(hoisted.sequence.slice(0, 3)).toEqual(["clear-cookie", "auth", "rate-limit"]);
+    expect(hoisted.sequence).toEqual(["clear-cookie"]);
     expect(hoisted.cookieSet).toHaveBeenCalledWith("compliancehub_github_oauth", "", {
       httpOnly: true, secure: true, sameSite: "lax", path: "/api/github", maxAge: 0,
     });
-    expect(hoisted.enforceRateLimit).toHaveBeenCalledTimes(1);
+    expect(hoisted.enforceRateLimit).not.toHaveBeenCalled();
     expect(response.status).toBe(303);
     expect(response.headers.get("location")).toBe(expectedLocation);
     expect(response.headers.get("cache-control")).toBe("no-store");

@@ -7,6 +7,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import {
   createAppJwt,
   createInstallationToken,
+  hasExactReadPermissions,
   READ_PERMISSIONS,
 } from "./github-app-auth";
 import { GitHubRateLimitError } from "./github-collection-error";
@@ -31,6 +32,31 @@ describe("GitHub App authentication", () => {
       vulnerability_alerts: "read",
     });
     expect(READ_PERMISSIONS).not.toHaveProperty("dependabot_alerts");
+  });
+
+  it.each([
+    ["missing actions", { administration: "read", metadata: "read", secret_scanning_alerts: "read", security_events: "read", vulnerability_alerts: "read" }],
+    ["missing administration", { actions: "read", metadata: "read", secret_scanning_alerts: "read", security_events: "read", vulnerability_alerts: "read" }],
+    ["missing metadata", { actions: "read", administration: "read", secret_scanning_alerts: "read", security_events: "read", vulnerability_alerts: "read" }],
+    ["missing secret_scanning_alerts", { actions: "read", administration: "read", metadata: "read", security_events: "read", vulnerability_alerts: "read" }],
+    ["missing security_events", { actions: "read", administration: "read", metadata: "read", secret_scanning_alerts: "read", vulnerability_alerts: "read" }],
+    ["missing vulnerability_alerts", { actions: "read", administration: "read", metadata: "read", secret_scanning_alerts: "read", security_events: "read" }],
+    ["additional contents permission", { actions: "read", administration: "read", metadata: "read", secret_scanning_alerts: "read", security_events: "read", vulnerability_alerts: "read", contents: "read" }],
+    ["write permission", { actions: "read", administration: "write", metadata: "read", secret_scanning_alerts: "read", security_events: "read", vulnerability_alerts: "read" }],
+    ["unexpected permission value", { actions: "triage", administration: "read", metadata: "read", secret_scanning_alerts: "read", security_events: "read", vulnerability_alerts: "read" }],
+  ])("rejects a permission payload with %s", (_label, permissions) => {
+    expect(hasExactReadPermissions(permissions)).toBe(false);
+  });
+
+  it("accepts the exact six approved read permissions regardless of property order", () => {
+    expect(hasExactReadPermissions({
+      vulnerability_alerts: "read",
+      security_events: "read",
+      secret_scanning_alerts: "read",
+      metadata: "read",
+      administration: "read",
+      actions: "read",
+    })).toBe(true);
   });
 
   it("signs an RS256 app JWT with GitHub's bounded claims and normalises escaped PEM newlines", async () => {

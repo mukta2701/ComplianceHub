@@ -24,7 +24,7 @@ const verified: VerifiedInstallationClaim = {
 describe("claimInstallation", () => {
   it("persists only a triple-verified canonical Organization claim", async () => {
     const persist = vi.fn().mockResolvedValue("installation-uuid");
-    await expect(claimInstallation(verified, { allowedAccountId: 99, persist })).resolves.toBe("installation-uuid");
+    await expect(claimInstallation(verified, { allowedAccountId: 99, allowedAccountType: "Organization", persist })).resolves.toBe("installation-uuid");
     expect(persist).toHaveBeenCalledWith(expect.objectContaining({
       requestedInstallationId: 77,
       accountId: 99,
@@ -89,7 +89,7 @@ describe("claimInstallation", () => {
   ])("rejects %s before persistence", async (_label, patch) => {
     const persist = vi.fn();
     const claim = { ...verified, ...patch } as VerifiedInstallationClaim;
-    await expect(claimInstallation(claim, { allowedAccountId: 99, persist })).rejects.toThrow("GitHub installation verification failed");
+    await expect(claimInstallation(claim, { allowedAccountId: 99, allowedAccountType: "Organization", persist })).rejects.toThrow("GitHub installation verification failed");
     expect(persist).not.toHaveBeenCalled();
   });
 
@@ -102,7 +102,7 @@ describe("claimInstallation", () => {
       [verified.repositories[0], { ...verified.repositories[0] }],
       Array.from({ length: 101 }, (_, index) => ({ ...verified.repositories[0], id: index + 1, name: `repo-${index}`, fullName: `adtecher/repo-${index}` })),
     ]) {
-      await expect(claimInstallation({ ...verified, repositories }, { allowedAccountId: 99, persist })).rejects.toThrow("GitHub installation verification failed");
+      await expect(claimInstallation({ ...verified, repositories }, { allowedAccountId: 99, allowedAccountType: "Organization", persist })).rejects.toThrow("GitHub installation verification failed");
     }
     expect(persist).not.toHaveBeenCalled();
   });
@@ -110,7 +110,7 @@ describe("claimInstallation", () => {
   it("maps transactional persistence failures to a fixed error", async () => {
     const providerDetail = crypto.randomUUID();
     const persist = vi.fn().mockRejectedValue(new Error(providerDetail));
-    const error = await claimInstallation(verified, { allowedAccountId: 99, persist }).catch((value: unknown) => value);
+    const error = await claimInstallation(verified, { allowedAccountId: 99, allowedAccountType: "Organization", persist }).catch((value: unknown) => value);
     expect(String(error)).toBe("Error: GitHub installation claim failed");
     expect(String(error)).not.toContain(providerDetail);
   });

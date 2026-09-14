@@ -33,6 +33,16 @@ export const READ_PERMISSIONS = {
   vulnerability_alerts: "read",
 } as const;
 
+export function hasExactReadPermissions(value: unknown): value is typeof READ_PERMISSIONS {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const entries = Object.entries(value);
+  return entries.length === Object.keys(READ_PERMISSIONS).length
+    && entries.every(([name, permission]) => (
+      name in READ_PERMISSIONS
+      && READ_PERMISSIONS[name as keyof typeof READ_PERMISSIONS] === permission
+    ));
+}
+
 export async function createAppJwt(
   config: { appId: string; privateKey: string },
   now: Date,
