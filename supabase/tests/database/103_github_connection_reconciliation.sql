@@ -1192,7 +1192,9 @@ insert into version_matrix_webhooks
 select * from public.claim_github_connection_webhook_deliveries_server(100);
 select ok(
   (select pg_catalog.bool_and(public.finalize_github_webhook_delivery_server(
-     delivery.id, delivery.attempt_count, 'processed', null
+     delivery.id, delivery.attempt_count,
+     case when delivery.installation_id is null then 'ignored' else 'processed' end,
+     null
    )) from version_matrix_webhooks delivery),
   'all matrix connection deliveries terminalize through their owned attempts'
 );
@@ -1200,8 +1202,8 @@ reset role;
 select is((select count(*)::integer from version_matrix_webhooks), 7, 'the bounded connection claim receives every matrix occurrence');
 select is(
   (select reconciliation_version from public.github_installations where id = 'a3210000-0000-4000-8000-000000000010'),
-  3::bigint,
-  'two connection deliveries each advance the installation occurrence version'
+  2::bigint,
+  'two same-version connection deliveries advance one coalesced installation occurrence'
 );
 select ok(
   (select pg_catalog.bool_and(installation.reconciliation_version = 2)
@@ -1303,9 +1305,9 @@ select ok(
 select is(
   (select count(*)::integer from version_matrix_followup_runs
    where installation_id = 'a3210000-0000-4000-8000-000000000010'
-     and reconciliation_version = 3),
+     and reconciliation_version = 2),
   1,
-  'two pending deliveries coalesce into one follow-up run at their latest version'
+  'two same-version deliveries coalesce into one version-two follow-up run'
 );
 set local role service_role;
 select is(
@@ -1656,6 +1658,14 @@ select is(public.finalize_github_connection_reconciliation_server(
   'incidentTransition', 'opened',
   'effectiveHealth', 'owner_action_required'
 ), 'atomic finalization returns only transition and applied fail-closed health');
+select is(public.finalize_github_connection_reconciliation_server(
+  (select id from receipt_order_initial_runs where installation_id = 'a3220000-0000-4000-8000-000000000020'),
+  'a3420000-0000-4000-8000-000000000001', 'action_required',
+  'permission_mismatch', null, '[]'::jsonb
+), pg_catalog.jsonb_build_object(
+  'incidentTransition', 'opened',
+  'effectiveHealth', 'owner_action_required'
+), 'an idempotent finalization replay returns the exact stored transition and effective health');
 select is(pg_temp.finalize_github_connection_transition(
   (select id from receipt_order_initial_runs where installation_id = 'a3220000-0000-4000-8000-000000000021'),
   'a3420000-0000-4000-8000-000000000001', 'disconnected',
@@ -1876,6 +1886,371 @@ select is(
   'the provider-limited occurrence becomes claimable exactly at its retained reset'
 );
 reset role;
+
+insert into public.github_installations(
+  id, organisation_id, provider_installation_id, account_id, account_login,
+  account_type, repository_selection, status, connected_by, permissions,
+  permissions_ok, health, health_diagnostic_code, next_reconciliation_at,
+  reconciliation_version
+) values
+  ('a3230000-0000-4000-8000-000000000030', 'a3100000-0000-4000-8000-000000000001', 933030, 943030, 'Receipt-Reconnect', 'Organization', 'selected', 'active', 'a3000000-0000-4000-8000-000000000001', '{"metadata":"read"}', true, 'healthy', null, '2000-01-01 00:00:00+00', 1),
+  ('a3230000-0000-4000-8000-000000000031', 'a3100000-0000-4000-8000-000000000001', 933031, 943031, 'Receipt-Precedence', 'Organization', 'selected', 'active', 'a3000000-0000-4000-8000-000000000001', '{"metadata":"read"}', true, 'healthy', null, '2000-01-01 00:00:00+00', 1),
+  ('a3230000-0000-4000-8000-000000000032', 'a3100000-0000-4000-8000-000000000001', 933032, 943032, 'Receipt-Owner-Action', 'Organization', 'selected', 'needs_attention', 'a3000000-0000-4000-8000-000000000001', '{"metadata":"read"}', false, 'owner_action_required', 'permission_mismatch', null, 1),
+  ('a3230000-0000-4000-8000-000000000033', 'a3100000-0000-4000-8000-000000000001', 933033, 943033, 'Receipt-Maximum', 'Organization', 'selected', 'active', 'a3000000-0000-4000-8000-000000000001', '{"metadata":"read"}', true, 'healthy', null, null, 9007199254740991);
+insert into public.github_repositories(
+  id, organisation_id, installation_id, provider_repository_id,
+  owner_login, name, full_name, html_url, visibility, default_branch,
+  selected, available, removed_at
+) values
+  ('a3330000-0000-4000-8000-000000000030', 'a3100000-0000-4000-8000-000000000001', 'a3230000-0000-4000-8000-000000000030', 953030, 'Receipt-Reconnect', 'repo', 'Receipt-Reconnect/repo', 'https://github.com/Receipt-Reconnect/repo', 'private', 'main', true, true, null),
+  ('a3330000-0000-4000-8000-000000000031', 'a3100000-0000-4000-8000-000000000001', 'a3230000-0000-4000-8000-000000000031', 953031, 'Receipt-Precedence', 'repo', 'Receipt-Precedence/repo', 'https://github.com/Receipt-Precedence/repo', 'private', 'main', true, true, null),
+  ('a3330000-0000-4000-8000-000000000032', 'a3100000-0000-4000-8000-000000000001', 'a3230000-0000-4000-8000-000000000032', 953032, 'Receipt-Owner-Action', 'repo', 'Receipt-Owner-Action/repo', 'https://github.com/Receipt-Owner-Action/repo', 'private', 'main', false, false, now()),
+  ('a3330000-0000-4000-8000-000000000033', 'a3100000-0000-4000-8000-000000000001', 'a3230000-0000-4000-8000-000000000033', 953033, 'Receipt-Maximum', 'repo', 'Receipt-Maximum/repo', 'https://github.com/Receipt-Maximum/repo', 'private', 'main', true, true, null);
+
+create temporary table receipt_provenance_runs
+as select * from public.github_connection_reconciliation_runs with no data;
+create temporary table receipt_provenance_deliveries
+as select * from public.github_webhook_deliveries with no data;
+grant select, insert on receipt_provenance_runs to service_role;
+grant select, insert on receipt_provenance_deliveries to service_role;
+set local role service_role;
+insert into receipt_provenance_runs
+select * from public.claim_due_github_connection_reconciliations_server(
+  'a3430000-0000-4000-8000-000000000030', 2, now()
+);
+reset role;
+select is(
+  (select count(*)::integer from receipt_provenance_runs where installation_id in (
+    'a3230000-0000-4000-8000-000000000030',
+    'a3230000-0000-4000-8000-000000000031'
+  )),
+  2,
+  'receipt provenance fixtures begin with exact running version-one reconciliations'
+);
+
+insert into public.github_webhook_deliveries(
+  id, provider_installation_id, provider_delivery_id,
+  event_name, payload_sha256, received_at
+) values
+  ('a3530000-0000-4000-8000-000000000031', 933031, 'precedence-first', 'installation', repeat('7', 64), '2000-01-01 00:00:00+00'),
+  ('a3530000-0000-4000-8000-000000000030', 933030, 'cancelled-run-receipt', 'installation', repeat('8', 64), '2000-01-03 00:00:00+00');
+select ok(
+  (select pg_catalog.bool_and(connection_reconciliation_version = 1)
+   from public.github_webhook_deliveries
+   where id in (
+     'a3530000-0000-4000-8000-000000000030',
+     'a3530000-0000-4000-8000-000000000031'
+   )),
+  'deliveries received during a run bind that exact running version'
+);
+set local role service_role;
+insert into receipt_provenance_deliveries
+select * from public.claim_github_connection_webhook_deliveries_server(1);
+select ok(public.finalize_github_webhook_delivery_server(
+  'a3530000-0000-4000-8000-000000000031',
+  (select attempt_count from receipt_provenance_deliveries where id = 'a3530000-0000-4000-8000-000000000031'),
+  'processed', null
+), 'the first running-version receipt schedules one pending occurrence');
+reset role;
+select is(
+  (select reconciliation_version from public.github_installations
+   where id = 'a3230000-0000-4000-8000-000000000031'),
+  2::bigint,
+  'one accepted receipt advances the installation to version two'
+);
+insert into public.github_webhook_deliveries(
+  id, provider_installation_id, provider_delivery_id,
+  event_name, payload_sha256, received_at
+) values (
+  'a3530000-0000-4000-8000-000000000034', 933031,
+  'precedence-after-pending', 'repository', repeat('9', 64),
+  '1999-12-31 00:00:00+00'
+);
+select is(
+  (select connection_reconciliation_version from public.github_webhook_deliveries
+   where id = 'a3530000-0000-4000-8000-000000000034'),
+  1::bigint,
+  'the exact running version takes precedence over a newer pending installation version'
+);
+set local role service_role;
+insert into receipt_provenance_deliveries
+select * from public.claim_github_connection_webhook_deliveries_server(1);
+select ok(public.finalize_github_webhook_delivery_server(
+  'a3530000-0000-4000-8000-000000000034',
+  (select attempt_count from receipt_provenance_deliveries where id = 'a3530000-0000-4000-8000-000000000034'),
+  'ignored', null
+), 'the stale running-version receipt is terminally ignored');
+reset role;
+select ok(
+  (select reconciliation_version = 2
+      and next_reconciliation_at is not null
+   from public.github_installations
+   where id = 'a3230000-0000-4000-8000-000000000031'),
+  'a stale running-version receipt cannot manufacture a third occurrence'
+);
+
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"a3000000-0000-4000-8000-000000000001","role":"authenticated"}',
+  true
+);
+select ok(
+  public.disconnect_github_installation('a3230000-0000-4000-8000-000000000030'),
+  'Owner cancellation terminalizes the version-one reconnect fixture'
+);
+reset role;
+insert into public.github_webhook_deliveries(
+  id, provider_installation_id, provider_delivery_id,
+  event_name, payload_sha256, received_at
+) values
+  ('a3530000-0000-4000-8000-000000000032', 933030, 'null-after-local-disconnect', 'installation', repeat('a', 64), '2000-01-04 00:00:00+00'),
+  ('a3530000-0000-4000-8000-000000000033', 933032, 'null-after-owner-action', 'installation', repeat('b', 64), '2000-01-05 00:00:00+00');
+select ok(
+  (select pg_catalog.bool_and(connection_reconciliation_version is null)
+   from public.github_webhook_deliveries
+   where id in (
+     'a3530000-0000-4000-8000-000000000032',
+     'a3530000-0000-4000-8000-000000000033'
+   )),
+  'events received after local disconnect or settled Owner action have no receipt provenance'
+);
+
+set local role service_role;
+select is(public.claim_github_installation_server(
+  'a3100000-0000-4000-8000-000000000001',
+  'a3000000-0000-4000-8000-000000000001',
+  933030, 943030, 'Receipt-Reconnect', 'Organization', 'selected',
+  '{"metadata":"read"}'::jsonb, true,
+  '[{"id":953030,"owner":"Receipt-Reconnect","name":"repo","fullName":"Receipt-Reconnect/repo","htmlUrl":"https://github.com/Receipt-Reconnect/repo","visibility":"private","archived":false,"defaultBranch":"main"}]'::jsonb
+), 'a3230000-0000-4000-8000-000000000030'::uuid,
+'the deliberate Owner reconnect advances the cancelled installation');
+insert into receipt_provenance_runs
+select * from public.claim_due_github_connection_reconciliations_server(
+  'a3430000-0000-4000-8000-000000000031', 1, now()
+);
+reset role;
+select set_config(
+  'app.receipt_reconnect_active_state',
+  (select row(
+     reconciliation_version, next_reconciliation_at,
+     reconciliation_locked_by, reconciliation_locked_until,
+     status, permissions_ok, health, health_diagnostic_code
+   )::text from public.github_installations
+   where id = 'a3230000-0000-4000-8000-000000000030'),
+  true
+);
+select set_config(
+  'app.receipt_reconnect_active_scope',
+  (select row(selected, available, removed_at)::text
+   from public.github_repositories
+   where id = 'a3330000-0000-4000-8000-000000000030'),
+  true
+);
+set local role service_role;
+insert into receipt_provenance_deliveries
+select * from public.claim_github_connection_webhook_deliveries_server(1);
+select ok(public.finalize_github_webhook_delivery_server(
+  'a3530000-0000-4000-8000-000000000030',
+  (select attempt_count from receipt_provenance_deliveries where id = 'a3530000-0000-4000-8000-000000000030'),
+  'ignored', null
+), 'the cancelled-run receipt is finalized as ignored during reconnect');
+reset role;
+select ok(
+  (select organisation_id is null and installation_id is null
+   from receipt_provenance_deliveries
+   where id = 'a3530000-0000-4000-8000-000000000030'),
+  'a stale receipt stays unbound while the reconnect run is active'
+);
+select ok(
+  (select row(
+     reconciliation_version, next_reconciliation_at,
+     reconciliation_locked_by, reconciliation_locked_until,
+     status, permissions_ok, health, health_diagnostic_code
+   )::text = current_setting('app.receipt_reconnect_active_state')
+   from public.github_installations
+   where id = 'a3230000-0000-4000-8000-000000000030'),
+  'an ignored stale receipt cannot change version, due time, lease, permissions or lifecycle'
+);
+select is(
+  (select row(selected, available, removed_at)::text
+   from public.github_repositories
+   where id = 'a3330000-0000-4000-8000-000000000030'),
+  current_setting('app.receipt_reconnect_active_scope'),
+  'an ignored stale receipt cannot restore repository scope'
+);
+set local role service_role;
+select is(public.finalize_github_connection_reconciliation_server(
+  (select id from receipt_provenance_runs
+   where installation_id = 'a3230000-0000-4000-8000-000000000030'
+   order by reconciliation_version desc limit 1),
+  'a3430000-0000-4000-8000-000000000031',
+  'success', null, now() + interval '1 day',
+  '[{"id":953030,"owner":"Receipt-Reconnect","name":"repo","fullName":"Receipt-Reconnect/repo","htmlUrl":"https://github.com/Receipt-Reconnect/repo","visibility":"private","archived":false,"defaultBranch":"main"}]'::jsonb
+), pg_catalog.jsonb_build_object(
+  'incidentTransition', 'recovered', 'effectiveHealth', 'healthy'
+), 'the deliberate reconnect succeeds without being superseded by stale receipts');
+reset role;
+
+select set_config(
+  'app.receipt_reconnect_success_state',
+  (select row(
+     reconciliation_version, next_reconciliation_at,
+     reconciliation_locked_by, reconciliation_locked_until,
+     status, permissions_ok, health, health_diagnostic_code
+   )::text from public.github_installations
+   where id = 'a3230000-0000-4000-8000-000000000030'),
+  true
+);
+set local role service_role;
+insert into receipt_provenance_deliveries
+select * from public.claim_github_connection_webhook_deliveries_server(1);
+select ok(public.finalize_github_webhook_delivery_server(
+  'a3530000-0000-4000-8000-000000000032',
+  (select attempt_count from receipt_provenance_deliveries where id = 'a3530000-0000-4000-8000-000000000032'),
+  'ignored', null
+), 'the marker-null local-disconnect receipt is finalized as ignored after reconnect success');
+reset role;
+select ok(
+  (select organisation_id is null and installation_id is null
+   from receipt_provenance_deliveries
+   where id = 'a3530000-0000-4000-8000-000000000032'),
+  'a marker-null local-disconnect receipt remains unbound after reconnect success'
+);
+select ok(
+  (select row(
+     reconciliation_version, next_reconciliation_at,
+     reconciliation_locked_by, reconciliation_locked_until,
+     status, permissions_ok, health, health_diagnostic_code
+   )::text = current_setting('app.receipt_reconnect_success_state')
+   from public.github_installations
+   where id = 'a3230000-0000-4000-8000-000000000030'),
+  'the delayed marker-null receipt cannot change recovered installation state'
+);
+
+set local role service_role;
+select is(public.claim_github_installation_server(
+  'a3100000-0000-4000-8000-000000000001',
+  'a3000000-0000-4000-8000-000000000001',
+  933032, 943032, 'Receipt-Owner-Action', 'Organization', 'selected',
+  '{"metadata":"read"}'::jsonb, true,
+  '[{"id":953032,"owner":"Receipt-Owner-Action","name":"repo","fullName":"Receipt-Owner-Action/repo","htmlUrl":"https://github.com/Receipt-Owner-Action/repo","visibility":"private","archived":false,"defaultBranch":"main"}]'::jsonb
+), 'a3230000-0000-4000-8000-000000000032'::uuid,
+'the settled Owner-action fixture starts its deliberate reconnect');
+insert into receipt_provenance_runs
+select * from public.claim_due_github_connection_reconciliations_server(
+  'a3430000-0000-4000-8000-000000000032', 1, now()
+);
+select is(public.finalize_github_connection_reconciliation_server(
+  (select id from receipt_provenance_runs
+   where installation_id = 'a3230000-0000-4000-8000-000000000032'),
+  'a3430000-0000-4000-8000-000000000032',
+  'success', null, now() + interval '1 day',
+  '[{"id":953032,"owner":"Receipt-Owner-Action","name":"repo","fullName":"Receipt-Owner-Action/repo","htmlUrl":"https://github.com/Receipt-Owner-Action/repo","visibility":"private","archived":false,"defaultBranch":"main"}]'::jsonb
+), pg_catalog.jsonb_build_object(
+  'incidentTransition', 'recovered', 'effectiveHealth', 'healthy'
+), 'the settled Owner-action reconnect succeeds before its marker-null receipt is claimed');
+insert into receipt_provenance_deliveries
+select * from public.claim_github_connection_webhook_deliveries_server(1);
+select ok(public.finalize_github_webhook_delivery_server(
+  'a3530000-0000-4000-8000-000000000033',
+  (select attempt_count from receipt_provenance_deliveries where id = 'a3530000-0000-4000-8000-000000000033'),
+  'ignored', null
+), 'the marker-null Owner-action receipt is finalized as ignored after reconnect success');
+reset role;
+select ok(
+  (select organisation_id is null and installation_id is null
+   from receipt_provenance_deliveries
+   where id = 'a3530000-0000-4000-8000-000000000033'),
+  'a marker-null Owner-action receipt remains unbound after reconnect success'
+);
+select ok(
+  (select reconciliation_version = 2
+      and next_reconciliation_at is not null
+      and health = 'healthy'
+      and permissions_ok
+   from public.github_installations
+   where id = 'a3230000-0000-4000-8000-000000000032'),
+  'the delayed Owner-action receipt cannot add a version or alter recovered state'
+);
+
+insert into public.github_webhook_deliveries(
+  id, provider_installation_id, provider_delivery_id,
+  event_name, payload_sha256, received_at
+) values (
+  'a3530000-0000-4000-8000-000000000035', 933030,
+  'usable-receipt-after-reconnect', 'installation_repositories', repeat('c', 64),
+  now()
+);
+select is(
+  (select connection_reconciliation_version from public.github_webhook_deliveries
+   where id = 'a3530000-0000-4000-8000-000000000035'),
+  2::bigint,
+  'a usable installation with no running run binds its current version at receipt'
+);
+set local role service_role;
+insert into receipt_provenance_deliveries
+select * from public.claim_github_connection_webhook_deliveries_server(1);
+select ok(public.finalize_github_webhook_delivery_server(
+  'a3530000-0000-4000-8000-000000000035',
+  (select attempt_count from receipt_provenance_deliveries where id = 'a3530000-0000-4000-8000-000000000035'),
+  'processed', null
+), 'a delayed usable-at-receipt delivery finalizes once');
+select is(
+  (select count(*)::integer from public.claim_github_connection_webhook_deliveries_server(1)),
+  0,
+  'the usable receipt cannot be claimed twice'
+);
+reset role;
+select is(
+  (select reconciliation_version from public.github_installations
+   where id = 'a3230000-0000-4000-8000-000000000030'),
+  3::bigint,
+  'the usable receipt advances exactly one coalesced occurrence'
+);
+
+insert into public.github_webhook_deliveries(
+  id, provider_installation_id, provider_delivery_id,
+  event_name, payload_sha256, received_at
+) values (
+  'a3530000-0000-4000-8000-000000000036', 933033,
+  'maximum-version-receipt', 'installation', repeat('d', 64), now()
+);
+select is(
+  (select connection_reconciliation_version from public.github_webhook_deliveries
+   where id = 'a3530000-0000-4000-8000-000000000036'),
+  9007199254740991::bigint,
+  'a maximum-version usable receipt records its bounded provenance'
+);
+set local role service_role;
+select lives_ok(
+  $$ insert into receipt_provenance_deliveries
+     select * from public.claim_github_connection_webhook_deliveries_server(1) $$,
+  'maximum-version exhaustion is terminally ignored instead of poisoning the claim'
+);
+select ok(coalesce((
+  select public.finalize_github_webhook_delivery_server(
+    delivery.id, delivery.attempt_count, 'ignored', null
+  )
+  from receipt_provenance_deliveries delivery
+  where delivery.id = 'a3530000-0000-4000-8000-000000000036'
+), false), 'the exhausted-version delivery finalizes through one bounded attempt');
+reset role;
+select ok(
+  (select reconciliation_version = 9007199254740991
+      and next_reconciliation_at is null
+      and reconciliation_locked_by is null
+      and reconciliation_locked_until is null
+   from public.github_installations
+   where id = 'a3230000-0000-4000-8000-000000000033'),
+  'maximum-version exhaustion cannot change version, due schedule or lease state'
+);
+select ok(
+  (select organisation_id is null and installation_id is null
+   from receipt_provenance_deliveries
+   where id = 'a3530000-0000-4000-8000-000000000036'),
+  'an exhausted-version delivery remains tenant-unbound and fail-closed'
+);
 
 select is(
   (select row(

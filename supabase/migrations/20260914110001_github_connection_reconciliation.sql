@@ -232,21 +232,39 @@ language plpgsql
 security definer
 set search_path = ''
 as $$
+declare
+  resolved_installation public.github_installations;
 begin
   new.connection_reconciliation_version := null;
   if new.event_name in (
     'installation', 'installation_repositories', 'repository'
   ) and new.provider_installation_id is not null then
-    select run.reconciliation_version
-    into new.connection_reconciliation_version
+    select installation.* into resolved_installation
     from public.github_installations installation
-    join public.github_connection_reconciliation_runs run
-      on run.installation_id = installation.id
-      and run.organisation_id = installation.organisation_id
-      and run.status = 'running'
-    where installation.provider_installation_id = new.provider_installation_id
-    order by run.last_attempted_at desc, run.id
-    limit 1;
+    where installation.provider_installation_id = new.provider_installation_id;
+
+    if found then
+      new.connection_reconciliation_version := (
+        select run.reconciliation_version
+        from public.github_connection_reconciliation_runs run
+        where run.installation_id = resolved_installation.id
+          and run.organisation_id = resolved_installation.organisation_id
+          and run.status = 'running'
+        order by run.last_attempted_at desc, run.id
+        limit 1
+      );
+
+      if new.connection_reconciliation_version is null
+        and resolved_installation.status = 'active'
+        and resolved_installation.permissions_ok
+        and resolved_installation.health not in (
+          'owner_action_required', 'disconnected'
+        )
+      then
+        new.connection_reconciliation_version :=
+          resolved_installation.reconciliation_version;
+      end if;
+    end if;
   end if;
   return new;
 end;
@@ -401,39 +419,41 @@ begin
 
     if installation_found then
       select (
-        (
-          resolved_installation.status = 'active'
-          and resolved_installation.permissions_ok
-          and resolved_installation.health not in (
+        candidate.connection_reconciliation_version is not null
+        and candidate.connection_reconciliation_version
+          = resolved_installation.reconciliation_version
+        and resolved_installation.reconciliation_version < 9007199254740991
+        and not (
+          resolved_installation.health = 'disconnected'
+          and resolved_installation.health_diagnostic_code is distinct from
+            'installation_revoked'
+        )
+        and (
+          resolved_installation.health not in (
             'owner_action_required', 'disconnected'
           )
-        )
-        or exists (
-          select 1
-          from public.github_connection_reconciliation_runs run
-          where run.installation_id = resolved_installation.id
-            and run.organisation_id = resolved_installation.organisation_id
-            and run.status = 'running'
-        )
-        or exists (
-          select 1
-          from public.github_connection_reconciliation_runs receipt_run
-          where receipt_run.installation_id = resolved_installation.id
-            and receipt_run.organisation_id = resolved_installation.organisation_id
-            and receipt_run.reconciliation_version
-              = candidate.connection_reconciliation_version
-            and (
-              (
-                receipt_run.status = 'action_required'
-                and resolved_installation.health = 'owner_action_required'
+          or exists (
+            select 1
+            from public.github_connection_reconciliation_runs receipt_run
+            where receipt_run.installation_id = resolved_installation.id
+              and receipt_run.organisation_id = resolved_installation.organisation_id
+              and receipt_run.reconciliation_version
+                = candidate.connection_reconciliation_version
+              and (
+                receipt_run.status = 'running'
+                or (
+                  receipt_run.status = 'action_required'
+                  and resolved_installation.health = 'owner_action_required'
+                )
+                or (
+                  receipt_run.status = 'disconnected'
+                  and receipt_run.diagnostic_code = 'installation_revoked'
+                  and resolved_installation.health = 'disconnected'
+                  and resolved_installation.health_diagnostic_code
+                    = 'installation_revoked'
+                )
               )
-              or (
-                receipt_run.status = 'disconnected'
-                and resolved_installation.health = 'disconnected'
-                and resolved_installation.health_diagnostic_code
-                  = 'installation_revoked'
-              )
-            )
+          )
         )
       ) into schedule_installation;
     end if;
