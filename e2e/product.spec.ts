@@ -962,6 +962,8 @@ test("a policy is authored, approved, accepted, and re-accepted after a material
   expect(detailAxe.violations).toEqual([]);
 
   // A material content edit bumps the version and invalidates the prior acceptance.
+  // Approval updates the saved policy revision, so reload before starting a new edit.
+  await page.reload();
   // The edit form lives behind an "Edit policy" disclosure — open it first.
   await page.getByText("Edit policy", { exact: true }).click();
   await page.getByLabel("Policy content").fill("Access to systems is granted on least privilege and reviewed quarterly.");
@@ -1070,7 +1072,13 @@ test("a task is pushed to a sandbox tracker, polled to In Progress, then the con
   await settingsTabs.getByRole("link", { name: "Connections" }).click();
   await page.waitForURL(/\/app\/integrations$/);
   await expect(settingsTabs.getByRole("link", { name: "Connections" })).toHaveAttribute("aria-current", "page");
+  if (testInfo.project.name === "mobile") {
+    await page.getByRole("banner").getByRole("button", { name: "Open navigation" }).click();
+  }
   await expect(settingsNavLink).toHaveAttribute("aria-current", "page");
+  if (testInfo.project.name === "mobile") {
+    await page.getByRole("banner").getByRole("button", { name: "Close navigation" }).click();
+  }
 
   // This deterministic local scenario uses the development-only sample-data
   // forms; provider prompts remain untouched.
