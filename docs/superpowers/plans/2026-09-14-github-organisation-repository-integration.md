@@ -29,7 +29,7 @@
 - Read the relevant checked-in Next.js 16.3 guides in `node_modules/next/dist/docs/` before changing Route Handlers, Server Actions, environment handling or self-hosting behavior.
 - Follow red-green-refactor for every behavior change. Do not weaken existing tests or historical acceptance claims.
 - Run heavy checks sequentially through `node --import=tsx scripts/local-resource-guard.ts -- <command>` as required by `docs/local-resource-guard.md`.
-- After each coherent task, run focused checks, update `docs/release-checklist.md` with truthful evidence, commit only intended files and push `origin/codex/team-baseline`. Do not merge, deploy, alter provider configuration or expose secrets without the task's explicit gate.
+- After each coherent task, run focused checks, update `docs/release-checklist.md` with truthful evidence, commit only intended files and push `origin/codex/milestone-1-github-integration`. Do not merge, deploy, alter provider configuration or expose secrets without the task's explicit gate.
 
 ## Planned File Structure
 
