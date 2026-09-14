@@ -46,6 +46,7 @@ function dependencies(
       nextAttemptAt: "2026-09-15T12:00:00.000Z",
       repositorySnapshot: [],
       incidentTransition: "none",
+      effectiveHealth: "healthy",
     }),
     ...overrides,
   };
@@ -118,6 +119,7 @@ describe("runGitHubConnectionCycle", () => {
         nextAttemptAt: "2026-09-14T12:01:00.000Z",
         repositorySnapshot: [],
         incidentTransition: "none",
+        effectiveHealth: "retrying",
       };
     });
 
@@ -351,6 +353,7 @@ describe("runGitHubConnectionCycle", () => {
         nextAttemptAt: "2026-09-15T12:00:00.000Z",
         repositorySnapshot: [],
         incidentTransition: "recovered",
+        effectiveHealth: "healthy",
       });
 
     const result = await buildGitHubConnectionCycleRunner(deps)(cycleInput);
@@ -368,6 +371,27 @@ describe("runGitHubConnectionCycle", () => {
     expect(JSON.stringify(result)).not.toContain(String(claim(1).providerInstallationId));
   });
 
+  it("counts a superseded provider success from its effective fail-closed health", async () => {
+    const deps = dependencies();
+    deps.claimDue.mockResolvedValue([claim(1)]);
+    deps.reconcile.mockResolvedValue({
+      outcome: "success",
+      diagnostic: null,
+      nextAttemptAt: "2026-09-15T12:00:00.000Z",
+      repositorySnapshot: [],
+      incidentTransition: "remained_open",
+      effectiveHealth: "owner_action_required",
+    });
+
+    await expect(buildGitHubConnectionCycleRunner(deps)(cycleInput)).resolves.toMatchObject({
+      healthy: 0,
+      retrying: 0,
+      actionRequired: 1,
+      recovered: 0,
+      ownershipLost: 0,
+    });
+  });
+
   it("reports partial, action-required, and disconnected results without identifiers", async () => {
     const deps = dependencies();
     deps.drainConnectionWebhooks.mockResolvedValue({
@@ -375,9 +399,9 @@ describe("runGitHubConnectionCycle", () => {
     });
     deps.claimDue.mockResolvedValue([claim(1), claim(2), claim(3)]);
     deps.reconcile
-      .mockResolvedValueOnce({ outcome: "partial", diagnostic: "repository_unavailable", nextAttemptAt: "2026-09-15T12:00:00.000Z", repositorySnapshot: [], incidentTransition: "opened" })
-      .mockResolvedValueOnce({ outcome: "action_required", diagnostic: "permission_mismatch", nextAttemptAt: null, repositorySnapshot: [], incidentTransition: "opened" })
-      .mockResolvedValueOnce({ outcome: "disconnected", diagnostic: "installation_revoked", nextAttemptAt: null, repositorySnapshot: [], incidentTransition: "remained_open" });
+      .mockResolvedValueOnce({ outcome: "partial", diagnostic: "repository_unavailable", nextAttemptAt: "2026-09-15T12:00:00.000Z", repositorySnapshot: [], incidentTransition: "opened", effectiveHealth: "partially_unavailable" })
+      .mockResolvedValueOnce({ outcome: "action_required", diagnostic: "permission_mismatch", nextAttemptAt: null, repositorySnapshot: [], incidentTransition: "opened", effectiveHealth: "owner_action_required" })
+      .mockResolvedValueOnce({ outcome: "disconnected", diagnostic: "installation_revoked", nextAttemptAt: null, repositorySnapshot: [], incidentTransition: "remained_open", effectiveHealth: "disconnected" });
 
     const result = await buildGitHubConnectionCycleRunner(deps)(cycleInput);
 

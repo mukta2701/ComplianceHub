@@ -4,7 +4,7 @@ import { GitHubInstallationTokenError, hasExactReadPermissions } from "./github-
 import type {
   ClaimedGitHubConnectionReconciliation,
   GitHubConnectionFinalization,
-  GitHubConnectionIncidentTransition,
+  GitHubConnectionFinalizationResult,
   GitHubConnectionReconciliationOutcome,
 } from "./github-connection-store";
 import {
@@ -40,13 +40,12 @@ export type ReconcileGitHubConnectionDependencies = {
     claim: ClaimedGitHubConnectionReconciliation,
     finalization: GitHubConnectionFinalization,
     signal?: AbortSignal,
-  ): Promise<GitHubConnectionIncidentTransition>;
+  ): Promise<GitHubConnectionFinalizationResult>;
   now(): Date;
 };
 
-export type GitHubConnectionReconciliationResult = GitHubConnectionFinalization & {
-  incidentTransition: GitHubConnectionIncidentTransition;
-};
+export type GitHubConnectionReconciliationResult = GitHubConnectionFinalization
+  & GitHubConnectionFinalizationResult;
 
 type ClassifiedOutcome = {
   outcome: GitHubConnectionReconciliationOutcome;
@@ -274,10 +273,10 @@ export async function reconcileGitHubConnection(
   if (externalSignal?.aborted) throw reconciliationInterrupted();
   const finalization = toFinalization(claim, classified);
   try {
-    const incidentTransition = externalSignal
+    const finalizationResult = externalSignal
       ? await deps.finalize(claim, finalization, externalSignal)
       : await deps.finalize(claim, finalization);
-    return { ...finalization, incidentTransition };
+    return { ...finalization, ...finalizationResult };
   } catch (error) {
     if (externalSignal?.aborted) throw reconciliationInterrupted();
     throw error;

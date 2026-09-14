@@ -36,6 +36,13 @@ alter table public.github_installations
     reconciliation_version between 1 and 9007199254740991
   );
 
+alter table public.github_webhook_deliveries
+  add column connection_reconciliation_version bigint,
+  add constraint github_webhook_connection_version_check check (
+    connection_reconciliation_version is null
+    or connection_reconciliation_version between 1 and 9007199254740991
+  );
+
 create index github_installations_reconciliation_due_idx
 on public.github_installations(next_reconciliation_at, id)
 where next_reconciliation_at is not null;
@@ -66,6 +73,7 @@ create table public.github_connection_reconciliation_runs (
     incident_transition is null
     or incident_transition in ('none', 'opened', 'remained_open', 'recovered')
   ),
+  effective_health public.github_connection_health,
   started_at timestamptz not null default now(),
   last_attempted_at timestamptz not null default now(),
   completed_at timestamptz,
@@ -89,24 +97,28 @@ create table public.github_connection_reconciliation_runs (
       and completed_at is null
       and diagnostic_code is null
       and incident_transition is null
+      and effective_health is null
     )
     or (
       status = 'success'
       and completed_at is not null
       and diagnostic_code is null
       and incident_transition is not null
+      and effective_health is not null
     )
     or (
       status = 'cancelled'
       and completed_at is not null
       and diagnostic_code is null
       and incident_transition = 'none'
+      and effective_health = 'disconnected'
     )
     or (
       status not in ('running', 'success', 'cancelled')
       and completed_at is not null
       and diagnostic_code is not null
       and incident_transition is not null
+      and effective_health is not null
     )
   ),
   constraint github_connection_reconciliation_runs_count_check check (
@@ -213,6 +225,41 @@ from public, anon, authenticated, service_role;
 create trigger github_installations_00_schedule_reconciliation
 after update of connected_by, permissions on public.github_installations
 for each row execute function public.schedule_github_reconciliation_after_claim();
+
+create or replace function public.bind_github_connection_reconciliation_at_receipt()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  new.connection_reconciliation_version := null;
+  if new.event_name in (
+    'installation', 'installation_repositories', 'repository'
+  ) and new.provider_installation_id is not null then
+    select run.reconciliation_version
+    into new.connection_reconciliation_version
+    from public.github_installations installation
+    join public.github_connection_reconciliation_runs run
+      on run.installation_id = installation.id
+      and run.organisation_id = installation.organisation_id
+      and run.status = 'running'
+    where installation.provider_installation_id = new.provider_installation_id
+    order by run.last_attempted_at desc, run.id
+    limit 1;
+  end if;
+  return new;
+end;
+$$;
+
+alter function public.bind_github_connection_reconciliation_at_receipt()
+owner to postgres;
+revoke all on function public.bind_github_connection_reconciliation_at_receipt()
+from public, anon, authenticated, service_role;
+
+create trigger github_webhook_deliveries_bind_connection_reconciliation
+before insert on public.github_webhook_deliveries
+for each row execute function public.bind_github_connection_reconciliation_at_receipt();
 
 create or replace function public.claim_github_webhook_deliveries_server(
   target_limit integer
@@ -323,7 +370,8 @@ begin
   end if;
 
   for candidate in
-    select delivery.id, delivery.attempt_count
+    select delivery.id, delivery.attempt_count,
+           delivery.connection_reconciliation_version
     from public.github_webhook_deliveries delivery
     where delivery.event_name in (
         'installation', 'installation_repositories', 'repository'
@@ -367,6 +415,26 @@ begin
             and run.organisation_id = resolved_installation.organisation_id
             and run.status = 'running'
         )
+        or exists (
+          select 1
+          from public.github_connection_reconciliation_runs receipt_run
+          where receipt_run.installation_id = resolved_installation.id
+            and receipt_run.organisation_id = resolved_installation.organisation_id
+            and receipt_run.reconciliation_version
+              = candidate.connection_reconciliation_version
+            and (
+              (
+                receipt_run.status = 'action_required'
+                and resolved_installation.health = 'owner_action_required'
+              )
+              or (
+                receipt_run.status = 'disconnected'
+                and resolved_installation.health = 'disconnected'
+                and resolved_installation.health_diagnostic_code
+                  = 'installation_revoked'
+              )
+            )
+        )
       ) into schedule_installation;
     end if;
 
@@ -387,10 +455,22 @@ begin
       if candidate.attempt_count = 0 then
         update public.github_installations installation
         set reconciliation_version = installation.reconciliation_version + 1,
-            next_reconciliation_at = least(
-              coalesce(installation.next_reconciliation_at, scheduled_at),
-              scheduled_at
-            )
+            next_reconciliation_at = case
+              when installation.health = 'retrying' and exists (
+                select 1
+                from public.github_connection_reconciliation_runs retry_run
+                where retry_run.installation_id = installation.id
+                  and retry_run.organisation_id = installation.organisation_id
+                  and retry_run.status = 'temporary_failure'
+              ) then greatest(
+                coalesce(installation.next_reconciliation_at, scheduled_at),
+                scheduled_at
+              )
+              else least(
+                coalesce(installation.next_reconciliation_at, scheduled_at),
+                scheduled_at
+              )
+            end
         where installation.id = resolved_installation.id
           and installation.organisation_id = resolved_installation.organisation_id;
       end if;
@@ -582,7 +662,7 @@ create or replace function public.finalize_github_connection_reconciliation_serv
   target_next_attempt_at timestamptz,
   target_repository_snapshot jsonb
 )
-returns text
+returns jsonb
 language plpgsql
 security definer
 set search_path = ''
@@ -597,6 +677,7 @@ declare
   retry_floor timestamptz;
   effective_next_attempt_at timestamptz;
   next_health public.github_connection_health;
+  applied_health public.github_connection_health;
   prior_incident_open boolean;
   next_incident_open boolean;
   transition text;
@@ -608,7 +689,7 @@ declare
   repository_unavailable integer;
 begin
   if target_run_id is null or target_worker_id is null then
-    return 'not_finalized';
+    return pg_catalog.jsonb_build_object('status', 'not_finalized');
   end if;
 
   select * into run_row
@@ -616,16 +697,19 @@ begin
   where id = target_run_id;
 
   if not found then
-    return 'not_finalized';
+    return pg_catalog.jsonb_build_object('status', 'not_finalized');
   end if;
 
   if run_row.status <> 'running' then
     if run_row.status = target_outcome
       and run_row.diagnostic_code is not distinct from target_diagnostic_code
     then
-      return run_row.incident_transition;
+      return pg_catalog.jsonb_build_object(
+        'incidentTransition', run_row.incident_transition,
+        'effectiveHealth', run_row.effective_health
+      );
     end if;
-    return 'not_finalized';
+    return pg_catalog.jsonb_build_object('status', 'not_finalized');
   end if;
 
   select * into installation_row
@@ -635,7 +719,7 @@ begin
   for update;
 
   if not found then
-    return 'not_finalized';
+    return pg_catalog.jsonb_build_object('status', 'not_finalized');
   end if;
 
   select * into run_row
@@ -646,16 +730,19 @@ begin
   for update;
 
   if not found then
-    return 'not_finalized';
+    return pg_catalog.jsonb_build_object('status', 'not_finalized');
   end if;
 
   if run_row.status <> 'running' then
     if run_row.status = target_outcome
       and run_row.diagnostic_code is not distinct from target_diagnostic_code
     then
-      return run_row.incident_transition;
+      return pg_catalog.jsonb_build_object(
+        'incidentTransition', run_row.incident_transition,
+        'effectiveHealth', run_row.effective_health
+      );
     end if;
-    return 'not_finalized';
+    return pg_catalog.jsonb_build_object('status', 'not_finalized');
   end if;
 
   completed_time := greatest(pg_catalog.clock_timestamp(), run_row.last_attempted_at);
@@ -667,7 +754,7 @@ begin
     or installation_row.reconciliation_locked_until is null
     or installation_row.reconciliation_locked_until <= pg_catalog.now()
   then
-    return 'not_finalized';
+    return pg_catalog.jsonb_build_object('status', 'not_finalized');
   end if;
 
   if target_outcome is null
@@ -799,6 +886,8 @@ begin
     when 'action_required' then 'owner_action_required'::public.github_connection_health
     else 'disconnected'::public.github_connection_health
   end;
+  applied_health := case when superseded_success
+    then installation_row.health else next_health end;
 
   effective_next_attempt_at := target_next_attempt_at;
   if target_outcome = 'temporary_failure' then
@@ -873,7 +962,7 @@ begin
   end if;
 
   update public.github_installations installation
-  set health = case when superseded_success then installation.health else next_health end,
+  set health = applied_health,
       last_successful_reconciliation_at = case
         when target_outcome = 'success' and not superseded_success
         then run_row.last_attempted_at
@@ -916,7 +1005,7 @@ begin
     and installation.reconciliation_locked_by = target_worker_id;
 
   if not found then
-    return 'not_finalized';
+    return pg_catalog.jsonb_build_object('status', 'not_finalized');
   end if;
 
   select pg_catalog.count(*)::integer,
@@ -931,6 +1020,7 @@ begin
   set status = target_outcome,
       diagnostic_code = target_diagnostic_code,
       incident_transition = transition,
+      effective_health = applied_health,
       completed_at = completed_time,
       repository_count = repository_total,
       available_repository_count = repository_available,
@@ -945,7 +1035,10 @@ begin
       using errcode = '40001';
   end if;
 
-  return transition;
+  return pg_catalog.jsonb_build_object(
+    'incidentTransition', transition,
+    'effectiveHealth', applied_health
+  );
 end;
 $$;
 
@@ -1030,6 +1123,7 @@ begin
     set status = 'cancelled',
         diagnostic_code = null,
         incident_transition = 'none',
+        effective_health = 'disconnected',
         completed_at = greatest(disconnected_at, run.last_attempted_at),
         repository_count = (
           select pg_catalog.count(*)::integer

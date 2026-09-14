@@ -21,6 +21,33 @@ commit;
 begin;
 select no_plan();
 
+create or replace function pg_temp.finalize_github_connection_transition(
+  target_run_id uuid,
+  target_worker_id uuid,
+  target_outcome text,
+  target_diagnostic_code text,
+  target_next_attempt_at timestamptz,
+  target_repository_snapshot jsonb
+)
+returns text
+language sql
+as $$
+  select coalesce(
+    result ->> 'incidentTransition',
+    result ->> 'status'
+  )
+  from (
+    select public.finalize_github_connection_reconciliation_server(
+      target_run_id,
+      target_worker_id,
+      target_outcome,
+      target_diagnostic_code,
+      target_next_attempt_at,
+      target_repository_snapshot
+    ) as result
+  ) finalization
+$$;
+
 select has_table(
   'public', 'github_connection_reconciliation_runs',
   'GitHub connection reconciliation has a durable run ledger'
@@ -48,8 +75,25 @@ select has_column('public', 'github_installations', 'reconciliation_locked_until
 select has_column('public', 'github_installations', 'reconciliation_version', 'installations record the newest requested reconciliation occurrence');
 select col_not_null('public', 'github_installations', 'reconciliation_version', 'an installation occurrence version cannot become unknown');
 select col_default_is('public', 'github_installations', 'reconciliation_version', '1', 'a new installation starts with one initial occurrence');
+select has_column(
+  'public', 'github_webhook_deliveries', 'connection_reconciliation_version',
+  'connection deliveries can bind receipt time to one running reconciliation version'
+);
+select ok(
+  exists (
+    select 1 from pg_catalog.pg_constraint
+    where conrelid = 'public.github_webhook_deliveries'::regclass
+      and conname = 'github_webhook_connection_version_check'
+      and contype = 'c'
+  ),
+  'the optional receipt marker has an explicit positive safe-integer bound'
+);
 select has_column('public', 'github_connection_reconciliation_runs', 'reconciliation_version', 'each reconciliation run records the occurrence it verifies');
 select col_not_null('public', 'github_connection_reconciliation_runs', 'reconciliation_version', 'a run occurrence version cannot become unknown');
+select has_column(
+  'public', 'github_connection_reconciliation_runs', 'effective_health',
+  'the run ledger preserves the health atomically applied by finalization'
+);
 select ok(
   (select count(*) = 2
    from pg_catalog.pg_constraint
@@ -106,6 +150,43 @@ select has_function(
   array['integer']
 );
 select has_function('public', 'disconnect_github_installation', array['uuid']);
+select is(
+  pg_catalog.pg_get_function_result(
+    'public.finalize_github_connection_reconciliation_server(uuid,uuid,text,text,timestamptz,jsonb)'::regprocedure
+  ),
+  'jsonb',
+  'atomic finalization returns only a strict safe JSON result'
+);
+select ok(
+  exists (
+    select 1
+    from pg_catalog.pg_trigger trigger_row
+    join pg_catalog.pg_proc function_row
+      on function_row.oid = trigger_row.tgfoid
+    where trigger_row.tgrelid = 'public.github_webhook_deliveries'::regclass
+      and trigger_row.tgname = 'github_webhook_deliveries_bind_connection_reconciliation'
+      and not trigger_row.tgisinternal
+      and function_row.prosecdef
+      and function_row.proowner = 'postgres'::regrole
+      and function_row.proconfig = array['search_path=""']
+  ),
+  'the receipt marker trigger is a postgres-owned empty-search-path security definer'
+);
+select ok(
+  (
+    lower(pg_catalog.pg_get_functiondef(
+      'public.bind_github_connection_reconciliation_at_receipt()'::regprocedure
+    )) like all (array[
+      '%''installation''%',
+      '%''installation_repositories''%',
+      '%''repository''%'
+    ])
+    and lower(pg_catalog.pg_get_functiondef(
+      'public.bind_github_connection_reconciliation_at_receipt()'::regprocedure
+    )) not like '%workflow_run%'
+  ),
+  'the receipt trigger binds only the three exact connection delivery classes'
+);
 select ok(has_function_privilege(
   'service_role',
   'public.claim_due_github_connection_reconciliations_server(uuid,integer,timestamptz)',
@@ -206,6 +287,30 @@ select ok(not has_table_privilege(
 select ok(not has_table_privilege(
   'service_role', 'public.github_connection_reconciliation_runs', 'INSERT,UPDATE,DELETE'
 ), 'service workers cannot bypass claim and finalization functions');
+select ok(not exists (
+  select 1 from information_schema.column_privileges privilege
+  where privilege.table_schema = 'public'
+    and privilege.table_name = 'github_webhook_deliveries'
+    and privilege.column_name = 'connection_reconciliation_version'
+    and privilege.grantee = 'authenticated'
+    and privilege.privilege_type in ('SELECT', 'INSERT', 'UPDATE')
+), 'authenticated callers cannot read or forge the internal receipt marker');
+select ok(not exists (
+  select 1 from information_schema.column_privileges privilege
+  where privilege.table_schema = 'public'
+    and privilege.table_name = 'github_webhook_deliveries'
+    and privilege.column_name = 'connection_reconciliation_version'
+    and privilege.grantee = 'service_role'
+    and privilege.privilege_type in ('INSERT', 'UPDATE')
+), 'delivery insert callers cannot forge or change the internal receipt marker');
+select ok(not exists (
+  select 1 from information_schema.column_privileges privilege
+  where privilege.table_schema = 'public'
+    and privilege.table_name = 'github_connection_reconciliation_runs'
+    and privilege.column_name = 'effective_health'
+    and privilege.grantee = 'authenticated'
+    and privilege.privilege_type = 'SELECT'
+), 'the internal applied-health ledger field is exposed only through the safe finalizer result');
 
 insert into auth.users(
   id, instance_id, aud, role, email, encrypted_password, email_confirmed_at,
@@ -518,8 +623,8 @@ select is(
     'a3400000-0000-4000-8000-000000000099',
     'success', null, now() + interval '1 day', '[]'::jsonb
   ),
-  'not_finalized',
-  'a worker that does not own the lease cannot finalize the run'
+  pg_catalog.jsonb_build_object('status', 'not_finalized'),
+  'a worker without the lease receives no synthesized health or transition'
 );
 reset role;
 select is(
@@ -542,7 +647,7 @@ reset role;
 
 set local role service_role;
 select is(
-  public.finalize_github_connection_reconciliation_server(
+  pg_temp.finalize_github_connection_transition(
     current_setting('app.first_run_id')::uuid,
     'a3400000-0000-4000-8000-000000000002',
     'success', null, now() + interval '1 day',
@@ -588,7 +693,7 @@ select is(
 );
 set local role service_role;
 select is(
-  public.finalize_github_connection_reconciliation_server(
+  pg_temp.finalize_github_connection_transition(
     current_setting('app.first_run_id')::uuid,
     'a3400000-0000-4000-8000-000000000002',
     'success', null, now() + interval '1 day', '[]'::jsonb
@@ -603,7 +708,7 @@ set consecutive_reconciliation_failures = 2
 where id = 'a3200000-0000-4000-8000-000000000002';
 set local role service_role;
 select is(
-  public.finalize_github_connection_reconciliation_server(
+  pg_temp.finalize_github_connection_transition(
     current_setting('app.second_run_id')::uuid,
     'a3400000-0000-4000-8000-000000000001',
     'temporary_failure', 'internal_failure', now() + interval '2 minutes', '[]'::jsonb
@@ -619,7 +724,7 @@ select is(
 );
 set local role service_role;
 select is(
-  public.finalize_github_connection_reconciliation_server(
+  pg_temp.finalize_github_connection_transition(
     current_setting('app.second_run_id')::uuid,
     'a3400000-0000-4000-8000-000000000001',
     'temporary_failure', 'internal_failure', now() + interval '2 minutes', '[]'::jsonb
@@ -641,7 +746,7 @@ select set_config(
   true
 );
 select is(
-  public.finalize_github_connection_reconciliation_server(
+  pg_temp.finalize_github_connection_transition(
     current_setting('app.third_run_id')::uuid,
     'a3400000-0000-4000-8000-000000000003',
     'temporary_failure', 'provider_rate_limited', now() + interval '30 minutes', '[]'::jsonb
@@ -668,7 +773,7 @@ select set_config(
   true
 );
 select is(
-  public.finalize_github_connection_reconciliation_server(
+  pg_temp.finalize_github_connection_transition(
     current_setting('app.fourth_run_id')::uuid,
     'a3400000-0000-4000-8000-000000000004',
     'success', null, now() + interval '1 day',
@@ -694,7 +799,7 @@ select set_config(
   true
 );
 select is(
-  public.finalize_github_connection_reconciliation_server(
+  pg_temp.finalize_github_connection_transition(
     current_setting('app.fifth_run_id')::uuid,
     'a3400000-0000-4000-8000-000000000006',
     'temporary_failure', 'provider_temporary_failure',
@@ -821,7 +926,7 @@ select set_config(
   true
 );
 select is(
-  public.finalize_github_connection_reconciliation_server(
+  pg_temp.finalize_github_connection_transition(
     current_setting('app.incident_reconnect_run_id')::uuid,
     'a3400000-0000-4000-8000-000000000007',
     'success', null, now() + interval '1 day',
@@ -1012,7 +1117,7 @@ select ok(
   'a deliberate reconnect makes the disconnected installation claimable exactly once'
 );
 select is(
-  public.finalize_github_connection_reconciliation_server(
+  pg_temp.finalize_github_connection_transition(
     current_setting('app.local_reconnect_run_id', true)::uuid,
     'a3400000-0000-4000-8000-000000000008',
     'success', null, now() + interval '1 day',
@@ -1116,31 +1221,31 @@ from public.github_installations
 where id between 'a3210000-0000-4000-8000-000000000010' and 'a3210000-0000-4000-8000-000000000015';
 
 set local role service_role;
-select is(public.finalize_github_connection_reconciliation_server(
+select is(pg_temp.finalize_github_connection_transition(
   (select id from version_matrix_initial_runs where installation_id = 'a3210000-0000-4000-8000-000000000010'),
   'a3410000-0000-4000-8000-000000000001', 'success', null,
   current_setting('app.version_matrix_claim_time')::timestamptz + interval '1 day', '[]'::jsonb
 ), 'none', 'success finalizes the older future-skewed run');
-select is(public.finalize_github_connection_reconciliation_server(
+select is(pg_temp.finalize_github_connection_transition(
   (select id from version_matrix_initial_runs where installation_id = 'a3210000-0000-4000-8000-000000000011'),
   'a3410000-0000-4000-8000-000000000001', 'partial', 'repository_unavailable',
   current_setting('app.version_matrix_claim_time')::timestamptz + interval '1 day', '[]'::jsonb
 ), 'opened', 'partial finalizes the older future-skewed run');
-select is(public.finalize_github_connection_reconciliation_server(
+select is(pg_temp.finalize_github_connection_transition(
   (select id from version_matrix_initial_runs where installation_id = 'a3210000-0000-4000-8000-000000000012'),
   'a3410000-0000-4000-8000-000000000001', 'temporary_failure', 'provider_temporary_failure',
   current_setting('app.version_matrix_claim_time')::timestamptz + interval '10 seconds', '[]'::jsonb
 ), 'none', 'temporary failure finalizes the older future-skewed run');
-select is(public.finalize_github_connection_reconciliation_server(
+select is(pg_temp.finalize_github_connection_transition(
   (select id from version_matrix_initial_runs where installation_id = 'a3210000-0000-4000-8000-000000000013'),
   'a3410000-0000-4000-8000-000000000001', 'temporary_failure', 'provider_rate_limited',
   current_setting('app.version_matrix_claim_time')::timestamptz + interval '10 minutes', '[]'::jsonb
 ), 'none', 'provider rate limiting finalizes the older future-skewed run');
-select is(public.finalize_github_connection_reconciliation_server(
+select is(pg_temp.finalize_github_connection_transition(
   (select id from version_matrix_initial_runs where installation_id = 'a3210000-0000-4000-8000-000000000014'),
   'a3410000-0000-4000-8000-000000000001', 'action_required', 'permission_mismatch', null, '[]'::jsonb
 ), 'opened', 'action-required finalizes the older future-skewed run');
-select is(public.finalize_github_connection_reconciliation_server(
+select is(pg_temp.finalize_github_connection_transition(
   (select id from version_matrix_initial_runs where installation_id = 'a3210000-0000-4000-8000-000000000015'),
   'a3410000-0000-4000-8000-000000000001', 'disconnected', 'installation_revoked', null, '[]'::jsonb
 ), 'opened', 'disconnected finalizes the older future-skewed run');
@@ -1280,7 +1385,7 @@ select ok(
   'the newer event does not alter the installation incident before verification'
 );
 set local role service_role;
-select is(public.finalize_github_connection_reconciliation_server(
+select is(pg_temp.finalize_github_connection_transition(
   (select id from version_matrix_followup_runs where installation_id = 'a3210000-0000-4000-8000-000000000014'),
   'a3410000-0000-4000-8000-000000000005', 'success', null,
   current_setting('app.version_matrix_claim_time')::timestamptz + interval '1 day',
@@ -1335,7 +1440,7 @@ select is(
   'the newer occurrence becomes exactly one latest-version follow-up run'
 );
 set local role service_role;
-select is(public.finalize_github_connection_reconciliation_server(
+select is(pg_temp.finalize_github_connection_transition(
   (select id from version_matrix_latest_action_run
    where installation_id = 'a3210000-0000-4000-8000-000000000014'),
   'a3410000-0000-4000-8000-000000000006', 'success', null,
@@ -1383,13 +1488,13 @@ select * from public.claim_due_github_connection_reconciliations_server(
   'a3410000-0000-4000-8000-000000000007', 100,
   current_setting('app.version_matrix_claim_time')::timestamptz + interval '12 minutes'
 );
-select is(public.finalize_github_connection_reconciliation_server(
+select is(pg_temp.finalize_github_connection_transition(
   (select id from version_matrix_terminal_action_run
    where installation_id = 'a3210000-0000-4000-8000-000000000014'),
   'a3410000-0000-4000-8000-000000000007', 'action_required',
   'permission_mismatch', null, '[]'::jsonb
 ), 'opened', 'a newest-version serious failure still opens its incident');
-select is(public.finalize_github_connection_reconciliation_server(
+select is(pg_temp.finalize_github_connection_transition(
   (select id from version_matrix_followup_runs where installation_id = 'a3210000-0000-4000-8000-000000000015'),
   'a3410000-0000-4000-8000-000000000002', 'disconnected', 'installation_revoked', null, '[]'::jsonb
 ), 'remained_open', 'the disconnected follow-up finalizes without another occurrence');
@@ -1448,6 +1553,327 @@ select is(
   )),
   0,
   'terminal action-required and disconnected work cannot loop without another occurrence'
+);
+reset role;
+
+insert into public.github_installations(
+  id, organisation_id, provider_installation_id, account_id, account_login,
+  account_type, repository_selection, status, connected_by, permissions,
+  permissions_ok, health, next_reconciliation_at
+) values
+  ('a3220000-0000-4000-8000-000000000020', 'a3100000-0000-4000-8000-000000000001', 932020, 942020, 'Receipt-Action', 'Organization', 'selected', 'active', 'a3000000-0000-4000-8000-000000000001', '{"metadata":"read"}', true, 'healthy', now() - interval '1 minute'),
+  ('a3220000-0000-4000-8000-000000000021', 'a3100000-0000-4000-8000-000000000001', 932021, 942021, 'Receipt-Disconnect', 'Organization', 'selected', 'active', 'a3000000-0000-4000-8000-000000000001', '{"metadata":"read"}', true, 'healthy', now() - interval '1 minute'),
+  ('a3220000-0000-4000-8000-000000000022', 'a3100000-0000-4000-8000-000000000001', 932022, 942022, 'Receipt-Cancel', 'Organization', 'selected', 'active', 'a3000000-0000-4000-8000-000000000001', '{"metadata":"read"}', true, 'healthy', now() - interval '1 minute'),
+  ('a3220000-0000-4000-8000-000000000023', 'a3100000-0000-4000-8000-000000000001', 932023, 942023, 'Floor-Temporary', 'Organization', 'selected', 'active', 'a3000000-0000-4000-8000-000000000001', '{"metadata":"read"}', true, 'healthy', now() - interval '1 minute'),
+  ('a3220000-0000-4000-8000-000000000024', 'a3100000-0000-4000-8000-000000000001', 932024, 942024, 'Floor-Rate', 'Organization', 'selected', 'active', 'a3000000-0000-4000-8000-000000000001', '{"metadata":"read"}', true, 'healthy', now() - interval '1 minute'),
+  ('a3220000-0000-4000-8000-000000000025', 'a3100000-0000-4000-8000-000000000001', 932025, 942025, 'Inactive-Only', 'Organization', 'selected', 'suspended', 'a3000000-0000-4000-8000-000000000001', '{"metadata":"read"}', true, 'healthy', null),
+  ('a3220000-0000-4000-8000-000000000026', 'a3100000-0000-4000-8000-000000000001', 932026, 942026, 'Permission-Only', 'Organization', 'selected', 'active', 'a3000000-0000-4000-8000-000000000001', '{"metadata":"read"}', false, 'healthy', null);
+
+select set_config(
+  'app.receipt_order_claim_time',
+  (pg_catalog.clock_timestamp() + interval '2 days')::text,
+  true
+);
+create temporary table receipt_order_initial_runs
+as select * from public.github_connection_reconciliation_runs with no data;
+grant select, insert on receipt_order_initial_runs to service_role;
+set local role service_role;
+insert into receipt_order_initial_runs
+select * from public.claim_due_github_connection_reconciliations_server(
+  'a3420000-0000-4000-8000-000000000001', 5,
+  current_setting('app.receipt_order_claim_time')::timestamptz
+);
+reset role;
+select is(
+  (select count(*)::integer from receipt_order_initial_runs), 5,
+  'the receipt-order fixtures start with one running version per usable installation'
+);
+
+insert into public.github_webhook_deliveries(
+  id, provider_installation_id, provider_delivery_id,
+  event_name, payload_sha256, received_at
+) values
+  ('a3520000-0000-4000-8000-000000000020', 932020, 'receipt-before-action', 'installation', repeat('a', 64), now()),
+  ('a3520000-0000-4000-8000-000000000021', 932021, 'receipt-before-disconnect', 'installation_repositories', repeat('b', 64), now()),
+  ('a3520000-0000-4000-8000-000000000022', 932022, 'receipt-before-owner-cancel', 'repository', repeat('c', 64), now()),
+  ('a3520000-0000-4000-8000-000000000029', 932020, 'monitoring-during-connection-run', 'workflow_run', repeat('d', 64), now());
+select ok(
+  (select pg_catalog.bool_and(
+     (to_jsonb(delivery) ->> 'connection_reconciliation_version') = '1'
+   ) from public.github_webhook_deliveries delivery
+   where delivery.id between 'a3520000-0000-4000-8000-000000000020'
+                         and 'a3520000-0000-4000-8000-000000000022'),
+  'each connection delivery binds the exact run version at receipt time'
+);
+select is(
+  (select to_jsonb(delivery) ->> 'connection_reconciliation_version'
+   from public.github_webhook_deliveries delivery
+   where delivery.id = 'a3520000-0000-4000-8000-000000000029'),
+  null,
+  'the receipt trigger ignores a genuine Monitoring delivery class'
+);
+select set_config(
+  'app.duplicate_receipt_installation_state',
+  (select row(
+     reconciliation_version,
+     next_reconciliation_at,
+     reconciliation_locked_by,
+     reconciliation_locked_until
+   )::text
+   from public.github_installations
+   where id = 'a3220000-0000-4000-8000-000000000020'),
+  true
+);
+select throws_ok(
+  $$ insert into public.github_webhook_deliveries(
+       id, provider_installation_id, provider_delivery_id,
+       event_name, payload_sha256, received_at
+     ) values (
+       'a3520000-0000-4000-8000-000000000028', 932020,
+       'receipt-before-action', 'installation', repeat('e', 64), now()
+     ) $$,
+  '23505', null,
+  'a duplicate provider delivery remains replay-safe at receipt time'
+);
+select ok(
+  (select row(
+     reconciliation_version,
+     next_reconciliation_at,
+     reconciliation_locked_by,
+     reconciliation_locked_until
+   )::text = current_setting('app.duplicate_receipt_installation_state')
+   from public.github_installations
+   where id = 'a3220000-0000-4000-8000-000000000020'),
+  'a rejected duplicate receipt leaves version, schedule and lease state untouched'
+);
+
+set local role service_role;
+select is(public.finalize_github_connection_reconciliation_server(
+  (select id from receipt_order_initial_runs where installation_id = 'a3220000-0000-4000-8000-000000000020'),
+  'a3420000-0000-4000-8000-000000000001', 'action_required',
+  'permission_mismatch', null, '[]'::jsonb
+), pg_catalog.jsonb_build_object(
+  'incidentTransition', 'opened',
+  'effectiveHealth', 'owner_action_required'
+), 'atomic finalization returns only transition and applied fail-closed health');
+select is(pg_temp.finalize_github_connection_transition(
+  (select id from receipt_order_initial_runs where installation_id = 'a3220000-0000-4000-8000-000000000021'),
+  'a3420000-0000-4000-8000-000000000001', 'disconnected',
+  'installation_revoked', null, '[]'::jsonb
+), 'opened', 'the second receipt-bound run settles provider-disconnected');
+reset role;
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"a3000000-0000-4000-8000-000000000001","role":"authenticated"}',
+  true
+);
+select ok(
+  public.disconnect_github_installation('a3220000-0000-4000-8000-000000000022'),
+  'Owner disconnect cancels the third run after its delivery was received'
+);
+reset role;
+
+create temporary table receipt_order_claimed_deliveries
+as select * from public.github_webhook_deliveries with no data;
+grant select, insert on receipt_order_claimed_deliveries to service_role;
+set local role service_role;
+insert into receipt_order_claimed_deliveries
+select * from public.claim_github_connection_webhook_deliveries_server(3);
+select ok(
+  (select pg_catalog.bool_and(public.finalize_github_webhook_delivery_server(
+    delivery.id,
+    delivery.attempt_count,
+    case when delivery.installation_id is null then 'ignored' else 'processed' end,
+    null
+  )) from receipt_order_claimed_deliveries delivery),
+  'receipt-bound deliveries finalize once through their claimed attempt'
+);
+reset role;
+select is(
+  (select count(*)::integer from receipt_order_claimed_deliveries
+   where installation_id in (
+     'a3220000-0000-4000-8000-000000000020',
+     'a3220000-0000-4000-8000-000000000021'
+   )),
+  2,
+  'deliveries received during exact runs survive later fail-closed settlement'
+);
+select ok(
+  (select organisation_id is null and installation_id is null
+   from receipt_order_claimed_deliveries
+   where provider_installation_id = 932022),
+  'a marker whose exact run was Owner-cancelled is ignored'
+);
+select ok(
+  (select pg_catalog.bool_and(reconciliation_version = 2 and next_reconciliation_at is not null)
+   from public.github_installations
+   where id in (
+     'a3220000-0000-4000-8000-000000000020',
+     'a3220000-0000-4000-8000-000000000021'
+   )),
+  'each surviving receipt advances one follow-up occurrence while remaining fail-closed'
+);
+select ok(
+  (select reconciliation_version = 1 and next_reconciliation_at is null
+   from public.github_installations
+   where id = 'a3220000-0000-4000-8000-000000000022'),
+  'Owner cancellation prevents its earlier receipt from scheduling follow-up work'
+);
+
+create temporary table receipt_order_followup_runs
+as select * from public.github_connection_reconciliation_runs with no data;
+grant select, insert on receipt_order_followup_runs to service_role;
+set local role service_role;
+insert into receipt_order_followup_runs
+select * from public.claim_due_github_connection_reconciliations_server(
+  'a3420000-0000-4000-8000-000000000002', 10,
+  current_setting('app.receipt_order_claim_time')::timestamptz + interval '1 minute'
+);
+reset role;
+select is(
+  (select count(*)::integer from receipt_order_followup_runs
+   where installation_id in (
+     'a3220000-0000-4000-8000-000000000020',
+     'a3220000-0000-4000-8000-000000000021',
+     'a3220000-0000-4000-8000-000000000022'
+   )),
+  2,
+  'the two preserved receipts become exactly one follow-up run each'
+);
+select ok(
+  (select pg_catalog.bool_and(reconciliation_version = 2)
+   from receipt_order_followup_runs
+   where installation_id in (
+     'a3220000-0000-4000-8000-000000000020',
+     'a3220000-0000-4000-8000-000000000021'
+   )),
+  'each receipt-bound follow-up captures its exact next logical version'
+);
+
+set local role service_role;
+select is(pg_temp.finalize_github_connection_transition(
+  (select id from receipt_order_initial_runs where installation_id = 'a3220000-0000-4000-8000-000000000023'),
+  'a3420000-0000-4000-8000-000000000001', 'temporary_failure',
+  'provider_temporary_failure',
+  current_setting('app.receipt_order_claim_time')::timestamptz + interval '10 seconds',
+  '[]'::jsonb
+), 'none', 'the ordinary temporary fixture settles with a fixed retry floor');
+select is(pg_temp.finalize_github_connection_transition(
+  (select id from receipt_order_initial_runs where installation_id = 'a3220000-0000-4000-8000-000000000024'),
+  'a3420000-0000-4000-8000-000000000001', 'temporary_failure',
+  'provider_rate_limited',
+  current_setting('app.receipt_order_claim_time')::timestamptz + interval '30 minutes',
+  '[]'::jsonb
+), 'none', 'the provider-limited fixture settles with its later reset floor');
+reset role;
+select set_config(
+  'app.receipt_temporary_floor',
+  (select next_reconciliation_at::text from public.github_installations
+   where id = 'a3220000-0000-4000-8000-000000000023'),
+  true
+);
+select set_config(
+  'app.receipt_rate_floor',
+  (select next_reconciliation_at::text from public.github_installations
+   where id = 'a3220000-0000-4000-8000-000000000024'),
+  true
+);
+insert into public.github_webhook_deliveries(
+  id, provider_installation_id, provider_delivery_id,
+  event_name, payload_sha256, received_at
+) values
+  ('a3520000-0000-4000-8000-000000000023', 932023, 'delivery-after-temporary', 'installation', repeat('3', 64), now()),
+  ('a3520000-0000-4000-8000-000000000024', 932024, 'delivery-after-rate-limit', 'installation', repeat('4', 64), now()),
+  ('a3520000-0000-4000-8000-000000000025', 932025, 'delivery-for-inactive-only', 'installation', repeat('5', 64), now()),
+  ('a3520000-0000-4000-8000-000000000026', 932026, 'delivery-for-permission-only', 'installation', repeat('6', 64), now());
+create temporary table retry_floor_claimed_deliveries
+as select * from public.github_webhook_deliveries with no data;
+grant select, insert on retry_floor_claimed_deliveries to service_role;
+set local role service_role;
+insert into retry_floor_claimed_deliveries
+select * from public.claim_github_connection_webhook_deliveries_server(4);
+select ok(
+  (select pg_catalog.bool_and(public.finalize_github_webhook_delivery_server(
+    delivery.id,
+    delivery.attempt_count,
+    case when delivery.installation_id is null then 'ignored' else 'processed' end,
+    null
+  )) from retry_floor_claimed_deliveries delivery),
+  'post-settlement and ineligible deliveries finalize once through their claimed attempts'
+);
+reset role;
+select is(
+  (select count(*)::integer from retry_floor_claimed_deliveries
+   where installation_id is not null),
+  2,
+  'settled retrying installations accept events while inactive-only and permission-invalid-only installations do not'
+);
+select ok(
+  (select pg_catalog.bool_and(reconciliation_version = 2)
+   from public.github_installations
+   where id in (
+     'a3220000-0000-4000-8000-000000000023',
+     'a3220000-0000-4000-8000-000000000024'
+   )),
+  'each post-settlement retry delivery advances one logical occurrence'
+);
+select ok(
+  (select next_reconciliation_at = current_setting('app.receipt_temporary_floor')::timestamptz
+   from public.github_installations
+   where id = 'a3220000-0000-4000-8000-000000000023'),
+  'a later delivery cannot reduce the ordinary temporary retry floor'
+);
+select ok(
+  (select next_reconciliation_at = current_setting('app.receipt_rate_floor')::timestamptz
+   from public.github_installations
+   where id = 'a3220000-0000-4000-8000-000000000024'),
+  'a later delivery cannot reduce the provider rate-limit reset floor'
+);
+select ok(
+  (select pg_catalog.bool_and(reconciliation_version = 1 and next_reconciliation_at is null)
+   from public.github_installations
+   where id in (
+     'a3220000-0000-4000-8000-000000000025',
+     'a3220000-0000-4000-8000-000000000026'
+   )),
+  'isolated inactive and permission-invalid deliveries cannot schedule work'
+);
+set local role service_role;
+select is(
+  (select count(*)::integer from public.claim_due_github_connection_reconciliations_server(
+    'a3420000-0000-4000-8000-000000000003', 10,
+    current_setting('app.receipt_temporary_floor')::timestamptz - interval '1 microsecond'
+  ) where installation_id in (
+    'a3220000-0000-4000-8000-000000000023',
+    'a3220000-0000-4000-8000-000000000024'
+  )),
+  0,
+  'neither post-settlement occurrence is claimable before its retained floor'
+);
+select is(
+  (select count(*)::integer from public.claim_due_github_connection_reconciliations_server(
+    'a3420000-0000-4000-8000-000000000003', 10,
+    current_setting('app.receipt_temporary_floor')::timestamptz
+  ) where installation_id = 'a3220000-0000-4000-8000-000000000023'),
+  1,
+  'the ordinary temporary occurrence becomes claimable exactly at its retained floor'
+);
+select is(
+  (select count(*)::integer from public.claim_due_github_connection_reconciliations_server(
+    'a3420000-0000-4000-8000-000000000004', 10,
+    current_setting('app.receipt_rate_floor')::timestamptz - interval '1 microsecond'
+  ) where installation_id = 'a3220000-0000-4000-8000-000000000024'),
+  0,
+  'the provider-limited occurrence remains unavailable immediately before reset'
+);
+select is(
+  (select count(*)::integer from public.claim_due_github_connection_reconciliations_server(
+    'a3420000-0000-4000-8000-000000000004', 10,
+    current_setting('app.receipt_rate_floor')::timestamptz
+  ) where installation_id = 'a3220000-0000-4000-8000-000000000024'),
+  1,
+  'the provider-limited occurrence becomes claimable exactly at its retained reset'
 );
 reset role;
 
@@ -1574,14 +2000,20 @@ select extensions.dblink_exec('reconciliation_lock_finalize', $finalize_helper$
   returns text
   language plpgsql
   as $body$
+  declare
+    finalization_result jsonb;
   begin
-    return public.finalize_github_connection_reconciliation_server(
+    finalization_result := public.finalize_github_connection_reconciliation_server(
       'a3630000-0000-4000-8000-000000000001',
       'a3640000-0000-4000-8000-000000000001',
       'temporary_failure',
       'provider_temporary_failure',
       pg_catalog.clock_timestamp() + interval '1 minute',
       '[]'::jsonb
+    );
+    return coalesce(
+      finalization_result ->> 'incidentTransition',
+      finalization_result ->> 'status'
     );
   exception
     when deadlock_detected then return 'deadlock';

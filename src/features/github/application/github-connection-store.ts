@@ -53,6 +53,10 @@ export type ClaimedGitHubConnectionReconciliation = {
 };
 
 export type GitHubConnectionIncidentTransition = "none" | "opened" | "remained_open" | "recovered";
+export type GitHubConnectionFinalizationResult = {
+  incidentTransition: GitHubConnectionIncidentTransition;
+  effectiveHealth: GitHubConnectionHealth;
+};
 
 const uuid = z.string().uuid();
 const timestamp = z.string().datetime({ offset: true });
@@ -92,6 +96,7 @@ const runRowSchema = z.object({
   status: z.literal("running"),
   diagnostic_code: z.null(),
   incident_transition: z.null(),
+  effective_health: z.null(),
   started_at: timestamp,
   last_attempted_at: timestamp,
   completed_at: z.null(),
@@ -173,6 +178,10 @@ const claimInputSchema = z.object({
   signal: z.instanceof(AbortSignal).optional(),
 }).strict();
 const incidentTransitionSchema = z.enum(["none", "opened", "remained_open", "recovered"]);
+const finalizationResultSchema = z.object({
+  incidentTransition: incidentTransitionSchema,
+  effectiveHealth: healthSchema,
+}).strict();
 
 function failure(): Error {
   return new Error("GitHub connection persistence failed");
@@ -217,7 +226,7 @@ export function buildGitHubConnectionStore(serviceInput: unknown): {
     claim: ClaimedGitHubConnectionReconciliation,
     finalization: GitHubConnectionFinalization,
     signal?: AbortSignal,
-  ): Promise<GitHubConnectionIncidentTransition>;
+  ): Promise<GitHubConnectionFinalizationResult>;
 } {
   const service = serviceInput as SupabaseServiceClient;
   return {
@@ -314,7 +323,7 @@ export function buildGitHubConnectionStore(serviceInput: unknown): {
           target_repository_snapshot: parsedFinalization.repositorySnapshot,
         }), signal);
         if (error) throw failure();
-        return incidentTransitionSchema.parse(data);
+        return finalizationResultSchema.parse(data);
       } catch {
         throw failure();
       }

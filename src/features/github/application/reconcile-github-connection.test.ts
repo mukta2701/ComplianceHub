@@ -84,7 +84,10 @@ function dependencies(providerSnapshot: InstallationSnapshot = snapshot()): Reco
     }),
     readMetadata: vi.fn().mockResolvedValue(metadata(providerSnapshot)),
     readRepositories: vi.fn().mockResolvedValue(providerSnapshot.repositories),
-    finalize: vi.fn().mockResolvedValue("none"),
+    finalize: vi.fn().mockResolvedValue({
+      incidentTransition: "none",
+      effectiveHealth: "healthy",
+    }),
     now: () => new Date("2026-09-14T12:00:00.000Z"),
   };
 }
@@ -94,7 +97,12 @@ describe("reconcileGitHubConnection", () => {
     const deps = dependencies(snapshot({ repositories: [repository(103), repository(101), repository(102)] }));
     const result = await reconcileGitHubConnection(deps, claim);
 
-    expect(result).toMatchObject({ outcome: "success", diagnostic: null, incidentTransition: "none" });
+    expect(result).toMatchObject({
+      outcome: "success",
+      diagnostic: null,
+      incidentTransition: "none",
+      effectiveHealth: "healthy",
+    });
     expect(deps.finalize).toHaveBeenCalledOnce();
     expect(deps.finalize).toHaveBeenCalledWith(claim, {
       outcome: "success",

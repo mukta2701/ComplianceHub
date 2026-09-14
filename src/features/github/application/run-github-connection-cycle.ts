@@ -78,6 +78,13 @@ const webhookSummarySchema = z.object({
 const reconciliationResultSchema = z.object({
   outcome: z.enum(["success", "partial", "temporary_failure", "action_required", "disconnected"]),
   incidentTransition: z.enum(["none", "opened", "remained_open", "recovered"]),
+  effectiveHealth: z.enum([
+    "healthy",
+    "retrying",
+    "partially_unavailable",
+    "owner_action_required",
+    "disconnected",
+  ]),
 }).passthrough();
 
 function cycleFailure(): Error {
@@ -192,15 +199,15 @@ export function buildGitHubConnectionCycleRunner(
           if (!parsedResult.success) {
             summary.ownershipLost += 1;
           } else {
-            switch (parsedResult.data.outcome) {
-              case "success":
+            switch (parsedResult.data.effectiveHealth) {
+              case "healthy":
                 summary.healthy += 1;
                 break;
-              case "temporary_failure":
+              case "retrying":
                 summary.retrying += 1;
                 break;
-              case "partial":
-              case "action_required":
+              case "partially_unavailable":
+              case "owner_action_required":
               case "disconnected":
                 summary.actionRequired += 1;
                 break;

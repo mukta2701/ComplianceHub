@@ -19,6 +19,7 @@ const runRow = {
   status: "running",
   diagnostic_code: null,
   incident_transition: null,
+  effective_health: null,
   started_at: "2026-09-14T12:00:00.000Z",
   last_attempted_at: "2026-09-14T12:00:00.000Z",
   completed_at: null,
@@ -165,7 +166,7 @@ function service(overrides: {
     }
     const data = Object.prototype.hasOwnProperty.call(overrides, "finalize")
       ? overrides.finalize
-      : "none";
+      : { incidentTransition: "none", effectiveHealth: "healthy" };
     const query = new ResultQuery(
       { data, error: null },
       overrides.pendingRpc === "finalize",
@@ -288,7 +289,10 @@ describe("buildGitHubConnectionStore", () => {
   });
 
   it("finalizes through the compare-and-set RPC with safe fields and full claim ownership", async () => {
-    const database = service({ finalize: "opened" });
+    const database = service({ finalize: {
+      incidentTransition: "opened",
+      effectiveHealth: "partially_unavailable",
+    } });
     const store = buildGitHubConnectionStore(database);
     const [claimed] = await store.claimDue({ workerId, limit: 1, now: "2026-09-14T12:00:00.000Z" });
 
@@ -306,7 +310,10 @@ describe("buildGitHubConnectionStore", () => {
         archived: false,
         defaultBranch: "main",
       }],
-    })).resolves.toBe("opened");
+    })).resolves.toEqual({
+      incidentTransition: "opened",
+      effectiveHealth: "partially_unavailable",
+    });
 
     expect(database.rpc).toHaveBeenLastCalledWith("finalize_github_connection_reconciliation_server", {
       target_run_id: runId,
@@ -396,6 +403,10 @@ describe("buildGitHubConnectionStore", () => {
     "not_finalized",
     "unexpected",
     ["none", "opened"],
+    { status: "not_finalized" },
+    { incidentTransition: "none" },
+    { incidentTransition: "none", effectiveHealth: "unknown" },
+    { incidentTransition: "none", effectiveHealth: "healthy", raw: "private" },
   ])("rejects an invalid finalization result (%s)", async (finalize) => {
     const store = buildGitHubConnectionStore(service({ finalize }));
     const [claimed] = await store.claimDue({ workerId, limit: 1, now: "2026-09-14T12:00:00.000Z" });
