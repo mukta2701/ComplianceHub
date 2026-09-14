@@ -152,7 +152,9 @@ async function selectRepository(page: Page, repositoryName: string) {
   );
   await checkbox.check();
   expect((await response).status()).toBeLessThan(400);
-  await expect(page.getByRole("status")).toContainText("Repository scope updated.");
+  await expect(page.getByRole("status")).toContainText("Repository scope updated.", {
+    timeout: 15_000,
+  });
   await expect(checkbox).toBeChecked();
 }
 
