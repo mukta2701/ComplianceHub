@@ -49,7 +49,10 @@ export type GitHubConnectionCycleDependencies = {
     limit: number;
     now: string;
   }): Promise<ClaimedGitHubConnectionReconciliation[]>;
-  reconcile(claim: ClaimedGitHubConnectionReconciliation): Promise<GitHubConnectionReconciliationResult>;
+  reconcile(
+    claim: ClaimedGitHubConnectionReconciliation,
+    signal: AbortSignal,
+  ): Promise<GitHubConnectionReconciliationResult>;
   now(): Date;
 };
 
@@ -80,6 +83,14 @@ function cycleFailure(): Error {
   return new Error("GitHub connection cycle failed");
 }
 
+function cycleTimeout(): DOMException {
+  return new DOMException("GitHub connection cycle deadline reached", "TimeoutError");
+}
+
+function cycleInterrupted(): DOMException {
+  return new DOMException("GitHub connection cycle interrupted", "AbortError");
+}
+
 function currentTime(dependencies: GitHubConnectionCycleDependencies): Date {
   const now = dependencies.now();
   if (!Number.isFinite(now.getTime())) throw cycleFailure();
@@ -103,79 +114,99 @@ export function buildGitHubConnectionCycleRunner(
     const startedAt = currentTime(dependencies).getTime();
     const deadlineAt = startedAt + parsed.data.timeBudgetMs;
     if (!Number.isSafeInteger(deadlineAt)) throw cycleFailure();
-    ensureActive(dependencies, parsed.data.signal, deadlineAt);
-
-    const webhookResult = webhookSummarySchema.safeParse(await dependencies.drainConnectionWebhooks({
-      limit: parsed.data.maximumWebhookDeliveries,
-      signal: parsed.data.signal,
-    }));
-    if (!webhookResult.success || webhookResult.data.claimed > parsed.data.maximumWebhookDeliveries) {
-      throw cycleFailure();
+    const cycle = new AbortController();
+    const abortFromInput = () => cycle.abort(cycleInterrupted());
+    let inputListenerAttached = false;
+    if (parsed.data.signal?.aborted) {
+      abortFromInput();
+    } else if (parsed.data.signal) {
+      parsed.data.signal.addEventListener("abort", abortFromInput, { once: true });
+      inputListenerAttached = true;
     }
-    ensureActive(dependencies, parsed.data.signal, deadlineAt);
+    const deadlineTimer = setTimeout(() => cycle.abort(cycleTimeout()), parsed.data.timeBudgetMs);
 
-    const claimTime = currentTime(dependencies).toISOString();
-    const claims = await dependencies.claimDue({
-      workerId: parsed.data.executionId,
-      limit: parsed.data.maximumInstallations,
-      now: claimTime,
-    });
-    if (!Array.isArray(claims) || claims.length > parsed.data.maximumInstallations) throw cycleFailure();
-    ensureActive(dependencies, parsed.data.signal, deadlineAt);
+    try {
+      ensureActive(dependencies, cycle.signal, deadlineAt);
 
-    const summary: GitHubConnectionCycleSummary = {
-      executionId: parsed.data.executionId,
-      webhookDeliveriesClaimed: webhookResult.data.claimed,
-      installationsClaimed: claims.length,
-      healthy: 0,
-      retrying: 0,
-      actionRequired: 0,
-      recovered: 0,
-      ownershipLost: webhookResult.data.ownershipLost,
-    };
-    const processedRuns = new Set<string>();
-    const processedInstallations = new Set<string>();
-
-    for (const claim of claims) {
-      ensureActive(dependencies, parsed.data.signal, deadlineAt);
-      if (
-        claim.workerId !== parsed.data.executionId
-        || processedRuns.has(claim.runId)
-        || processedInstallations.has(claim.installationId)
-      ) {
-        summary.ownershipLost += 1;
-        continue;
+      const webhookResult = webhookSummarySchema.safeParse(await dependencies.drainConnectionWebhooks({
+        limit: parsed.data.maximumWebhookDeliveries,
+        signal: parsed.data.signal,
+      }));
+      if (!webhookResult.success || webhookResult.data.claimed > parsed.data.maximumWebhookDeliveries) {
+        throw cycleFailure();
       }
-      processedRuns.add(claim.runId);
-      processedInstallations.add(claim.installationId);
+      ensureActive(dependencies, cycle.signal, deadlineAt);
 
-      try {
-        const parsedResult = reconciliationResultSchema.safeParse(await dependencies.reconcile(claim));
-        if (!parsedResult.success) {
+      const claimTime = currentTime(dependencies).toISOString();
+      const claims = await dependencies.claimDue({
+        workerId: parsed.data.executionId,
+        limit: parsed.data.maximumInstallations,
+        now: claimTime,
+      });
+      if (!Array.isArray(claims) || claims.length > parsed.data.maximumInstallations) throw cycleFailure();
+      ensureActive(dependencies, cycle.signal, deadlineAt);
+
+      const summary: GitHubConnectionCycleSummary = {
+        executionId: parsed.data.executionId,
+        webhookDeliveriesClaimed: webhookResult.data.claimed,
+        installationsClaimed: claims.length,
+        healthy: 0,
+        retrying: 0,
+        actionRequired: 0,
+        recovered: 0,
+        ownershipLost: webhookResult.data.ownershipLost,
+      };
+      const processedRuns = new Set<string>();
+      const processedInstallations = new Set<string>();
+
+      for (const claim of claims) {
+        ensureActive(dependencies, cycle.signal, deadlineAt);
+        if (
+          claim.workerId !== parsed.data.executionId
+          || processedRuns.has(claim.runId)
+          || processedInstallations.has(claim.installationId)
+        ) {
           summary.ownershipLost += 1;
-        } else {
-          switch (parsedResult.data.outcome) {
-            case "success":
-              summary.healthy += 1;
-              break;
-            case "temporary_failure":
-              summary.retrying += 1;
-              break;
-            case "partial":
-            case "action_required":
-            case "disconnected":
-              summary.actionRequired += 1;
-              break;
-          }
-          if (parsedResult.data.incidentTransition === "recovered") summary.recovered += 1;
+          continue;
         }
-      } catch {
-        summary.ownershipLost += 1;
-      }
-      ensureActive(dependencies, parsed.data.signal, deadlineAt);
-    }
+        processedRuns.add(claim.runId);
+        processedInstallations.add(claim.installationId);
 
-    return summary;
+        try {
+          const parsedResult = reconciliationResultSchema.safeParse(
+            await dependencies.reconcile(claim, cycle.signal),
+          );
+          if (!parsedResult.success) {
+            summary.ownershipLost += 1;
+          } else {
+            switch (parsedResult.data.outcome) {
+              case "success":
+                summary.healthy += 1;
+                break;
+              case "temporary_failure":
+                summary.retrying += 1;
+                break;
+              case "partial":
+              case "action_required":
+              case "disconnected":
+                summary.actionRequired += 1;
+                break;
+            }
+            if (parsedResult.data.incidentTransition === "recovered") summary.recovered += 1;
+          }
+        } catch {
+          summary.ownershipLost += 1;
+        }
+        ensureActive(dependencies, cycle.signal, deadlineAt);
+      }
+
+      return summary;
+    } finally {
+      clearTimeout(deadlineTimer);
+      if (inputListenerAttached) {
+        parsed.data.signal?.removeEventListener("abort", abortFromInput);
+      }
+    }
   };
 }
 
@@ -209,7 +240,7 @@ function buildProductionDependencies(): GitHubConnectionCycleDependencies {
   return {
     drainConnectionWebhooks: (input) => drainGitHubConnectionWebhookDeliveries(webhook, input),
     claimDue: store.claimDue,
-    reconcile: (claim) => reconcileGitHubConnection(reconciliationDependencies, claim),
+    reconcile: (claim, signal) => reconcileGitHubConnection(reconciliationDependencies, claim, signal),
     now: () => new Date(),
   };
 }

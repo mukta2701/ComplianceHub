@@ -178,6 +178,71 @@ describe("runGitHubConnectionCycle", () => {
     expect(deps.claimDue).not.toHaveBeenCalled();
   });
 
+  it("aborts in-flight reconciliation at the cycle budget without starting later claims", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-14T12:00:00.000Z"));
+    try {
+      const deps = dependencies({ now: () => new Date() });
+      deps.claimDue.mockResolvedValue([claim(1), claim(2)]);
+      deps.reconcile.mockImplementation((_claimed, signal?: AbortSignal) => {
+        if (!signal) throw new Error("missing cycle signal");
+        return new Promise((_resolve, reject) => {
+          const stop = () => reject(signal.reason);
+          if (signal.aborted) stop();
+          else signal.addEventListener("abort", stop, { once: true });
+        });
+      });
+
+      const pending = buildGitHubConnectionCycleRunner(deps)({
+        ...cycleInput,
+        timeBudgetMs: 10,
+      });
+      const rejected = expect(pending).rejects.toThrow("GitHub connection cycle failed");
+      await vi.advanceTimersByTimeAsync(10);
+
+      await rejected;
+      expect(deps.reconcile).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("relays external abort during reconciliation and removes its listener without later work", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-14T12:00:00.000Z"));
+    try {
+      const controller = new AbortController();
+      const removeListener = vi.spyOn(controller.signal, "removeEventListener");
+      const deps = dependencies({ now: () => new Date() });
+      deps.claimDue.mockResolvedValue([claim(1), claim(2)]);
+      deps.reconcile.mockImplementation((_claimed, signal?: AbortSignal) => {
+        if (!signal) throw new Error("missing cycle signal");
+        return new Promise((_resolve, reject) => {
+          const stop = () => reject(signal.reason);
+          if (signal.aborted) stop();
+          else signal.addEventListener("abort", stop, { once: true });
+        });
+      });
+
+      const pending = buildGitHubConnectionCycleRunner(deps)({
+        ...cycleInput,
+        signal: controller.signal,
+      });
+      const rejected = expect(pending).rejects.toThrow("GitHub connection cycle failed");
+      await vi.advanceTimersByTimeAsync(0);
+      controller.abort(new Error(`private-${crypto.randomUUID()}`));
+      await vi.advanceTimersByTimeAsync(0);
+
+      await rejected;
+      expect(deps.reconcile).toHaveBeenCalledOnce();
+      expect(removeListener).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("honours an existing abort before claiming any work", async () => {
     const controller = new AbortController();
     controller.abort(new Error("provider token must stay private"));

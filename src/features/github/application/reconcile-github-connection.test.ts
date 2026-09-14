@@ -440,6 +440,38 @@ describe("reconcileGitHubConnection", () => {
     }
   });
 
+  it("stops in-flight provider work on an external abort without finalizing afterward", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-14T12:00:00.000Z"));
+    try {
+      const controller = new AbortController();
+      const removeListener = vi.spyOn(controller.signal, "removeEventListener");
+      const deps = dependencies();
+      deps.now = () => new Date();
+      deps.readRepositories.mockImplementation(({ signal }: { signal: AbortSignal }) => (
+        new Promise((_resolve, reject) => {
+          const stop = () => reject(signal.reason);
+          if (signal.aborted) stop();
+          else signal.addEventListener("abort", stop, { once: true });
+        })
+      ));
+
+      const pending = reconcileGitHubConnection(deps, claim, controller.signal);
+      const rejected = expect(pending).rejects.toThrow("GitHub reconciliation interrupted");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(deps.readRepositories).toHaveBeenCalledOnce();
+      controller.abort(new Error(`private-${crypto.randomUUID()}`));
+      await vi.advanceTimersByTimeAsync(0);
+
+      await rejected;
+      expect(deps.finalize).not.toHaveBeenCalled();
+      expect(removeListener).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("finalizes an already-expired claim without starting provider work", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-14T12:04:00.000Z"));

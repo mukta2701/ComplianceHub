@@ -294,7 +294,7 @@ select ok(
   'the connection claim receives only exact connection event classes'
 );
 select ok(
-  (select next_reconciliation_at <= now()
+  (select next_reconciliation_at <= pg_catalog.clock_timestamp()
       and organisation_id = 'a3100000-0000-4000-8000-000000000001'
    from public.github_installations
    where id = 'a3200000-0000-4000-8000-000000000003'),
@@ -931,6 +931,101 @@ select is(
   'only verified success recovers a deliberately reconnected local disconnect'
 );
 reset role;
+
+insert into public.github_installations(
+  id, organisation_id, provider_installation_id, account_id, account_login,
+  account_type, repository_selection, status, connected_by, permissions,
+  permissions_ok, next_reconciliation_at
+) values (
+  'a3200000-0000-4000-8000-000000000004',
+  'a3100000-0000-4000-8000-000000000001',
+  930004, 940004, 'Reconcile-Race-Co', 'Organization', 'selected', 'active',
+  'a3000000-0000-4000-8000-000000000001', '{"metadata":"read"}', true,
+  pg_catalog.clock_timestamp() - interval '1 minute'
+);
+set local role service_role;
+select set_config(
+  'app.webhook_race_run_id',
+  (select id::text
+   from public.claim_due_github_connection_reconciliations_server(
+     'a3400000-0000-4000-8000-000000000009', 1,
+     pg_catalog.clock_timestamp()
+   )
+   where installation_id = 'a3200000-0000-4000-8000-000000000004'),
+  true
+);
+reset role;
+
+insert into public.github_webhook_deliveries(
+  id, provider_installation_id, provider_delivery_id,
+  event_name, payload_sha256, received_at
+) values (
+  'a3500000-0000-4000-8000-000000000006', 930004,
+  'connection-during-active-reconciliation', 'installation', repeat('6', 64),
+  now()
+);
+set local role service_role;
+select set_config(
+  'app.webhook_race_scheduled_at',
+  (select delivery.last_attempted_at::text
+   from public.claim_github_connection_webhook_deliveries_server(1) delivery
+   where delivery.id = 'a3500000-0000-4000-8000-000000000006'),
+  true
+);
+select ok(
+  public.finalize_github_webhook_delivery_server(
+    'a3500000-0000-4000-8000-000000000006', 1, 'processed', null
+  ),
+  'the connection event terminalizes through its owned delivery attempt'
+);
+reset role;
+select ok(
+  (select next_reconciliation_at > run.last_attempted_at
+   from public.github_installations installation
+   join public.github_connection_reconciliation_runs run
+     on run.installation_id = installation.id
+    and run.id = current_setting('app.webhook_race_run_id')::uuid
+   where installation.id = 'a3200000-0000-4000-8000-000000000004'),
+  'a connection event during an active lease records a newer pending schedule'
+);
+
+set local role service_role;
+select is(
+  public.finalize_github_connection_reconciliation_server(
+    current_setting('app.webhook_race_run_id')::uuid,
+    'a3400000-0000-4000-8000-000000000009',
+    'success', null, pg_catalog.clock_timestamp() + interval '1 day', '[]'::jsonb
+  ),
+  'none',
+  'the older in-flight reconciliation can still finalize through its lease'
+);
+reset role;
+select is(
+  (select next_reconciliation_at
+   from public.github_installations
+   where id = 'a3200000-0000-4000-8000-000000000004'),
+  current_setting('app.webhook_race_scheduled_at')::timestamptz,
+  'finalization preserves the newer connection-event schedule instead of replacing it'
+);
+
+set local role service_role;
+select set_config(
+  'app.webhook_followup_run_id',
+  coalesce((select id::text
+   from public.claim_due_github_connection_reconciliations_server(
+     'a3400000-0000-4000-8000-000000000010', 1,
+     pg_catalog.clock_timestamp()
+   )
+   where installation_id = 'a3200000-0000-4000-8000-000000000004'), ''),
+  true
+);
+reset role;
+select ok(
+  nullif(current_setting('app.webhook_followup_run_id'), '') is not null
+    and current_setting('app.webhook_followup_run_id')::uuid
+      <> current_setting('app.webhook_race_run_id')::uuid,
+  'the preserved event remains immediately claimable as one later reconciliation'
+);
 
 select is(
   (select row(

@@ -61,6 +61,10 @@ function reconciliationTimeout(): DOMException {
   return new DOMException("GitHub reconciliation deadline reached", "TimeoutError");
 }
 
+function reconciliationInterrupted(): DOMException {
+  return new DOMException("GitHub reconciliation interrupted", "AbortError");
+}
+
 function safeRateLimitTime(error: GitHubInstallationTokenError, now: Date): string | null {
   const candidates: number[] = [];
   if (error.retryAfterSeconds !== undefined) {
@@ -193,12 +197,15 @@ async function readProviderState(
   now: Date,
   signal: AbortSignal,
 ): Promise<ClassifiedOutcome> {
+  signal.throwIfAborted();
   const appJwt = await deps.createAppJwt();
+  signal.throwIfAborted();
   const metadata = await deps.readMetadata({
     installationId: claim.providerInstallationId,
     appJwt,
     signal,
   });
+  signal.throwIfAborted();
   const metadataOutcome = classifyMetadata(claim, metadata);
   if (metadataOutcome) return metadataOutcome;
 
@@ -208,6 +215,7 @@ async function readProviderState(
     now,
     signal,
   });
+  signal.throwIfAborted();
   const expiresAt = Date.parse(installationCredential.expiresAt);
   if (
     !installationCredential.token
@@ -221,18 +229,28 @@ async function readProviderState(
     accountLogin: metadata.account.login,
     signal,
   });
+  signal.throwIfAborted();
   return classifyRepositories(claim, repositories);
 }
 
 export async function reconcileGitHubConnection(
   deps: ReconcileGitHubConnectionDependencies,
   claim: ClaimedGitHubConnectionReconciliation,
+  externalSignal?: AbortSignal,
 ): Promise<GitHubConnectionReconciliationResult> {
   const now = deps.now();
   const deadline = new AbortController();
   let deadlineTimer: ReturnType<typeof setTimeout> | null = null;
+  const abortFromExternal = () => deadline.abort(reconciliationInterrupted());
+  let externalListenerAttached = false;
   let classified: ClassifiedOutcome;
   try {
+    if (externalSignal?.aborted) {
+      abortFromExternal();
+    } else if (externalSignal) {
+      externalSignal.addEventListener("abort", abortFromExternal, { once: true });
+      externalListenerAttached = true;
+    }
     if (!Number.isFinite(now.getTime())) throw new Error("invalid reconciliation time");
     const deadlineAt = Date.parse(claim.attemptedAt) + RECONCILIATION_DEADLINE_MS;
     if (!Number.isFinite(deadlineAt)) throw new Error("invalid reconciliation deadline");
@@ -243,11 +261,16 @@ export async function reconcileGitHubConnection(
     }, remainingMs);
     classified = await readProviderState(deps, claim, now, deadline.signal);
   } catch (error) {
+    if (externalSignal?.aborted) throw reconciliationInterrupted();
     classified = classifyError(error, now);
   } finally {
     if (deadlineTimer !== null) clearTimeout(deadlineTimer);
+    if (externalListenerAttached) {
+      externalSignal?.removeEventListener("abort", abortFromExternal);
+    }
   }
 
+  if (externalSignal?.aborted) throw reconciliationInterrupted();
   const finalization = toFinalization(claim, classified);
   const incidentTransition = await deps.finalize(claim, finalization);
   return { ...finalization, incidentTransition };

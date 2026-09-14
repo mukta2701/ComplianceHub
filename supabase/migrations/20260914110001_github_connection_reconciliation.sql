@@ -326,7 +326,7 @@ begin
     limit target_limit
     for update skip locked
   loop
-    scheduled_at := pg_catalog.now();
+    scheduled_at := pg_catalog.clock_timestamp();
     resolved_installation := null;
     select installation.* into resolved_installation
     from public.github_installations installation
@@ -340,6 +340,13 @@ begin
 
     resolved_repository_id := null;
     if installation_found then
+      if resolved_installation.last_reconciliation_attempt_at is not null
+        and scheduled_at <= resolved_installation.last_reconciliation_attempt_at
+      then
+        scheduled_at := resolved_installation.last_reconciliation_attempt_at
+          + interval '1 microsecond';
+      end if;
+
       select repository.id into resolved_repository_id
       from public.github_repositories repository
       where repository.installation_id = resolved_installation.id
@@ -353,10 +360,7 @@ begin
         );
 
       update public.github_installations installation
-      set next_reconciliation_at = least(
-        coalesce(installation.next_reconciliation_at, scheduled_at),
-        scheduled_at
-      )
+      set next_reconciliation_at = scheduled_at
       where installation.id = resolved_installation.id
         and installation.organisation_id = resolved_installation.organisation_id;
     end if;
@@ -793,7 +797,11 @@ begin
         else installation.last_successful_reconciliation_at
       end,
       consecutive_reconciliation_failures = next_failure_count,
-      next_reconciliation_at = effective_next_attempt_at,
+      next_reconciliation_at = case
+        when installation.next_reconciliation_at > run_row.last_attempted_at
+          then installation.next_reconciliation_at
+        else effective_next_attempt_at
+      end,
       health_diagnostic_code = target_diagnostic_code,
       reconciliation_locked_by = null,
       reconciliation_locked_until = null,
