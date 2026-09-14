@@ -94,4 +94,28 @@ describe("runMonitoring", () => {
     expect(summary.alertsFailed).toBe(1);
     expect(summary.alertsDelivered).toBe(0);
   });
+
+  it("does not let one rejected Slack destination starve another channel", async () => {
+    const rejected: AlertChannel = {
+      id: "slack-rejected", type: "slack",
+      config: { slackDestinationStatus: "not_approved" }, minSeverity: "high",
+    };
+    const whatsapp: AlertChannel = {
+      id: "whatsapp-ok", type: "whatsapp", config: { to: "+447700900123" }, minSeverity: "high",
+    };
+    const deliver = vi.fn()
+      .mockResolvedValueOnce({ channelId: rejected.id, type: "slack", status: "failed", reason: "Slack destination is not approved" })
+      .mockResolvedValueOnce({ channelId: whatsapp.id, type: "whatsapp", status: "delivered" });
+    const d = deps({
+      runChecks: async () => [check({ checkId: "github.branch_protection", passed: false })],
+      listExternalChannels: async () => [rejected, whatsapp],
+      deliver,
+    });
+
+    const summary = await runMonitoring(d);
+
+    expect(deliver).toHaveBeenNthCalledWith(1, rejected, expect.anything());
+    expect(deliver).toHaveBeenNthCalledWith(2, whatsapp, expect.anything());
+    expect(summary).toMatchObject({ alertsFailed: 1, alertsDelivered: 1, sourcesChecked: 1 });
+  });
 });

@@ -13,12 +13,13 @@ export function generateReadinessPdf(report: ReadinessReport, organisationName: 
     doc.on("error", reject);
     doc.fontSize(20).text("Leadership readiness report").moveDown(0.3);
     doc.fontSize(10).text(`Organisation: ${organisationName}`).text(`Generated: ${new Date().toISOString().slice(0, 10)}`).moveDown();
-    doc.fontSize(12).text(`Framework coverage: ${report.soaPercent}% (${report.soaTotal} applicable controls)`);
+    doc.fontSize(12).text(`Weighted control maturity: ${report.soaPercent}% (${report.soaTotal} applicable controls)`);
     doc.text(`Tasks: ${report.tasksOpen} open, ${report.tasksOverdue} overdue`);
-    doc.text(`Evidence: ${report.evidence.total} live, ${report.evidence.expiring} expiring, ${report.evidence.expired} expired`);
+    doc.text(`Evidence: ${report.evidence.total} recorded, ${report.evidence.expiring} expiring, ${report.evidence.expired} expired`);
     doc.text(`Audits: ${report.openAudits} open, ${report.openNonConformities} open non-conformities`).moveDown();
     doc.fontSize(13).text("Risk posture").fontSize(11);
     for (const band of Object.keys(report.riskBands) as RiskBand[]) doc.text(`${RISK_BAND_LABEL[band]}: ${report.riskBands[band]}`);
+    doc.moveDown().fontSize(10).text("The maturity score summarises recorded control statuses. Evidence quality, verification results and audit conclusions must be reviewed separately.");
     doc.end();
   });
 }

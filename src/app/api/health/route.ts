@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { logError } from "@/lib/observability/logger";
+import { complianceHubRuntimeCapabilities } from "@/features/mcp/application/runtime-capabilities";
 
 export const dynamic = "force-dynamic";
 
@@ -15,9 +16,19 @@ export async function GET() {
     // to service_role, so the probe needs no additional database privileges.
     const { error } = await supabase.from("app_errors").select("id").limit(1);
     if (error) throw error;
-    return NextResponse.json({ status: "ok", db: "ok", ms: Date.now() - started });
+    return NextResponse.json({
+      status: "ok",
+      db: "ok",
+      ms: Date.now() - started,
+      ...complianceHubRuntimeCapabilities(),
+    });
   } catch (error) {
     await logError("route", "health check failed", error);
-    return NextResponse.json({ status: "degraded", db: "error", ms: Date.now() - started }, { status: 503 });
+    return NextResponse.json({
+      status: "degraded",
+      db: "error",
+      ms: Date.now() - started,
+      ...complianceHubRuntimeCapabilities(),
+    }, { status: 503 });
   }
 }

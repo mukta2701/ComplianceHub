@@ -10,7 +10,7 @@ export function siteUrl(): string {
     if (process.env.NODE_ENV === "production") {
       throw new Error("NEXT_PUBLIC_SITE_URL must be set in production (used for auth/email redirect links)");
     }
-    return "http://localhost:3000";
+    return "http://127.0.0.1:3100";
   }
   return url.replace(/\/+$/, "");
 }

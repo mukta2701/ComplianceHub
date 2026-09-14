@@ -1,4 +1,11 @@
 import ExcelJS from "exceljs";
+import { assertSafeXlsxArchive } from "./xlsx-archive";
+import {
+  MAX_XLSX_COLUMNS,
+  MAX_XLSX_POPULATED_CELLS,
+  MAX_XLSX_ROW_INDEX,
+  MAX_XLSX_WORKSHEETS,
+} from "./limits";
 
 export type ParsedWorkbook = { headers: string[]; rows: string[][] };
 
@@ -26,12 +33,28 @@ export function parseCsv(text: string): string[][] {
 }
 
 async function parseXlsx(buf: ArrayBuffer): Promise<string[][]> {
+  await assertSafeXlsxArchive(buf);
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(buf);
+  if (workbook.worksheets.length > MAX_XLSX_WORKSHEETS) {
+    throw new Error("XLSX worksheet exceeds safe data limits.");
+  }
+  let populatedCells = 0;
+  for (const worksheet of workbook.worksheets) {
+    if (worksheet.rowCount > MAX_XLSX_ROW_INDEX || worksheet.columnCount > MAX_XLSX_COLUMNS) {
+      throw new Error("XLSX worksheet exceeds safe data limits.");
+    }
+    worksheet.eachRow((row) => {
+      populatedCells += row.actualCellCount;
+      if (populatedCells > MAX_XLSX_POPULATED_CELLS) {
+        throw new Error("XLSX worksheet exceeds safe data limits.");
+      }
+    });
+  }
   const sheet = workbook.worksheets[0];
   const grid: string[][] = [];
   if (!sheet) return grid;
-  sheet.eachRow({ includeEmpty: true }, (excelRow) => {
+  sheet.eachRow((excelRow) => {
     const values = excelRow.values as unknown[]; // 1-based; index 0 is undefined
     const cells: string[] = [];
     for (let c = 1; c < values.length; c++) {

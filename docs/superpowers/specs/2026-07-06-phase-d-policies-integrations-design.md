@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-06
 **Status:** Draft for founder review
-**Parent roadmap:** `2026-07-05-product-roadmap-v3.md` §Phase D (approved, final build phase).
+**Historical context:** This document records the already-delivered Phase D design. Its former parent roadmap has been removed from the active tree. Future work follows the [trusted compliance platform roadmap](2026-09-13-trusted-compliance-platform-roadmap.md).
 **Binding:** v2 §10 — RLS + pgTAP attack tests (all 4 cross-tenant verbs) on every new tenant table; tenant + audit triggers; reuse the existing tasks/notifications/evidence engines (no parallel machinery); Phase A design system (fragments/single-h1/axe-zero); en-GB; original content; NO service-role in request paths (the daily-sweep cron is the only service-role user; a new poll cron may use it, tenant-scoped).
 
 ## Goal

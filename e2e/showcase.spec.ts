@@ -1,0 +1,231 @@
+import { readFileSync } from "node:fs";
+import { expect, test, type Page } from "@playwright/test";
+
+const BASE_ORIGIN = "http://127.0.0.1:3100";
+const showcaseEnabled = process.env.SHOWCASE_REHEARSAL === "1";
+const manifest = showcaseEnabled
+  ? JSON.parse(readFileSync("artifacts/showcase-v1/manifest.json", "utf8")) as { ids: Record<string, string> }
+  : { ids: {} };
+const snapshotId = manifest.ids.soa_snapshot;
+
+test.skip(!showcaseEnabled, "Set SHOWCASE_REHEARSAL=1 to run against the saved showcase session");
+test.use({ storageState: showcaseEnabled ? "artifacts/showcase-v1/browser-session.json" : { cookies: [], origins: [] } });
+
+async function clickPath(page: Page, path: string) {
+  const openNavigation = page.getByRole("button", { name: "Open navigation" });
+  if (await openNavigation.isVisible()) await openNavigation.click();
+  await Promise.all([
+    page.waitForURL(new URL(path, BASE_ORIGIN).toString()),
+    page.locator(`a[href="${path}"]`).first().click(),
+  ]);
+}
+
+async function checkPage(page: Page, label: string, errors: string[]) {
+  const width = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth }));
+  expect(width.scroll, `${label} horizontal overflow`).toBeLessThanOrEqual(width.client);
+  expect(errors, `${label} browser errors`).toEqual([]);
+}
+
+test("rehearses the saved connected showcase journey without writes", async ({ page }) => {
+  test.setTimeout(120_000);
+  expect(new URL(test.info().project.use.baseURL ?? BASE_ORIGIN).origin).toBe(BASE_ORIGIN);
+  expect(snapshotId, "run demo:setup to finish the immutable showcase snapshot").toBeTruthy();
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(`pageerror: ${error.message}`));
+  page.on("console", (message) => { if (message.type() === "error") errors.push(`console: ${message.text()}`); });
+  page.on("requestfailed", (request) => {
+    const failure = request.failure()?.errorText ?? "failed";
+    // Next cancels speculative RSC fetches when navigation supersedes them.
+    // Each real navigation is separately required to reach its URL and content.
+    if (failure === "net::ERR_ABORTED") return; // Browser navigation/download cancellation; content and files are verified below.
+    errors.push(`request: ${request.url()} ${failure}`);
+  });
+
+  await page.goto("/app");
+  const anonymousContext = await page.context().browser()!.newContext({ baseURL: BASE_ORIGIN, storageState: { cookies: [], origins: [] } });
+  const anonymousPage = await anonymousContext.newPage();
+  await anonymousPage.goto("/app");
+  await expect(anonymousPage).toHaveURL(/\/sign-in$/);
+  const anonymousExport = await anonymousPage.request.get("/api/app/evidence/export?format=csv", { maxRedirects: 0 });
+  expect([401, 403, 307, 308]).toContain(anonymousExport.status());
+  await anonymousContext.close();
+  await checkPage(page, "dashboard", errors);
+
+  await clickPath(page, "/app/assessment");
+  await page.locator(`a[href="/app/assessment/${manifest.ids.assessment}"]`).click();
+  await page.waitForURL(new RegExp(`/app/assessment/${manifest.ids.assessment}$`));
+  await expect(page.getByText("This assessment is complete.")).toBeVisible();
+  await expect(page.getByText(/10 of 10 answered/)).toBeVisible();
+  await checkPage(page, "assessment", errors);
+
+  await clickPath(page, "/app/soa");
+  await expect(page.getByText("Finalised statements")).toBeVisible();
+  await page.locator(`a[href="/app/soa/${manifest.ids.soa}"]`).click();
+  await page.waitForURL(new RegExp(`/app/soa/${manifest.ids.soa}$`));
+  await expect(page.getByText(/Preflight complete|reviewed/)).toBeVisible();
+  await checkPage(page, "SoA", errors);
+  await clickPath(page, "/app/soa");
+  await expect(page.locator(`a[href="/api/app/soa/${snapshotId}/pdf"]`)).toHaveCount(1);
+  const [soaDownload] = await Promise.all([
+    page.waitForEvent("download"),
+    page.locator(`a[href="/api/app/soa/${snapshotId}/pdf"]`).click(),
+  ]);
+  expect(soaDownload.suggestedFilename()).toMatch(/^statement-of-applicability-v.+\.pdf$/);
+  expect(readFileSync((await soaDownload.path())!).subarray(0, 4).toString()).toBe("%PDF");
+
+  await clickPath(page, "/app/risks");
+  await page.locator(`a[href="/app/risks/${manifest.ids.risk}"]`).click();
+  await page.waitForURL(new RegExp(`/app/risks/${manifest.ids.risk}$`));
+  await expect(page.getByText("Treatment plans")).toBeVisible();
+  await expect(page.getByText("Lead: Northstar Showcase Owner · target 2026-12-31", { exact: true })).toBeVisible();
+  await checkPage(page, "risk", errors);
+
+  await clickPath(page, "/app/risks");
+  await page.locator(`a[href="/app/tasks/${manifest.ids.task}"]`).click();
+  await page.waitForURL(new RegExp(`/app/tasks/${manifest.ids.task}$`));
+  await expect(page.locator("h2").first()).toBeVisible();
+  await expect(page.getByText(/Linked risk/)).toBeVisible();
+  await checkPage(page, "treatment task", errors);
+
+  await page.goto(`/app/evidence?evidence=${manifest.ids.evidence}#evidence-${manifest.ids.evidence}`);
+  const evidenceDetail = page.locator(`#evidence-${manifest.ids.evidence}`);
+  await expect(evidenceDetail).toBeVisible();
+  await expect(evidenceDetail.locator("span.pill").filter({ hasText: "Policy: NS-POL-001: Northstar access review policy" })).toBeVisible();
+  await expect(evidenceDetail.locator("span.pill").filter({ hasText: /^Risk NS-R-001/ })).toBeVisible();
+  await expect(evidenceDetail.locator("span.pill").filter({ hasText: /^Task: Treatment plan NS-RTP-001/ })).toBeVisible();
+  await expect(evidenceDetail.getByText("Task: undefined")).toHaveCount(0);
+  await page.reload();
+  await expect(evidenceDetail.locator("span.pill").filter({ hasText: "Policy: NS-POL-001: Northstar access review policy" })).toBeVisible();
+  await checkPage(page, "evidence", errors);
+
+  await clickPath(page, "/app/audits");
+  await page.locator(`a[href="/app/audits/${manifest.ids.audit}"]`).click();
+  await page.waitForURL(new RegExp(`/app/audits/${manifest.ids.audit}$`));
+  await expect(page.getByRole("heading", { name: "Northstar access governance review", exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Audit checklist" })).toBeVisible();
+  const [auditDownload] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("link", { name: "Evidence pack (XLSX)" }).click(),
+  ]);
+  expect(auditDownload.suggestedFilename()).toMatch(/^audit-pack-.+\.xlsx$/);
+  await checkPage(page, "audit", errors);
+
+  await clickPath(page, "/app/reports/readiness");
+  await expect(page.getByRole("heading", { name: "Leadership readiness report" })).toBeVisible();
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("link", { name: /Download PDF/i }).click(),
+  ]);
+  expect(download.suggestedFilename()).toBe("readiness-report.pdf");
+  expect(readFileSync((await download.path())!).subarray(0, 4).toString()).toBe("%PDF");
+  await checkPage(page, "leadership report", errors);
+});
+
+test.describe("showcase Member permissions", () => {
+  test.use({ storageState: showcaseEnabled ? "artifacts/showcase-v1/member-session.json" : { cookies: [], origins: [] } });
+  test("shows the published report and blocks operator routes and APIs", async ({ page }) => {
+    for (const route of ["/app/assessment", "/app/soa", "/app/evidence", "/app/risks/new", "/app/audits"]) {
+      await page.goto(route);
+      await expect(page).toHaveURL(`${BASE_ORIGIN}/app`);
+    }
+    const denied = await page.request.get("/api/app/evidence/export?format=csv");
+    expect(denied.status()).toBe(403);
+    await page.goto(`/app/policies/${manifest.ids.policy}`);
+    await expect(page.getByRole("button", { name: "Save policy", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Northstar access review policy", exact: true })).toBeVisible();
+    await page.goto("/app/reports/readiness");
+    await expect(page.getByText("PUBLISHED REPORT", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Publish to members", exact: true })).toHaveCount(0);
+    const report = await page.request.get("/api/app/reports/readiness/pdf");
+    expect(report.status()).toBe(200);
+    expect((await report.body()).subarray(0, 4).toString()).toBe("%PDF");
+    await checkPage(page, "Member report", []);
+  });
+});
+
+test("all showcase sections load with honest status and readable layouts", async ({ page }) => {
+  test.setTimeout(120_000);
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  const sections = [
+    ["/app", "Programme overview"],
+    ["/app/assessment", "Readiness assessments"],
+    ["/app/risks", "Risk register"],
+    ["/app/soa", "Statement of Applicability"],
+    ["/app/evidence", "Evidence vault"],
+    ["/app/tasks", "Tasks"],
+    ["/app/monitoring", "Continuous monitoring"],
+    ["/app/automation", "Review the work your systems prepared"],
+    ["/app/policies", "Policy library"],
+    ["/app/audits", "Internal audits"],
+    ["/app/kpis", "Performance measures"],
+    ["/app/reports/readiness", "Leadership readiness report"],
+    ["/app/trust", "Public Trust Center"],
+    ["/app/settings", "Organisation settings"],
+    ["/app/notifications", "Notifications"],
+  ];
+  for (const [path, heading] of sections) {
+    await page.goto(path);
+    await expect(page.getByRole("main").getByRole("heading", { name: heading, exact: true }).first()).toBeVisible();
+    await checkPage(page, path, errors);
+  }
+  await expect(page.getByText(/an empty inbox does not mean all checks have passed/)).toBeVisible();
+  await page.goto("/app/kpis");
+  await expect(page.getByRole("img", { name: "Trend of 2 readings" })).toBeVisible();
+  await expect(page.getByText("Target: 95%", { exact: true })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Indicator", exact: true })).not.toBeVisible();
+  await page.getByText("Add a performance measure", { exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "Indicator", exact: true })).toBeVisible();
+  await page.goto("/app/reports/readiness");
+  await expect(page.getByText("MATURITY", { exact: true })).toBeVisible();
+  await expect(page.getByText("READY", { exact: true })).toHaveCount(0);
+  await page.goto(`/app/evidence?evidence=${manifest.ids.evidence}#evidence-${manifest.ids.evidence}`);
+  const sample = page.locator(`#evidence-${manifest.ids.evidence}`);
+  await expect(sample).toBeVisible();
+  await expect(sample.getByRole("link", { name: "Supersede", exact: true })).toHaveAttribute("href", `/app/evidence/new?replaces=${manifest.ids.evidence}`);
+  await expect(sample.getByRole("button", { name: "Confirm withdrawal", exact: true })).not.toBeVisible();
+  await sample.getByText("Withdraw evidence", { exact: true }).click();
+  await expect(sample.getByRole("button", { name: "Confirm withdrawal", exact: true })).toBeVisible();
+  const manageLinks = sample.getByText("Manage links", { exact: true });
+  await manageLinks.click();
+  await expect(sample.getByLabel(/Link .+ to a control/)).toBeVisible();
+  // Inspect maintenance affordances without altering the saved fictional records.
+  await page.reload();
+  await expect(sample.getByRole("button", { name: "Confirm withdrawal", exact: true })).not.toBeVisible();
+  await expect(sample.getByLabel(/Link .+ to a control/)).not.toBeVisible();
+});
+
+test("shows the completed fictional human-review chain without changing records", async ({ page }) => {
+  test.setTimeout(90_000);
+  const ids = manifest.ids;
+  for (const key of ["human_audit", "human_task", "human_finding", "human_checklist", "human_evidence"]) {
+    expect(ids[key], `Complete the guarded --human-review rehearsal: ${key}`).toBeTruthy();
+  }
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto(`/app/tasks/${ids.human_task}`);
+  await expect(page.locator('select[name="status"]')).toHaveValue("done");
+  await expect(page.locator(`a[href="/app/audits/${ids.human_audit}"]`).first()).toBeVisible();
+  await checkPage(page, "completed human-review task", errors);
+  await page.goto(`/app/evidence?evidence=${ids.human_evidence}#evidence-${ids.human_evidence}`);
+  const evidence = page.locator(`#evidence-${ids.human_evidence}`);
+  await expect(evidence).toContainText("FICTIONAL HUMAN REVIEW");
+  await expect(evidence).toContainText("not live provider verification");
+  await expect(evidence).toContainText(ids.human_finding);
+  await checkPage(page, "fresh fictional review evidence", errors);
+  await page.goto(`/app/audits/${ids.human_audit}`);
+  await expect(page.getByLabel("Status of finding: FICTIONAL NS-AUD-002: independent sign-off needs a human review", { exact: true })).toHaveValue("closed");
+  await expect(page.getByLabel("Result for Has the fictional follow-up received a fresh human review?", { exact: true })).toHaveValue("compliant");
+  await expect(page.locator(`a[href*="evidence=${ids.human_evidence}"]`).first()).toBeVisible();
+  await page.reload();
+  await checkPage(page, "human-reviewed audit after refresh", errors);
+  const pack = await page.request.get(`/api/app/audits/${ids.human_audit}/pack?format=csv`);
+  expect(pack.status()).toBe(200);
+  const csv = await pack.text();
+  expect(csv).toContain("FICTIONAL HUMAN REVIEW");
+  expect(csv).toContain(ids.human_task);
+  expect(csv).toContain(ids.human_finding);
+  await page.goto("/app/reports/readiness");
+  await expect(page.getByRole("heading", { name: "Leadership readiness report" })).toBeVisible();
+  await checkPage(page, "current report after human review", errors);
+});

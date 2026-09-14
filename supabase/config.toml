@@ -18,10 +18,19 @@ sql_paths = ["./seed.sql"]
 
 [auth]
 enabled = true
-site_url = "http://localhost:3000"
-additional_redirect_urls = ["http://localhost:3000/auth/callback", "http://127.0.0.1:3000/auth/callback"]
+site_url = "http://127.0.0.1:3100"
+additional_redirect_urls = ["http://127.0.0.1:3100/auth/callback"]
 jwt_expiry = 3600
 enable_signup = true
+
+[auth.oauth_server]
+enabled = true
+authorization_url_path = "/oauth/consent"
+allow_dynamic_registration = true
+
+[auth.hook.custom_access_token]
+enabled = true
+uri = "pg-functions://postgres/private/mcp_access_token_hook"
 
 [auth.email]
 enable_signup = true

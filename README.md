@@ -13,6 +13,8 @@ ComplianceHub supports readiness work. It does **not** provide certification, le
 - **Policies** — a policy library with an approval lifecycle, per-employee version-stamped acceptance, material-edit re-accept, scheduled review reminders, and 10 original, editable starter policies for ISO 27001 readiness.
 - **KPIs & management review** — a KPI register with measurement trends for management review.
 - **Integrations** — Owner/Admin-managed GitHub and Jira OAuth authorization through a server-only Nango boundary, with mode-bound ticket push/status sync, linked GitHub compliance monitoring, enable/disable controls, and a network-free local sandbox path.
+- **Internal MCP + daily digest** — OAuth-protected, read-only MCP tools for workspace compliance facts plus an Owner-only, fact-hashed Slack digest flow with encrypted webhook delivery and replay-safe delivery records.
+- **GitHub shadow collection** — a private, read-only GitHub App flow can scope one repository, collect sanitised security observations, and show collection health without changing readiness, evidence, findings, MCP answers, or Slack output.
 - **Multi-framework** — record how your ISO 27001 controls map to SOC 2 / GDPR / HIPAA / NIST CSF / ISO 27017, with per-framework coverage.
 - **Public Trust Center** — an owner-opt-in public page that shares only a safe security-posture summary with prospects.
 - **Multi-tenant & audited** — every table is org-isolated via Postgres Row-Level Security with cross-tenant attack tests, and every change is captured to an audit trail.
@@ -24,11 +26,33 @@ Requirements: Node.js 22+, npm, Docker Desktop, and the Supabase CLI.
 ```bash
 cp .env.example .env.local
 npm install
-npx supabase start
+npx supabase start -x analytics
 npm run dev
 ```
 
-Use the local Supabase values printed by `supabase start` in `.env.local`. Never expose `SUPABASE_SERVICE_ROLE_KEY` to browser code.
+The app does not require Supabase's optional local analytics container; excluding
+it keeps the small demo stack responsive. Use the local Supabase values printed
+by `supabase start` in `.env.local`. If you use
+`supabase status -o env`, map its names to the application names before starting
+Next.js (the CLI prints `API_URL`, `ANON_KEY`, and `SERVICE_ROLE_KEY`):
+
+```bash
+eval "$(npx supabase status -o env)"
+NEXT_PUBLIC_SUPABASE_URL="$API_URL" \
+NEXT_PUBLIC_SUPABASE_ANON_KEY="$ANON_KEY" \
+SUPABASE_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY" \
+MCP_RESOURCE_URL="http://127.0.0.1:3100/mcp" \
+npm run dev
+```
+
+Alternatively, copy the values into `.env.local`; do not commit that file.
+Never expose `SUPABASE_SERVICE_ROLE_KEY` to browser code.
+The ordinary development command serves the app at `http://127.0.0.1:3100`.
+For local verification, set `MCP_RESOURCE_URL` to the exact `NEXT_PUBLIC_SITE_URL`
+origin plus `/mcp` (`http://127.0.0.1:3100/mcp` for the canonical local runtime).
+`SUPABASE_OAUTH_ISSUER` and `SUPABASE_OAUTH_JWKS_URL` may stay blank locally
+because they use fixed loopback defaults. Set all three to exact hosted values
+for staging or production.
 
 ## Verification
 
@@ -38,9 +62,37 @@ npm run test:db
 npm run test:e2e
 ```
 
+The browser suite runs both desktop and mobile projects. It uses the local
+Supabase environment from `.env.local` (or the CI-provisioned environment) and
+serializes local runs to one worker because the local stack is shared. Set
+`E2E_TEST_TOOLS_ENABLED=1` only for local test runs so the sandbox integration
+fixtures are visible; never enable that flag on a hosted origin. CI runs the
+suite against the production build; local runs use the development server for
+faster iteration.
+
+`npm run test:db` runs ordinary pgTAP against the current local schema and does
+not reset the database. The historical migration-upgrade harness is deliberately
+separate because it destroys all data in the local Supabase instance: it resets
+to migration `20260807047000`, loads legacy fixtures, applies the remaining
+migration, verifies the result, and finally resets to a fresh current schema
+without seed data. It always uses `--local` and never a linked or hosted project.
+Run it only when losing every local record is acceptable:
+
+```bash
+COMPLIANCEHUB_ALLOW_LOCAL_DB_RESET=1 npm run test:db:upgrade
+```
+
+Without that exact acknowledgement (or `CI=true` in an isolated CI job), the
+upgrade harness exits before invoking Supabase.
+
 ## Deployment
 
-The reference beta deployment uses Vercel and managed Supabase. See `docs/deployment.md`. The application remains portable because schema changes are SQL migrations and core domain logic is framework-independent TypeScript.
+The active staging target is Azure Container Apps with managed Supabase; Vercel
+is not used by the current rollout. See `docs/deployment.md` and the checked-in
+release checklist. Hosted migrations, Azure credentials, GitHub App approval,
+and real Slack delivery remain explicit owner-controlled gates. The application
+remains portable because schema changes are SQL migrations and core domain logic
+is framework-independent TypeScript.
 
 ## Security and privacy
 

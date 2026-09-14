@@ -1,5 +1,58 @@
 # Codex overnight readiness notes
 
+> The original 2026-07-13 entry below is retained as historical evidence. The
+> current handoff is the section immediately following it.
+
+## Current handoff — 2026-08-18
+
+- Branch: `codex/github-collection-foundation`; the reviewed baseline for this
+  handoff is `5ba9586`, including retry-safe automation provenance, scheduled
+  retention purging, owner-gated AI drafting, replay-safe automation reviews,
+  stable automation sign-up/tracker
+  E2E paths, the safe connector-metadata grant, and active-workspace isolation
+  across policies, imports, autosave, automation, invitations, AI, audits,
+  legacy registers, exports, SoA owner assignment, deployment attestation, and
+  active-workspace GitHub repository selection. KPI follow-up task creation and
+  monitoring remediation-task creation are now atomic, tenant-scoped RPCs with
+  row locks and duplicate protection; risk-matrix mutations are operator-only
+  in both the UI and RLS.
+- Local application health: `/api/health` returns HTTP 200 with `db: ok`.
+- Local verification baseline: the current release verification passed lint,
+  typecheck, **210 test files / 1,472 tests**, and the Next production build.
+  The fixture-preserving local database gate also passed **79 files / 1,257
+  tests**, including the atomic KPI and monitoring task RPCs and operator-only
+  risk mutations; the disposable CI database gate
+  independently passed the same migration set.
+- Server error hygiene: assessment autosave, automation review, and SoA
+  finalisation return stable client errors and do not expose raw database
+  messages.
+- Browser evidence: GitHub CI's complete production matrix passed **58/58**
+  across Chromium and mobile with `E2E_TEST_TOOLS_ENABLED=1` and one worker.
+  The exact current-SHA disposable CI run is the authoritative production-server
+  evidence.
+- Integration evidence: `npm run test:integration` passed 3 files / 5 tests;
+  the production GitHub shadow spec passed on Chromium and mobile (2/2).
+- Remote CI evidence: run `32158868448` for `3fd6ebd` completed successfully.
+  Gitleaks, container, database upgrade/full pgTAP, application
+  lint/typecheck/unit/build, integration, and the full desktop/mobile
+  Playwright gate all passed.
+- MCP evidence: local DCR + S256 PKCE, authorization-code exchange, refresh,
+  authenticated initialize/tools/list, and revocation all passed. The canonical
+  local audience row is configured for `http://127.0.0.1:3100/mcp` only.
+- Slack evidence: local digest reservation/finalisation and concurrency tests
+  pass with an injected transport. Any earlier Ankit, AdTecher, or KT-SME
+  workspace/channel smoke is invalid historical evidence and not authorised for use.
+  No current external Slack acceptance is claimed. The
+  only permitted future proof is an explicitly verified Mukta-owned,
+  server-approved private Slack destination.
+- GitHub evidence: the local personal pilot collected the selected
+  `mukta2701/ComplianceHub` repository and kept readiness unchanged. This is not
+  Adtecher acceptance.
+- Release boundary: hosted Supabase backup/migrations, Azure deployment and
+  protected secrets, hosted MCP OAuth, real Slack webhook deliveries, and the
+  Adtecher-owned App/repository proof remain owner-controlled checkpoints. Do
+  not mark them complete from local fixtures.
+
 Date: 2026-07-13  
 Branch: `main`  
 Readiness verdict: **NO-GO for hosted deployment until the three new database migrations are applied through the approved production migration process.**

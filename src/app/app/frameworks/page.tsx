@@ -9,7 +9,7 @@ import {
   type ComplianceFramework,
   type CrosswalkMapping,
 } from "@/features/controls/domain/crosswalk";
-import { hasCapability } from "@/features/organisations/domain/access";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import { addControlCrosswalkAction, deleteControlCrosswalkAction } from "./actions";
 
 // A control counts as "implemented" when its Statement of Applicability status
@@ -19,7 +19,7 @@ const IMPLEMENTED_SOA_STATUSES = new Set(["established", "operational", "advance
 
 export default async function FrameworksPage() {
   const { supabase, organisation, membership } = await requireAppContext();
-  const canManage = hasCapability(membership.role, "manage_frameworks");
+  const canManage = workspaceAccess(membership.role).section("frameworks").canManage;
 
   // Coverage is a view of the active workspace's current SoA, not a lifetime
   // history. Version ordering matches the readiness-report loader semantics.

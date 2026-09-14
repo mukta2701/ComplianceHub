@@ -1,5 +1,5 @@
 begin;
-select plan(10);
+select plan(15);
 
 -- Phase D (B6): scheduled policy review reminders. The daily sweep runs as the
 -- service role (bypasses RLS, tenant-scoped per row via organisation_id). This
@@ -54,13 +54,13 @@ select lives_ok(
              '50000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001') $$,
   'the service role raises a policy_review task linked to the due policy');
 
--- (4) The (organisation_id, policy_id, source) unique key stops the sweep from
--- re-raising the same policy_review task day after day.
+-- (4) The preserved scheduled-cycle key stops the sweep from
+-- re-raising the same policy review cycle day after day.
 select throws_ok(
   $$ insert into public.tasks (organisation_id, title, source, policy_id, created_by)
      values ('20000000-0000-4000-8000-000000000001', 'duplicate policy review',
              'policy_review', '50000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001') $$,
-  '23505', null, 'a policy_review task never re-raises for the same policy');
+  '23505', null, 'a policy_review task never re-raises for the same scheduled cycle');
 
 -- (5) The composite tenant FK keeps a task's policy in the task's own tenant: a
 -- task in tenant B cannot point at tenant A's policy.
@@ -96,6 +96,38 @@ select is(
   (select count(*) from public.tasks where source = 'policy_review'
      and status in ('open', 'in_progress') and policy_id = '50000000-0000-4000-8000-000000000002'),
   0::bigint, 'the not-yet-due policy has no policy_review task');
+
+reset role;
+
+-- The next scheduled date is a distinct obligation, while the previous task
+-- remains as completed history. Retry the same cycle through the sweep insert.
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated"}', true);
+update public.tasks set status = 'done' where policy_id = '50000000-0000-4000-8000-000000000001';
+update public.policies set review_due = current_date where id = '50000000-0000-4000-8000-000000000001';
+set local role service_role;
+select lives_ok(
+  $$ insert into public.tasks (organisation_id, title, source, due_on, policy_id, created_by)
+     values ('20000000-0000-4000-8000-000000000001', 'Next review', 'policy_review', current_date,
+       '50000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001') $$,
+  'a later policy review cycle creates its own task');
+select throws_ok(
+  $$ insert into public.tasks (organisation_id, title, source, due_on, policy_id, created_by)
+     values ('20000000-0000-4000-8000-000000000001', 'Retry next review', 'policy_review', current_date,
+       '50000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001') $$,
+  '23505', null, 'same-cycle retries cannot duplicate the new review task');
+select is((select count(*) from public.tasks where policy_id = '50000000-0000-4000-8000-000000000001'), 2::bigint,
+  'both the completed prior review and the next review are preserved');
+update public.tasks set due_on = current_date + 7 where policy_id = '50000000-0000-4000-8000-000000000001' and status = 'open';
+select throws_ok(
+  $$ insert into public.tasks (organisation_id, title, source, due_on, policy_review_due_on, policy_id, created_by)
+     values ('20000000-0000-4000-8000-000000000001', 'Retry after deadline edit', 'policy_review', current_date, current_date,
+       '50000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001') $$,
+  '23505', null, 'moving a task deadline does not erase its policy cycle deduplication');
+select throws_ok(
+  $$ update public.tasks set policy_review_due_on = current_date + 7
+     where policy_id = '50000000-0000-4000-8000-000000000001' and status = 'open' $$,
+  '42501', null, 'policy cycle identity is preserved through edits');
 
 reset role;
 

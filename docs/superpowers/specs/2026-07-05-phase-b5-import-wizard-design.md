@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-05
 **Status:** Draft for founder review
-**Parent:** `2026-07-05-product-roadmap-v3.md` §Phase B (import was split out of Phase B as a focused fast-follow); companion to `2026-07-05-phase-b-kill-the-spreadsheets-design.md`.
+**Historical context:** This document records the already-delivered Phase B.5 design and remains a companion to `2026-07-05-phase-b-kill-the-spreadsheets-design.md`. Its former parent roadmap has been removed from the active tree. Future work follows the [trusted compliance platform roadmap](2026-09-13-trusted-compliance-platform-roadmap.md).
 **Ground truth:** `.superpowers/research/iso-toolkit-structures.md` (the six workbook structures).
 **Binding:** v2 §10 — RLS on every write (imports insert via RLS-scoped actions, never service role); domain-first tests; e2e + axe; en-GB; original content. Presentation matches the Phase A design system.
 

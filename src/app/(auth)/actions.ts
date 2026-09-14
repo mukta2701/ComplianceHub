@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { signInSchema, signUpSchema, requestPasswordResetSchema, updatePasswordSchema } from "@/features/auth/application/auth";
+import { authFailureDiagnostic, authFailureMessage } from "@/features/auth/application/auth-errors";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { siteUrl } from "@/lib/site-url";
 import { safePostAuthPath } from "@/lib/auth-destination";
@@ -14,7 +15,7 @@ function message(path: string, value: string, next?: string) {
 }
 
 function safeNext(formData: FormData): string {
-  return safePostAuthPath(formData.get("next"));
+  return safePostAuthPath(formData.get("next"), { allowOAuthConsent: true });
 }
 
 function authCallbackUrl(next: string): string {
@@ -30,7 +31,14 @@ export async function signInAction(formData: FormData) {
   if (!result.success) redirect(message("/sign-in", "Enter a valid email and password.", next));
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase.auth.signInWithPassword(result.data);
-  if (error) redirect(message("/sign-in", "Sign-in failed. Check your details and try again.", next));
+  if (error) {
+    console.error(
+      "Supabase authentication request failed",
+      authFailureDiagnostic(error.message, "sign-in"),
+    );
+    const failure = authFailureMessage(error.message, "sign-in");
+    redirect(message(failure.path, failure.message, next));
+  }
   redirect(next);
 }
 
@@ -40,8 +48,16 @@ export async function signUpAction(formData: FormData) {
   const result = signUpSchema.safeParse(Object.fromEntries(formData));
   if (!result.success) redirect(message("/sign-up", result.error.issues[0]?.message ?? "Check your details.", next));
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.auth.signUp({ email: result.data.email, password: result.data.password, options: { data: { display_name: result.data.displayName }, emailRedirectTo: authCallbackUrl(next) } });
-  if (error) redirect(message("/sign-up", "Account creation failed. Please try again.", next));
+  const { data, error } = await supabase.auth.signUp({ email: result.data.email, password: result.data.password, options: { data: { display_name: result.data.displayName }, emailRedirectTo: authCallbackUrl(next) } });
+  if (error) {
+    console.error(
+      "Supabase authentication request failed",
+      authFailureDiagnostic(error.message, "sign-up"),
+    );
+    const failure = authFailureMessage(error.message, "sign-up");
+    redirect(message(failure.path, failure.message, next));
+  }
+  if (data.session) redirect(next);
   redirect(message("/sign-in", "Check your email to confirm your account.", next));
 }
 

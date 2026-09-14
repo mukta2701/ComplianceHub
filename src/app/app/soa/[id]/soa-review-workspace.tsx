@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { AiSuggestionPanel } from "@/components/ai-suggestion-panel";
 import { useRouter } from "next/navigation";
 import {
   useCallback,
@@ -14,6 +15,7 @@ import { StatusLabel, type StatusTone } from "@/components/status-label";
 import type { EvidenceKind, EvidenceStatus } from "@/features/evidence/domain/evidence";
 import {
   deriveSoaReviewState,
+  describeSoaAttention,
   filterSoaQueue,
   summariseSoaQueue,
   type SoaDomain,
@@ -23,9 +25,10 @@ import {
 } from "@/features/soa/application/review-queue";
 import { SOA_STATUS_LABEL, type SoaStatus } from "@/features/soa/domain/soa";
 import type { TaskStatus } from "@/features/tasks/domain/tasks";
+import type { SaveSoaDecisionResult } from "../../actions";
 
 type MemberOption = { id: string; name: string };
-type SaveAction = (formData: FormData) => Promise<void>;
+type SaveAction = (formData: FormData) => Promise<SaveSoaDecisionResult>;
 type DetailTab = "decision" | "evidence" | "work" | "history";
 type BlockerFilter = "missing_rationale" | "evidence_gaps" | "unassigned" | "undecided";
 type EvidenceFreshnessFilter = "none" | "current" | "expiring" | "expired";
@@ -50,20 +53,39 @@ type RecentAuditEvent = {
   occurredAt: string;
 };
 
+type SourceAnswer = {
+  questionId: string;
+  code: string;
+  prompt: string;
+  answer: "yes" | "partially" | "no" | "not_applicable" | null;
+  evidenceNote: string;
+  updatedAt: string | null;
+};
+
+type DisplayList = { total: number | null; shown: number; limit: number; truncated: boolean };
+
 export type SoaReviewWorkspaceItem = SoaQueueItem & {
+  decisionRevision: number;
   linkedEvidence: LinkedEvidence[];
   linkedTasks: LinkedTask[];
   recentAuditEvents: RecentAuditEvent[];
+  sourceAnswers: SourceAnswer[];
+  lists: { tasks: DisplayList; evidence: DisplayList; history: DisplayList };
 };
 
 type Draft = Pick<SoaQueueItem, "applicable" | "status" | "justification" | "evidenceText" | "ownerId">;
-type OptimisticDraft = { draft: Draft; sourceItems: SoaReviewWorkspaceItem[] };
+type OptimisticDraft = { draft: Draft; revision: number; sourceItems: SoaReviewWorkspaceItem[] };
+type ReconcileRequest = { itemId: string; baseRevision: number };
 
 export type SoaReviewWorkspaceProps = {
   items: SoaReviewWorkspaceItem[];
   members: MemberOption[];
   currentUserId: string;
+  registerId: string;
   saveAction: SaveAction;
+  sourceAssessment?: { id: string; title: string | null; state: string | null; revision: number | null };
+  readOnly?: boolean;
+  aiEnabled?: boolean;
 };
 
 const DOMAINS: SoaDomain[] = ["organisational", "people", "physical", "technological"];
@@ -124,6 +146,12 @@ function formatAuditTime(value: string) {
   }).format(new Date(value));
 }
 
+function sourceAnswerLabel(answer: SourceAnswer["answer"]) {
+  if (answer === null) return "Not answered";
+  if (answer === "not_applicable") return "Not applicable";
+  return titleCase(answer);
+}
+
 function toDraft(item: SoaQueueItem): Draft {
   return {
     applicable: item.applicable,
@@ -165,8 +193,8 @@ function applyBlockerFilter<T extends SoaQueueItem>(items: T[], blocker: Blocker
   if (blocker === "evidence_gaps") {
     return items.filter((item) => item.applicable && (item.evidenceTotal === 0 || item.evidenceExpired > 0));
   }
-  if (blocker === "unassigned") return items.filter((item) => !item.ownerId);
-  if (blocker === "undecided") return items.filter((item) => item.status === "pending");
+  if (blocker === "unassigned") return items.filter((item) => item.applicable && !item.ownerId);
+  if (blocker === "undecided") return items.filter((item) => item.applicable && item.status === "pending");
   return items;
 }
 
@@ -190,7 +218,7 @@ function filterWorkspaceItems(
   return applyEvidenceFilter(applyBlockerFilter(queueFiltered, blocker), freshness);
 }
 
-export function SoaReviewWorkspace({ items, members, currentUserId, saveAction }: SoaReviewWorkspaceProps) {
+export function SoaReviewWorkspace({ items, members, currentUserId, registerId, saveAction, sourceAssessment, readOnly = false, aiEnabled = false }: SoaReviewWorkspaceProps) {
   const router = useRouter();
   const initialItems = useMemo(() => [...items].sort((left, right) => left.position - right.position), [items]);
   const [optimisticDrafts, setOptimisticDrafts] = useState<Record<string, OptimisticDraft>>({});
@@ -206,10 +234,13 @@ export function SoaReviewWorkspace({ items, members, currentUserId, saveAction }
   const firstAttention = initialItems.find((item) => item.reviewState !== "reviewed") ?? initialItems[0] ?? null;
   const [selectedId, setSelectedId] = useState<string | null>(firstAttention?.id ?? null);
   const [draft, setDraft] = useState<Draft | null>(firstAttention ? toDraft(firstAttention) : null);
+  const [draftBaseRevision, setDraftBaseRevision] = useState(firstAttention?.decisionRevision ?? 0);
+  const [reconcileRequest, setReconcileRequest] = useState<ReconcileRequest | null>(null);
   const [dirty, setDirty] = useState(false);
   const [activeTab, setActiveTab] = useState<DetailTab>("decision");
   const [saveMessage, setSaveMessage] = useState("");
   const [saving, setSaving] = useState(false);
+  const [blockedRevisions, setBlockedRevisions] = useState<Record<string, number>>({});
 
   const queueItems = useMemo(() => initialItems.map((item) => {
     const optimisticEntry = optimisticDrafts[item.id];
@@ -221,6 +252,7 @@ export function SoaReviewWorkspace({ items, members, currentUserId, saveAction }
     const projected = {
       ...item,
       ...optimistic,
+      decisionRevision: optimisticEntry.revision,
       ownerName: members.find((member) => member.id === optimistic.ownerId)?.name ?? null,
     };
     return { ...projected, reviewState: deriveSoaReviewState(projected) };
@@ -254,6 +286,30 @@ export function SoaReviewWorkspace({ items, members, currentUserId, saveAction }
   const selectedDraft = selectedItem?.id === selectedId && draft && dirty
     ? draft
     : selectedItem ? toDraft(selectedItem) : null;
+  const canonicalSelectedItem = initialItems.find((item) => item.id === selectedItem?.id) ?? null;
+  const reconcileBaseRevision = reconcileRequest && selectedItem && reconcileRequest.itemId === selectedItem.id
+    ? reconcileRequest.baseRevision
+    : null;
+  const reconciledRevision = reconcileBaseRevision !== null
+    && canonicalSelectedItem
+    && canonicalSelectedItem.decisionRevision > reconcileBaseRevision
+    ? canonicalSelectedItem.decisionRevision
+    : null;
+  const effectiveBaseRevision = reconciledRevision ?? draftBaseRevision;
+  const selectedBlocked = selectedItem
+    ? blockedRevisions[selectedItem.id] === effectiveBaseRevision
+    : false;
+
+  if (reconciledRevision !== null) {
+    setDraftBaseRevision(reconciledRevision);
+    setReconcileRequest(null);
+    setOptimisticDrafts((current) => {
+      if (!selectedItem || !current[selectedItem.id]) return current;
+      const next = { ...current };
+      delete next[selectedItem.id];
+      return next;
+    });
+  }
 
   useEffect(() => {
     if (!dirty) return;
@@ -334,11 +390,15 @@ export function SoaReviewWorkspace({ items, members, currentUserId, saveAction }
     const nextSelected = nextVisible.find((item) => item.id === selectedId) ?? nextVisible[0] ?? null;
     setSelectedId(nextSelected?.id ?? null);
     setDraft(nextSelected ? toDraft(nextSelected) : null);
+    setDraftBaseRevision(nextSelected?.decisionRevision ?? 0);
+    setReconcileRequest(null);
   }
 
   function loadItem(item: SoaReviewWorkspaceItem) {
     setSelectedId(item.id);
     setDraft(toDraft(item));
+    setDraftBaseRevision(item.decisionRevision);
+    setReconcileRequest(null);
     setDirty(false);
     setActiveTab("decision");
     setSaveMessage("");
@@ -351,6 +411,10 @@ export function SoaReviewWorkspace({ items, members, currentUserId, saveAction }
 
   function updateDraft(next: Draft) {
     if (!selectedItem) return;
+    if (!dirty) {
+      setDraftBaseRevision(selectedItem.decisionRevision);
+      setReconcileRequest(null);
+    }
     setSelectedId(selectedItem.id);
     setDraft(next);
     setDirty(true);
@@ -444,12 +508,30 @@ export function SoaReviewWorkspace({ items, members, currentUserId, saveAction }
     });
   }
 
+  function refreshCurrentDecision() {
+    if (!selectedItem || !canonicalSelectedItem) return;
+    if (canonicalSelectedItem.decisionRevision > effectiveBaseRevision) {
+      setOptimisticDrafts((current) => {
+        const next = { ...current };
+        delete next[selectedItem.id];
+        return next;
+      });
+      setDraftBaseRevision(canonicalSelectedItem.decisionRevision);
+      setReconcileRequest(null);
+    } else {
+      setReconcileRequest({ itemId: selectedItem.id, baseRevision: effectiveBaseRevision });
+    }
+    router.refresh();
+  }
+
   async function save(advance: boolean) {
-    if (!selectedItem || !selectedDraft || saving || !visibleItems.some((item) => item.id === selectedItem.id)) return;
+    if (readOnly || !selectedItem || !selectedDraft || saving || selectedBlocked || !visibleItems.some((item) => item.id === selectedItem.id)) return;
     setSaving(true);
     setSaveMessage("Saving");
     const formData = new FormData();
+    formData.set("registerId", registerId);
     formData.set("itemId", selectedItem.id);
+    formData.set("expectedRevision", String(effectiveBaseRevision));
     formData.set("status", selectedDraft.status);
     formData.set("applicable", String(selectedDraft.applicable));
     formData.set("ownerId", selectedDraft.ownerId ?? "");
@@ -457,20 +539,30 @@ export function SoaReviewWorkspace({ items, members, currentUserId, saveAction }
     formData.set("evidence", selectedDraft.evidenceText);
 
     try {
-      await saveAction(formData);
+      const result = await saveAction(formData);
+      if (result.status !== "saved") {
+        if (result.status === "stale") {
+          setBlockedRevisions((current) => ({ ...current, [selectedItem.id]: effectiveBaseRevision }));
+        }
+        setSaveMessage(result.message);
+        return;
+      }
       const updated: SoaReviewWorkspaceItem = {
         ...selectedItem,
         ...selectedDraft,
+        decisionRevision: result.revision,
         ownerName: members.find((member) => member.id === selectedDraft.ownerId)?.name ?? null,
         reviewState: deriveSoaReviewState({ ...selectedItem, ...selectedDraft }),
       };
       const nextQueue = queueItems.map((item) => item.id === updated.id ? updated : item);
       setOptimisticDrafts((current) => ({
         ...current,
-        [updated.id]: { draft: selectedDraft, sourceItems: items },
+        [updated.id]: { draft: selectedDraft, revision: result.revision, sourceItems: items },
       }));
       setSelectedId(updated.id);
       setDraft(toDraft(updated));
+      setDraftBaseRevision(result.revision);
+      setReconcileRequest(null);
       setDirty(false);
       setSaveMessage("Saved");
       router.refresh();
@@ -516,6 +608,10 @@ export function SoaReviewWorkspace({ items, members, currentUserId, saveAction }
 
   return (
     <section className="soa-review-workspace" id="soa-review-blockers">
+      <section className="soa-progress-overview" aria-labelledby="soa-progress-heading">
+        <div className="soa-progress-copy"><span className="eyebrow">REVIEW PROGRESS</span><h2 id="soa-progress-heading">{summary.reviewed} of {summary.total} controls reviewed</h2><p>{summary.needsAttention} need attention. Counts can overlap because one control may have several blockers.</p></div>
+        <div className="soa-progress-graphic"><progress max={Math.max(summary.total, 1)} value={summary.reviewed} aria-label={`${summary.reviewed} of ${summary.total} controls reviewed`} aria-valuemin={0} aria-valuemax={Math.max(summary.total, 1)} aria-valuenow={summary.reviewed} aria-valuetext={`${summary.reviewed} reviewed; ${summary.needsAttention} need attention`} /><strong>{summary.total ? Math.round((summary.reviewed / summary.total) * 100) : 0}%</strong></div>
+      </section>
       <div className="soa-review-summary" aria-label="Review summary">
         <button type="button" aria-pressed={activeSummary === "needs_attention"} onClick={() => selectSummary("needs_attention")}>Needs attention <strong>{summary.needsAttention}</strong></button>
         <button type="button" aria-pressed={activeSummary === "reviewed"} onClick={() => selectSummary("reviewed")}>Reviewed <strong>{summary.reviewed}</strong></button>
@@ -546,8 +642,11 @@ export function SoaReviewWorkspace({ items, members, currentUserId, saveAction }
                 <li key={item.id} data-selected={item.id === selectedItem?.id}>
                   <div className="soa-queue-control"><code>{item.code}</code><strong>{item.title}</strong><small>{titleCase(item.domain)}</small></div>
                   <StatusLabel tone={reviewTone(item.reviewState)}>{REVIEW_STATE_LABEL[item.reviewState]}</StatusLabel>
-                  <span className="soa-queue-owner">{item.ownerName ?? "Unassigned"}</span>
-                  <span className="soa-queue-evidence">{evidenceHealth(item)}</span>
+                  <span className="soa-queue-source">{item.sourceAnswers.length ? `${item.sourceAnswers.length} mapped source answer${item.sourceAnswers.length === 1 ? "" : "s"}` : "No direct source question"}</span>
+                  <span className="soa-queue-decision">{item.applicable ? "Applicable" : "Not applicable"} · {SOA_STATUS_LABEL[item.status]}</span>
+                  <span className="soa-queue-owner">Owner: {item.ownerName ?? "Unassigned"}</span>
+                  <span className="soa-queue-evidence">{evidenceHealth(item)} · {item.justification.trim() ? "Rationale recorded" : "No rationale"}</span>
+                  <small className="soa-queue-attention">{describeSoaAttention(item)}</small>
                   <button type="button" className="button secondary" aria-current={item.id === selectedItem?.id ? "true" : undefined} onClick={() => selectItem(item)}>Review <span className="sr-only">{item.code} {item.title}</span></button>
                 </li>
               ))}
@@ -564,10 +663,33 @@ export function SoaReviewWorkspace({ items, members, currentUserId, saveAction }
 
             {retainingDirtySelection ? <p className="soa-filtered-dirty-notice">This control is shown because it has unsaved changes and does not match the current filters.</p> : null}
 
+            <ol className="soa-decision-chain" aria-label="Control decision chain">
+              <li><span>1</span><strong>Assessment context</strong></li>
+              <li><span>2</span><strong>Decision</strong></li>
+              <li><span>3</span><strong>Accountability</strong></li>
+              <li><span>4</span><strong>Evidence</strong></li>
+              <li><span>5</span><strong>Linked work</strong></li>
+            </ol>
+
+            <section className="soa-source-context" aria-label={`Assessment context for ${selectedItem.code}`}>
+              <header><div><span className="eyebrow">CURRENT SOURCE CONTEXT</span><h3>{sourceAssessment?.title ?? "Source assessment"}</h3></div>{sourceAssessment ? <Link href={`/app/assessment/${sourceAssessment.id}`}>Open source assessment</Link> : null}</header>
+              <p className="soa-current-context-warning">Current assessment context guides this review; it does not decide applicability and is not frozen with each saved decision.{sourceAssessment ? ` Displaying revision ${sourceAssessment.revision ?? "unavailable"}${sourceAssessment.state ? `, ${titleCase(sourceAssessment.state)}` : ""}.` : ""}</p>
+              {selectedItem.sourceAnswers.length ? <ul className="soa-source-answers">{selectedItem.sourceAnswers.map((answer) => <li key={answer.questionId}>
+                <div><code>{answer.code}</code><strong>{answer.prompt}</strong></div>
+                <StatusLabel tone={answer.answer === "yes" ? "confirmed" : answer.answer === "no" ? "risk" : answer.answer === null ? "neutral" : "attention"}>{sourceAnswerLabel(answer.answer)}</StatusLabel>
+                <p><strong>Supporting note</strong>{answer.evidenceNote.trim() || "No supporting note recorded."}</p>
+                <small>{answer.updatedAt ? `Updated ${formatAuditTime(answer.updatedAt)}` : "No recorded update time."}</small>
+              </li>)}</ul> : <p className="soa-source-empty">No direct assessment question is mapped to this control.</p>}
+            </section>
+
             <div className="soa-decision-context">
               <div><strong>Why this matters</strong><p>{DOMAIN_WHY[selectedItem.domain]} For {selectedItem.title.toLowerCase()}, record the decision your team can support with its own working evidence.</p></div>
               <div><strong>What you decide here</strong><p>Confirm whether this control applies, how far it is implemented, who owns it, and the rationale and references supporting that decision.</p></div>
             </div>
+
+            {aiEnabled && !readOnly && (dirty || saving
+              ? <p>Save this control&apos;s decisions before requesting an AI draft.</p>
+              : <AiSuggestionPanel key={`${selectedItem.id}:${selectedItem.applicable}:${selectedItem.status}`} target={{ targetType: "soa_item", targetId: selectedItem.id }} />)}
 
             <div className="soa-detail-tabs" role="tablist" aria-label="Control review sections">
               {DETAIL_TABS.map((tab) => <button
@@ -586,35 +708,43 @@ export function SoaReviewWorkspace({ items, members, currentUserId, saveAction }
 
             <div className="soa-detail-panel" role="tabpanel" id={`soa-panel-${activeTab}`} aria-labelledby={`soa-tab-${activeTab}`}>
               {activeTab === "decision" ? <div className="soa-decision-fields">
-                <label>Applicability decision<select value={String(selectedDraft.applicable)} onChange={(event) => updateApplicability(event.target.value === "true")}><option value="true">Applicable</option><option value="false">Not applicable</option></select></label>
-                <label>Implementation status<select value={selectedDraft.status} disabled={!selectedDraft.applicable} onChange={(event) => updateDraft({ ...selectedDraft, status: event.target.value as SoaStatus })}>{selectedDraft.applicable ? IMPLEMENTATION_STATUSES.map((status) => <option key={status} value={status}>{SOA_STATUS_LABEL[status]}</option>) : <option value="not_applicable">{SOA_STATUS_LABEL.not_applicable}</option>}</select></label>
-                <label>Owner assignment<select value={selectedDraft.ownerId ?? ""} onChange={(event) => updateDraft({ ...selectedDraft, ownerId: event.target.value || null })}><option value="">Unassigned</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label>
-                <label className="soa-rationale">Rationale<textarea required value={selectedDraft.justification} onChange={(event) => updateDraft({ ...selectedDraft, justification: event.target.value })} /></label>
+                <label>Applicability decision<select disabled={readOnly} value={String(selectedDraft.applicable)} onChange={(event) => updateApplicability(event.target.value === "true")}><option value="true">Applicable</option><option value="false">Not applicable</option></select></label>
+                <label>Implementation status<select value={selectedDraft.status} disabled={readOnly || !selectedDraft.applicable} onChange={(event) => updateDraft({ ...selectedDraft, status: event.target.value as SoaStatus })}>{selectedDraft.applicable ? IMPLEMENTATION_STATUSES.map((status) => <option key={status} value={status}>{SOA_STATUS_LABEL[status]}</option>) : <option value="not_applicable">{SOA_STATUS_LABEL.not_applicable}</option>}</select></label>
+                <label>Owner assignment<select disabled={readOnly} value={selectedDraft.ownerId ?? ""} onChange={(event) => updateDraft({ ...selectedDraft, ownerId: event.target.value || null })}><option value="">Unassigned</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label>
+                <label className="soa-rationale">Rationale<textarea readOnly={readOnly} required value={selectedDraft.justification} onChange={(event) => updateDraft({ ...selectedDraft, justification: event.target.value })} /></label>
               </div> : null}
 
               {activeTab === "evidence" ? <div className="soa-evidence-panel">
                 <div className="soa-evidence-health"><strong>Evidence health</strong><p>{evidenceHealth(selectedItem)}</p>{selectedItem.evidenceExpiring > 0 ? <small>{selectedItem.evidenceExpiring} item{selectedItem.evidenceExpiring === 1 ? " is" : "s are"} nearing expiry.</small> : null}{selectedItem.evidenceExpired > 0 ? <small>{selectedItem.evidenceExpired} item{selectedItem.evidenceExpired === 1 ? " has" : "s have"} expired.</small> : null}</div>
                 {selectedItem.linkedEvidence.length ? <ul className="soa-linked-records">{selectedItem.linkedEvidence.map((evidence) => <li key={evidence.id}><span><strong>{evidence.title}</strong><small>{titleCase(evidence.kind)}{evidence.validUntil ? ` - valid until ${formatDate(evidence.validUntil)}` : " - no expiry date"}</small></span><StatusLabel tone={evidenceTone(evidence.status)}>{titleCase(evidence.status)}</StatusLabel></li>)}</ul> : <p className="soa-record-empty"><strong>No linked evidence</strong><span>No evidence records are currently mapped to this control.</span></p>}
-                <label>Evidence references<textarea value={selectedDraft.evidenceText} onChange={(event) => updateDraft({ ...selectedDraft, evidenceText: event.target.value })} /></label>
-                <Link href="/app/evidence">Open evidence library</Link>
+                <label>Evidence references<textarea readOnly={readOnly} value={selectedDraft.evidenceText} onChange={(event) => updateDraft({ ...selectedDraft, evidenceText: event.target.value })} /></label>
+                {!readOnly && <Link href="/app/evidence">Open evidence library</Link>}
+                {selectedItem.lists.evidence.truncated ? <p className="soa-list-limit">Showing {selectedItem.lists.evidence.shown} of {selectedItem.lists.evidence.total} linked evidence records (limit {selectedItem.lists.evidence.limit}).</p> : null}
               </div> : null}
 
               {activeTab === "work" ? <div className="soa-work-panel">
-                {selectedItem.linkedTasks.length ? <ul className="soa-linked-records">{selectedItem.linkedTasks.map((task) => <li key={task.id}><span><Link href={`/app/tasks/${task.id}`}>{task.title}</Link><small>{task.dueOn ? `Due ${formatDate(task.dueOn)}` : "No due date"}</small></span><StatusLabel tone={taskTone(task.status)}>{titleCase(task.status)}</StatusLabel></li>)}</ul> : <p className="soa-record-empty"><strong>No linked open work</strong><span>There are no open or in-progress tasks currently mapped to this control.</span></p>}
+                {selectedItem.lists.tasks.total === null
+                  ? <p className="soa-record-empty"><strong>Linked work unavailable</strong><span>We could not verify the linked task records for this control.</span></p>
+                  : selectedItem.linkedTasks.length ? <ul className="soa-linked-records">{selectedItem.linkedTasks.map((task) => <li key={task.id}><span><Link href={`/app/tasks/${task.id}`}>{task.title}</Link><small>{task.dueOn ? `Due ${formatDate(task.dueOn)}` : "No due date"}</small></span><StatusLabel tone={taskTone(task.status)}>{titleCase(task.status)}</StatusLabel></li>)}</ul> : <p className="soa-record-empty"><strong>No linked open work</strong><span>There are no open or in-progress tasks currently mapped to this control.</span></p>}
                 <Link href="/app/tasks">Open task queue</Link>
+                {selectedItem.lists.tasks.truncated ? <p className="soa-list-limit">Showing {selectedItem.lists.tasks.shown} of {selectedItem.lists.tasks.total} linked tasks (limit {selectedItem.lists.tasks.limit}).</p> : null}
               </div> : null}
 
               {activeTab === "history" ? <div className="soa-history-panel">
-                {selectedItem.recentAuditEvents.length ? <ul className="soa-history-list">{selectedItem.recentAuditEvents.map((event, index) => <li key={`${event.occurredAt}-${index}`}><strong>{auditActionLabel(event.action)}</strong><time dateTime={event.occurredAt}>{formatAuditTime(event.occurredAt)}</time></li>)}</ul> : <p className="soa-record-empty"><strong>No recent item history</strong><span>No item-level audit events are available for this control yet.</span></p>}
-                <Link href="/app/activity">View audit trail</Link>
+                {selectedItem.lists.history.total === null
+                  ? <p className="soa-record-empty"><strong>Item history unavailable</strong><span>We could not verify the recent item history for this control.</span></p>
+                  : selectedItem.recentAuditEvents.length ? <ul className="soa-history-list">{selectedItem.recentAuditEvents.map((event, index) => <li key={`${event.occurredAt}-${index}`}><strong>{auditActionLabel(event.action)}</strong><time dateTime={event.occurredAt}>{formatAuditTime(event.occurredAt)}</time></li>)}</ul> : <p className="soa-record-empty"><strong>No recent item history</strong><span>No item-level audit events are available for this control yet.</span></p>}
+                {!readOnly && <Link href="/app/activity">View audit trail</Link>}
+                {selectedItem.lists.history.truncated ? <p className="soa-list-limit">Showing {selectedItem.lists.history.shown} of {selectedItem.lists.history.total} history events (limit {selectedItem.lists.history.limit}).</p> : null}
               </div> : null}
             </div>
 
-            <footer className="soa-detail-actions">
+            {readOnly ? <p className="soa-detail-actions">Read-only review. A workspace operator can update these decisions.</p> : <footer className="soa-detail-actions">
               <p role="status" aria-live="polite">{saveMessage}</p>
-              <button type="submit" name="saveIntent" value="draft" className="button secondary" disabled={saving}>{saving ? "Saving" : "Save draft"}</button>
-              <button type="submit" name="saveIntent" value="next" className="button primary" disabled={saving}>{saving ? "Saving" : "Save and next"}</button>
-            </footer>
+              {selectedBlocked ? <button type="button" className="button secondary" onClick={refreshCurrentDecision}>Refresh current decisions</button> : null}
+              <button type="submit" name="saveIntent" value="draft" className="button secondary" disabled={saving || selectedBlocked}>{saving ? "Saving" : "Save draft"}</button>
+              <button type="submit" name="saveIntent" value="next" className="button primary" disabled={saving || selectedBlocked}>{saving ? "Saving" : "Save and next"}</button>
+            </footer>}
           </form>
         ) : <section className="soa-review-detail soa-review-empty"><h2>No control selected</h2><p>Adjust the filters or choose a control from the review queue.</p></section>}
       </div>

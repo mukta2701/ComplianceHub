@@ -12,10 +12,12 @@ vi.mock("next/navigation", () => ({
 }));
 
 const CURRENT_USER_ID = "member-1";
+const REGISTER_ID = "register-1";
 
 const items: SoaReviewWorkspaceItem[] = [
   {
     id: "item-1",
+    decisionRevision: 0,
     controlId: "control-1",
     code: "A.5.1",
     title: "Policies for information security",
@@ -35,9 +37,19 @@ const items: SoaReviewWorkspaceItem[] = [
     linkedEvidence: [],
     linkedTasks: [],
     recentAuditEvents: [],
+    sourceAnswers: [
+      { questionId: "question-1", code: "G1", prompt: "Who reviews access?", answer: "partially", evidenceNote: "Quarterly notes", updatedAt: "2026-09-09T12:00:00.000Z" },
+      { questionId: "question-2", code: "G2", prompt: "Are reviews recorded?", answer: null, evidenceNote: "", updatedAt: null },
+    ],
+    lists: {
+      tasks: { total: 0, shown: 0, limit: 20, truncated: false },
+      evidence: { total: 0, shown: 0, limit: 20, truncated: false },
+      history: { total: 0, shown: 0, limit: 5, truncated: false },
+    },
   },
   {
     id: "item-2",
+    decisionRevision: 2,
     controlId: "control-2",
     code: "A.6.3",
     title: "Information security awareness",
@@ -68,9 +80,16 @@ const items: SoaReviewWorkspaceItem[] = [
       dueOn: "2026-09-30",
     }],
     recentAuditEvents: [{ action: "update", occurredAt: "2026-07-10T09:30:00.000Z" }],
+    sourceAnswers: [],
+    lists: {
+      tasks: { total: 1, shown: 1, limit: 20, truncated: false },
+      evidence: { total: 1, shown: 1, limit: 20, truncated: false },
+      history: { total: 1, shown: 1, limit: 5, truncated: false },
+    },
   },
   {
     id: "item-3",
+    decisionRevision: 4,
     controlId: "control-3",
     code: "A.8.8",
     title: "Management of technical vulnerabilities",
@@ -99,9 +118,16 @@ const items: SoaReviewWorkspaceItem[] = [
       { id: "task-32", title: "Patch critical findings", status: "in_progress", dueOn: null },
     ],
     recentAuditEvents: [{ action: "update", occurredAt: "2026-07-09T14:15:00.000Z" }],
+    sourceAnswers: [],
+    lists: {
+      tasks: { total: 2, shown: 2, limit: 20, truncated: false },
+      evidence: { total: 1, shown: 1, limit: 20, truncated: false },
+      history: { total: 1, shown: 1, limit: 5, truncated: false },
+    },
   },
   {
     id: "item-4",
+    decisionRevision: 1,
     controlId: "control-4",
     code: "A.7.1",
     title: "Physical security perimeters",
@@ -121,6 +147,12 @@ const items: SoaReviewWorkspaceItem[] = [
     linkedEvidence: [],
     linkedTasks: [],
     recentAuditEvents: [],
+    sourceAnswers: [],
+    lists: {
+      tasks: { total: 0, shown: 0, limit: 20, truncated: false },
+      evidence: { total: 0, shown: 0, limit: 20, truncated: false },
+      history: { total: 0, shown: 0, limit: 5, truncated: false },
+    },
   },
 ];
 
@@ -130,7 +162,7 @@ const members = [
 ];
 
 function renderWorkspace(
-  saveAction = vi.fn<(formData: FormData) => Promise<void>>(async () => undefined),
+  saveAction = vi.fn<(formData: FormData) => Promise<{ status: "saved"; revision: number }>>(async () => ({ status: "saved", revision: 1 })),
   workspaceItems = items,
 ) {
   return render(
@@ -138,7 +170,9 @@ function renderWorkspace(
       items={workspaceItems}
       members={members}
       currentUserId={CURRENT_USER_ID}
+      registerId={REGISTER_ID}
       saveAction={saveAction}
+      sourceAssessment={{ id: "assessment-1", title: "Recorded practices", state: "draft", revision: 7 }}
     />,
   );
 }
@@ -153,11 +187,58 @@ function workspaceItem(overrides: Partial<SoaReviewWorkspaceItem>): SoaReviewWor
     linkedEvidence: [],
     linkedTasks: [],
     recentAuditEvents: [],
+    sourceAnswers: [],
+    lists: {
+      tasks: { total: 0, shown: 0, limit: 20, truncated: false },
+      evidence: { total: 0, shown: 0, limit: 20, truncated: false },
+      history: { total: 0, shown: 0, limit: 5, truncated: false },
+    },
     ...overrides,
   };
 }
 
 describe("SoaReviewWorkspace", () => {
+  it("shows every mapped answer as current guidance and makes unmapped context explicit", async () => {
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    const source = screen.getByRole("region", { name: "Assessment context for A.5.1" });
+    expect(within(source).getByRole("link", { name: "Open source assessment" })).toHaveAttribute("href", "/app/assessment/assessment-1");
+    expect(within(source).getByText("G1")).toBeInTheDocument();
+    expect(within(source).getByText("Partially")).toBeInTheDocument();
+    expect(within(source).getByText("Quarterly notes")).toBeInTheDocument();
+    expect(within(source).getByText("G2")).toBeInTheDocument();
+    expect(within(source).getByText("Not answered")).toBeInTheDocument();
+    expect(within(source).getByText("No supporting note recorded.")).toBeInTheDocument();
+    expect(within(source).getByText(/guides this review.*does not decide applicability.*not frozen/i)).toBeInTheDocument();
+
+    await user.click(queue().getByRole("button", { name: "Review A.7.1 Physical security perimeters" }));
+    expect(screen.getByText("No direct assessment question is mapped to this control.")).toBeInTheDocument();
+  });
+
+  it("uses one labelled progress graphic and a visible decision chain", () => {
+    renderWorkspace();
+    expect(screen.getByRole("progressbar", { name: "1 of 4 controls reviewed" })).toHaveAttribute("aria-valuenow", "1");
+    const chain = screen.getByRole("list", { name: "Control decision chain" });
+    for (const label of ["Assessment context", "Decision", "Accountability", "Evidence", "Linked work"]) {
+      expect(within(chain).getByText(label)).toBeInTheDocument();
+    }
+  });
+  it("keeps Member review navigation available without editable decisions", async () => {
+    const saveAction = vi.fn();
+    render(<SoaReviewWorkspace items={items} members={members} currentUserId={CURRENT_USER_ID} registerId={REGISTER_ID} saveAction={saveAction} sourceAssessment={{ id: "assessment-1", title: "Recorded practices", state: "draft", revision: 7 }} readOnly />);
+    expect(screen.getByLabelText("Applicability decision")).toBeDisabled();
+    expect(screen.getByLabelText("Owner assignment")).toBeDisabled();
+    expect(screen.getByLabelText("Rationale")).toHaveAttribute("readonly");
+    expect(screen.queryByRole("button", { name: "Save draft" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open source assessment" })).toHaveAttribute("href", "/app/assessment/assessment-1");
+    await userEvent.click(screen.getByRole("tab", { name: "Evidence" }));
+    expect(screen.getByLabelText("Evidence references")).toHaveAttribute("readonly");
+    expect(screen.queryByRole("link", { name: "Open evidence library" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("tab", { name: "History" }));
+    expect(screen.queryByRole("link", { name: "View audit trail" })).not.toBeInTheDocument();
+    expect(saveAction).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     navigation.refresh.mockReset();
   });
@@ -204,6 +285,22 @@ describe("SoaReviewWorkspace", () => {
       expect(queue().getAllByRole("listitem")).toHaveLength(expectedTitles.length);
       for (const title of expectedTitles) expect(queue().getByText(title)).toBeInTheDocument();
     }
+  });
+
+  it("keeps justified exclusions out of applicable-only owner and decision blockers", async () => {
+    const user = userEvent.setup();
+    renderWorkspace(undefined, [
+      workspaceItem({ id: "excluded", code: "X1", title: "Justified exclusion", applicable: false, status: "not_applicable", justification: "Outside scope.", ownerId: null, reviewState: "reviewed" }),
+      workspaceItem({ id: "included", code: "X2", title: "Applicable gap", applicable: true, status: "pending", justification: "", ownerId: null, reviewState: "missing_decision", position: 2 }),
+    ]);
+
+    await user.click(screen.getByRole("button", { name: "Unassigned 1" }));
+    expect(queue().getByText("Applicable gap")).toBeInTheDocument();
+    expect(queue().queryByText("Justified exclusion")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Undecided 1" }));
+    expect(queue().getByText("Applicable gap")).toBeInTheDocument();
+    expect(queue().queryByText("Justified exclusion")).not.toBeInTheDocument();
   });
 
   it("filters by every implementation status", async () => {
@@ -357,7 +454,7 @@ describe("SoaReviewWorkspace", () => {
           <a href="https://example.test/external">External guidance</a>
           <Link href="#soa-review-blockers">Review summary</Link>
         </nav>
-        <SoaReviewWorkspace items={items} members={members} currentUserId={CURRENT_USER_ID} saveAction={vi.fn()} />
+        <SoaReviewWorkspace items={items} members={members} currentUserId={CURRENT_USER_ID} registerId={REGISTER_ID} saveAction={vi.fn()} />
       </>,
     );
     await user.type(screen.getByRole("textbox", { name: "Rationale" }), "Unsaved shell navigation");
@@ -380,7 +477,7 @@ describe("SoaReviewWorkspace", () => {
     render(
       <>
         <form data-soa-finalise-form><button type="submit">Finalise immutable v1</button></form>
-        <SoaReviewWorkspace items={items} members={members} currentUserId={CURRENT_USER_ID} saveAction={vi.fn()} />
+        <SoaReviewWorkspace items={items} members={members} currentUserId={CURRENT_USER_ID} registerId={REGISTER_ID} saveAction={vi.fn()} />
       </>,
     );
     await user.type(screen.getByRole("textbox", { name: "Rationale" }), "Unsaved before finalisation");
@@ -402,12 +499,12 @@ describe("SoaReviewWorkspace", () => {
 
   it("guards sign-out submission without intercepting the workspace save form", async () => {
     const user = userEvent.setup();
-    const saveAction = vi.fn<(formData: FormData) => Promise<void>>(async () => undefined);
+    const saveAction = vi.fn<(formData: FormData) => Promise<{ status: "saved"; revision: number }>>(async () => ({ status: "saved", revision: 1 }));
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
     render(
       <>
         <form data-app-exit-form><button type="submit">Sign out</button></form>
-        <SoaReviewWorkspace items={items} members={members} currentUserId={CURRENT_USER_ID} saveAction={saveAction} />
+        <SoaReviewWorkspace items={items} members={members} currentUserId={CURRENT_USER_ID} registerId={REGISTER_ID} saveAction={saveAction} />
       </>,
     );
     await user.type(screen.getByRole("textbox", { name: "Rationale" }), "Unsaved before sign-out");
@@ -431,7 +528,7 @@ describe("SoaReviewWorkspace", () => {
 
   it("shows an optimistic save immediately and adopts the next canonical props", async () => {
     const user = userEvent.setup();
-    const saveAction = vi.fn<(formData: FormData) => Promise<void>>(async () => undefined);
+    const saveAction = vi.fn<(formData: FormData) => Promise<{ status: "saved"; revision: number }>>(async () => ({ status: "saved", revision: 1 }));
     const view = renderWorkspace(saveAction);
 
     await user.type(screen.getByRole("textbox", { name: "Rationale" }), "Optimistic rationale");
@@ -447,6 +544,7 @@ describe("SoaReviewWorkspace", () => {
         items={refreshedItems}
         members={members}
         currentUserId={CURRENT_USER_ID}
+        registerId={REGISTER_ID}
         saveAction={saveAction}
       />,
     );
@@ -468,6 +566,7 @@ describe("SoaReviewWorkspace", () => {
         items={refreshedItems}
         members={members}
         currentUserId={CURRENT_USER_ID}
+        registerId={REGISTER_ID}
         saveAction={vi.fn()}
       />,
     );
@@ -539,7 +638,7 @@ describe("SoaReviewWorkspace", () => {
 
   it("saves once and advances to the next unresolved visible control", async () => {
     const user = userEvent.setup();
-    const saveAction = vi.fn<(formData: FormData) => Promise<void>>(async () => undefined);
+    const saveAction = vi.fn<(formData: FormData) => Promise<{ status: "saved"; revision: number }>>(async () => ({ status: "saved", revision: 1 }));
     renderWorkspace(saveAction);
 
     await user.selectOptions(screen.getByRole("combobox", { name: "Implementation status" }), "in_progress");
@@ -550,7 +649,9 @@ describe("SoaReviewWorkspace", () => {
     await waitFor(() => expect(saveAction).toHaveBeenCalledTimes(1));
     const formData = saveAction.mock.calls[0][0];
     expect(Object.fromEntries(formData)).toMatchObject({
+      registerId: REGISTER_ID,
       itemId: "item-1",
+      expectedRevision: "0",
       applicable: "true",
       status: "in_progress",
       ownerId: CURRENT_USER_ID,
@@ -563,7 +664,7 @@ describe("SoaReviewWorkspace", () => {
 
   it("reports save errors and keeps the selected control open", async () => {
     const user = userEvent.setup();
-    const saveAction = vi.fn<(formData: FormData) => Promise<void>>(async () => {
+    const saveAction = vi.fn(async () => {
       throw new Error("save failed");
     });
     renderWorkspace(saveAction);
@@ -575,6 +676,128 @@ describe("SoaReviewWorkspace", () => {
     expect(saveAction).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("heading", { name: "A.5.1 Policies for information security" })).toBeInTheDocument();
     expect(navigation.refresh).not.toHaveBeenCalled();
+  });
+
+  it("preserves a stale draft and blocks that control until refreshed data arrives", async () => {
+    const user = userEvent.setup();
+    const saveAction = vi.fn()
+      .mockResolvedValueOnce({ status: "stale", message: "This control changed after you opened it. Refresh and reconcile your draft before saving again." })
+      .mockResolvedValueOnce({ status: "saved", revision: 2 });
+    const view = renderWorkspace(saveAction);
+
+    await user.type(screen.getByRole("textbox", { name: "Rationale" }), "My newer draft");
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+
+    await screen.findByText(/changed after you opened it/i);
+    expect(screen.getByRole("textbox", { name: "Rationale" })).toHaveValue("My newer draft");
+    expect(screen.getByRole("button", { name: "Save draft" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save and next" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Refresh current decisions" }));
+    expect(navigation.refresh).toHaveBeenCalledTimes(1);
+    expect(saveAction).toHaveBeenCalledTimes(1);
+
+    view.rerender(
+      <SoaReviewWorkspace
+        items={items.map((item) => item.id === "item-1" ? { ...item, decisionRevision: 1 } : item)}
+        members={members}
+        currentUserId={CURRENT_USER_ID}
+        registerId={REGISTER_ID}
+        saveAction={saveAction}
+      />,
+    );
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save draft" })).toBeEnabled());
+    expect(screen.getByRole("textbox", { name: "Rationale" })).toHaveValue("My newer draft");
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    await waitFor(() => expect(saveAction).toHaveBeenCalledTimes(2));
+    expect(saveAction.mock.calls[1][0].get("expectedRevision")).toBe("1");
+  });
+
+  it("keeps a dirty draft on its original base revision through an ordinary prop refresh", async () => {
+    const user = userEvent.setup();
+    const saveAction = vi.fn()
+      .mockResolvedValueOnce({ status: "stale", message: "This control changed after you opened it. Refresh and reconcile your draft before saving again." })
+      .mockResolvedValueOnce({ status: "saved", revision: 2 });
+    const view = renderWorkspace(saveAction);
+    await user.type(screen.getByRole("textbox", { name: "Rationale" }), "Draft from revision zero");
+
+    view.rerender(
+      <SoaReviewWorkspace
+        items={items.map((item) => item.id === "item-1" ? { ...item, decisionRevision: 1, justification: "Another tab saved" } : item)}
+        members={members}
+        currentUserId={CURRENT_USER_ID}
+        registerId={REGISTER_ID}
+        saveAction={saveAction}
+      />,
+    );
+    expect(screen.getByRole("textbox", { name: "Rationale" })).toHaveValue("Draft from revision zero");
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    await screen.findByText(/changed after you opened it/i);
+    expect(saveAction.mock.calls[0][0].get("expectedRevision")).toBe("0");
+
+    await user.click(screen.getByRole("button", { name: "Refresh current decisions" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save draft" })).toBeEnabled());
+    expect(screen.getByRole("textbox", { name: "Rationale" })).toHaveValue("Draft from revision zero");
+
+    view.rerender(
+      <SoaReviewWorkspace
+        items={items.map((item) => item.id === "item-1" ? { ...item, decisionRevision: 2, justification: "A later ordinary refresh" } : item)}
+        members={members}
+        currentUserId={CURRENT_USER_ID}
+        registerId={REGISTER_ID}
+        saveAction={saveAction}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    await waitFor(() => expect(saveAction).toHaveBeenCalledTimes(2));
+    expect(saveAction.mock.calls[1][0].get("expectedRevision")).toBe("1");
+  });
+
+  it("discards an obsolete optimistic revision when reconciling after an earlier local save", async () => {
+    const user = userEvent.setup();
+    const saveAction = vi.fn()
+      .mockResolvedValueOnce({ status: "saved", revision: 1 })
+      .mockResolvedValueOnce({ status: "stale", message: "This control changed after you opened it. Refresh and reconcile your draft before saving again." })
+      .mockResolvedValueOnce({ status: "saved", revision: 3 });
+    const view = renderWorkspace(saveAction);
+
+    await user.type(screen.getByRole("textbox", { name: "Rationale" }), "First local save");
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Saved"));
+    await user.type(screen.getByRole("textbox", { name: "Rationale" }), " plus unsaved detail");
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    await screen.findByText(/changed after you opened it/i);
+    expect(saveAction.mock.calls[1][0].get("expectedRevision")).toBe("1");
+    expect(screen.getByRole("textbox", { name: "Rationale" })).toHaveValue("First local save plus unsaved detail");
+
+    await user.click(screen.getByRole("button", { name: "Refresh current decisions" }));
+    view.rerender(
+      <SoaReviewWorkspace
+        items={items.map((item) => item.id === "item-1" ? { ...item, decisionRevision: 0, justification: "Lagging refresh" } : item)}
+        members={members}
+        currentUserId={CURRENT_USER_ID}
+        registerId={REGISTER_ID}
+        saveAction={saveAction}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Save draft" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Refresh current decisions" })).toBeVisible();
+    expect(saveAction).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("textbox", { name: "Rationale" })).toHaveValue("First local save plus unsaved detail");
+
+    view.rerender(
+      <SoaReviewWorkspace
+        items={items.map((item) => item.id === "item-1" ? { ...item, decisionRevision: 2, justification: "Another tab saved twice" } : item)}
+        members={members}
+        currentUserId={CURRENT_USER_ID}
+        registerId={REGISTER_ID}
+        saveAction={saveAction}
+      />,
+    );
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save draft" })).toBeEnabled());
+    expect(screen.getByRole("textbox", { name: "Rationale" })).toHaveValue("First local save plus unsaved detail");
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    await waitFor(() => expect(saveAction).toHaveBeenCalledTimes(3));
+    expect(saveAction.mock.calls[2][0].get("expectedRevision")).toBe("2");
   });
 
   it("provides labelled controls, a live save region, and honest tab content", async () => {
@@ -602,6 +825,25 @@ describe("SoaReviewWorkspace", () => {
     await user.click(screen.getByRole("tab", { name: "History" }));
     expect(screen.getByText("No recent item history")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "View audit trail" })).toHaveAttribute("href", "/app/activity");
+  });
+
+  it("labels optional linked-work and history failures instead of claiming empty records", async () => {
+    const user = userEvent.setup();
+    renderWorkspace(undefined, [workspaceItem({
+      lists: {
+        tasks: { total: null, shown: 0, limit: 20, truncated: false },
+        evidence: { total: 0, shown: 0, limit: 20, truncated: false },
+        history: { total: null, shown: 0, limit: 5, truncated: false },
+      },
+    })]);
+
+    await user.click(screen.getByRole("tab", { name: "Linked work" }));
+    expect(screen.getByText("Linked work unavailable")).toBeInTheDocument();
+    expect(screen.queryByText("No linked open work")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "History" }));
+    expect(screen.getByText("Item history unavailable")).toBeInTheDocument();
+    expect(screen.queryByText("No recent item history")).not.toBeInTheDocument();
   });
 
   it("renders real linked evidence, task records, and recent item audit events", async () => {
@@ -656,12 +898,48 @@ describe("SoaReviewWorkspace", () => {
 
   it("keeps the scoped SoA CSS on semantic tokens without clipping outer focus rings", () => {
     const css = readFileSync("src/app/globals.css", "utf8");
-    const soaCss = css.slice(css.indexOf("/* SoA review workspace */"));
+    const start = css.indexOf("/* SoA review workspace */");
+    const end = css.indexOf("/* Guided assessment decision flow */", start);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    // Later modules have their own styling contracts; they are not SoA rules.
+    const soaCss = css.slice(start, end);
     const workspaceRule = soaCss.match(/\.soa-review-workspace\{([^}]*)\}/)?.[1] ?? "";
     const detailRule = soaCss.match(/\.soa-review-detail\{([^}]*)\}/)?.[1] ?? "";
 
+    expect(workspaceRule).not.toBe("");
+    expect(detailRule).not.toBe("");
     expect(soaCss).not.toMatch(/#[0-9a-f]{3,8}\b|rgba?\(/i);
     expect(workspaceRule).not.toContain("overflow:hidden");
     expect(detailRule).not.toContain("overflow:hidden");
+  });
+});
+
+
+describe("SoA optional AI restoration", () => {
+  it("targets the selected SoA item and resets its AI draft when switching controls", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({
+      id: "suggestion", status: "draft", output: { explanation: "Review rationale", recommendedAction: "Confirm applicability", confidence: "medium" }, source_references: [],
+    }) });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<SoaReviewWorkspace items={items} members={members} currentUserId={CURRENT_USER_ID} registerId={REGISTER_ID} saveAction={vi.fn()} aiEnabled />);
+    await userEvent.click(screen.getByRole("button", { name: "Draft explanation and next step" }));
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ targetType: "soa_item", targetId: "item-1" });
+    expect(await screen.findByRole("button", { name: "Mark draft reviewed" })).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: /Review A.8.8/ }));
+    expect(screen.getByRole("button", { name: "Draft explanation and next step" })).toBeVisible();
+    expect(screen.queryByText("Review rationale")).not.toBeInTheDocument();
+  });
+  it("requires unsaved decisions to be saved before generating AI context", async () => {
+    render(<SoaReviewWorkspace items={items} members={members} currentUserId={CURRENT_USER_ID} registerId={REGISTER_ID} saveAction={vi.fn().mockResolvedValue({ status: "saved", revision: 1 })} aiEnabled />);
+    await userEvent.type(screen.getByLabelText("Rationale"), "Working rationale");
+    expect(screen.queryByRole("button", { name: "Draft explanation and next step" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    expect(await screen.findByRole("button", { name: "Draft explanation and next step" })).toBeVisible();
+  });
+  it.each([{ aiEnabled: false, readOnly: false }, { aiEnabled: true, readOnly: true }])("keeps optional AI unavailable for %j", (access) => {
+    render(<SoaReviewWorkspace items={items} members={members} currentUserId={CURRENT_USER_ID} registerId={REGISTER_ID} saveAction={vi.fn()} {...access} />);
+    expect(screen.queryByRole("button", { name: "Draft explanation and next step" })).not.toBeInTheDocument();
+    expect(screen.getByText("Why this matters")).toBeVisible();
   });
 });

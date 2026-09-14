@@ -6,11 +6,14 @@ import { requireAppContext } from "@/lib/app-context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { gapTaskInputSchema, taskInputSchema } from "@/features/tasks/application/task";
 import { nextDueDate, type TaskRecurrence } from "@/features/tasks/domain/tasks";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
+import { z } from "zod";
 
 const today = () => new Date().toISOString().slice(0, 10);
 
 export async function createTaskAction(formData: FormData) {
-  const { supabase, user, organisation } = await requireAppContext();
+  const { supabase, user, organisation, membership } = await requireAppContext();
+  workspaceAccess(membership.role).section("tasks").requireManage("create-task");
   await enforceRateLimit(`task:${user.id}`, { limit: 30, windowMs: 60_000 });
   const parsed = taskInputSchema.parse({ ...Object.fromEntries(formData), organisationId: organisation.id });
   const { error } = await supabase.from("tasks").insert({
@@ -23,12 +26,14 @@ export async function createTaskAction(formData: FormData) {
 }
 
 export async function updateTaskStatusAction(formData: FormData) {
-  const { supabase } = await requireAppContext();
+  const { supabase, organisation, membership, user } = await requireAppContext();
+  workspaceAccess(membership.role).section("tasks").requireManage("update-task-status");
+  await enforceRateLimit(`task-status:${user.id}`, { limit: 30, windowMs: 60_000 });
   const status = String(formData.get("status"));
   if (!["open", "in_progress", "done", "cancelled"].includes(status)) throw new Error("Invalid task status");
   const id = String(formData.get("id"));
   const { data: task, error: readError } = await supabase.from("tasks")
-    .select("id,organisation_id,title,detail,owner_id,due_on,recurrence,source,control_id,risk_id,status").eq("id", id).single();
+    .select("id,organisation_id,title,detail,owner_id,due_on,recurrence,source,control_id,risk_id,status").eq("id", id).eq("organisation_id", organisation.id).single();
   if (readError || !task) throw new Error("Task not found");
   if (status === "done" && task.status !== "done" && task.recurrence && task.due_on) {
     const { error } = await supabase.rpc("complete_recurring_task", {
@@ -36,10 +41,56 @@ export async function updateTaskStatusAction(formData: FormData) {
     });
     if (error) throw new Error("Could not complete recurring task");
   } else {
-    const { error } = await supabase.from("tasks").update({ status, updated_at: new Date().toISOString() }).eq("id", id);
-    if (error) throw new Error("Could not update task");
+    const { data, error } = await supabase.from("tasks").update({ status, updated_at: new Date().toISOString() }).eq("id", id).eq("organisation_id", organisation.id).select("id").maybeSingle();
+    if (error || !data) throw new Error("Could not update task");
   }
   revalidatePath("/app/tasks"); revalidatePath("/app");
+}
+
+export async function updateTaskAction(formData: FormData) {
+  const { supabase, organisation, membership, user } = await requireAppContext();
+  workspaceAccess(membership.role).section("tasks").requireManage("edit-task");
+  await enforceRateLimit(`task-edit:${user.id}`, { limit: 30, windowMs: 60_000 });
+  const id = z.uuid().parse(String(formData.get("id")));
+  const expectedUpdatedAt = z.iso.datetime({ offset: true }).parse(String(formData.get("expectedUpdatedAt")));
+  const parsed = taskInputSchema.parse({ ...Object.fromEntries(formData), organisationId: organisation.id });
+  const { data, error } = await supabase.from("tasks").update({
+    title: parsed.title, detail: parsed.detail, owner_id: parsed.ownerId, due_on: parsed.dueOn,
+    recurrence: parsed.recurrence, control_id: parsed.controlId, risk_id: parsed.riskId,
+    updated_at: new Date().toISOString(),
+  }).eq("id", id).eq("organisation_id", organisation.id).eq("updated_at", expectedUpdatedAt).select("id").maybeSingle();
+  if (error) throw new Error("Could not update task");
+  if (!data) throw new Error("This task changed or is no longer available. Reload it before saving again.");
+  revalidatePath("/app/tasks"); revalidatePath(`/app/tasks/${id}`); redirect(`/app/tasks/${id}`);
+}
+
+export type TaskFormState = { error?: string; fieldErrors?: Record<string, string[] | undefined>; conflict?: boolean };
+
+function taskValidationState(error: z.ZodError): TaskFormState {
+  return { error: "Check the highlighted fields and try again.", fieldErrors: error.flatten().fieldErrors };
+}
+
+export async function createTaskFormAction(_previous: TaskFormState, formData: FormData): Promise<TaskFormState> {
+  try {
+    await createTaskAction(formData);
+    return {};
+  } catch (error) {
+    if (error instanceof z.ZodError) return taskValidationState(error);
+    if (error instanceof Error && error.message === "Could not save task") return { error: "Could not save task. Try again." };
+    throw error;
+  }
+}
+
+export async function updateTaskFormAction(_previous: TaskFormState, formData: FormData): Promise<TaskFormState> {
+  try {
+    await updateTaskAction(formData);
+    return {};
+  } catch (error) {
+    if (error instanceof z.ZodError) return taskValidationState(error);
+    if (error instanceof Error && error.message === "Could not update task") return { error: "Could not save task. Try again." };
+    if (error instanceof Error && error.message.startsWith("This task changed or is no longer available")) return { error: error.message, conflict: true };
+    throw error;
+  }
 }
 
 export async function createGapTaskAction(formData: FormData) {

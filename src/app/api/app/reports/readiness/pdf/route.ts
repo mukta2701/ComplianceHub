@@ -4,15 +4,20 @@ import { loadReadinessInput } from "@/features/reports/application/load-readines
 import { buildReadinessReport } from "@/features/reports/domain/readiness-report";
 import { generateReadinessPdf } from "@/features/reports/application/readiness-pdf";
 import { loadLatestLeadershipSnapshot } from "@/features/reports/application/leadership-snapshots";
+import { protectExport, recordExportAudit } from "@/features/exports/export-audit";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 
 // Auth + tenant scoping via requireAppContext(): the returned Supabase client is
 // RLS-scoped to the caller's session (no service role), matching the readiness
 // report page (src/app/app/reports/readiness/page.tsx) this route exports from.
 export async function GET() {
-  const { supabase, organisation, membership } = await requireAppContext();
+  const { supabase, organisation, membership, user } = await requireAppContext();
+  const reportAccess = workspaceAccess(membership.role).section("leadership-report");
+  const auditContext = { organisationId: organisation.id, userId: user.id, resource: "readiness" as const, format: "pdf" as const };
+  await protectExport(auditContext);
   let report;
   let organisationName: string;
-  if (membership.role === "member") {
+  if (!reportAccess.canManage) {
     const snapshot = await loadLatestLeadershipSnapshot(supabase, organisation.id);
     if (!snapshot) {
       return NextResponse.json({ error: "Leadership report not found" }, {
@@ -27,6 +32,7 @@ export async function GET() {
     organisationName = organisation.name;
   }
   const buffer = await generateReadinessPdf(report, organisationName);
+  await recordExportAudit(auditContext);
   return new NextResponse(new Uint8Array(buffer), {
     headers: {
       "content-type": "application/pdf",

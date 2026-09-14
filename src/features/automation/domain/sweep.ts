@@ -5,6 +5,7 @@ import { isOverdue, type TaskStatus } from "../../tasks/domain/tasks";
 export type SweepEvidence = Readonly<{
   id: string; organisationId: string; title: string; ownerId: string | null;
   status: "current" | "expiring" | "expired"; validUntil: string | null;
+  isMachineManaged: boolean;
 }>;
 export type SweepTask = Readonly<{
   id: string; organisationId: string; title: string; ownerId: string | null;
@@ -28,7 +29,11 @@ export function planExpiryTasks(
 ) {
   const covered = new Set(openExpiryTaskEvidenceIds);
   return evidence
-    .filter((item) => !covered.has(item.id) && deriveEvidenceStatus(item.validUntil, today) !== "current")
+    .filter((item) => (
+      !item.isMachineManaged
+      && !covered.has(item.id)
+      && deriveEvidenceStatus(item.validUntil, today) !== "current"
+    ))
     .map((item) => ({
       organisationId: item.organisationId, evidenceId: item.id,
       title: `Replace stale evidence: ${item.title}`.slice(0, 200), ownerId: item.ownerId, dueOn: item.validUntil,

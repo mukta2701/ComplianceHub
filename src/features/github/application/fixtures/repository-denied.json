@@ -1,0 +1,7 @@
+{
+  "status": 403,
+  "body": {
+    "message": "credential and private provider detail that must be discarded",
+    "documentation_url": "https://docs.github.com/private-location"
+  }
+}

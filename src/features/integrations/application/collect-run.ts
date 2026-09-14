@@ -3,18 +3,27 @@ import { resolveEvidenceProvider } from "./evidence-registry";
 import { decryptSecret } from "@/lib/security/secrets";
 import { toEvidenceRow } from "../domain/evidence-collection";
 import type { EvidenceProviderKind } from "../domain/evidence-provider";
+import { collectIdPages } from "@/lib/supabase/paginate";
+import { persistCollectedAutomation, recordCollectionHealth } from "@/features/automation/application/collector-persistence";
 
 export async function collectEvidence(supabase: SupabaseClient): Promise<{ collected: number; refreshed: number; failed: number }> {
   // Active sources across every org — collection is a global sweep, tenant-scoped
   // per row by each source's organisation_id (mirrors integrations-sync).
-  const { data: sources, error } = await supabase.from("evidence_sources")
-    .select("id,organisation_id,provider,config,access_token,connected_by")
-    .is("revoked_at", null);
-  if (error) throw error;
+  const sources = await collectIdPages(async (afterId, limit) => {
+    let query = supabase.from("evidence_sources")
+      .select("id,organisation_id,provider,config,access_token,connected_by")
+      .is("revoked_at", null)
+      .order("id", { ascending: true })
+      .limit(limit);
+    if (afterId) query = query.gt("id", afterId);
+    const { data, error } = await query;
+    if (error) throw error;
+    return data ?? [];
+  });
   let collected = 0;
   let refreshed = 0;
   let failed = 0;
-  for (const source of sources ?? []) {
+  for (const source of sources) {
     // One provider (or one org's mis-config) must not starve the rest of the
     // sweep — isolate each source, count failures, and keep going.
     try {
@@ -26,18 +35,18 @@ export async function collectEvidence(supabase: SupabaseClient): Promise<{ colle
         accessToken: decryptSecret(source.access_token) ?? "",
       });
       for (const item of items) {
-        const row = toEvidenceRow(item, { organisationId: source.organisation_id, sourceId: source.id });
-        // Dedup by the Stage-1 partial unique index (source_id, external_ref).
+        const row = toEvidenceRow(item, { organisationId: source.organisation_id, sourceId: source.id, provider: source.provider as EvidenceProviderKind });
+        // Reuse an exact observation only. A later collection date or changed
+        // provider result gets its own immutable evidence record.
         // Evidence rows are immutable except for status (DB trigger), so a
         // re-collect of an already-stored item is a no-op refresh rather than a
         // rewrite: look it up first, insert only when absent. This keeps the
         // sweep idempotent — re-running never duplicates a collected item.
-        const { data: existing, error: lookupError } = await supabase.from("evidence")
-          .select("id")
-          .eq("source_id", source.id)
-          .eq("external_ref", row.external_ref)
-          .eq("organisation_id", source.organisation_id)
-          .maybeSingle();
+        const findObservation = () => supabase.from("evidence")
+          .select("id").eq("organisation_id", source.organisation_id)
+          .eq("source_id", source.id).eq("external_ref", row.external_ref)
+          .eq("observation_key", row.observation_key).maybeSingle();
+        const { data: existing, error: lookupError } = await findObservation();
         if (lookupError) throw lookupError;
         if (existing) { refreshed += 1; continue; }
         const { error: insertError } = await supabase.from("evidence").insert({
@@ -45,11 +54,35 @@ export async function collectEvidence(supabase: SupabaseClient): Promise<{ colle
           // The source's connector is recorded as the evidence author.
           created_by: source.connected_by,
         });
+        if (insertError?.code === "23505") {
+          const { data: winner, error: winnerError } = await findObservation();
+          if (winnerError || !winner) throw winnerError ?? insertError;
+          refreshed += 1;
+          continue;
+        }
         if (insertError) throw insertError;
         collected += 1;
       }
+      for (const item of items) {
+        await persistCollectedAutomation({
+          supabase, organisationId: source.organisation_id,
+          provider: source.provider as EvidenceProviderKind,
+          config: (source.config ?? {}) as Record<string, unknown>, collected: item,
+        });
+      }
+      await recordCollectionHealth({ supabase, organisationId: source.organisation_id,
+        provider: source.provider as EvidenceProviderKind,
+        config: (source.config ?? {}) as Record<string, unknown>, succeeded: true });
     } catch {
       failed += 1;
+      try {
+        await recordCollectionHealth({ supabase, organisationId: source.organisation_id,
+          provider: source.provider as EvidenceProviderKind,
+          config: (source.config ?? {}) as Record<string, unknown>, succeeded: false });
+      } catch {
+        // The source is already reported failed; a database outage must not
+        // prevent another source from completing or count this source twice.
+      }
     }
   }
   return { collected, refreshed, failed };

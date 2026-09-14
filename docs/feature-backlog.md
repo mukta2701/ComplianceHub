@@ -98,24 +98,11 @@ Phase B took every compliance workflow that a 10–20 person organisation used t
 
 **Suggested improvements:**
 - Add an audit-pack export that bundles all registers, the finalised SoA snapshot and the evidence index into a single workbook or zip for auditors.
-- Add an XLSX import round-trip (the planned Phase B.5) so exported workbooks re-import cleanly.
 - Produce styled, branded XLSX output (formatted header row, sensible column widths, auto-filters) so the export can genuinely replace the workbooks.
-- Rate-limit and audit the export route handlers (create actions are already rate-limited; the export endpoints only auth-check).
 
 ## Deferred hardening
 
-Small backlog items carried forward in the SDD ledger (`.superpowers/sdd/progress.md`, Phase B section) and the GO-LIVE notes:
-
-- **CSV formula-injection is unmitigated** — the shared `cell()` escaper (`src/features/exports/exports.ts`) quotes commas / quotes / newlines but does not neutralise a leading `=`, `+`, `-` or `@`, so exported free text can execute as a spreadsheet formula (Task 12 minor; security-relevant, also gates the B.5 round-trip).
-- **XLSX export test checks the container, not the content** — there is no round-trip read-back assertion on the generated workbook (Task 12 minor).
-- **`risk_matrix_config` update policy does not re-assert `updated_by = auth.uid()`** — the server action always sets it, but the RLS with-check does not pin it (Task 3 minor).
-- **RTP delete action discards the DB error** — `deleteRtpAction` swallows any delete failure, matching the existing pattern but hiding errors (Task 5 minor).
-- **`reviewSoaItemAction` lacks server-side owner-membership re-validation** — the composite FK backstops it and the UI is unreachable for a non-member, but there is no explicit server check (Task 7 minor).
-- **Asset link/unlink actions lack an empty-id guard** — the form is always valid today, but the actions do not defensively guard a blank id (Task 11 minor).
-- **Category-backfill `dense_rank` position collision** — the `202607020011` backfill can collide positions for category values that differ only by case; it passed on real data as a one-shot but is not collision-proof (Task 2 minor).
-- **Export e2e hits endpoints, not buttons, and asserts no filenames** — the download tests call the routes directly and do not assert the `content-disposition` filename (Tasks 13/14 minor).
-- **Evidence export owner fallback is `""` rather than "Unassigned"** — inconsistent with the other export owner columns (Task 14 minor).
-- **`maybeSingle` risk-matrix-config read assumes a single active org** — a pre-existing pattern that will need revisiting for multi-org membership (Task 3 minor).
+The following previously reported items are now closed and tracked as `Done` in `docs/feature-backlog.csv`: CSV formula-injection protection, XLSX import round-trip, XLSX content round-trip coverage, risk-matrix policy identity and active-workspace reads, operator-only risk-matrix mutations, owner-only monitoring-finding mutations with atomic remediation-task linking, RTP delete errors, asset-link empty-id guards, category position collision, export filename/button coverage, export rate-limit/audit coverage, evidence owner fallback, policy-evidence rate limiting and policy-scoped unlinking, and server-side SoA owner-membership validation. A broader operator-facing digest status dashboard and live connector secret vault remain backlog items.
 
 ---
 
@@ -146,10 +133,10 @@ Small backlog items carried forward in the SDD ledger (`.superpowers/sdd/progres
 - Findings dashboard + trend over time; link findings to the SoA control they affect.
 - KPI trend charts + threshold RAG status (currently a flat log); KPI edit UI.
 - Readiness report: scheduled email/PDF to leadership; a 5th risk-band tone so high vs very-high are visually distinct.
-- Auditor access hardening: flash the one-time link via a single-use server-side store instead of a 60s cookie; per-view access log of auditor-token reads; escape `audit.reference` in the evidence-pack filename.
+- Auditor access hardening: replace the short-lived flash cookie with a single-use server-side store.
 - Management-review meeting record (agenda + minutes) built on the KPI log.
 
-**Deferred hardening (from reviews):** evidence-pack Content-Disposition filename not escaped; pgTAP 021 per-query cross-org coverage (RPC code-clean, public-view e2e renders full payload); `grant usage public to anon` broader than needed; auditor token `on delete cascade` with its audit.
+**Deferred hardening (from reviews):** pgTAP 021 per-query cross-org coverage (RPC code-clean, public-view e2e renders full payload); `grant usage public to anon` broader than needed; auditor token `on delete cascade` with its audit.
 
 ---
 
@@ -165,4 +152,61 @@ Small backlog items carried forward in the SDD ledger (`.superpowers/sdd/progres
 - Push-to-tracker from findings and risks (not only tasks); bulk-push overdue remediation.
 - Move integration tokens to Supabase Vault / an encrypted column before any real connection (go-live hardening, already flagged on the connect checklist).
 
-**Deferred hardening (from the whole-branch review):** policy evidence link/unlink actions lack the rate-limit the other policy actions carry and `unlink` deletes by `linkId` without re-scoping to `policyId` (RLS still org-scopes it); `024` pgTAP omits an UPDATE-verb assertion (evidence_links has no UPDATE path); poll-cron per-ticket errors now isolated (returns `{synced, failed}`) but failures are counted, not logged per-row.
+**Deferred hardening (from the whole-branch review):** `024` pgTAP omits an UPDATE-verb assertion (evidence_links has no UPDATE path); poll-cron per-ticket errors now isolated (returns `{synced, failed}`) but failures are counted, not logged per-row.
+
+## Internal MCP + daily Slack digest (shipped)
+
+**What shipped:** an OAuth-protected Streamable HTTP MCP endpoint with seven
+tenant-scoped read/prepare tools plus a separate Owner-only `post_daily_digest`
+external-write tool, including a bounded immutable official-GitHub read,
+schema-v2 deterministic digest facts, and an Owner-only daily Slack digest
+workflow. Digest claims are derived from a prepared fact hash that covers the
+exact GitHub partition, prior-delivery baseline, immutable lifecycle changes,
+and truncation state;
+reservation/finalisation RPCs make concurrent calls idempotent, webhook URLs are
+encrypted at rest, and delivery outcomes are terminally classified. Every real
+Slack write now fails closed to one Mukta-owned, server-approved private Slack destination
+using a server-only canonical-URL digest; legacy/mismatched rows are
+rejected before decryption and the reservation is bound to the exact expected
+channel. A private
+ComplianceHub plugin and daily-brief skill keep preparation side-effect-free
+unless the user explicitly requests a send. Hosted OAuth and a real Slack
+webhook remain go-live checkpoints, not local defaults.
+
+**Suggested improvements:**
+- Complete hosted MCP Inspector/Codex/Claude OAuth acceptance against the canonical Azure origin.
+- After Mukta approves the private destination and deploy secret, record three
+  redacted application-owned deliveries, including failure/unknown handling.
+- Add operator-facing schedule status and a bounded retry/recovery dashboard for abandoned digest reservations.
+
+## GitHub verified collection and materialisation (pipeline shipped)
+
+**What shipped:** a private GitHub App claim/callback flow, tenant-safe
+installation and repository scope, deterministic rule evaluation, bounded
+collection orchestration, signed replay-safe webhook intake, manual recheck UI,
+collection-health summaries, immutable mapping approval/provenance, transactional
+evidence/finding materialisation, and immutable official results consumed by the
+read-only MCP result tool and schema-v2 digest. Raw shadow observations never
+become official facts by themselves. The local personal pilot accepts a `User`
+account only on an HTTP loopback origin; hosted deployments stay
+organisation-only. Official GitHub technical results remain narrower than ISO
+certification, readiness, security, or overall-compliance claims.
+
+**Suggested improvements:**
+- Complete the hosted Supabase migration and Azure secret/registration checkpoints.
+- Run the approved Adtecher one-repository shadow pilot and commit a redacted comparison proof.
+- Add the separately planned Owner-facing mapping approval and official-result UI after the shadow proof passes.
+
+## Ongoing lifecycle quality programme — 9 September 2026
+
+The [evidence-backed assessment and linked tickets](plans/operating-lifecycle-quality/assessment.md) cover policy accountability, repeat review cycles and connected review clarity across the broader company programme. The release checklist remains the sole overall status source. Collector observation semantics and export expansion are separately identified decisions/follow-ups. The next [dashboard/audit availability increment](superpowers/specs/2026-09-09-unavailable-dashboard-data.md) prevents failed reads from appearing as zero work. Asset import ownership inferred from free-text location is also recorded in the assessment for a separate correction.
+
+The follow-on [import preview consistency increment](superpowers/specs/2026-09-09-import-preview-consistency.md) prevents an operator confirming a preview whose mappings or target register have changed. Asset-owner inference is a separate pending decision because the original import design explicitly allowed it.
+
+Owner-approved [explicit asset-import ownership](superpowers/specs/2026-09-09-explicit-asset-import-owner.md) separates descriptive location from assignment and flags uncertain names before import. Existing export format and saved records remain unchanged.
+
+Owner-approved [dated generic collector observations](superpowers/specs/2026-09-09-dated-collector-observations.md) preserve later check dates and changed facts while keeping identical retries and previous reviews stable. Ticket10 is the next complete collection-to-review increment.
+
+## Workspace navigation and Settings polish
+
+The owner requested a visual reorganisation using Mobbin references. [Ticket12](plans/operating-lifecycle-quality/issues/12-workspace-ui.md) covers grouped navigation, readable shared controls and focused Settings sections with keyboard-safe mobile navigation. [Specification](superpowers/specs/2026-09-09-workspace-ui.md). Current acceptance remains in the release checklist.

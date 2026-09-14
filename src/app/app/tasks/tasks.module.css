@@ -1,0 +1,76 @@
+.pageActions { display:flex; flex-wrap:wrap; gap:8px; }
+.summaryGrid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-bottom:14px; }
+.metric { display:grid; grid-template-columns:1fr auto; gap:3px 12px; padding:18px 20px; color:inherit; text-decoration:none; border:1px solid var(--line); border-radius:14px; background:linear-gradient(145deg,#fff 45%,#f3f7ff); box-shadow:0 7px 24px rgba(20,37,63,.04); transition:border-color .16s ease,transform .16s ease; }
+.metric:hover { border-color:#aec5f3; transform:translateY(-1px); }
+.metric span,.kicker { color:#61708a; font-size:11px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
+.metric strong { grid-row:1 / span 2; grid-column:2; align-self:center; font-size:30px; line-height:1; }
+.metric small { color:#6b7588; font-size:12px; }
+.metricAlert { background:linear-gradient(145deg,#fff 45%,#fff2f1); }
+.metricAlert strong { color:#b33a32; }
+.metricReview { background:linear-gradient(145deg,#fff 45%,#eefbf7); }
+.metricReview strong { color:#087963; }
+.healthCard { padding:19px 20px; margin-bottom:14px; }
+.healthHeader,.tableHeader,.sectionHeader { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.healthHeader > div,.tableHeader > div { display:grid; gap:5px; }
+.healthHeader > div strong { font-size:14px; }
+.healthHeader > span,.tableHeader > span { color:#677287; font-size:12px; }
+.healthTrack { height:8px; margin:16px 0 11px; overflow:hidden; border-radius:99px; background:#f4d7d3; }
+.healthTrack { display:flex; }
+.healthTrack span { display:block; height:100%; }
+.healthTrack .onTrackSegment { background:linear-gradient(90deg,#2f68d8,#16a085); }
+.healthTrack .overdueSegment { background:#c34d43; }
+.healthLegend { display:flex; gap:18px; color:#667085; font-size:12px; }
+.healthLegend span { display:flex; align-items:center; gap:7px; }
+.healthLegend i { width:8px; height:8px; border-radius:50%; }
+.onTrackDot { background:#167d6c; }.overdueDot { background:#c34d43; }.undatedDot { background:#c7ced9; }
+.filters { display:flex; gap:4px; margin:0 0 14px; padding:4px; overflow-x:auto; border:1px solid var(--line); border-radius:12px; background:#fff; scrollbar-width:thin; }
+.filters a { flex:0 0 auto; padding:9px 13px; border-radius:8px; color:#536078; font-size:12px; font-weight:700; text-decoration:none; white-space:nowrap; }
+.filters a:hover { background:#f4f7fc; }
+.filters a[aria-current="page"] { color:#2155b6; background:#eaf0ff; box-shadow:inset 0 0 0 1px #d8e3ff; }
+.reviewQueue { padding:20px; margin-bottom:14px; border-color:#cfe3dc; background:linear-gradient(135deg,#fff 55%,#f1fbf8); }
+.sectionHeader h2,.tableHeader h2 { margin:4px 0 0; font-size:18px; }
+.reviewList { display:grid; gap:10px; margin-top:16px; }
+.reviewItem { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:12px; padding:14px; border:1px solid #e1e8ed; border-radius:11px; background:rgba(255,255,255,.88); }
+.reviewItem p { margin:4px 0 0; color:#667085; font-size:12px; }
+.avatar,.owner i { display:grid; place-items:center; flex:none; border-radius:50%; color:#175fb0; background:#e8f0ff; font-size:11px; font-style:normal; font-weight:800; }
+.avatar { width:34px; height:34px; }
+.starter { padding:20px; margin-bottom:14px; }
+.starter h2 { margin:0 0 4px; font-size:15px; }.starter p { margin:0 0 12px; color:#596273; font-size:12px; }
+.tableCard { overflow:hidden; }
+.tableHeader { padding:18px 20px 14px; border-bottom:1px solid var(--line); }
+.taskTable { border:0; border-radius:0; }
+.taskTable table { min-width:860px; }
+.taskTable th { padding-top:11px; padding-bottom:11px; }
+.taskTable td { vertical-align:middle; }
+.taskName { min-width:255px; }.taskName b { display:block; line-height:1.35; }.taskName small { display:-webkit-box; margin-top:5px; max-width:370px; overflow:hidden; color:#738096; line-height:1.4; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
+.owner { display:flex; align-items:center; gap:8px; min-width:150px; }.owner i { width:26px; height:26px; }
+.date { min-width:130px; white-space:nowrap; }.date :global(.pill) { margin-left:6px; }
+.capitalize { text-transform:capitalize; }
+.statusForm { display:flex; align-items:center; gap:6px; min-width:205px; }.statusForm select { min-width:112px; }.statusForm button { min-height:34px; padding:6px 12px; }
+.empty { padding:34px 20px !important; color:#596273; text-align:center; }
+
+@media (max-width: 760px) {
+  .pageActions { width:100%; }.pageActions a { flex:1 1 auto; justify-content:center; }
+  .summaryGrid { gap:7px; }
+  .metric { display:flex; flex-direction:column; gap:4px; min-width:0; padding:13px 11px; }
+  .metric strong { order:-1; font-size:24px; }.metric span { font-size:9px; }.metric small { display:none; }
+  .healthCard { padding:16px; }.healthHeader { align-items:flex-start; }.healthHeader > span { white-space:nowrap; }.healthLegend { flex-wrap:wrap; gap:7px 14px; }
+  .filters { margin-inline:-2px; }
+  .reviewQueue { padding:16px; }.reviewItem { grid-template-columns:auto minmax(0,1fr); }.reviewItem a { grid-column:1 / -1; justify-content:center; }
+  .tableHeader { padding:16px; }
+  .taskTable { overflow:visible; }
+  .taskTable table { min-width:0; width:100%; }
+  .taskTable thead { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); }
+  .taskTable tbody { display:grid; gap:10px; padding:10px; }
+  .taskTable tr { display:grid; grid-template-columns:1fr 1fr; gap:0 14px; padding:15px; border:1px solid var(--line); border-radius:12px; background:#fff; }
+  .taskTable td { display:grid; grid-template-columns:76px minmax(0,1fr); gap:8px; align-items:center; padding:7px 0; border:0; min-width:0; }
+  .taskTable td::before { content:attr(data-label); color:#718096; font-size:10px; font-weight:800; letter-spacing:.05em; text-transform:uppercase; }
+  .taskTable .taskName { display:block; grid-column:1 / -1; padding:0 0 11px; border-bottom:1px solid #edf0f5; }
+  .taskTable .taskName::before { content:none; }
+  .taskTable td:nth-child(n+2) { grid-column:1 / -1; }
+  .taskName small { max-width:none; }
+  .owner { min-width:0; }
+  .statusForm { min-width:0; }.statusForm select { flex:1; min-width:0; }.statusForm button { flex:none; }
+  .taskTable .empty { display:block; grid-column:1 / -1; }
+  .taskTable .empty::before { content:none; }
+}

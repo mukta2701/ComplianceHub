@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveEvidenceStatus, summariseEvidenceFreshness } from "./evidence";
+import { deriveEffectiveEvidenceStatus, deriveEvidenceStatus, summariseEvidenceFreshness } from "./evidence";
 
 describe("deriveEvidenceStatus", () => {
   it("treats evidence without an expiry as always current", () => {
@@ -15,6 +15,25 @@ describe("deriveEvidenceStatus", () => {
   });
   it("rejects malformed dates", () => {
     expect(() => deriveEvidenceStatus("01/07/2026", "2026-07-02")).toThrow(/ISO date/);
+  });
+});
+
+describe("deriveEffectiveEvidenceStatus", () => {
+  it("lets elapsed dates override an unswept current or expiring label", () => {
+    expect(deriveEffectiveEvidenceStatus("current", "2026-07-01", "2026-07-02")).toBe("expired");
+    expect(deriveEffectiveEvidenceStatus("expiring", "2026-07-01", "2026-07-02")).toBe("expired");
+  });
+
+  it("keeps deliberate lifecycle and earlier attention states", () => {
+    expect(deriveEffectiveEvidenceStatus("withdrawn", "2027-01-01", "2026-07-02")).toBe("withdrawn");
+    expect(deriveEffectiveEvidenceStatus("superseded", null, "2026-07-02")).toBe("superseded");
+    expect(deriveEffectiveEvidenceStatus("expired", "2027-01-01", "2026-07-02")).toBe("expired");
+    expect(deriveEffectiveEvidenceStatus("expiring", null, "2026-07-02")).toBe("expiring");
+  });
+
+  it("derives the attention window for otherwise current evidence", () => {
+    expect(deriveEffectiveEvidenceStatus("current", "2026-08-01", "2026-07-02")).toBe("expiring");
+    expect(deriveEffectiveEvidenceStatus("current", "2026-08-02", "2026-07-02")).toBe("current");
   });
 });
 

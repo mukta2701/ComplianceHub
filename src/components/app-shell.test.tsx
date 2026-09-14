@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 const hoisted = vi.hoisted(() => ({ pathname: "/app" }));
 
 vi.mock("next/navigation", () => ({ usePathname: () => hoisted.pathname }));
 vi.mock("@/app/app/actions", () => ({ signOutAction: vi.fn() }));
-vi.mock("./alert-toaster", () => ({ AlertToaster: () => null }));
+vi.mock("./alert-toaster", () => ({ AlertToaster: () => <a href="/app/monitoring">New monitoring alert</a> }));
 
 import { AppShell } from "./app-shell";
 
@@ -26,19 +26,66 @@ function renderShell(role: "owner" | "admin" | "member" | null, jobTitle: string
 }
 
 describe("AppShell role-specific navigation", () => {
-  beforeEach(() => { hoisted.pathname = "/app"; });
+  beforeEach(() => {
+    hoisted.pathname = "/app";
+    vi.stubGlobal("matchMedia", () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+  });
 
-  it("renders only the curated read-only navigation for a Member", () => {
+  it("makes the existing asset inventory discoverable for operators", () => {
+    renderShell("owner");
+    expect(screen.getByRole("link", { name: "Asset inventory" })).toHaveAttribute("href", "/app/assets");
+  });
+
+  it("names the working control area while preserving its existing route", () => {
+    renderShell("owner");
+
+    expect(screen.getByRole("link", { name: "Controls & applicability" })).toHaveAttribute("href", "/app/soa");
+    expect(screen.queryByRole("link", { name: "Statement of Applicability" })).not.toBeInTheDocument();
+  });
+
+  it("identifies the workspace and current page in the header breadcrumb", () => {
+    hoisted.pathname = "/app/policies/example-policy";
+    renderShell("owner");
+
+    const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(within(breadcrumb).getByRole("link", { name: "Example Ltd" })).toHaveAttribute("href", "/app");
+    expect(within(breadcrumb).getByRole("heading", { name: "Policies", level: 1 })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Policies" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("keeps a closed drawer out of navigation and isolates its open state", () => {
+    vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+    renderShell("owner");
+    expect(screen.queryByRole("navigation", { name: "Workspace" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open navigation" }));
+    const drawer = screen.getByRole("dialog", { name: "Workspace navigation" });
+    expect(drawer).toHaveAttribute("aria-modal", "true");
+    expect(screen.getByText("Page content").closest(".app-main")).toHaveAttribute("inert");
+    expect(screen.getByText("New monitoring alert").closest("[inert]")).not.toBeNull();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByText("Page content").closest(".app-main")).not.toHaveAttribute("inert");
+  });
+
+  it("focuses a drawer control before membership exists", async () => {
+    vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+    renderShell(null);
+    fireEvent.click(screen.getByRole("button", { name: "Open navigation" }));
+    await waitFor(() => expect(screen.getByRole("dialog").contains(document.activeElement)).toBe(true));
+  });
+
+  it("renders only the curated navigation with assigned work for a Member", () => {
     renderShell("member", "Developer");
 
     const navigation = screen.getByRole("navigation", { name: "Workspace" });
-    expect(navigation).toHaveTextContent("OverviewCompliancePoliciesFramework coverageMonitoringLeadership report");
-    expect(navigation.querySelectorAll("a")).toHaveLength(5);
+    expect(navigation).toHaveTextContent("OverviewComplianceAssigned tasksPoliciesControls & applicabilityFramework coverageMonitoringLeadership report");
+    expect(navigation.querySelectorAll("a")).toHaveLength(7);
+    expect(screen.getByRole("link", { name: "Controls & applicability" })).toHaveAttribute("href", "/app/soa");
     expect(screen.getByRole("link", { name: "Framework coverage" })).toHaveAttribute("href", "/app/frameworks");
-    expect(screen.getByText("Developer · Read only")).toBeInTheDocument();
+    expect(screen.getByText("Developer · Assigned work access")).toBeInTheDocument();
     expect(screen.getByText("Member view", { selector: "span" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Tasks" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Assigned tasks" })).toHaveAttribute("href", "/app/tasks?filter=assigned");
     expect(screen.queryByRole("link", { name: "Trust Center" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Notifications, 2 unread" })).toHaveAttribute("href", "/app/notifications");
   });
@@ -61,6 +108,33 @@ describe("AppShell role-specific navigation", () => {
     expect(screen.queryByRole("link", { name: "Connections" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("heading", { name: "Connections", level: 1 })).toBeInTheDocument();
+  });
+
+  it("keeps Audit navigation and route-specific titles unchanged", () => {
+    const { unmount } = renderShell("owner");
+    expect(screen.getByRole("link", { name: "Internal audits" })).toHaveAttribute("href", "/app/audits");
+    unmount();
+
+    hoisted.pathname = "/app/audits/new";
+    const planned = renderShell("owner");
+    expect(screen.getByRole("heading", { name: "Plan an audit", level: 1 })).toBeInTheDocument();
+    planned.unmount();
+
+    hoisted.pathname = "/app/activity";
+    renderShell("admin");
+    expect(screen.getByRole("heading", { name: "Audit trail", level: 1 })).toBeInTheDocument();
+  });
+
+  it("keeps role-specific task navigation and the Tasks breadcrumb unchanged", () => {
+    hoisted.pathname = "/app/tasks/57000000-0000-4000-8000-000000000001";
+    const member = renderShell("member");
+    expect(screen.getByRole("link", { name: "Assigned tasks" })).toHaveAttribute("href", "/app/tasks?filter=assigned");
+    expect(screen.getByRole("heading", { name: "Tasks", level: 1 })).toBeInTheDocument();
+    member.unmount();
+
+    renderShell("owner");
+    expect(screen.getByRole("link", { name: "Tasks" })).toHaveAttribute("href", "/app/tasks");
+    expect(screen.getByRole("heading", { name: "Tasks", level: 1 })).toBeInTheDocument();
   });
 
   it("shows workspace setup without operational navigation before membership exists", () => {

@@ -9,10 +9,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // task constraints that make the sweep idempotent across retries and concurrent
 // invocations.
 
-const hoisted = vi.hoisted(() => ({ client: null as unknown }));
+const hoisted = vi.hoisted(() => ({
+  client: null as unknown,
+  buildMaterialisation: vi.fn(),
+  reconcileMaterialisation: vi.fn(),
+}));
 
 vi.mock("@/lib/supabase/service", () => ({
   createSupabaseServiceClient: () => hoisted.client,
+}));
+vi.mock("@/features/github/application/materialise-approved-observations", () => ({
+  buildMaterialisationDependencies: hoisted.buildMaterialisation,
+  reconcileApprovedGitHubObservations: hoisted.reconcileMaterialisation,
 }));
 
 type Row = Record<string, unknown>;
@@ -32,6 +40,7 @@ type Filter =
   | { kind: "in"; col: string; vals: unknown[] }
   | { kind: "notNull"; col: string }
   | { kind: "isNull"; col: string }
+  | { kind: "gt"; col: string; val: unknown }
   | { kind: "lt"; col: string; val: unknown };
 
 let idCounter = 0;
@@ -43,6 +52,7 @@ function matches(row: Row, filters: Filter[]): boolean {
     if (f.kind === "in") return f.vals.includes(row[f.col]);
     if (f.kind === "notNull") return row[f.col] !== null && row[f.col] !== undefined;
     if (f.kind === "isNull") return row[f.col] === null || row[f.col] === undefined;
+    if (f.kind === "gt") return (row[f.col] as string) > (f.val as string);
     return (row[f.col] as string) < (f.val as string);
   });
 }
@@ -54,6 +64,8 @@ class Builder implements PromiseLike<{ data: unknown; error: unknown }> {
   private upsertKeys: string[] = [];
   private isSingle = false;
   private isMaybeSingle = false;
+  private orderColumn: string | null = null;
+  private resultLimit: number | null = null;
 
   constructor(private store: Store, private table: keyof Store) {}
 
@@ -87,7 +99,16 @@ class Builder implements PromiseLike<{ data: unknown; error: unknown }> {
     this.filters.push({ kind: "lt", col, val });
     return this;
   }
-  limit() {
+  gt(col: string, val: unknown) {
+    this.filters.push({ kind: "gt", col, val });
+    return this;
+  }
+  order(col: string) {
+    this.orderColumn = col;
+    return this;
+  }
+  limit(value: number) {
+    this.resultLimit = value;
     return this;
   }
   update(payload: Row) {
@@ -122,7 +143,14 @@ class Builder implements PromiseLike<{ data: unknown; error: unknown }> {
       this.rows.push(inserted);
       return { data: [{ id: inserted.id }], error: null };
     }
-    const found = this.rows.filter((r) => matches(r, this.filters));
+    let found = this.rows.filter((r) => matches(r, this.filters));
+    if (this.orderColumn) {
+      const col = this.orderColumn;
+      found = [...found].sort((left, right) => String(left[col]).localeCompare(String(right[col])));
+    }
+    // Match the local/hosted Data API ceiling so missing pagination fails in
+    // unit tests instead of silently passing against the in-memory store.
+    found = found.slice(0, this.resultLimit ?? 1_000);
     if (this.isSingle) {
       if (found.length === 0) return { data: null, error: { message: "no rows" } };
       return { data: found[0], error: null };
@@ -142,7 +170,10 @@ class Builder implements PromiseLike<{ data: unknown; error: unknown }> {
 }
 
 function createFakeClient(store: Store) {
-  return { from: (table: keyof Store) => new Builder(store, table) };
+  return {
+    from: (table: keyof Store) => new Builder(store, table),
+    rpc: vi.fn(async () => ({ data: 0, error: null })),
+  };
 }
 
 function seed(): Store {
@@ -182,6 +213,14 @@ beforeEach(async () => {
   vi.stubEnv("CRON_SECRET", "test-secret");
   store = seed();
   hoisted.client = createFakeClient(store);
+  hoisted.buildMaterialisation.mockReset().mockReturnValue({ dependency: "materialisation" });
+  hoisted.reconcileMaterialisation.mockReset().mockResolvedValue({
+    runsConsidered: 1,
+    materialised: 0,
+    unchanged: 1,
+    awaitingApproval: 0,
+    needsAttention: 0,
+  });
   ({ GET } = await import("./route"));
 });
 
@@ -209,6 +248,31 @@ describe("GET /api/cron/daily", () => {
     expect(summary.sweep.tasksCreated).toBe(2);
     expect(summary.collect).toEqual({ collected: 0, refreshed: 0, failed: 0 });
     expect(summary.sync).toEqual({ synced: 0, failed: 0, tasksClosed: 0 });
+    expect(summary.digestRecovery).toEqual({ classifiedUnknown: 0, limitReached: false });
+    expect(summary.githubMaterialisation).toEqual({
+      runsConsidered: 1,
+      materialised: 0,
+      unchanged: 1,
+      awaitingApproval: 0,
+      needsAttention: 0,
+    });
+    expect(hoisted.reconcileMaterialisation).toHaveBeenCalledWith(
+      { dependency: "materialisation" },
+      { limit: 20 },
+    );
+  });
+
+  it("ages and notifies GitHub-managed evidence without raising a manual replacement task", async () => {
+    store.evidence[0].machine_provenance = [{ evidence_id: "ev-1" }];
+
+    const response = await GET(request("test-secret"));
+
+    expect(response.status).toBe(200);
+    expect(store.evidence[0].status).toBe("expired");
+    expect(expiryTasks()).toHaveLength(0);
+    expect(store.notifications.some((notification) => (
+      notification.kind === "evidence_expired" && notification.subject_id === "ev-1"
+    ))).toBe(true);
   });
 
   it("raises exactly one policy_review task for the due policy and notifies the owner", async () => {
@@ -228,6 +292,18 @@ describe("GET /api/cron/daily", () => {
     expect(policyReviewTasks()).toHaveLength(1);
   });
 
+  it("creates one later policy review after completion and preserves both cycles on retry", async () => {
+    store.policies[0].review_due = "2020-01-01";
+    await GET(request("test-secret"));
+    const prior = policyReviewTasks()[0];
+    prior.status = "done";
+    store.policies[0].review_due = "2020-01-02";
+    await Promise.all([GET(request("test-secret")), GET(request("test-secret"))]);
+    expect(policyReviewTasks()).toHaveLength(2);
+    expect(policyReviewTasks().filter((task) => task.status === "done")).toHaveLength(1);
+    expect(policyReviewTasks().filter((task) => task.due_on === "2020-01-02")).toHaveLength(1);
+  });
+
   it("stays idempotent when two sweeps run concurrently", async () => {
     await Promise.all([GET(request("test-secret")), GET(request("test-secret"))]);
 
@@ -238,11 +314,43 @@ describe("GET /api/cron/daily", () => {
     expect(new Set(keys).size).toBe(keys.length);
   });
 
+  it("paginates every workspace Owner beyond the Supabase row ceiling", async () => {
+    store.memberships = Array.from({ length: 1_205 }, (_, index) => ({
+      organisation_id: "org-1",
+      user_id: `owner-${String(index + 1).padStart(4, "0")}`,
+      role: "owner",
+    }));
+    store.evidence[0].owner_id = null;
+    store.tasks[0].owner_id = null;
+    store.policies[0].owner_id = null;
+
+    const response = await GET(request("test-secret"));
+    expect(response.status).toBe(200);
+
+    const overdueRecipients = new Set(store.notifications
+      .filter((row) => row.kind === "task_overdue")
+      .map((row) => row.user_id));
+    expect(overdueRecipients.size).toBe(1_205);
+    expect(overdueRecipients.has("owner-1205")).toBe(true);
+  });
+
   it("rejects a wrong bearer token with 401 and touches no state", async () => {
     const response = await GET(request("wrong-secret"));
     expect(response.status).toBe(401);
     expect(store.evidence[0].status).toBe("current");
     expect(expiryTasks()).toHaveLength(0);
     expect(store.notifications).toHaveLength(0);
+    expect(hoisted.reconcileMaterialisation).not.toHaveBeenCalled();
+  });
+
+  it("isolates a bounded GitHub materialisation recovery failure from the existing daily sweep", async () => {
+    hoisted.reconcileMaterialisation.mockRejectedValue(new Error("private RPC body"));
+
+    const response = await GET(request("test-secret"));
+    const summary = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(summary.githubMaterialisation).toEqual({ error: "githubMaterialisation failed" });
+    expect(summary.sweep.evidenceExpired).toBe(1);
   });
 });

@@ -17,7 +17,7 @@ export function MemberOverview({ data }: { data: MemberOverviewData }) {
     <PageIntro
       eyebrow="MEMBER OVERVIEW"
       title={`Welcome to ${data.organisationName}`}
-      body={`${data.jobTitle?.trim() || "Member"} · Read-only member view`}
+      body={`${data.jobTitle?.trim() || "Member"} · View workspace records and contribute to assigned tasks`}
     />
 
     <div className="stats-grid">
@@ -48,6 +48,7 @@ export function MemberOverview({ data }: { data: MemberOverviewData }) {
         <h3 style={{ margin: "0 0 8px" }}>Leadership report</h3>
         <p style={{ color: "#596273", fontSize: "13px" }}>{reportDate ? `Published ${reportDate}.` : "No leadership report has been published for members yet."}</p>
         {reportDate && <Link className="button secondary" href="/app/reports/readiness">Open leadership report</Link>}
+        <p><Link className="button secondary" href="/app/baseline">View saved baseline</Link></p>
       </Card>
     </div>
   </>;

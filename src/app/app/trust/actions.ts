@@ -4,13 +4,11 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireAppContext } from "@/lib/app-context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
-import { hasCapability } from "@/features/organisations/domain/access";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 
 async function requireTrustCenterManager() {
   const context = await requireAppContext();
-  if (!hasCapability(context.membership.role, "manage_trust_center")) {
-    throw new Error("Only workspace operators can manage the Trust Center");
-  }
+  workspaceAccess(context.membership.role).section("trust-center").requireManage();
   return context;
 }
 

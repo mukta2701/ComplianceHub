@@ -7,9 +7,16 @@ import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { ALLOWED_EVIDENCE_MIME_TYPES, MAX_EVIDENCE_FILE_BYTES, evidenceInputSchema, persistEvidenceWithCompensation } from "@/features/evidence/application/evidence";
 import { deriveEvidenceStatus } from "@/features/evidence/domain/evidence";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
+import type { MembershipRole } from "@/features/organisations/domain/access";
+
+function requireEvidenceOperator(membership: { role: MembershipRole }) {
+  workspaceAccess(membership.role).section("evidence").requireManage();
+}
 
 export async function createEvidenceAction(formData: FormData) {
-  const { supabase, user, organisation } = await requireAppContext();
+  const { supabase, user, organisation, membership } = await requireAppContext();
+  requireEvidenceOperator(membership);
   await enforceRateLimit(`evidence:${user.id}`, { limit: 20, windowMs: 60_000 });
   const parsed = evidenceInputSchema.parse({ ...Object.fromEntries(formData), organisationId: organisation.id });
   let storagePath: string | null = null;
@@ -43,7 +50,8 @@ export async function createEvidenceAction(formData: FormData) {
 }
 
 export async function linkEvidenceAction(formData: FormData) {
-  const { supabase, user, organisation } = await requireAppContext();
+  const { supabase, user, organisation, membership } = await requireAppContext();
+  requireEvidenceOperator(membership);
   const evidenceId = String(formData.get("evidenceId"));
   const target = String(formData.get("target")); // "control:<id>" | "risk:<id>" | "task:<id>" | "policy:<id>"
   const [kind, id] = target.split(":");
@@ -59,21 +67,24 @@ export async function linkEvidenceAction(formData: FormData) {
 }
 
 export async function unlinkEvidenceAction(formData: FormData) {
-  const { supabase } = await requireAppContext();
-  const { error } = await supabase.from("evidence_links").delete().eq("id", String(formData.get("linkId"))); if (error) throw new Error("Could not remove the evidence link");
+  const { supabase, organisation, membership } = await requireAppContext();
+  requireEvidenceOperator(membership);
+  const { data, error } = await supabase.from("evidence_links").delete().eq("id", String(formData.get("linkId"))).eq("organisation_id", organisation.id).select("id").maybeSingle();
+  if (error || !data) throw new Error("Could not remove the evidence link");
   revalidatePath("/app/evidence");
 }
 
 export async function withdrawEvidenceAction(formData: FormData) {
-  const { supabase } = await requireAppContext();
-  const { error } = await supabase.from("evidence").update({ status: "withdrawn" }).eq("id", String(formData.get("id")));
-  if (error) throw new Error("Could not withdraw evidence");
+  const { supabase, organisation, membership } = await requireAppContext();
+  requireEvidenceOperator(membership);
+  const { data, error } = await supabase.from("evidence").update({ status: "withdrawn" }).eq("id", String(formData.get("id"))).eq("organisation_id", organisation.id).select("id").maybeSingle();
+  if (error || !data) throw new Error("Could not withdraw evidence");
   revalidatePath("/app/evidence");
 }
 
 export async function downloadEvidenceAction(formData: FormData) {
-  const { supabase } = await requireAppContext();
-  const { data: item } = await supabase.from("evidence").select("storage_path").eq("id", String(formData.get("id"))).single();
+  const { supabase, organisation } = await requireAppContext();
+  const { data: item } = await supabase.from("evidence").select("storage_path").eq("id", String(formData.get("id"))).eq("organisation_id", organisation.id).single();
   if (!item?.storage_path) throw new Error("Evidence file not found");
   const { data, error } = await supabase.storage.from("evidence").createSignedUrl(item.storage_path, 60);
   if (error || !data) throw new Error("Could not create a download link");

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Daily Compliance Brief"
+  short_description: "Prepare or preview a verified digest"
+  default_prompt: "Use $daily-compliance-brief to prepare and preview today’s verified Slack-ready ComplianceHub digest; Phase 3 cannot deliver it."

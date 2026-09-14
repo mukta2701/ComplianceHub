@@ -1,39 +1,70 @@
 import { NextResponse } from "next/server";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { requireAppContext } from "@/lib/app-context";
 import { toCsv, toXlsx, type ExportColumn } from "@/features/exports/exports";
+import { protectExport, recordExportAudit } from "@/features/exports/export-audit";
 import { CHECKLIST_RESULT_LABEL, FINDING_SEVERITY_LABEL, FINDING_STATUS_LABEL, type ChecklistResult, type FindingSeverity, type FindingStatus } from "@/features/audits/domain/audits";
+import { one } from "@/lib/supabase/one";
+import { collectIdPages } from "@/lib/supabase/paginate";
+import { deriveEffectiveEvidenceStatus, type EvidenceStatus } from "@/features/evidence/domain/evidence";
 
 type PackRow = { section: string; ref: string; item: string; result: string; detail: string };
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const format = new URL(request.url).searchParams.get("format") === "csv" ? "csv" : "xlsx";
-  const supabase = await createSupabaseServerClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
-  const { data: audit } = await supabase.from("audits").select("reference,title").eq("id", id).maybeSingle();
+  const format: "csv" | "xlsx" = new URL(request.url).searchParams.get("format") === "csv" ? "csv" : "xlsx";
+  const { supabase, organisation, user } = await requireAppContext();
+  const auditContext = { organisationId: organisation.id, userId: user.id, resource: "audits" as const, format };
+  await protectExport(auditContext);
+  const { data: audit } = await supabase.from("audits").select("reference,title").eq("id", id).eq("organisation_id", organisation.id).maybeSingle();
   if (!audit) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  const [{ data: items }, { data: findings }] = await Promise.all([
-    supabase.from("audit_checklist_items").select("area,clause_reference,checklist_item,compliant,evidence_note,findings").eq("audit_id", id).order("position"),
-    supabase.from("audit_findings").select("summary,severity,status,corrective_action").eq("audit_id", id).order("created_at"),
+  const [{ data: items, error: itemsError }, { data: findings, error: findingsError }] = await Promise.all([
+    supabase.from("audit_checklist_items").select("area,clause_reference,checklist_item,compliant,evidence_note,findings").eq("audit_id", id).eq("organisation_id", organisation.id).order("position"),
+    supabase.from("audit_findings").select("summary,severity,status,corrective_action").eq("audit_id", id).eq("organisation_id", organisation.id).order("created_at"),
   ]);
+  if (itemsError || findingsError) return NextResponse.json({ error: "Could not load the complete audit pack. Please try again." }, { status: 503 });
+  const evidenceRows: PackRow[] = [];
+  try {
+    const links = await collectIdPages(async (afterId, limit) => {
+      let query = supabase.from("evidence_links")
+        .select("id,evidence_id,audit_checklist_item_id,audit_checklist_items!inner(audit_id,checklist_item),evidence(id,title,description,kind,status,collected_on,valid_until)")
+        .eq("organisation_id", organisation.id).eq("audit_checklist_items.audit_id", id)
+        .order("id", { ascending: true }).limit(limit);
+      if (afterId) query = query.gt("id", afterId);
+      const { data, error } = await query;
+      if (error) throw new Error("Evidence unavailable");
+      return data ?? [];
+    });
+    for (const link of links) {
+      const evidence = one(link.evidence);
+      const checklist = one(link.audit_checklist_items);
+      if (!evidence || !checklist) throw new Error("Evidence unavailable");
+      const effectiveStatus = deriveEffectiveEvidenceStatus(evidence.status as EvidenceStatus, evidence.valid_until, new Date().toISOString().slice(0,10));
+      evidenceRows.push({ section: "Linked evidence", ref: evidence.id, item: evidence.title, result: effectiveStatus,
+        detail: [`Checklist: ${checklist.checklist_item}`, `Kind: ${evidence.kind}`, `Collected: ${evidence.collected_on}`, `Valid until: ${evidence.valid_until ?? "No expiry recorded"}`, evidence.description].filter(Boolean).join(" — ") });
+    }
+  } catch {
+    return NextResponse.json({ error: "Could not load the complete audit pack. Please try again." }, { status: 503 });
+  }
   const rows: PackRow[] = [
     ...(items ?? []).map((i) => ({ section: "Checklist", ref: `${i.area} ${i.clause_reference}`.trim(), item: i.checklist_item, result: CHECKLIST_RESULT_LABEL[i.compliant as ChecklistResult], detail: [i.evidence_note, i.findings].filter(Boolean).join(" — ") })),
     ...(findings ?? []).map((f) => ({ section: "Finding", ref: FINDING_SEVERITY_LABEL[f.severity as FindingSeverity], item: f.summary, result: FINDING_STATUS_LABEL[f.status as FindingStatus], detail: f.corrective_action })),
+    ...evidenceRows,
   ];
   const columns: ExportColumn<PackRow>[] = [
     { header: "Section", value: (r) => r.section }, { header: "Reference", value: (r) => r.ref },
     { header: "Item", value: (r) => r.item }, { header: "Result", value: (r) => r.result }, { header: "Detail", value: (r) => r.detail },
   ];
-  const safeReference = audit.reference.replace(/["\r\n]/g, "");
+  const safeReference = audit.reference.replace(/[^A-Za-z0-9._ -]/g, "").trim() || "audit";
   const filename = `audit-pack-${safeReference}`;
   const encodedFilename = encodeURIComponent(`audit-pack-${audit.reference}`);
   if (format === "csv") {
+    await recordExportAudit(auditContext);
     return new NextResponse(toCsv(columns, rows), { headers: {
       "content-type": "text/csv; charset=utf-8",
       "content-disposition": `attachment; filename="${filename}.csv"; filename*=UTF-8''${encodedFilename}.csv`, "cache-control": "private, no-store" } });
   }
   const buffer = await toXlsx("Audit pack", columns, rows);
+  await recordExportAudit(auditContext);
   return new NextResponse(new Uint8Array(buffer), { headers: {
     "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "content-disposition": `attachment; filename="${filename}.xlsx"; filename*=UTF-8''${encodedFilename}.xlsx`, "cache-control": "private, no-store" } });

@@ -8,6 +8,25 @@ permissions:
   contents: read
 
 jobs:
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build production container
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          platforms: linux/amd64
+          build-args: |
+            NEXT_PUBLIC_SUPABASE_URL=https://example.supabase.co
+            NEXT_PUBLIC_SUPABASE_ANON_KEY=ci-anon-key-placeholder-long
+            NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=ci-publishable-key-placeholder-long
+            NEXT_PUBLIC_SITE_URL=https://compliancehub-staging.example
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   application:
     runs-on: ubuntu-latest
     steps:
@@ -21,29 +40,49 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
-      - run: npm run build
-      - run: npx playwright install --with-deps chromium
+      # GitHub-hosted Ubuntu already provides Playwright's system libraries;
+      # install only the pinned browser so apt dependency setup cannot stall the
+      # application job before the production build and E2E gates.
+      - run: npx playwright install chromium
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
-      - run: supabase start
+          version: 2.109.0
+      - name: Start local Supabase without logging credentials
+        run: supabase start > "$RUNNER_TEMP/compliancehub-supabase-start.log" 2>&1
       - name: Configure local application environment
         run: |
           eval "$(supabase status -o env)"
-          echo "NEXT_PUBLIC_SUPABASE_URL=$API_URL" >> "$GITHUB_ENV"
-          echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$ANON_KEY" >> "$GITHUB_ENV"
-          echo "SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY" >> "$GITHUB_ENV"
-          echo "NEXT_PUBLIC_SITE_URL=http://127.0.0.1:3000" >> "$GITHUB_ENV"
-          # Provisioned so the CRON_SECRET-gated e2e steps actually run (rather than
-          # skipping to a vacuous pass) and so secret-encryption paths have a key.
-          echo "CRON_SECRET=ci-test-cron-secret" >> "$GITHUB_ENV"
-          echo "APP_ENCRYPTION_KEY=$(openssl rand -base64 32)" >> "$GITHUB_ENV"
+          app_encryption_key="$(openssl rand -base64 32)"
+          echo "::add-mask::$API_URL"
+          echo "::add-mask::$ANON_KEY"
+          echo "::add-mask::$SERVICE_ROLE_KEY"
+          echo "::add-mask::ci-test-cron-secret"
+          echo "::add-mask::$app_encryption_key"
+          {
+            echo "NEXT_PUBLIC_SUPABASE_URL=$API_URL"
+            echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$ANON_KEY"
+            echo "SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY"
+            echo "NEXT_PUBLIC_SITE_URL=http://127.0.0.1:3100"
+            # Provisioned so the CRON_SECRET-gated e2e steps actually run (rather than
+            # skipping to a vacuous pass) and so secret-encryption paths have a key.
+            echo "CRON_SECRET=ci-test-cron-secret"
+            echo "APP_ENCRYPTION_KEY=$app_encryption_key"
+            echo "E2E_TEST_TOOLS_ENABLED=1"
+            # Synthetic destination used only for configuration/lifecycle E2E;
+            # those tests never invoke the Slack transport.
+            echo "SLACK_ALLOWED_WEBHOOK_SHA256=36b243d5b0e2304cbdf6f5bf362061b4f0e5cdc842c7f407af9253d0207cce52"
+          } >> "$GITHUB_ENV"
+      # Build only after the same local Supabase environment used by the
+      # browser suite is available. Playwright starts this artifact through
+      # scripts/playwright-production-server.sh, which launches the standalone
+      # server so CI exercises production routing and bundling.
+      - run: npm run build
       # Non-hermetic integration tests: run only now that the DB stack is up and
       # its env (incl. the service-role key) is provisioned. Excluded from the
       # earlier `npm test` on purpose.
       - run: npm run test:integration
       # Run BOTH Playwright projects (desktop chromium + mobile) so mobile-viewport
-      # regressions are caught in CI, not just locally.
+      # regressions are caught against the production build, not just locally.
       - run: npm run test:e2e
 
   secrets:
@@ -52,7 +91,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
+      - uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   database:
     runs-on: ubuntu-latest
@@ -60,6 +101,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
-      - run: supabase start
+          version: 2.109.0
+      - name: Start local Supabase without logging credentials
+        run: supabase start > "$RUNNER_TEMP/compliancehub-supabase-start.log" 2>&1
+      - run: bash scripts/test-db-upgrade.sh
       - run: supabase test db

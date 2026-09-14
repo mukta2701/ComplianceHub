@@ -3,24 +3,26 @@
 import { revalidatePath } from "next/cache";
 import { requireAppContext } from "@/lib/app-context";
 import { one } from "@/lib/supabase/one";
+import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { decryptSecret } from "@/lib/security/secrets";
 import { resolveTicketProvider } from "@/features/integrations/application/registry";
 import { buildTicketPayload } from "@/features/integrations/domain/mapping";
 import type { IntegrationProvider } from "@/features/integrations/domain/provider";
-import { hasCapability } from "@/features/organisations/domain/access";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import { z } from "zod";
 
 export async function pushTaskToTrackerAction(formData: FormData) {
   const { supabase, user, organisation, membership } = await requireAppContext();
-  if (!hasCapability(membership.role, "manage_connections")) {
-    throw new Error("Only workspace operators can push tracker tickets");
-  }
+  workspaceAccess(membership.role).section("tasks").requireManage("push-task-to-tracker");
   await enforceRateLimit(`ticket-push:${user.id}`, { limit: 20, windowMs: 60_000 });
   const taskId = z.uuid().parse(String(formData.get("taskId")));
   const connectionId = z.uuid().parse(String(formData.get("connectionId")));
-  // Connection is operator-only RLS; a Member sees no rows here and cannot push.
-  const { data: connection, error: connError } = await supabase.from("integration_connections")
+  // Credentials are intentionally not selectable through the authenticated
+  // Data API. The action has already proved the caller is an operator; use the
+  // server-only client for this one tenant-scoped credential lookup.
+  const service = createSupabaseServiceClient();
+  const { data: connection, error: connError } = await service.from("integration_connections")
     .select("id,provider,config,access_token,connection_mode,broker_connection_id,broker_provider_config_key")
     .eq("id", connectionId).eq("organisation_id", organisation.id).eq("enabled", true)
     .is("revoked_at", null).maybeSingle();

@@ -1,32 +1,38 @@
 import { NextResponse } from "next/server";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { requireAppContext } from "@/lib/app-context";
 import { toCsv, toXlsx, type ExportColumn } from "@/features/exports/exports";
+import { protectExport, recordExportAudit } from "@/features/exports/export-audit";
 
 type Row = { code: string; prompt: string; answer: string; evidence_note: string };
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const format = url.searchParams.get("format") === "csv" ? "csv" : "xlsx";
+  const format: "csv" | "xlsx" = url.searchParams.get("format") === "csv" ? "csv" : "xlsx";
   const requestedSessionId = url.searchParams.get("sessionId");
-  const supabase = await createSupabaseServerClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
+  const { supabase, organisation, user } = await requireAppContext();
+  const auditContext = { organisationId: organisation.id, userId: user.id, resource: "assessment" as const, format };
+  await protectExport(auditContext);
   let sessionId = requestedSessionId;
   let catalogueVersionId: string | null = null;
   if (sessionId) {
-    const { data: session } = await supabase.from("assessment_sessions").select("id,catalogue_version_id").eq("id", sessionId).maybeSingle();
+    const { data: session, error } = await supabase.from("assessment_sessions").select("id,catalogue_version_id").eq("id", sessionId).eq("organisation_id", organisation.id).maybeSingle();
+    if (error) return NextResponse.json({ error: "Could not export assessment" }, { status: 500, headers: { "cache-control": "private, no-store" } });
     if (!session) return NextResponse.json({ error: "No assessment session found" }, { status: 404 });
     catalogueVersionId = session.catalogue_version_id;
   } else {
-    const { data: latest } = await supabase.from("assessment_sessions").select("id,catalogue_version_id").order("updated_at", { ascending: false }).limit(1).maybeSingle();
+    const { data: latest, error } = await supabase.from("assessment_sessions").select("id,catalogue_version_id").eq("organisation_id", organisation.id).order("updated_at", { ascending: false }).limit(1).maybeSingle();
+    if (error) return NextResponse.json({ error: "Could not export assessment" }, { status: 500, headers: { "cache-control": "private, no-store" } });
     if (!latest) return NextResponse.json({ error: "No assessment session found" }, { status: 404 });
     sessionId = latest.id;
     catalogueVersionId = latest.catalogue_version_id;
   }
-  const [{ data: questions }, { data: responses }] = await Promise.all([
+  const [questionsResult, responsesResult] = await Promise.all([
     supabase.from("catalogue_questions").select("id,code,prompt,position").eq("catalogue_version_id", catalogueVersionId).order("position"),
-    supabase.from("assessment_responses").select("question_id,answer,evidence_note").eq("session_id", sessionId),
+    supabase.from("assessment_responses").select("question_id,answer,evidence_note").eq("session_id", sessionId).eq("organisation_id", organisation.id),
   ]);
+  if (questionsResult.error || responsesResult.error) return NextResponse.json({ error: "Could not export assessment" }, { status: 500, headers: { "cache-control": "private, no-store" } });
+  const { data: questions } = questionsResult;
+  const { data: responses } = responsesResult;
   const responseByQuestion = new Map<string, { answer: string | null; evidence_note: string | null }>();
   for (const r of responses ?? []) responseByQuestion.set(r.question_id, { answer: r.answer, evidence_note: r.evidence_note });
   const rows: Row[] = (questions ?? []).map((q) => {
@@ -39,7 +45,11 @@ export async function GET(request: Request) {
     { header: "Answer", value: (q) => q.answer },
     { header: "Evidence Note", value: (q) => q.evidence_note },
   ];
-  if (format === "csv") return new NextResponse(toCsv(columns, rows), { headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": 'attachment; filename="assessment.csv"', "cache-control": "private, no-store" } });
+  if (format === "csv") {
+    await recordExportAudit(auditContext);
+    return new NextResponse(toCsv(columns, rows), { headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": 'attachment; filename="assessment.csv"', "cache-control": "private, no-store" } });
+  }
   const buffer = await toXlsx("Assessment", columns, rows);
+  await recordExportAudit(auditContext);
   return new NextResponse(new Uint8Array(buffer), { headers: { "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "content-disposition": 'attachment; filename="assessment.xlsx"', "cache-control": "private, no-store" } });
 }

@@ -9,6 +9,9 @@ const eslintConfig = defineConfig([
   globalIgnores([
     // Default ignores of eslint-config-next:
     ".next/**",
+    // Ignore agent-managed nested worktrees and their generated build output.
+    ".superpowers/**",
+    "artifacts/**",
     "out/**",
     "build/**",
     "test-results/**",

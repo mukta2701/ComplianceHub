@@ -9,7 +9,7 @@ select is(
   'member and operator reporting both exclude untrusted legacy rows'
 );
 select ok(
-  pg_catalog.pg_get_functiondef('public.accept_policy(uuid)'::pg_catalog.regprocedure) like '%trusted_at%',
+  pg_catalog.pg_get_functiondef('public.accept_policy(uuid,integer)'::pg_catalog.regprocedure) like '%trusted_at%',
   'only accept_policy stamps an acceptance as trusted'
 );
 
@@ -36,7 +36,7 @@ select set_config('request.jwt.claims','{"sub":"79000000-0000-4000-8000-00000000
 select is((select count(*) from public.policy_acceptances),0::bigint,'an operator does not report a forged legacy acceptance');
 
 select set_config('request.jwt.claims','{"sub":"79000000-0000-4000-8000-000000000002","email":"trusted-member@example.test","role":"authenticated"}',true);
-select lives_ok($$ select public.accept_policy('79000000-0000-4000-8000-000000000101') $$,'secure re-acceptance upgrades the legacy row');
+select lives_ok($$ select public.accept_policy('79000000-0000-4000-8000-000000000101',3) $$,'secure re-acceptance upgrades the legacy row');
 select results_eq(
   $$ select accepted_version, accepted_at < '2099-01-01'::timestamptz from public.policy_acceptances $$,
   $$ values(3, true) $$,

@@ -1,0 +1,81 @@
+{
+  "metadata": {
+    "id": 101,
+    "owner": { "login": "AdTecher" },
+    "name": "Portal",
+    "full_name": "AdTecher/Portal",
+    "visibility": "private",
+    "archived": false,
+    "default_branch": "main",
+    "html_url": "https://provider.example/ignored",
+    "security_and_analysis": {
+      "secret_scanning": { "status": "enabled" },
+      "secret_scanning_push_protection": { "status": "enabled" }
+    }
+  },
+  "rules": [
+    { "type": "non_fast_forward" },
+    { "type": "deletion" },
+    {
+      "type": "pull_request",
+      "parameters": {
+        "required_approving_review_count": 2,
+        "dismiss_stale_reviews_on_push": true,
+        "require_code_owner_review": true
+      }
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "required_status_checks": [
+          { "context": "test" },
+          { "context": "lint" }
+        ]
+      }
+    },
+    { "type": "future_rule", "parameters": { "provider_detail": "discarded" } }
+  ],
+  "protection": {
+    "allow_force_pushes": { "enabled": true },
+    "allow_deletions": { "enabled": true },
+    "required_pull_request_reviews": {
+      "required_approving_review_count": 1,
+      "dismiss_stale_reviews": false,
+      "require_code_owner_reviews": false
+    },
+    "required_status_checks": {
+      "contexts": ["test"],
+      "checks": [{ "context": "build" }]
+    }
+  },
+  "dependabot": [
+    { "number": 1, "security_advisory": { "severity": "high" } },
+    { "number": 1, "security_advisory": { "severity": "high" } },
+    { "number": 2, "security_advisory": { "severity": "critical" } }
+  ],
+  "codeScanningHigh": [
+    { "number": 10, "rule": { "security_severity_level": "high" } },
+    { "number": 10, "rule": { "security_severity_level": "high" } }
+  ],
+  "codeScanningCritical": [
+    { "number": 11, "rule": { "security_severity_level": "critical" } }
+  ],
+  "secretAlerts": [{ "number": 20 }, { "number": 20 }],
+  "workflows": {
+    "total_count": 2,
+    "workflows": [
+      { "id": 31, "name": "CodeQL", "state": "active" },
+      { "id": 32, "name": "Unreviewed", "state": "active" }
+    ]
+  },
+  "workflowRuns": {
+    "total_count": 1,
+    "workflow_runs": [
+      { "id": 3100, "status": "completed", "conclusion": "success", "head_branch": "main" }
+    ]
+  },
+  "collaborators": [
+    { "id": 41, "login": "private-user", "permissions": { "admin": true } },
+    { "id": 41, "login": "private-user", "permissions": { "admin": true } }
+  ]
+}

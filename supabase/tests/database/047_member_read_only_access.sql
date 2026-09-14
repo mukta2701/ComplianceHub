@@ -1,6 +1,6 @@
 begin;
 
-select plan(52);
+select plan(55);
 
 -- The inventory is intentionally explicit. Adding an organisation-scoped public
 -- table without classifying it here must fail this suite instead of silently
@@ -17,7 +17,7 @@ select is(
       and a.attnum > 0
       and not a.attisdropped
   ),
-  'alert_channels,assessment_responses,assessment_sessions,asset_categories,asset_risks,assets,audit_checklist_items,audit_events,audit_findings,auditor_access_log,auditor_access_tokens,audits,control_crosswalks,evidence,evidence_links,evidence_sources,integration_connections,invitations,kpi_measurements,kpis,leadership_report_snapshots,memberships,monitor_sources,monitoring_findings,notifications,policies,policy_acceptances,policy_feedback_comments,policy_feedback_threads,risk_categories,risk_matrix_config,risk_treatment_plans,risks,soa_items,soa_registers,soa_snapshots,task_tickets,tasks,trust_center_settings',
+  'ai_suggestions,ai_workspace_settings,alert_channels,alert_deliveries,assessment_responses,assessment_sessions,asset_categories,asset_risks,assets,audit_checklist_items,audit_events,audit_findings,auditor_access_log,auditor_access_tokens,audits,automation_assignments,automation_proposal_sources,automation_proposals,automation_rules,automation_signals,baseline_progress,baseline_snapshots,collection_runs,connector_connections,control_crosswalks,daily_digest_deliveries,daily_digest_delivery_attempts,evidence,evidence_links,evidence_sources,github_collection_runs,github_evidence_provenance,github_finding_provenance,github_finding_transitions,github_installations,github_mapping_approvals,github_materialisation_jobs,github_oauth_states,github_observations,github_official_compliance_results,github_repositories,github_webhook_deliveries,integration_authorization_states,integration_connection_targets,integration_connections,integration_sync_claim_connections,integration_sync_claim_organisations,integration_sync_jobs,integration_webhook_deliveries,integration_webhook_delivery_rollups,invitations,jira_webhook_cleanup_jobs,kpi_measurements,kpis,leadership_report_snapshots,memberships,monitor_sources,monitoring_findings,notifications,organisation_scope_profiles,pending_jira_authorizations,policies,policy_acceptances,policy_feedback_comments,policy_feedback_threads,risk_categories,risk_matrix_config,risk_treatment_plans,risks,soa_items,soa_registers,soa_snapshots,source_objects,task_contributions,task_tickets,tasks,trust_center_settings',
   'every organisation-scoped public table is present in the reviewed access inventory'
 );
 
@@ -129,8 +129,8 @@ select is(
     join pg_catalog.pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public'
       and p.proname = any(array[
-        'complete_recurring_task', 'create_evidence_record', 'create_soa_draft',
-        'create_soa_successor', 'finalise_soa', 'notify_policy_reaccept',
+        'complete_recurring_task', 'create_evidence_record', 'create_or_reuse_soa_review',
+        'create_or_reuse_soa_successor', 'finalise_soa', 'notify_policy_reaccept',
         'save_assessment_response'
       ])
       and pg_catalog.pg_get_functiondef(p.oid) not like '%is_organisation_operator%'
@@ -139,22 +139,26 @@ select is(
   'authenticated operational mutation RPCs perform an operator check'
 );
 
-select function_returns('public', 'accept_policy', array['uuid'], 'uuid');
+select function_returns('public', 'accept_policy', array['uuid','integer'], 'uuid');
 select ok(
-  (select p.prosecdef from pg_catalog.pg_proc p where p.oid = pg_catalog.to_regprocedure('public.accept_policy(uuid)')),
+  (select p.prosecdef from pg_catalog.pg_proc p where p.oid = pg_catalog.to_regprocedure('public.accept_policy(uuid,integer)')),
   'accept_policy is SECURITY DEFINER'
 );
 select is(
-  (select pg_catalog.pg_get_userbyid(p.proowner) from pg_catalog.pg_proc p where p.oid = pg_catalog.to_regprocedure('public.accept_policy(uuid)')),
+  (select pg_catalog.pg_get_userbyid(p.proowner) from pg_catalog.pg_proc p where p.oid = pg_catalog.to_regprocedure('public.accept_policy(uuid,integer)')),
   'postgres',
   'accept_policy has the expected trusted owner'
 );
 select ok(
-  (select p.proconfig @> array['search_path=""'] from pg_catalog.pg_proc p where p.oid = pg_catalog.to_regprocedure('public.accept_policy(uuid)')),
+  (select p.proconfig @> array['search_path=""'] from pg_catalog.pg_proc p where p.oid = pg_catalog.to_regprocedure('public.accept_policy(uuid,integer)')),
   'accept_policy pins an empty search path'
 );
-select ok(not pg_catalog.has_function_privilege('anon', pg_catalog.to_regprocedure('public.accept_policy(uuid)'), 'execute'), 'anon cannot execute accept_policy');
-select ok(pg_catalog.has_function_privilege('authenticated', pg_catalog.to_regprocedure('public.accept_policy(uuid)'), 'execute'), 'authenticated may invoke the guarded accept_policy RPC');
+select ok(not pg_catalog.has_function_privilege('anon', pg_catalog.to_regprocedure('public.accept_policy(uuid,integer)'), 'execute'), 'anon cannot execute accept_policy');
+select ok(pg_catalog.has_function_privilege('authenticated', pg_catalog.to_regprocedure('public.accept_policy(uuid,integer)'), 'execute'), 'authenticated may invoke the guarded accept_policy RPC');
+select ok(not pg_catalog.has_any_column_privilege('authenticated', 'public.soa_registers', 'insert'), 'authenticated register inserts require the atomic review RPC');
+select ok(not pg_catalog.has_any_column_privilege('anon', 'public.soa_registers', 'insert'), 'anon cannot insert registers directly or inherit a PUBLIC insert grant');
+select ok(pg_catalog.has_table_privilege('authenticated', 'public.soa_registers', 'select'), 'authenticated callers retain RLS-scoped register reads');
+
 select ok(pg_catalog.has_table_privilege('authenticated', 'public.policy_acceptances', 'select'), 'authenticated can select policy acceptances through RLS');
 select ok(not pg_catalog.has_table_privilege('anon', 'public.policy_acceptances', 'insert'), 'anon cannot insert policy acceptances directly');
 select ok(not pg_catalog.has_table_privilege('authenticated', 'public.policy_acceptances', 'insert'), 'authenticated cannot insert policy acceptances directly');
@@ -259,7 +263,7 @@ select throws_ok(
 );
 select throws_ok($$ update public.policy_acceptances set accepted_version = 999 $$, '42501', null, 'a member cannot forge a direct acceptance update');
 select throws_ok($$ delete from public.policy_acceptances $$, '42501', null, 'a member cannot delete acceptance history directly');
-select lives_ok($$ select public.accept_policy('77000000-0000-4000-8000-000000000101') $$, 'a verified member can accept an approved policy');
+select lives_ok($$ select public.accept_policy('77000000-0000-4000-8000-000000000101',3) $$, 'a verified member can accept an approved policy');
 select results_eq(
   $$ select organisation_id, policy_id, user_id, accepted_version from public.policy_acceptances $$,
   $$ values (
@@ -276,16 +280,16 @@ select set_config('request.jwt.claims', '{"sub":"77000000-0000-4000-8000-0000000
 update public.policies set body = 'approved body, revised' where id = '77000000-0000-4000-8000-000000000101';
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub":"77000000-0000-4000-8000-000000000003","email":"access-member-a@example.test","role":"authenticated"}', true);
-select lives_ok($$ select public.accept_policy('77000000-0000-4000-8000-000000000101') $$, 're-accepting is idempotent and refreshes the authoritative version');
+select lives_ok($$ select public.accept_policy('77000000-0000-4000-8000-000000000101',4) $$, 're-accepting is idempotent and refreshes the authoritative version');
 select results_eq(
   $$ select count(*)::bigint, max(accepted_version)::integer from public.policy_acceptances $$,
   $$ values (1::bigint, 4::integer) $$,
   're-accept uses one row and the current authoritative policy version'
 );
-select throws_ok($$ select public.accept_policy('77000000-0000-4000-8000-000000000102') $$, '42501', 'policy is not available for acceptance', 'a member cannot accept a draft policy');
-select throws_ok($$ select public.accept_policy('77000000-0000-4000-8000-000000000103') $$, '42501', 'policy is not available for acceptance', 'a member cannot accept another tenant policy');
+select throws_ok($$ select public.accept_policy('77000000-0000-4000-8000-000000000102',1) $$, '42501', 'policy is not available for acceptance', 'a member cannot accept a draft policy');
+select throws_ok($$ select public.accept_policy('77000000-0000-4000-8000-000000000103',1) $$, '42501', 'policy is not available for acceptance', 'a member cannot accept another tenant policy');
 select throws_ok($$ select public.notify_policy_reaccept('77000000-0000-4000-8000-000000000101', '') $$, '42501', 'not an operator of the policy organisation', 'member cannot bypass policy notification writes');
-select throws_ok($$ select public.create_soa_draft('77000000-0000-4000-8000-000000000302', 'Bypass') $$, '42501', 'assessment not found', 'member cannot bypass SoA writes through create_soa_draft');
+select throws_ok($$ select public.create_or_reuse_soa_review('77000000-0000-4000-8000-000000000302') $$, '42501', 'Assessment unavailable', 'member cannot bypass SoA writes through create_or_reuse_soa_review');
 select throws_ok(
   $$ select public.save_assessment_response(
        '77000000-0000-4000-8000-000000000302',
@@ -309,13 +313,13 @@ select throws_ok(
 );
 
 select set_config('request.jwt.claims', '{"sub":"77000000-0000-4000-8000-000000000005","email":"access-unverified@example.test","role":"authenticated"}', true);
-select throws_ok($$ select public.accept_policy('77000000-0000-4000-8000-000000000101') $$, '42501', 'verified authentication required', 'an unverified member cannot accept a policy');
+select throws_ok($$ select public.accept_policy('77000000-0000-4000-8000-000000000101',4) $$, '42501', 'verified authentication required', 'an unverified member cannot accept a policy');
 
 select set_config('request.jwt.claims', '{"role":"authenticated"}', true);
-select throws_ok($$ select public.accept_policy('77000000-0000-4000-8000-000000000101') $$, '42501', 'verified authentication required', 'an authenticated request without a user cannot accept a policy');
+select throws_ok($$ select public.accept_policy('77000000-0000-4000-8000-000000000101',4) $$, '42501', 'verified authentication required', 'an authenticated request without a user cannot accept a policy');
 
 select set_config('request.jwt.claims', '{"sub":"77000000-0000-4000-8000-000000000001","email":"access-owner-a@example.test","role":"authenticated"}', true);
-select lives_ok($$ select public.accept_policy('77000000-0000-4000-8000-000000000101') $$, 'an operator can also acknowledge an approved policy');
+select lives_ok($$ select public.accept_policy('77000000-0000-4000-8000-000000000101',4) $$, 'an operator can also acknowledge an approved policy');
 select is((select count(*) from public.policy_acceptances), 2::bigint, 'operators can read organisation-wide acceptance reporting');
 
 select set_config('request.jwt.claims', '{"sub":"77000000-0000-4000-8000-000000000003","email":"access-member-a@example.test","role":"authenticated"}', true);

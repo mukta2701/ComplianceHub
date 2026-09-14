@@ -1,8 +1,9 @@
-import { hasCapability, type MembershipRole } from "@/features/organisations/domain/access";
+import type { MembershipRole } from "@/features/organisations/domain/access";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import { summarisePolicyAcceptances } from "./policies";
 
 export function policyPortalAccess(role: MembershipRole) {
-  const canManage = hasCapability(role, "manage_policies");
+  const canManage = workspaceAccess(role).section("policies").canManage;
   return {
     canManage,
     loadRoster: canManage,
@@ -17,7 +18,7 @@ export function policyAcceptancePresentation(
   acceptances: readonly { user_id: string; accepted_version: number }[],
   memberCount: number,
 ) {
-  if (!hasCapability(role, "manage_policies")) {
+  if (!workspaceAccess(role).section("policies").canManage) {
     return {
       mode: "personal" as const,
       acceptedCurrent: acceptances.some(

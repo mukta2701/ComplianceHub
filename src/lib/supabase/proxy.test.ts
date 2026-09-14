@@ -158,12 +158,38 @@ describe("workspace request session and capability guard", () => {
     hoisted.rows = [membership(ORG_A, "member", "2026-01-01T00:00:00.000Z")];
 
     const settings = await refreshSupabaseSession(request("/app/settings"));
+    const audits = await refreshSupabaseSession(request("/app/audits"));
+    const auditActivity = await refreshSupabaseSession(request("/app/activity"));
     const exportApi = await refreshSupabaseSession(request("/api/app/assets/export"));
+    const evidenceExportApi = await refreshSupabaseSession(request("/api/app/evidence/export"));
+    const auditPackApi = await refreshSupabaseSession(request(`/api/app/audits/${ORG_A}/pack`));
+    const auditorLinkApi = await refreshSupabaseSession(request(`/api/app/audits/${ORG_A}/auditor-link`));
+    const taskList = await refreshSupabaseSession(request("/app/tasks"));
+    const taskDetail = await refreshSupabaseSession(request(`/app/tasks/${ORG_A}`));
+    const newTask = await refreshSupabaseSession(request("/app/tasks/new"));
+    const editTask = await refreshSupabaseSession(request(`/app/tasks/${ORG_A}/edit`));
+    const gapTask = await refreshSupabaseSession(request("/app/tasks/from-gap"));
+    const taskExportApi = await refreshSupabaseSession(request("/api/app/tasks/export"));
     const reportApi = await refreshSupabaseSession(request("/api/app/reports/readiness/pdf"));
 
     expect(settings.headers.get("location")).toBe("https://compliancehub.example/app");
+    expect(audits.headers.get("location")).toBe("https://compliancehub.example/app");
+    expect(auditActivity.headers.get("location")).toBe("https://compliancehub.example/app");
     expect(exportApi.status).toBe(403);
     await expect(exportApi.json()).resolves.toEqual({ error: "Workspace operator access required" });
+    expect(evidenceExportApi.status).toBe(403);
+    await expect(evidenceExportApi.json()).resolves.toEqual({ error: "Workspace operator access required" });
+    expect(auditPackApi.status).toBe(403);
+    await expect(auditPackApi.json()).resolves.toEqual({ error: "Workspace operator access required" });
+    expect(auditorLinkApi.status).toBe(403);
+    await expect(auditorLinkApi.json()).resolves.toEqual({ error: "Workspace operator access required" });
+    expect(taskList.headers.get("x-middleware-next")).toBe("1");
+    expect(taskDetail.headers.get("x-middleware-next")).toBe("1");
+    expect(newTask.headers.get("location")).toBe("https://compliancehub.example/app");
+    expect(editTask.headers.get("location")).toBe("https://compliancehub.example/app");
+    expect(gapTask.headers.get("location")).toBe("https://compliancehub.example/app");
+    expect(taskExportApi.status).toBe(403);
+    await expect(taskExportApi.json()).resolves.toEqual({ error: "Workspace operator access required" });
     expect(reportApi.headers.get("x-middleware-next")).toBe("1");
   });
 
@@ -171,7 +197,15 @@ describe("workspace request session and capability guard", () => {
     hoisted.rows = [membership(ORG_A, role, "2026-01-01T00:00:00.000Z")];
 
     expect((await refreshSupabaseSession(request("/app/settings"))).headers.get("x-middleware-next")).toBe("1");
+    expect((await refreshSupabaseSession(request("/app/audits"))).headers.get("x-middleware-next")).toBe("1");
+    expect((await refreshSupabaseSession(request("/app/activity"))).headers.get("x-middleware-next")).toBe("1");
+    expect((await refreshSupabaseSession(request("/app/tasks/new"))).headers.get("x-middleware-next")).toBe("1");
+    expect((await refreshSupabaseSession(request(`/app/tasks/${ORG_A}/edit`))).headers.get("x-middleware-next")).toBe("1");
+    expect((await refreshSupabaseSession(request("/app/tasks/from-gap"))).headers.get("x-middleware-next")).toBe("1");
     expect((await refreshSupabaseSession(request("/api/app/tasks/export"))).headers.get("x-middleware-next")).toBe("1");
+    expect((await refreshSupabaseSession(request(`/api/app/audits/${ORG_A}/pack`))).headers.get("x-middleware-next")).toBe("1");
+    expect((await refreshSupabaseSession(request(`/api/app/audits/${ORG_A}/auditor-link`))).headers.get("x-middleware-next")).toBe("1");
+    expect((await refreshSupabaseSession(request("/api/app/evidence/export"))).headers.get("x-middleware-next")).toBe("1");
   });
 
   it("redirects users with a membership away from onboarding without creating a loop", async () => {

@@ -2,8 +2,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 
 const ORG_ID = "10000000-0000-4000-8000-000000000001";
+const SIBLING_ORG_ID = "10000000-0000-4000-8000-000000000004";
 const USER_ID = "20000000-0000-4000-8000-000000000002";
 const INVITE_ID = "30000000-0000-4000-8000-000000000003";
+
+type InvitationQuery = {
+  select: () => InvitationQuery;
+  eq: (column: string, value: unknown) => InvitationQuery;
+  maybeSingle: () => Promise<{ data: { id: string } | null; error: null }>;
+};
 
 const hoisted = vi.hoisted(() => ({
   ctx: null as unknown,
@@ -33,7 +40,7 @@ function form(entries: Record<string, string>) {
   return data;
 }
 
-function invitationClient() {
+function invitationClient(invitationOrganisationId = ORG_ID) {
   const rpc = vi.fn(async (name: string, args: Record<string, unknown>) => {
     if (name === "issue_invitation" || name === "resend_invitation") {
       return {
@@ -49,7 +56,22 @@ function invitationClient() {
     }
     return { data: null, error: null };
   });
-  return { rpc };
+  const from = vi.fn((table: string) => {
+    const filters = new Map<string, unknown>();
+    const builder = {} as InvitationQuery;
+    Object.assign(builder, {
+      select: () => builder,
+      eq: (column: string, value: unknown) => { filters.set(column, value); return builder; },
+      maybeSingle: async () => ({
+        data: table === "invitations" && filters.get("id") === INVITE_ID && filters.get("organisation_id") === invitationOrganisationId
+          ? { id: INVITE_ID }
+          : null,
+        error: null,
+      }),
+    });
+    return builder;
+  });
+  return { rpc, from };
 }
 
 describe("invitation delivery actions", () => {
@@ -145,5 +167,22 @@ describe("invitation delivery actions", () => {
 
     expect(supabase.rpc).toHaveBeenCalledWith("revoke_invitation", { target_invitation_id: INVITE_ID });
     expect(hoisted.revalidatePath).toHaveBeenCalledWith("/app/settings");
+  });
+
+  it("does not revoke an invitation owned by a sibling organisation", async () => {
+    const supabase = invitationClient(SIBLING_ORG_ID);
+    hoisted.ctx = { supabase, user: { id: USER_ID }, membership: { role: "admin" }, organisation: { id: ORG_ID, name: "Acme" } };
+
+    await expect(revokeInvitationAction(form({ invitationId: INVITE_ID }))).rejects.toThrow(/invitation not found/i);
+    expect(supabase.rpc).not.toHaveBeenCalled();
+  });
+
+  it("does not resend an invitation owned by a sibling organisation", async () => {
+    const supabase = invitationClient(SIBLING_ORG_ID);
+    hoisted.ctx = { supabase, user: { id: USER_ID }, membership: { role: "admin" }, organisation: { id: ORG_ID, name: "Acme" } };
+
+    await expect(resendInvitationAction(form({ invitationId: INVITE_ID }))).rejects.toThrow(/invitation not found/i);
+    expect(supabase.rpc).not.toHaveBeenCalled();
+    expect(hoisted.sendInvitationEmail).not.toHaveBeenCalled();
   });
 });

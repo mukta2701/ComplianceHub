@@ -1,5 +1,5 @@
 begin;
-select plan(4);
+select plan(7);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data)
 values
@@ -12,6 +12,9 @@ insert into public.organisations (id, name, slug, created_by) values
 insert into public.memberships (organisation_id, user_id, role) values
   ('20000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', 'owner'),
   ('20000000-0000-4000-8000-000000000002', '10000000-0000-4000-8000-000000000002', 'owner');
+
+insert into public.tasks (organisation_id, title, created_by) values
+  ('20000000-0000-4000-8000-000000000002', 'Other tenant audited task', '10000000-0000-4000-8000-000000000002');
 
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated"}', true);
@@ -32,6 +35,18 @@ select throws_ok(
      values ('20000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', 'read', 'test', '1') $$,
   '42501', null, 'clients cannot forge audit events in their tenant'
 );
+
+select lives_ok(
+  $$ insert into public.tasks (organisation_id, title, created_by)
+     values ('20000000-0000-4000-8000-000000000001', 'Audited task', '10000000-0000-4000-8000-000000000001') $$,
+  'ordinary task creation preserves trigger-generated audit logging'
+);
+select is((select count(*) from public.audit_events
+  where organisation_id = '20000000-0000-4000-8000-000000000001' and entity_type = 'tasks'),
+  1::bigint, 'member can read the audit event generated in their tenant');
+select is((select count(*) from public.audit_events
+  where organisation_id = '20000000-0000-4000-8000-000000000002'),
+  0::bigint, 'member cannot read another tenant audit event');
 
 select * from finish();
 rollback;

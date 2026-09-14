@@ -1,7 +1,8 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { createClient } from "@supabase/supabase-js";
 
 function isoDate(offsetDays: number): string {
   const date = new Date();
@@ -11,11 +12,45 @@ function isoDate(offsetDays: number): string {
 
 function localEnvironment(name: string): string {
   if (process.env[name]) return process.env[name];
-  const line = readFileSync(path.join(process.cwd(), ".env.local"), "utf8")
+  const envFile = path.join(process.cwd(), ".env.local");
+  if (!existsSync(envFile)) throw new Error(`${name} is required for the Phase 1 end-to-end test`);
+  const line = readFileSync(envFile, "utf8")
     .split("\n")
     .find((candidate) => candidate.startsWith(`${name}=`));
   if (!line) throw new Error(`${name} is required for the Phase 1 end-to-end test`);
   return line.slice(name.length + 1);
+}
+
+async function confirmE2eUser(email: string): Promise<void> {
+  const admin = createClient(
+    localEnvironment("NEXT_PUBLIC_SUPABASE_URL"),
+    localEnvironment("SUPABASE_SERVICE_ROLE_KEY"),
+    { auth: { persistSession: false, autoRefreshToken: false } },
+  );
+  let userId: string | null = null;
+  for (let page = 1; page <= 10 && userId === null; page += 1) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 1_000 });
+    if (error) throw error;
+    userId = data.users.find((user) => user.email === email)?.id ?? null;
+    if (data.users.length < 1_000) break;
+  }
+  if (!userId) throw new Error("Synthetic Phase 1 user was not found for confirmation");
+  const { error } = await admin.auth.admin.updateUserById(userId, { email_confirm: true });
+  if (error) throw error;
+}
+
+async function completeE2eSignUp(page: Page, email: string, password: string): Promise<void> {
+  await Promise.all([
+    page.waitForURL((url) => ["/sign-in", "/app", "/app/onboarding"].includes(url.pathname)),
+    page.getByRole("button", { name: "Create account" }).click(),
+  ]);
+  await confirmE2eUser(email);
+  if (new URL(page.url()).pathname === "/sign-in") {
+    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Password").fill(password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+  }
+  await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
 }
 
 async function createWorkspace(page: Page, suffix: string) {
@@ -27,14 +62,7 @@ async function createWorkspace(page: Page, suffix: string) {
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
-  await Promise.all([
-    page.waitForURL(/\/sign-in/),
-    page.getByRole("button", { name: "Create account" }).click(),
-  ]);
-
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await completeE2eSignUp(page, email, password);
   await page.getByLabel("Organisation name").fill(`Phase1 Workspace ${suffix}`);
   const workspaceResponse = page.waitForResponse((response) =>
     response.request().method() === "POST" && new URL(response.url()).pathname === "/app",
@@ -44,12 +72,30 @@ async function createWorkspace(page: Page, suffix: string) {
     page.getByRole("button", { name: "Create workspace" }).click(),
   ]);
   expect(response.status()).toBeLessThan(400);
-  await expect(page.getByRole("heading", { name: "Readiness dashboard" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Programme overview" })).toBeVisible();
 }
 
 async function activate(button: Locator) {
   await button.focus();
   await button.press("Enter");
+}
+
+async function selectEvidenceByTitle(page: Page, title: string) {
+  const record = page.getByRole("link").filter({ hasText: title }).first();
+  await expect(record).toBeVisible();
+  const href = await record.getAttribute("href");
+  if (!href) throw new Error(`Evidence record "${title}" did not expose a detail link`);
+  const target = new URL(href, "http://127.0.0.1");
+  const evidenceId = target.searchParams.get("evidence");
+  if (!evidenceId) throw new Error(`Evidence record "${title}" did not identify the selected evidence`);
+  expect(target.hash).toBe(`#evidence-${evidenceId}`);
+  await Promise.all([
+    page.waitForURL((url) => url.searchParams.get("evidence") === evidenceId && url.hash === `#evidence-${evidenceId}`),
+    record.click(),
+  ]);
+  const detail = page.locator(`#evidence-${evidenceId}`);
+  await expect(detail).toBeVisible();
+  return detail;
 }
 
 // The workspace nav is a horizontally scrollable strip on narrow viewports, so a
@@ -60,7 +106,7 @@ async function openSection(page: Page, name: string) {
   if (await toggle.isVisible()) await toggle.click();
   const link = page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name, exact: true });
   await link.scrollIntoViewIfNeeded();
-  await link.click({ force: true });
+  await link.dispatchEvent("click");
   await page.waitForURL(new RegExp(`/app/${name.toLowerCase()}`));
 }
 
@@ -102,18 +148,21 @@ test("a user runs the Phase 1 workflow loop", async ({ page, request }, testInfo
   await manualTaskRow.getByRole("button", { name: "Save" }).click();
 
   await openSection(page, "Evidence");
-  await page.getByRole("link", { name: "Add evidence" }).click();
+  await page.locator("header.page-heading").getByRole("link", { name: "Add evidence" }).click();
   const currentEvidenceTitle = `Access review minutes ${suffix}`;
-  await page.getByRole("textbox", { name: "Title", exact: true }).fill(currentEvidenceTitle);
-  await page.getByLabel("Kind").selectOption("link");
-  await page.getByLabel(/^URL/).fill("https://example.test/minutes");
+  await page.getByRole("textbox", { name: "Evidence title", exact: true }).fill(currentEvidenceTitle);
+  await page.getByLabel("Evidence type").selectOption("link");
+  await page.getByLabel("Web address").fill("https://example.test/minutes");
   await page.getByLabel("Valid until").fill(nextYear);
   await activate(page.getByRole("button", { name: "Save evidence" }));
-  const currentEvidence = page.getByRole("heading", { name: currentEvidenceTitle }).locator("xpath=ancestor::section");
+  const currentEvidence = await selectEvidenceByTitle(page, currentEvidenceTitle);
   await expect(currentEvidence.getByText("current", { exact: true })).toBeVisible();
+  await currentEvidence.getByText("Manage links", { exact: true }).click();
   await currentEvidence.getByLabel(`Link ${currentEvidenceTitle} to a control`).selectOption({ index: 1 });
   await activate(currentEvidence.getByRole("button", { name: "Link", exact: true }));
-  await expect(currentEvidence.locator("span").filter({ hasText: /^CH-001:/ })).toBeVisible();
+  const currentControlLink = currentEvidence.getByRole("listitem").filter({ hasText: /^CH-001:/ });
+  await expect(currentControlLink).toHaveCount(1);
+  await expect(currentControlLink).toBeVisible();
 
   await page.goto("/app/assessment");
   await Promise.all([
@@ -126,7 +175,7 @@ test("a user runs the Phase 1 workflow loop", async ({ page, request }, testInfo
   await expect(page.getByRole("status", { name: "Save status" })).toHaveText("Saved");
 
   await page.goto("/app/risks");
-  const acceptAsTask = page.getByRole("link", { name: "Accept as task" }).first();
+  const acceptAsTask = page.getByRole("link", { name: "Create task", exact: true });
   await expect(acceptAsTask).toBeVisible();
   await acceptAsTask.click();
   const gapTitle = await page.getByRole("textbox", { name: "Title", exact: true }).inputValue();
@@ -156,7 +205,7 @@ test("a user runs the Phase 1 workflow loop", async ({ page, request }, testInfo
   await page.locator('select[name="assessmentId"]').selectOption({ index: 1 });
   await Promise.all([
     page.waitForURL(/\/app\/soa\/[0-9a-f-]+$/),
-    activate(page.getByRole("button", { name: "Generate draft" })),
+    activate(page.getByRole("button", { name: "Start control review" })),
   ]);
   await page.getByRole("searchbox", { name: "Search controls" }).fill(controlTitle);
   const soaQueue = page.getByRole("region", { name: "SoA review queue" });
@@ -168,20 +217,23 @@ test("a user runs the Phase 1 workflow loop", async ({ page, request }, testInfo
 
   await page.goto("/app/evidence/new");
   const staleEvidenceTitle = `Stale control evidence ${suffix}`;
-  await page.getByRole("textbox", { name: "Title", exact: true }).fill(staleEvidenceTitle);
-  await page.getByLabel("Kind").selectOption("link");
-  await page.getByLabel(/^URL/).fill("https://example.test/stale-evidence");
+  await page.getByRole("textbox", { name: "Evidence title", exact: true }).fill(staleEvidenceTitle);
+  await page.getByLabel("Evidence type").selectOption("link");
+  await page.getByLabel("Web address").fill("https://example.test/stale-evidence");
   await page.getByLabel("Owner").selectOption({ label: "Phase One Owner" });
   await page.getByLabel("Valid until").fill(yesterday);
   await activate(page.getByRole("button", { name: "Save evidence" }));
-  const staleEvidence = page.getByRole("heading", { name: staleEvidenceTitle }).locator("xpath=ancestor::section");
+  const staleEvidence = await selectEvidenceByTitle(page, staleEvidenceTitle);
   await expect(staleEvidence.getByText("expired", { exact: true })).toBeVisible();
+  await staleEvidence.getByText("Manage links", { exact: true }).click();
   const controlOptions = await staleEvidence.getByLabel(`Link ${staleEvidenceTitle} to a control`).locator("option").allTextContents();
   const controlLabel = controlOptions.find((label) => label.startsWith(`${controlCode}:`));
   expect(controlLabel).toBeTruthy();
   await staleEvidence.getByLabel(`Link ${staleEvidenceTitle} to a control`).selectOption({ label: controlLabel! });
   await activate(staleEvidence.getByRole("button", { name: "Link", exact: true }));
-  await expect(staleEvidence.locator("span").filter({ hasText: new RegExp(`^${controlCode}:`) })).toBeVisible();
+  const staleControlLink = staleEvidence.getByRole("listitem").filter({ hasText: new RegExp(`^${controlCode}:`) });
+  await expect(staleControlLink).toHaveCount(1);
+  await expect(staleControlLink).toBeVisible();
 
   const headers = { authorization: `Bearer ${localEnvironment("CRON_SECRET")}` };
   const firstSweep = await request.post("/api/cron/daily", { headers });
@@ -195,7 +247,7 @@ test("a user runs the Phase 1 workflow loop", async ({ page, request }, testInfo
   await expect(page.getByText(new RegExp(`Evidence "${staleEvidenceTitle}" is expired`))).toHaveCount(1);
 
   await page.goto("/app");
-  const nextActions = page.getByRole("heading", { name: "Do this next" }).locator("xpath=ancestor::section");
+  const nextActions = page.getByRole("heading", { name: "Needs your attention" }).locator("xpath=ancestor::section");
   await expect(nextActions.getByRole("link", { name: "All tasks" })).toBeVisible();
   await expect(nextActions.getByRole("link", { name: /Decide applicability:/ }).first()).toBeVisible();
   const evidenceFreshness = page.getByRole("heading", { name: "Evidence freshness" }).locator("xpath=ancestor::section");

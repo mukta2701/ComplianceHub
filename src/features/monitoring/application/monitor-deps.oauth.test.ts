@@ -27,7 +27,7 @@ describe("OAuth monitor dependency routing", () => {
       },
     };
     const builder: Record<string, unknown> = {};
-    for (const method of ["select", "is", "eq"]) builder[method] = vi.fn(() => builder);
+    for (const method of ["select", "is", "eq", "order", "limit", "gt"]) builder[method] = vi.fn(() => builder);
     builder.then = (resolve: (value: { data: unknown[]; error: null }) => unknown) =>
       Promise.resolve({ data: [row], error: null }).then(resolve);
     const deps = buildMonitorDependencies({ from: vi.fn(() => builder) } as unknown as SupabaseClient);
@@ -70,9 +70,9 @@ describe("OAuth monitor dependency routing", () => {
       },
     ];
     const builder: Record<string, unknown> = {};
-    for (const method of ["select", "is", "eq"]) builder[method] = vi.fn(() => builder);
+    for (const method of ["select", "is", "eq", "order", "limit", "gt"]) builder[method] = vi.fn(() => builder);
     builder.then = (resolve: (value: { data: unknown[]; error: null }) => unknown) =>
-      Promise.resolve({ data: rows, error: null }).then(resolve);
+      Promise.resolve({ data: [...rows].sort((left, right) => left.id.localeCompare(right.id)), error: null }).then(resolve);
     const deps = buildMonitorDependencies({ from: vi.fn(() => builder) } as unknown as SupabaseClient);
 
     await expect(deps.listActiveSources()).resolves.toEqual([

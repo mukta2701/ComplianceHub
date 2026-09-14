@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import ExcelJS from "exceljs";
 import { toCsv, toXlsx, type ExportColumn } from "./exports";
 
 type Row = { a: string; b: number | null };
@@ -51,5 +52,14 @@ describe("toXlsx", () => {
     const buffer = await toXlsx("Sheet", columns, [{ a: "x", b: 1 }]);
     expect(buffer.length).toBeGreaterThan(0);
     expect(buffer.subarray(0, 2).toString("latin1")).toBe("PK"); // zip signature
+  });
+
+  it("round-trips headers and values as worksheet content", async () => {
+    const buffer = await toXlsx("Sheet", columns, [{ a: "evidence title", b: 7 }]);
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer as unknown as Parameters<typeof workbook.xlsx.load>[0]);
+    const sheet = workbook.getWorksheet("Sheet");
+    expect(sheet?.getRow(1).values).toEqual([, "Alpha", "Beta"]);
+    expect(sheet?.getRow(2).values).toEqual([, "evidence title", 7]);
   });
 });

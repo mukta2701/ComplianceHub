@@ -1,28 +1,32 @@
+import { redirect } from "next/navigation";
+import Link from "next/link";
 import { requireAppContext } from "@/lib/app-context";
-import { PageIntro } from "@/components/ui";
-import { createRiskAction } from "../../actions";
+import { one } from "@/lib/supabase/one";
+import { Card, PageIntro } from "@/components/ui";
+import { RiskForm, type RiskFormValues } from "../risk-form";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
+import styles from "../risk-form.module.css";
 
-export default async function NewRiskPage() {
-  const { supabase } = await requireAppContext();
-  const { data: categories } = await supabase.from("risk_categories").select("id,name").order("position");
+export default async function NewRiskPage({ searchParams }: { searchParams: Promise<{ title?: string; description?: string; treatmentPlan?: string; sourceAssessmentSessionId?: string }> }) {
+  const suggested = await searchParams;
+  const { supabase, organisation, membership } = await requireAppContext();
+  if (!workspaceAccess(membership.role).section("risks").canManage) redirect("/app/risks");
+  const [categoriesResult, membersResult] = await Promise.all([
+    supabase.from("risk_categories").select("id,name").eq("organisation_id", organisation.id).order("position"),
+    supabase.from("memberships").select("user_id,profiles(display_name)").eq("organisation_id", organisation.id),
+  ]);
+  if (categoriesResult.error || membersResult.error) throw new Error("Could not load risk choices. Reload and try again.");
+  const values: RiskFormValues = {
+    reference: "", title: suggested.title ?? "", description: suggested.description ?? "", categoryId: "", ownerId: "", reviewDate: "",
+    likelihood: "3", impact: "3", residualLikelihood: "3", residualImpact: "3", treatment: "mitigate", status: "open",
+    treatmentPlan: suggested.treatmentPlan ?? "", evidence: "", sourceAssessmentSessionId: suggested.sourceAssessmentSessionId ?? "",
+  };
   return <>
-    <PageIntro eyebrow="RISK" title="Add risk" body="Record inherent and residual exposure on the documented 5×5 matrix." />
-    <form action={createRiskAction} className="card app-form">
-      <div className="form-grid">
-        <label>Reference<input name="reference" required placeholder="e.g. R-001" /></label>
-        <label>Title<input name="title" required placeholder="Risk title" /></label>
-      </div>
-      <label>Description<textarea name="description" required placeholder="Risk description" /></label>
-      <div className="form-grid">
-        <label>Category<select name="categoryId" required defaultValue="">{[<option key="" value="" disabled>Select a category</option>, ...(categories ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)]}</select></label>
-        <label>Review date<input name="reviewDate" type="date" /></label>
-        {[["likelihood", "Likelihood"], ["impact", "Impact"], ["residualLikelihood", "Residual likelihood"], ["residualImpact", "Residual impact"]].map(([name, label]) => <label key={name}>{label}<select name={name} defaultValue="3">{[1, 2, 3, 4, 5].map((n) => <option key={n}>{n}</option>)}</select></label>)}
-        <label>Treatment<select name="treatment"><option value="mitigate">Mitigate</option><option value="avoid">Avoid</option><option value="transfer">Transfer</option><option value="accept">Accept</option></select></label>
-        <label>Status<select name="status"><option value="open">Open</option><option value="treating">Treating</option><option value="accepted">Accepted</option><option value="closed">Closed</option></select></label>
-      </div>
-      <label>Treatment plan<textarea name="treatmentPlan" placeholder="Treatment plan" /></label>
-      <label>Evidence references<textarea name="evidence" placeholder="Evidence references" /></label>
-      <button className="button primary">Save risk</button>
-    </form>
+    <Link href="/app/risks" className={styles.pageBack}><span aria-hidden="true">←</span> Back to risk register</Link>
+    <div className={styles.introGrid}>
+      <PageIntro eyebrow="RISK" title="Add risk" body="Record an exposure, assign accountability and document what should reduce it." />
+      <Card className={styles.guidance}><h2>A useful risk is actionable</h2><ul><li>Describe a clear scenario</li><li>Separate inherent and residual exposure</li><li>Set an owner and next review</li></ul></Card>
+    </div>
+    <RiskForm mode="create" values={values} options={{ categories: (categoriesResult.data ?? []).map((item) => ({ id: item.id, label: item.name })), owners: (membersResult.data ?? []).map((item) => ({ id: item.user_id, label: one(item.profiles)?.display_name ?? item.user_id })) }} cancelHref="/app/risks" />
   </>;
 }

@@ -37,6 +37,9 @@ vi.mock("@/lib/supabase/server", () => ({
 vi.mock("@/components/app-shell", () => ({
   AppShell: ({ unreadCount, children }: { unreadCount: number; children: React.ReactNode }) => <div data-testid="shell" data-unread={unreadCount}>{children}</div>,
 }));
+vi.mock("@/components/workspace-session-sync", () => ({
+  WorkspaceSessionSync: ({ userId }: { userId: string }) => <span data-testid="session-sync" data-user-id={userId} />,
+}));
 
 import ProtectedLayout from "./layout";
 
@@ -45,6 +48,7 @@ describe("protected layout active workspace scope", () => {
     render(await ProtectedLayout({ children: <p>Content</p> }));
 
     expect(screen.getByTestId("shell")).toHaveAttribute("data-unread", "2");
+    expect(screen.getByTestId("session-sync")).toHaveAttribute("data-user-id", "user-1");
     expect(hoisted.notificationEq).toHaveBeenCalledWith("organisation_id", "org-1");
   });
 });

@@ -8,7 +8,22 @@ describe("workspace access policy", () => {
     expect(hasCapability("member", "run_monitoring")).toBe(false);
     expect(hasCapability("owner", "manage_monitoring")).toBe(true);
     expect(hasCapability("admin", "manage_monitoring")).toBe(true);
-    for (const capability of ["manage_policies", "manage_connections", "manage_frameworks", "manage_trust_center"] as const) {
+    expect(hasCapability("owner", "manage_monitoring_findings")).toBe(true);
+    expect(hasCapability("admin", "manage_monitoring_findings")).toBe(false);
+    expect(hasCapability("member", "manage_monitoring_findings")).toBe(false);
+    expect(hasCapability("owner", "manage_official_github_monitoring")).toBe(true);
+    expect(hasCapability("admin", "manage_official_github_monitoring")).toBe(false);
+    expect(hasCapability("member", "manage_official_github_monitoring")).toBe(false);
+    expect(hasCapability("owner", "manage_ai_settings")).toBe(true);
+    expect(hasCapability("admin", "manage_ai_settings")).toBe(false);
+    expect(hasCapability("member", "manage_ai_settings")).toBe(false);
+    expect(hasCapability("owner", "manage_scope")).toBe(true);
+    expect(hasCapability("admin", "manage_scope")).toBe(false);
+    expect(hasCapability("member", "manage_scope")).toBe(false);
+    expect(hasCapability("owner", "manage_risk_matrix")).toBe(true);
+    expect(hasCapability("admin", "manage_risk_matrix")).toBe(true);
+    expect(hasCapability("member", "manage_risk_matrix")).toBe(false);
+    for (const capability of ["manage_assessments", "manage_audits", "manage_baselines", "manage_policies", "manage_connections", "manage_frameworks", "manage_tasks", "manage_trust_center", "manage_imports"] as const) {
       expect(hasCapability("owner", capability)).toBe(true);
       expect(hasCapability("admin", capability)).toBe(true);
       expect(hasCapability("member", capability)).toBe(false);

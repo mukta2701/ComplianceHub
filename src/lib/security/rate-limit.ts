@@ -2,6 +2,10 @@ import "server-only";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { logError } from "@/lib/observability/logger";
 
+export class RateLimitUnavailableError extends Error {
+  constructor() { super("Rate-limit storage unavailable"); }
+}
+
 export interface RateLimitStore { increment(key: string, windowMs: number, now: number): Promise<number> }
 
 // In-memory fallback. Correct within a single process, but resets per serverless
@@ -23,7 +27,9 @@ export class PostgresRateLimitStore implements RateLimitStore {
     const supabase = createSupabaseServiceClient();
     const { data, error } = await supabase.rpc("increment_rate_limit", { p_key: key, p_window_ms: windowMs });
     if (error) throw error;
-    return Number(data);
+    const count = typeof data === "number" ? data : NaN;
+    if (!Number.isSafeInteger(count) || count < 1) throw new RateLimitUnavailableError();
+    return count;
   }
 }
 
@@ -40,13 +46,17 @@ function defaultStore(): RateLimitStore {
   return memoryFallback;
 }
 
-export async function enforceRateLimit(key: string, options: { limit: number; windowMs: number; store?: RateLimitStore; now?: () => number }) {
+export async function enforceRateLimit(key: string, options: { limit: number; windowMs: number; store?: RateLimitStore; now?: () => number; failureMode?: "fallback" | "closed" }) {
+  if (options.failureMode === "closed" && !options.store && (!process.env.SUPABASE_SERVICE_ROLE_KEY || !process.env.NEXT_PUBLIC_SUPABASE_URL)) throw new RateLimitUnavailableError();
   const store = options.store ?? defaultStore();
   const now = (options.now ?? Date.now)();
   let count: number;
   try {
     count = await store.increment(key, options.windowMs, now);
   } catch (error) {
+    // Public write sinks must not log through the failing store or reset their
+    // cross-instance budget by falling back to an independent memory counter.
+    if (options.failureMode === "closed") throw new RateLimitUnavailableError();
     // The limiter must not take the app down: if the durable store blips, log it
     // and fall back to the in-memory counter rather than blocking the request.
     await logError("action", "rate-limit store unavailable, using in-memory fallback", error, { key });

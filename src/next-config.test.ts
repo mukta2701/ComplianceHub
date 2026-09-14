@@ -3,6 +3,18 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import nextConfig, { buildConnectSrc } from "../next.config";
 
+describe("container deployment output", () => {
+  it("emits the self-contained Next.js server required by the runtime image", () => {
+    expect(nextConfig.output).toBe("standalone");
+  });
+});
+
+describe("request log privacy", () => {
+  it("disables framework incoming-request logs so OAuth callback query values are never printed", () => {
+    expect(nextConfig.logging).toEqual(expect.objectContaining({ incomingRequests: false }));
+  });
+});
+
 describe("buildConnectSrc", () => {
   it("allows the configured local Supabase HTTP and WebSocket origins in development", () => {
     expect(buildConnectSrc("http://127.0.0.1:54321")).toBe(

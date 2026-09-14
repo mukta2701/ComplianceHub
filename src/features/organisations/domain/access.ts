@@ -4,21 +4,36 @@ export type MembershipRole = (typeof membershipRoles)[number];
 export type WorkspaceCapability =
   | "run_monitoring"
   | "manage_monitoring"
+  | "manage_monitoring_findings"
+  | "manage_official_github_monitoring"
+  | "manage_baselines"
+  | "manage_scope"
+  | "manage_risk_matrix"
+  | "manage_assessments"
+  | "manage_audits"
+  | "manage_evidence"
   | "manage_policies"
+  | "manage_tasks"
+  | "manage_automation_setup"
   | "manage_connections"
+  | "manage_github_app"
+  | "manage_slack_destinations"
+  | "manage_daily_digest_channel"
+  | "manage_ai_settings"
   | "manage_frameworks"
   | "manage_trust_center"
+  | "manage_imports"
   | "manage_members"
   | "manage_owners";
 
 const capabilities: Record<MembershipRole, ReadonlySet<WorkspaceCapability>> = {
   owner: new Set([
-    "run_monitoring", "manage_monitoring", "manage_policies",
-    "manage_connections", "manage_frameworks", "manage_trust_center", "manage_members", "manage_owners",
+    "run_monitoring", "manage_monitoring", "manage_monitoring_findings", "manage_official_github_monitoring", "manage_baselines", "manage_scope", "manage_risk_matrix", "manage_assessments", "manage_audits", "manage_evidence", "manage_policies",
+    "manage_tasks", "manage_automation_setup", "manage_connections", "manage_github_app", "manage_slack_destinations", "manage_daily_digest_channel", "manage_ai_settings", "manage_frameworks", "manage_trust_center", "manage_imports", "manage_members", "manage_owners",
   ]),
   admin: new Set([
-    "run_monitoring", "manage_monitoring", "manage_policies",
-    "manage_connections", "manage_frameworks", "manage_trust_center", "manage_members",
+    "run_monitoring", "manage_monitoring", "manage_baselines", "manage_risk_matrix", "manage_assessments", "manage_audits", "manage_evidence", "manage_policies",
+    "manage_tasks", "manage_connections", "manage_frameworks", "manage_trust_center", "manage_imports", "manage_members",
   ]),
   member: new Set(),
 };

@@ -1,0 +1,22 @@
+.page h3 { font-size: 17px; font-weight: 650; line-height: 1.4; margin: 0 0 12px; }
+.page h4 { font-size: 14px; font-weight: 650; margin: 20px 0 8px; }
+.page p { margin: 10px 0; line-height: 1.6; }
+.page a:not(:global(.button)) { color: var(--blue); text-decoration: underline; text-underline-offset: 3px; }
+.page ul { list-style: disc; margin: 12px 0; padding-left: 22px; }
+.page li { margin: 7px 0; line-height: 1.55; }
+.page dt { margin-top: 12px; }
+.page dd { margin-top: 4px; }
+.page details { padding: 12px 0; border-top: 1px solid var(--border, #e5e7eb); }
+.page details summary { cursor: pointer; font-weight: 600; line-height: 1.55; }
+.page th, .page td { padding: 12px 14px; text-align: left; border-bottom: 1px solid var(--border, #e5e7eb); }
+.page th { font-size: 12px; font-weight: 650; color: var(--text-secondary, #596273); }
+.form label { display: grid; gap: 7px; font-weight: 600; font-size: 14px; }
+.form textarea, .form select { display: block; box-sizing: border-box; width: 100%; min-width: 0; padding: 11px 12px; border: 1px solid var(--border, #d1d5db); border-radius: 8px; background: white; color: inherit; font-weight: 400; font-size: 14px; line-height: 1.5; }
+.form textarea { min-height: 108px; resize: vertical; }
+.form textarea:focus-visible, .form select:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+@media (max-width: 640px) {
+  .page th, .page td { padding: 10px 8px; }
+  .form button { flex: 1 1 180px; }
+}
+.page table { min-width: 600px; }
+.page th:nth-child(n+2), .page td:nth-child(n+2) { white-space: nowrap; }

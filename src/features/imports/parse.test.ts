@@ -1,7 +1,20 @@
 import { describe, expect, it } from "vitest";
 import ExcelJS from "exceljs";
 import { parseCsv, findHeaderRow, parseWorkbook } from "./parse";
+import { assertSafeXlsxArchive } from "./xlsx-archive";
 import { toXlsx, type ExportColumn } from "@/features/exports/exports";
+
+function renameZipEntry(buffer: Buffer, from: string, to: string): void {
+  if (Buffer.byteLength(from) !== Buffer.byteLength(to)) throw new Error("ZIP entry replacement must preserve length");
+  let offset = 0;
+  let replacements = 0;
+  while ((offset = buffer.indexOf(from, offset, "utf8")) !== -1) {
+    buffer.write(to, offset, "utf8");
+    offset += Buffer.byteLength(to);
+    replacements += 1;
+  }
+  if (replacements < 2) throw new Error(`ZIP entry was not present in both headers: ${from}`);
+}
 
 describe("parseCsv", () => {
   it("splits rows and honours quotes, escaped quotes, embedded commas and newlines", () => {
@@ -53,5 +66,104 @@ describe("parseWorkbook", () => {
     const { headers, rows } = await parseWorkbook(buffer, "xlsx", ["Risk ID", "Risk Description"]);
     expect(headers).toEqual(["Risk ID", "Risk Description"]);
     expect(rows).toEqual([["R-001", "Data loss"]]);
+  });
+  it("rejects a small XLSX whose archive expands beyond the safe limit", async () => {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("Compressed payload");
+    const repeated = "A".repeat(32_000);
+    for (let row = 0; row < 350; row += 1) sheet.addRow([`${row}-${repeated}`]);
+    const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+
+    expect(buffer.byteLength).toBeLessThan(5_000_000);
+    await expect(parseWorkbook(buffer, "xlsx")).rejects.toThrow("XLSX archive exceeds safe expansion limits.");
+  });
+  it("rejects a sparse XLSX whose populated cell has an unsafe row index", async () => {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("Sparse rows");
+    sheet.getCell("A10001").value = "far away";
+    const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+
+    await expect(parseWorkbook(buffer, "xlsx")).rejects.toThrow("XLSX worksheet exceeds safe data limits.");
+  });
+  it("rejects a sparse XLSX whose populated cell has an unsafe column index", async () => {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("Sparse columns");
+    sheet.getCell(1, 101).value = "far away";
+    const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+
+    await expect(parseWorkbook(buffer, "xlsx")).rejects.toThrow("XLSX worksheet exceeds safe data limits.");
+  });
+  it("rejects unsafe dimensions in a secondary worksheet", async () => {
+    const workbook = new ExcelJS.Workbook();
+    const safeSheet = workbook.addWorksheet("Import data");
+    safeSheet.addRow(["Risk ID", "Status"]);
+    safeSheet.addRow(["R-001", "Open"]);
+    const unsafeSheet = workbook.addWorksheet("Hidden sparse data");
+    unsafeSheet.getCell("A10001").value = "far away";
+    const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+
+    await expect(parseWorkbook(buffer, "xlsx", ["Risk ID", "Status"])).rejects.toThrow(
+      "XLSX worksheet exceeds safe data limits.",
+    );
+  });
+  it("rejects a workbook whose worksheets collectively exceed the populated-cell ceiling", async () => {
+    const workbook = new ExcelJS.Workbook();
+    const row = Array.from({ length: 90 }, (_, index) => String(index));
+    for (let sheetIndex = 0; sheetIndex < 3; sheetIndex += 1) {
+      const sheet = workbook.addWorksheet(`Data ${sheetIndex + 1}`);
+      for (let rowIndex = 0; rowIndex < 100; rowIndex += 1) sheet.addRow(row);
+    }
+    const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+
+    await expect(parseWorkbook(buffer, "xlsx")).rejects.toThrow("XLSX worksheet exceeds safe data limits.");
+  });
+  it("rejects excessive worksheet entries during archive preflight", async () => {
+    const workbook = new ExcelJS.Workbook();
+    for (let index = 0; index < 6; index += 1) {
+      workbook.addWorksheet(`Data ${index + 1}`).addRow(["Risk ID", "Status"]);
+    }
+    const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+
+    await expect(parseWorkbook(buffer, "xlsx")).rejects.toThrow("XLSX archive exceeds safe expansion limits.");
+  });
+  it("counts nonstandard direct worksheet XML entries during archive preflight", async () => {
+    const workbook = new ExcelJS.Workbook();
+    for (let index = 0; index < 6; index += 1) {
+      workbook.addWorksheet(`Data ${index + 1}`).addRow(["Risk ID", "Status"]);
+    }
+    const craftedArchive = Buffer.from(await workbook.xlsx.writeBuffer());
+    for (let index = 2; index <= 6; index += 1) {
+      renameZipEntry(
+        craftedArchive,
+        `xl/worksheets/sheet${index}.xml`,
+        `xl/worksheets/tab00${index}.xml`,
+      );
+    }
+
+    await expect(assertSafeXlsxArchive(craftedArchive.buffer.slice(
+      craftedArchive.byteOffset,
+      craftedArchive.byteOffset + craftedArchive.byteLength,
+    ) as ArrayBuffer)).rejects.toThrow("XLSX archive exceeds safe expansion limits.");
+  });
+  it("rejects an XLSX with too many populated cells", async () => {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("Dense data");
+    const row = Array.from({ length: 100 }, (_, index) => String(index));
+    for (let index = 0; index < 251; index += 1) sheet.addRow(row);
+    const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+
+    await expect(parseWorkbook(buffer, "xlsx")).rejects.toThrow("XLSX worksheet exceeds safe data limits.");
+  });
+  it("parses populated rows without materialising blank row gaps", async () => {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("Normal sparse data");
+    sheet.getRow(1).values = ["Risk ID", "Status"];
+    sheet.getRow(10).values = ["R-001", "Open"];
+    const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+
+    await expect(parseWorkbook(buffer, "xlsx", ["Risk ID", "Status"])).resolves.toEqual({
+      headers: ["Risk ID", "Status"],
+      rows: [["R-001", "Open"]],
+    });
   });
 });

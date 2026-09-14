@@ -30,12 +30,13 @@ function Sparkline({ readings }: { readings: MeasurementReading[] }) {
 }
 
 export default async function KpisPage() {
-  const { supabase } = await requireAppContext();
+  const { supabase, organisation, membership } = await requireAppContext();
+  const isMember = membership.role === "member";
   const today = new Date().toISOString().slice(0, 10);
   const [{ data: kpis }, { data: members }, { data: measurements }] = await Promise.all([
-    supabase.from("kpis").select("id,control_function,indicator,measurement_type,threshold,observations,next_steps,last_reviewed,task_id").order("indicator"),
-    supabase.from("memberships").select("user_id,profiles(display_name)"),
-    supabase.from("kpi_measurements").select("kpi_id,value,measured_on").order("measured_on"),
+    supabase.from("kpis").select("id,control_function,indicator,measurement_type,threshold,observations,next_steps,last_reviewed,task_id").eq("organisation_id", organisation.id).order("indicator"),
+    supabase.from("memberships").select("user_id,job_title,profiles(display_name)").eq("organisation_id", organisation.id),
+    supabase.from("kpi_measurements").select("kpi_id,value,measured_on").eq("organisation_id", organisation.id).order("measured_on"),
   ]);
   const rows = kpis ?? [];
   const readingsByKpi = new Map<string, MeasurementReading[]>();
@@ -45,7 +46,8 @@ export default async function KpisPage() {
     readingsByKpi.set(m.kpi_id, list);
   }
   return <>
-    <PageIntro eyebrow="MANAGEMENT REVIEW" title="Performance measures" body="The KPIs your management review discusses — indicator, measurement type, target, the trend of recorded readings, and the next steps that become tasks." />
+    <PageIntro eyebrow="MANAGEMENT REVIEW" title="Performance measures" body="Track a measurable outcome, compare readings with a target, and assign follow-up work. Trends appear after at least two recorded readings." />
+    {rows.length === 0 && <Card style={{ padding: "22px", marginBottom: "16px" }}><h2>No performance measures yet</h2><p>Start with a measure such as the percentage of access reviews completed on time. Define its target and record dated readings to show progress.</p><p>{isMember ? "A workspace operator can add a measure." : "Use the form below to add the first measure. Choosing Automatic labels the source; it does not connect a data feed."}</p></Card>}
     {rows.length > 0 && (
     <Card style={{ padding: 0, marginBottom: "16px" }}><div className="data-table-wrap" role="region" aria-label="KPI register" tabIndex={0}><table>
       <thead><tr><th>Function</th><th>Indicator</th><th>Type</th><th>Target</th><th>Reviewed</th><th>Trend</th><th>Next steps</th></tr></thead>
@@ -68,21 +70,21 @@ export default async function KpisPage() {
                 {" "}{trend.delta > 0 ? "+" : ""}{trend.delta}
               </Pill>}
             </div>}
-            <form action={recordKpiMeasurementAction} style={{ marginTop: "8px", display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "flex-end" }}>
+            {!isMember && <form action={recordKpiMeasurementAction} style={{ marginTop: "8px", display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "flex-end" }}>
               <input type="hidden" name="kpiId" value={k.id} />
               <label style={{ display: "flex", flexDirection: "column", fontSize: "11px", gap: "2px" }}>Value<input name="value" type="number" step="any" required aria-label={`Measurement value for ${k.indicator}`} style={{ width: "84px" }} /></label>
               <label style={{ display: "flex", flexDirection: "column", fontSize: "11px", gap: "2px" }}>Date<input name="measuredOn" type="date" aria-label={`Measurement date for ${k.indicator}`} /></label>
               <label style={{ display: "flex", flexDirection: "column", fontSize: "11px", gap: "2px" }}>Note<input name="note" maxLength={500} aria-label={`Measurement note for ${k.indicator}`} style={{ width: "120px" }} /></label>
               <button className="button secondary">Record</button>
-            </form>
+            </form>}
           </td>
-          <td>{k.next_steps || "—"}{k.next_steps && !k.task_id && <form action={raiseKpiTaskAction} style={{ marginTop: "6px", display: "flex", gap: "6px" }}><input type="hidden" name="id" value={k.id} /><input type="hidden" name="indicator" value={k.indicator} /><input type="hidden" name="nextSteps" value={k.next_steps} /><select name="ownerId" className="field" defaultValue="" aria-label={`Task owner for ${k.indicator}`}><option value="">Unassigned</option>{members?.map((m) => { const p = one(m.profiles); return <option key={m.user_id} value={m.user_id}>{p?.display_name ?? m.user_id}</option>; })}</select><button className="button secondary">Raise task</button></form>}{k.task_id && <small style={{ display: "block", color: "#596273" }}>Task raised.</small>}</td>
+          <td>{k.next_steps || "—"}{!isMember && k.next_steps && !k.task_id && <form action={raiseKpiTaskAction} style={{ marginTop: "6px", display: "flex", gap: "6px" }}><input type="hidden" name="id" value={k.id} /><input type="hidden" name="indicator" value={k.indicator} /><input type="hidden" name="nextSteps" value={k.next_steps} /><select name="ownerId" className="field" defaultValue="" aria-label={`Task owner for ${k.indicator}`}><option value="">Unassigned</option>{members?.map((m) => { const p = one(m.profiles); return <option key={m.user_id} value={m.user_id}>{p?.display_name || m.job_title || "Workspace member"}</option>; })}</select><button className="button secondary">Raise task</button></form>}{k.task_id && <small style={{ display: "block", color: "#596273" }}>Task raised.</small>}</td>
         </tr>;
         })}
       </tbody>
     </table></div></Card>
     )}
-    <Card id="add-kpi" style={{ padding: "18px" }}>
+    {!isMember && <details className="section-guide" open={rows.length === 0}><summary>Add a performance measure</summary><Card id="add-kpi" style={{ padding: "18px" }}>
       <h2 style={{ fontSize: "15px", margin: "0 0 10px" }}>Add a KPI</h2>
       <form action={createKpiAction} className="app-form">
         <div className="form-grid">
@@ -90,13 +92,13 @@ export default async function KpisPage() {
           <label>Indicator<input name="indicator" required maxLength={300} /></label>
           <label>Measurement type<select name="measurementType" defaultValue="manual"><option value="automatic">Automatic</option><option value="manual">Manual</option><option value="external">External</option></select></label>
           <label>Target / threshold<input name="threshold" maxLength={500} /></label>
-          <label>Responsible party<select name="responsibleId" defaultValue=""><option value="">Unassigned</option>{members?.map((m) => { const p = one(m.profiles); return <option key={m.user_id} value={m.user_id}>{p?.display_name ?? m.user_id}</option>; })}</select></label>
+          <label>Responsible party<select name="responsibleId" defaultValue=""><option value="">Unassigned</option>{members?.map((m) => { const p = one(m.profiles); return <option key={m.user_id} value={m.user_id}>{p?.display_name || m.job_title || "Workspace member"}</option>; })}</select></label>
           <label>Last reviewed<input name="lastReviewed" type="date" /></label>
         </div>
         <label>Observations<textarea name="observations" maxLength={10000} /></label>
         <label>Next steps<textarea name="nextSteps" maxLength={10000} /></label>
         <button className="button primary">Add KPI</button>
       </form>
-    </Card>
+    </Card></details>}
   </>;
 }

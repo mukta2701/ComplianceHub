@@ -4,11 +4,16 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireAppContext } from "@/lib/app-context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
-import { encryptSecret } from "@/lib/security/secrets";
+import { decryptSecret, encryptSecret } from "@/lib/security/secrets";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
+import { validateSlackIncomingWebhookUrl } from "@/lib/integrations/slack-incoming-webhook";
+import {
+  approveSlackDestination,
+  approveStoredSlackDestination,
+} from "@/features/mcp/application/slack-destination-policy";
 import { connectionInputSchema, connectionTargetInputSchema } from "@/features/integrations/application/connection";
 import { evidenceSourceInputSchema } from "@/features/integrations/application/evidence-source";
-import { hasCapability } from "@/features/organisations/domain/access";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import {
   createNangoConnectSession,
   deleteNangoConnection,
@@ -27,27 +32,117 @@ const toggleSchema = z.object({
   id: z.uuid(),
   enabled: z.enum(["true", "false"]).transform((value) => value === "true"),
 });
+const digestChannelSchema = z.object({
+  channelId: z.union([z.literal(""), z.uuid()]).transform((value) => value || null),
+});
+const githubRepositorySelectionSchema = z.object({
+  repositoryId: z.uuid(),
+  selected: z.enum(["true", "false"]).transform((value) => value === "true"),
+}).strict();
 const monitorSourceSchema = z.object({
   owner: z.string().trim().min(1, "GitHub owner is required").max(120),
   repo: z.string().trim().min(1, "Repository is required").max(120),
   label: z.string().trim().max(160).optional(),
   accessToken: z.string().trim().max(4_000).optional(),
 });
+const slackWebhookUrlSchema = z.string().trim().url().refine((value) => {
+  try {
+    validateSlackIncomingWebhookUrl(value);
+    return true;
+  } catch {
+    return false;
+  }
+}, "Must be a valid Slack incoming-webhook URL");
 const alertChannelSchema = z.object({
-  endpoint: z.string().trim().url().refine(
-    (url) => url.startsWith("https://hooks.slack.com/services/"),
-    "Must be a Slack incoming-webhook URL (https://hooks.slack.com/services/…)",
-  ),
+  endpoint: slackWebhookUrlSchema,
   minSeverity: z.enum(["low", "medium", "high", "critical"]),
   label: z.string().trim().max(160).optional(),
 });
 
 async function requireConnectionManager() {
   const context = await requireAppContext();
-  if (!hasCapability(context.membership.role, "manage_connections")) {
-    throw new Error("Only workspace operators can manage integrations");
-  }
+  workspaceAccess(context.membership.role).section("connections").requireManage();
   return context;
+}
+
+async function requireGitHubOwner() {
+  const context = await requireAppContext();
+  workspaceAccess(context.membership.role).section("connections").requireManage("manage-github-app");
+  return context;
+}
+
+async function requireDigestOwner() {
+  const context = await requireAppContext();
+  workspaceAccess(context.membership.role).section("connections").requireManage("select-daily-digest-channel");
+  return context;
+}
+
+async function requireSlackOwner() {
+  const context = await requireAppContext();
+  workspaceAccess(context.membership.role).section("connections").requireManage("manage-slack-destinations");
+  return context;
+}
+
+async function loadApprovedSlackDestination(
+  supabase: Awaited<ReturnType<typeof requireAppContext>>["supabase"],
+  input: { organisationId: string; channelId: string; requireEnabled: boolean },
+) {
+  let query = supabase.from("alert_channels")
+    .select("config")
+    .eq("id", input.channelId)
+    .eq("organisation_id", input.organisationId)
+    .eq("type", "slack")
+    .is("revoked_at", null);
+  if (input.requireEnabled) query = query.eq("enabled", true);
+  const { data, error } = await query.maybeSingle();
+  if (error || !data) throw new Error("Slack destination is not approved");
+  const stored = approveStoredSlackDestination(data.config);
+  if (stored.status !== "approved") throw new Error("Slack destination is not approved");
+  let decrypted: string | null = null;
+  try {
+    decrypted = decryptSecret(stored.encryptedWebhook);
+  } catch {
+    // The configuration error returned to the UI remains deliberately generic.
+  }
+  if (!decrypted || approveSlackDestination(decrypted).status !== "approved") {
+    throw new Error("Slack destination is not approved");
+  }
+}
+
+export type GitHubMutationResult = {
+  ok: boolean;
+  message: string;
+};
+
+const repositorySelectionFailure = {
+  ok: false,
+  message: "Could not update repository scope. Please try again.",
+} as const;
+
+export async function setGitHubRepositorySelectedAction(formData: FormData): Promise<GitHubMutationResult> {
+  try {
+    const { supabase, user, organisation } = await requireGitHubOwner();
+    const parsed = githubRepositorySelectionSchema.parse(Object.fromEntries(formData));
+    const { data: repository, error: repositoryError } = await supabase.from("github_repositories")
+      .select("id")
+      .eq("id", parsed.repositoryId)
+      .eq("organisation_id", organisation.id)
+      .maybeSingle();
+    if (repositoryError || !repository) return repositorySelectionFailure;
+    await enforceRateLimit(`github-repository-scope:${organisation.id}:${user.id}`, {
+      limit: 10,
+      windowMs: 60_000,
+    });
+    const { data, error } = await supabase.rpc("set_github_repository_selected", {
+      target_repository_id: parsed.repositoryId,
+      target_selected: parsed.selected,
+    });
+    if (error || data !== true) return repositorySelectionFailure;
+    revalidatePath("/app/integrations");
+    return { ok: true, message: "Repository scope updated." };
+  } catch {
+    return repositorySelectionFailure;
+  }
 }
 
 export async function addConnectionAction(formData: FormData) {
@@ -251,14 +346,19 @@ export async function revokeMonitorSourceAction(formData: FormData) {
 }
 
 export async function addAlertChannelAction(formData: FormData) {
-  const { supabase, user, organisation } = await requireConnectionManager();
-  await enforceRateLimit(`alert-channel:${user.id}`, { limit: 10, windowMs: 60_000 });
+  const { supabase, user, organisation } = await requireSlackOwner();
   const parsed = alertChannelSchema.parse(Object.fromEntries(formData));
+  const approved = approveSlackDestination(parsed.endpoint);
+  if (approved.status !== "approved") throw new Error("Slack destination is not approved");
+  await enforceRateLimit(`alert-channel:${user.id}`, { limit: 10, windowMs: 60_000 });
   const { error } = await supabase.from("alert_channels").insert({
     organisation_id: organisation.id,
     type: "slack",
     label: parsed.label || "Slack",
-    config: { webhookUrl: encryptSecret(parsed.endpoint) },
+    config: {
+      webhookUrl: encryptSecret(approved.canonicalUrl),
+      webhookSha256: approved.webhookSha256,
+    },
     min_severity: parsed.minSeverity,
     connected_by: user.id,
     enabled: true,
@@ -268,8 +368,15 @@ export async function addAlertChannelAction(formData: FormData) {
 }
 
 export async function setAlertChannelEnabledAction(formData: FormData) {
-  const { supabase, organisation } = await requireConnectionManager();
+  const { supabase, organisation } = await requireSlackOwner();
   const parsed = toggleSchema.parse(Object.fromEntries(formData));
+  if (parsed.enabled) {
+    await loadApprovedSlackDestination(supabase, {
+      organisationId: organisation.id,
+      channelId: parsed.id,
+      requireEnabled: false,
+    });
+  }
   const { data, error } = await supabase.from("alert_channels")
     .update({ enabled: parsed.enabled })
     .eq("id", parsed.id).eq("organisation_id", organisation.id)
@@ -278,8 +385,26 @@ export async function setAlertChannelEnabledAction(formData: FormData) {
   revalidatePath("/app/integrations");
 }
 
+export async function setDailyDigestChannelAction(formData: FormData) {
+  const { supabase, organisation } = await requireDigestOwner();
+  const parsed = digestChannelSchema.parse(Object.fromEntries(formData));
+  if (parsed.channelId) {
+    await loadApprovedSlackDestination(supabase, {
+      organisationId: organisation.id,
+      channelId: parsed.channelId,
+      requireEnabled: true,
+    });
+  }
+  const { data, error } = await supabase.rpc("set_daily_digest_channel", {
+    target_organisation_id: organisation.id,
+    target_channel_id: parsed.channelId,
+  });
+  if (error || data !== true) throw new Error("Could not update the daily digest channel");
+  revalidatePath("/app/integrations");
+}
+
 export async function revokeAlertChannelAction(formData: FormData) {
-  const { supabase, organisation } = await requireConnectionManager();
+  const { supabase, organisation } = await requireSlackOwner();
   const id = z.uuid().parse(String(formData.get("id")));
   const { data, error } = await supabase.from("alert_channels")
     .update({ revoked_at: new Date().toISOString(), enabled: false })

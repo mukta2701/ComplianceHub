@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildSlackPayload, buildWhatsAppPayload, deliverAlert, meetsSeverity,
   type AlertChannel, type AlertFinding,
@@ -9,6 +9,8 @@ const finding: AlertFinding = {
   controlRef: "A.8.32", subjectType: "github_repo", subjectId: "acme/isms",
   severity: "critical", title: "Production branch is unprotected", detail: "No protection rule on main.",
 };
+const APPROVED_SLACK_WEBHOOK = "https://hooks.slack.com/services/T_TEST/B_TEST/S_TEST";
+const APPROVED_SLACK_WEBHOOK_SHA256 = "36b243d5b0e2304cbdf6f5bf362061b4f0e5cdc842c7f407af9253d0207cce52";
 
 function channel(over: Partial<AlertChannel> & { type: AlertChannel["type"] }): AlertChannel {
   return { id: "ch1", config: {}, minSeverity: "high", ...over };
@@ -23,10 +25,11 @@ describe("meetsSeverity", () => {
 });
 
 describe("buildSlackPayload", () => {
-  it("puts the control, subject and detail into the blocks and a text fallback", () => {
+  it("puts provider text in literal blocks with a safe notification fallback", () => {
     const payload = buildSlackPayload(finding);
-    expect(payload.text).toContain("A.8.32");
-    expect(payload.text).toContain("acme/isms");
+    expect(payload.text).toContain("CRITICAL");
+    expect(JSON.stringify(payload.blocks)).toContain("A.8.32");
+    expect(JSON.stringify(payload.blocks)).toContain("acme/isms");
     expect(JSON.stringify(payload.blocks)).toContain("Production branch is unprotected");
     expect(JSON.stringify(payload.blocks)).toContain("No protection rule on main.");
   });
@@ -49,6 +52,9 @@ describe("buildWhatsAppPayload", () => {
 });
 
 describe("deliverAlert", () => {
+  beforeEach(() => vi.stubEnv("SLACK_ALLOWED_WEBHOOK_SHA256", APPROVED_SLACK_WEBHOOK_SHA256));
+  afterEach(() => vi.unstubAllEnvs());
+
   const ports = () => ({
     postSlack: vi.fn().mockResolvedValue(undefined),
     postWhatsApp: vi.fn().mockResolvedValue(undefined),
@@ -57,16 +63,54 @@ describe("deliverAlert", () => {
 
   it("skips a channel whose min_severity outranks the finding", async () => {
     const p = ports();
-    const result = await deliverAlert(channel({ type: "slack", minSeverity: "critical", config: { webhookUrl: "https://hooks/x" } }), { ...finding, severity: "medium" }, p);
+    const result = await deliverAlert(channel({ type: "slack", minSeverity: "critical", config: { webhookUrl: APPROVED_SLACK_WEBHOOK } }), { ...finding, severity: "medium" }, p);
     expect(result.status).toBe("skipped");
     expect(p.postSlack).not.toHaveBeenCalled();
   });
 
   it("posts to the Slack webhook when severity is met", async () => {
     const p = ports();
-    const result = await deliverAlert(channel({ type: "slack", config: { webhookUrl: "https://hooks/x" } }), finding, p);
+    const result = await deliverAlert(channel({ type: "slack", config: { webhookUrl: APPROVED_SLACK_WEBHOOK } }), finding, p);
     expect(result.status).toBe("delivered");
-    expect(p.postSlack).toHaveBeenCalledWith("https://hooks/x", expect.objectContaining({ text: expect.any(String) }));
+    expect(p.postSlack).toHaveBeenCalledWith(APPROVED_SLACK_WEBHOOK, expect.objectContaining({ text: expect.any(String) }));
+  });
+
+  it("fails closed with generic wording when the final Slack policy recheck does not approve", async () => {
+    vi.stubEnv("SLACK_ALLOWED_WEBHOOK_SHA256", "b".repeat(64));
+    const p = ports();
+
+    const result = await deliverAlert(
+      channel({ type: "slack", config: { webhookUrl: APPROVED_SLACK_WEBHOOK } }),
+      finding,
+      p,
+    );
+
+    expect(result).toEqual({
+      channelId: "ch1",
+      type: "slack",
+      status: "failed",
+      reason: "Slack destination is not approved",
+    });
+    expect(JSON.stringify(result)).not.toContain(APPROVED_SLACK_WEBHOOK);
+    expect(p.postSlack).not.toHaveBeenCalled();
+  });
+
+  it("allows a loopback receiver only behind the injected test transport", async () => {
+    expect(process.env.NODE_ENV).toBe("test");
+    const loopbackReceiver = vi.fn();
+    const postSlack = vi.fn(async (_approvedUrl: string, outgoing: unknown) => {
+      loopbackReceiver("http://127.0.0.1:4444/test-only", outgoing);
+    });
+
+    const result = await deliverAlert(
+      channel({ type: "slack", config: { webhookUrl: APPROVED_SLACK_WEBHOOK } }),
+      finding,
+      { postSlack, notifyInApp: vi.fn() },
+    );
+
+    expect(result.status).toBe("delivered");
+    expect(postSlack).toHaveBeenCalledWith(APPROVED_SLACK_WEBHOOK, expect.anything());
+    expect(loopbackReceiver).toHaveBeenCalledWith("http://127.0.0.1:4444/test-only", expect.anything());
   });
 
   it("skips a Slack channel with no webhook configured", async () => {
@@ -139,8 +183,8 @@ describe("deliverAlert", () => {
 
   it("isolates a throwing adapter as a failed result rather than propagating", async () => {
     const p = { postSlack: vi.fn().mockRejectedValue(new Error("503 from Slack")), notifyInApp: vi.fn() };
-    const result = await deliverAlert(channel({ type: "slack", config: { webhookUrl: "https://hooks/x" } }), finding, p);
+    const result = await deliverAlert(channel({ type: "slack", config: { webhookUrl: APPROVED_SLACK_WEBHOOK } }), finding, p);
     expect(result.status).toBe("failed");
-    expect(result.reason).toContain("503");
+    expect(result.reason).toBe("Slack alert delivery failed.");
   });
 });

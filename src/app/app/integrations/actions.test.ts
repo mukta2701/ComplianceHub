@@ -1,12 +1,15 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const ORGANISATION_ID = "20000000-0000-4000-8000-000000000001";
 const USER_ID = "20000000-0000-4000-8000-000000000002";
+const APPROVED_SLACK_WEBHOOK = "https://hooks.slack.com/services/T_TEST/B_TEST/S_TEST";
+const APPROVED_SLACK_WEBHOOK_SHA256 = "36b243d5b0e2304cbdf6f5bf362061b4f0e5cdc842c7f407af9253d0207cce52";
 
 const hoisted = vi.hoisted(() => ({
   ctx: null as unknown,
   enforceRateLimit: vi.fn(),
-  encryptSecret: vi.fn((value: string | null) => value),
+  encryptSecret: vi.fn(() => "v1:iv:tag:data"),
+  decryptSecret: vi.fn(() => APPROVED_SLACK_WEBHOOK),
   revalidatePath: vi.fn(),
   createNangoConnectSession: vi.fn(),
   deleteNangoConnection: vi.fn(),
@@ -18,7 +21,10 @@ const hoisted = vi.hoisted(() => ({
 
 vi.mock("@/lib/app-context", () => ({ requireAppContext: () => Promise.resolve(hoisted.ctx) }));
 vi.mock("@/lib/security/rate-limit", () => ({ enforceRateLimit: hoisted.enforceRateLimit }));
-vi.mock("@/lib/security/secrets", () => ({ encryptSecret: hoisted.encryptSecret }));
+vi.mock("@/lib/security/secrets", () => ({
+  encryptSecret: hoisted.encryptSecret,
+  decryptSecret: hoisted.decryptSecret,
+}));
 vi.mock("@/lib/supabase/service", () => ({
   createSupabaseServiceClient: hoisted.createServiceClient,
 }));
@@ -41,8 +47,10 @@ import {
   revokeMonitorSourceAction,
   setIntegrationConnectionEnabledAction,
   setAlertChannelEnabledAction,
+  setDailyDigestChannelAction,
   setMonitorSourceEnabledAction,
   startProviderAuthorizationAction,
+  setGitHubRepositorySelectedAction,
 } from "./actions";
 
 function connectionForm() {
@@ -58,12 +66,18 @@ function connectionForm() {
 describe("integration connection access", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    hoisted.enforceRateLimit.mockResolvedValue(undefined);
+    vi.stubEnv("SLACK_ALLOWED_WEBHOOK_SHA256", APPROVED_SLACK_WEBHOOK_SHA256);
+    hoisted.encryptSecret.mockImplementation(() => "v1:iv:tag:data");
+    hoisted.decryptSecret.mockReturnValue(APPROVED_SLACK_WEBHOOK);
     hoisted.createNangoConnectSession.mockResolvedValue({ configured: false });
     hoisted.deleteNangoConnection.mockResolvedValue(undefined);
     hoisted.resolveJiraOAuthTarget.mockResolvedValue({ cloudId: "1324a887-45db-4bf4-8e99-ef0ff456d421" });
     hoisted.verifyNangoConnection.mockResolvedValue(undefined);
     hoisted.verifyGitHubOAuthTarget.mockResolvedValue(undefined);
   });
+
+  afterEach(() => vi.unstubAllEnvs());
 
   it("rejects members before writing connection credentials", async () => {
     const from = vi.fn();
@@ -514,11 +528,11 @@ describe("integration connection access", () => {
     channel.set("endpoint", "https://hooks.slack.com/services/T/B/X"); channel.set("minSeverity", "high");
 
     await expect(addMonitorSourceAction(source)).rejects.toThrow("Only workspace operators can manage integrations");
-    await expect(addAlertChannelAction(channel)).rejects.toThrow("Only workspace operators can manage integrations");
+    await expect(addAlertChannelAction(channel)).rejects.toThrow("Only a workspace Owner can manage Slack destinations");
     expect(from).not.toHaveBeenCalled();
   });
 
-  it("allows an Admin to add monitoring and Slack configuration without exposing secrets", async () => {
+  it("allows an Admin to add monitoring configuration but rejects Slack configuration before mutation", async () => {
     const insert = vi.fn().mockResolvedValue({ error: null });
     hoisted.ctx = {
       supabase: { from: vi.fn(() => ({ insert })) }, user: { id: USER_ID },
@@ -527,13 +541,82 @@ describe("integration connection access", () => {
     const source = new FormData();
     source.set("owner", "acme"); source.set("repo", "isms"); source.set("label", "Production GitHub");
     const channel = new FormData();
-    channel.set("endpoint", "https://hooks.slack.com/services/T/B/X"); channel.set("minSeverity", "high");
+    channel.set("endpoint", APPROVED_SLACK_WEBHOOK); channel.set("minSeverity", "high");
 
     await addMonitorSourceAction(source);
-    await addAlertChannelAction(channel);
+    await expect(addAlertChannelAction(channel)).rejects.toThrow("Only a workspace Owner");
 
     expect(insert).toHaveBeenCalledWith(expect.objectContaining({ organisation_id: ORGANISATION_ID, enabled: true }));
-    expect(hoisted.encryptSecret).toHaveBeenCalledWith("https://hooks.slack.com/services/T/B/X");
+    expect(hoisted.encryptSecret).not.toHaveBeenCalledWith(APPROVED_SLACK_WEBHOOK);
+  });
+
+  it("fails an unapproved Slack destination before rate limiting, encryption, persistence, or revalidation", async () => {
+    vi.stubEnv("SLACK_ALLOWED_WEBHOOK_SHA256", "b".repeat(64));
+    const from = vi.fn();
+    hoisted.ctx = {
+      supabase: { from }, user: { id: USER_ID },
+      organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
+    };
+    const channel = new FormData();
+    channel.set("endpoint", APPROVED_SLACK_WEBHOOK); channel.set("minSeverity", "high");
+
+    await expect(addAlertChannelAction(channel)).rejects.toThrow("Slack destination is not approved");
+
+    expect(hoisted.enforceRateLimit).not.toHaveBeenCalled();
+    expect(hoisted.encryptSecret).not.toHaveBeenCalled();
+    expect(from).not.toHaveBeenCalled();
+    expect(hoisted.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("stores only the canonical approved URL envelope and its computed digest", async () => {
+    const insert = vi.fn().mockResolvedValue({ error: null });
+    hoisted.ctx = {
+      supabase: { from: vi.fn(() => ({ insert })) }, user: { id: USER_ID },
+      organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
+    };
+    const channel = new FormData();
+    channel.set("endpoint", "HTTPS://HOOKS.SLACK.COM/services/T_TEST/B_TEST/S_TEST");
+    channel.set("minSeverity", "high");
+
+    await addAlertChannelAction(channel);
+
+    expect(hoisted.encryptSecret).toHaveBeenCalledWith(APPROVED_SLACK_WEBHOOK);
+    expect(insert).toHaveBeenCalledWith(expect.objectContaining({
+      config: {
+        webhookUrl: "v1:iv:tag:data",
+        webhookSha256: APPROVED_SLACK_WEBHOOK_SHA256,
+      },
+    }));
+  });
+
+  it("accepts Slack Gov incoming-webhook URLs", async () => {
+    const insert = vi.fn().mockResolvedValue({ error: null });
+    hoisted.ctx = {
+      supabase: { from: vi.fn(() => ({ insert })) }, user: { id: USER_ID },
+      organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
+    };
+    const channel = new FormData();
+    const govUrl = "https://hooks.slack-gov.com/services/T_TEST/B_TEST/S_TEST";
+    vi.stubEnv("SLACK_ALLOWED_WEBHOOK_SHA256", "5430f2455f30bd64452ca6f7f517ca3e3d74d05151a68355dcb8252fc121cb60");
+    channel.set("endpoint", govUrl); channel.set("minSeverity", "high");
+
+    await addAlertChannelAction(channel);
+
+    expect(hoisted.encryptSecret).toHaveBeenCalledWith(govUrl);
+  });
+
+  it("rejects malformed official-looking Slack webhook URLs before writing", async () => {
+    const from = vi.fn();
+    hoisted.ctx = {
+      supabase: { from }, user: { id: USER_ID },
+      organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
+    };
+    const channel = new FormData();
+    channel.set("endpoint", "https://hooks.slack.com/services/T/B/X?redirect=https://example.test"); channel.set("minSeverity", "high");
+
+    await expect(addAlertChannelAction(channel)).rejects.toThrow();
+    expect(from).not.toHaveBeenCalled();
+    expect(hoisted.encryptSecret).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -559,6 +642,112 @@ describe("integration connection access", () => {
     expect(builder.eq).toHaveBeenCalledWith("organisation_id", ORGANISATION_ID);
   });
 
+  it("rejects enabling a legacy or mismatched Slack destination before update", async () => {
+    const builder: Record<string, ReturnType<typeof vi.fn>> = {};
+    for (const method of ["select", "eq", "is", "update"]) builder[method] = vi.fn(() => builder);
+    builder.maybeSingle = vi.fn().mockResolvedValue({
+      data: { config: { webhookUrl: APPROVED_SLACK_WEBHOOK } },
+      error: null,
+    });
+    hoisted.ctx = {
+      supabase: { from: vi.fn(() => builder) }, user: { id: USER_ID },
+      organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
+    };
+    const form = new FormData();
+    form.set("id", "10000000-0000-4000-8000-000000000099"); form.set("enabled", "true");
+
+    await expect(setAlertChannelEnabledAction(form)).rejects.toThrow("Slack destination is not approved");
+
+    expect(hoisted.decryptSecret).not.toHaveBeenCalled();
+    expect(builder.update).not.toHaveBeenCalled();
+    expect(hoisted.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("keeps the Slack disable stop path available when no allow digest is configured", async () => {
+    vi.stubEnv("SLACK_ALLOWED_WEBHOOK_SHA256", undefined);
+    const builder: Record<string, ReturnType<typeof vi.fn>> = {};
+    for (const method of ["update", "eq", "select"]) builder[method] = vi.fn(() => builder);
+    builder.maybeSingle = vi.fn().mockResolvedValue({ data: { id: "10000000-0000-4000-8000-000000000099" }, error: null });
+    hoisted.ctx = {
+      supabase: { from: vi.fn(() => builder) }, user: { id: USER_ID },
+      organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
+    };
+    const form = new FormData();
+    form.set("id", "10000000-0000-4000-8000-000000000099"); form.set("enabled", "false");
+
+    await expect(setAlertChannelEnabledAction(form)).resolves.toBeUndefined();
+    expect(builder.update).toHaveBeenCalledWith({ enabled: false });
+    expect(hoisted.decryptSecret).not.toHaveBeenCalled();
+  });
+
+  it("lets only an Owner atomically select the daily digest channel", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: true, error: null });
+    const builder: Record<string, ReturnType<typeof vi.fn>> = {};
+    for (const method of ["select", "eq", "is"]) builder[method] = vi.fn(() => builder);
+    builder.maybeSingle = vi.fn().mockResolvedValue({
+      data: { config: { webhookUrl: "v1:iv:tag:data", webhookSha256: APPROVED_SLACK_WEBHOOK_SHA256 } },
+      error: null,
+    });
+    const form = new FormData();
+    form.set("channelId", "10000000-0000-4000-8000-000000000099");
+    hoisted.ctx = {
+      supabase: { rpc, from: vi.fn(() => builder) }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
+    };
+
+    await setDailyDigestChannelAction(form);
+
+    expect(rpc).toHaveBeenCalledWith("set_daily_digest_channel", {
+      target_organisation_id: ORGANISATION_ID,
+      target_channel_id: "10000000-0000-4000-8000-000000000099",
+    });
+    expect(hoisted.revalidatePath).toHaveBeenCalledWith("/app/integrations");
+
+    hoisted.ctx = {
+      supabase: { rpc, from: vi.fn(() => builder) }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "admin" },
+    };
+    await expect(setDailyDigestChannelAction(form)).rejects.toThrow("Only a workspace Owner");
+    expect(rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects selecting a legacy Slack destination before RPC or decryption", async () => {
+    const builder: Record<string, ReturnType<typeof vi.fn>> = {};
+    for (const method of ["select", "eq", "is"]) builder[method] = vi.fn(() => builder);
+    builder.maybeSingle = vi.fn().mockResolvedValue({
+      data: { config: { webhookUrl: APPROVED_SLACK_WEBHOOK } }, error: null,
+    });
+    const rpc = vi.fn();
+    hoisted.ctx = {
+      supabase: { from: vi.fn(() => builder), rpc }, user: { id: USER_ID },
+      organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
+    };
+    const form = new FormData();
+    form.set("channelId", "10000000-0000-4000-8000-000000000099");
+
+    await expect(setDailyDigestChannelAction(form)).rejects.toThrow("Slack destination is not approved");
+    expect(hoisted.decryptSecret).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("maps an empty digest destination to null and rejects unsuccessful RPC outcomes", async () => {
+    const form = new FormData();
+    form.set("channelId", "");
+    const rpc = vi.fn().mockResolvedValue({ data: true, error: null });
+    hoisted.ctx = {
+      supabase: { rpc }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
+    };
+
+    await setDailyDigestChannelAction(form);
+    expect(rpc).toHaveBeenCalledWith("set_daily_digest_channel", {
+      target_organisation_id: ORGANISATION_ID,
+      target_channel_id: null,
+    });
+
+    rpc.mockResolvedValueOnce({ data: false, error: null });
+    await expect(setDailyDigestChannelAction(form)).rejects.toThrow("Could not update the daily digest channel");
+    rpc.mockResolvedValueOnce({ data: null, error: { message: "private database detail" } });
+    await expect(setDailyDigestChannelAction(form)).rejects.toThrow("Could not update the daily digest channel");
+  });
+
   it.each([
     ["enable or disable", setMonitorSourceEnabledAction, true],
     ["revoke", revokeMonitorSourceAction, false],
@@ -578,4 +767,156 @@ describe("integration connection access", () => {
 
     expect(builder.is).toHaveBeenCalledWith("integration_connection_id", null);
   });
+});
+
+describe("GitHub repository scope actions", () => {
+  const REPOSITORY_ID = "20000000-0000-4000-8000-000000000011";
+  beforeEach(() => {
+    vi.clearAllMocks();
+    hoisted.enforceRateLimit.mockResolvedValue(undefined);
+    process.env.GITHUB_APP_ID = "123456";
+    process.env.GITHUB_APP_PRIVATE_KEY = "private-key";
+    process.env.GITHUB_APPROVED_SECURITY_WORKFLOW_IDS = "101,202";
+  });
+
+  it("rejects Members before repository selection reaches Supabase", async () => {
+    const rpc = vi.fn();
+    hoisted.ctx = {
+      supabase: { rpc }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "member" },
+    };
+    const form = new FormData();
+    form.set("repositoryId", REPOSITORY_ID);
+    form.set("selected", "true");
+
+    await expect(setGitHubRepositorySelectedAction(form)).resolves.toEqual({
+      ok: false,
+      message: "Could not update repository scope. Please try again.",
+    });
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("rejects Admins before repository selection reaches Supabase", async () => {
+    const from = vi.fn();
+    const rpc = vi.fn();
+    hoisted.ctx = {
+      supabase: { from, rpc }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "admin" },
+    };
+    const form = new FormData();
+    form.set("repositoryId", REPOSITORY_ID);
+    form.set("selected", "true");
+
+    await expect(setGitHubRepositorySelectedAction(form)).resolves.toEqual({
+      ok: false,
+      message: "Could not update repository scope. Please try again.",
+    });
+    expect(from).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["not-a-uuid", "true"],
+    [REPOSITORY_ID, "yes"],
+    [REPOSITORY_ID, "1"],
+  ])("rejects invalid repository selection input before the checked RPC", async (repositoryId, selected) => {
+    const rpc = vi.fn();
+    hoisted.ctx = {
+      supabase: { rpc }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
+    };
+    const form = new FormData();
+    form.set("repositoryId", repositoryId);
+    form.set("selected", selected);
+
+    await expect(setGitHubRepositorySelectedAction(form)).resolves.toEqual({
+      ok: false,
+      message: "Could not update repository scope. Please try again.",
+    });
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("rejects a repository from a sibling workspace before calling the selection RPC", async () => {
+    const rpc = vi.fn();
+    const maybeSingle = vi.fn().mockResolvedValue({ data: null, error: null });
+    const organisationFilter = vi.fn().mockReturnValue({ maybeSingle });
+    const repositoryFilter = vi.fn().mockReturnValue({ eq: organisationFilter });
+    const select = vi.fn().mockReturnValue({ eq: repositoryFilter });
+    const from = vi.fn().mockReturnValue({ select });
+    hoisted.ctx = {
+      supabase: { from, rpc }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
+    };
+    const form = new FormData();
+    form.set("repositoryId", REPOSITORY_ID);
+    form.set("selected", "true");
+
+    await expect(setGitHubRepositorySelectedAction(form)).resolves.toEqual({
+      ok: false,
+      message: "Could not update repository scope. Please try again.",
+    });
+    expect(from).toHaveBeenCalledWith("github_repositories");
+    expect(select).toHaveBeenCalledWith("id");
+    expect(repositoryFilter).toHaveBeenCalledWith("id", REPOSITORY_ID);
+    expect(organisationFilter).toHaveBeenCalledWith("organisation_id", ORGANISATION_ID);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("uses the authenticated Owner RPC with exact derived arguments and requires true", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: true, error: null });
+    const maybeSingle = vi.fn().mockResolvedValue({ data: { id: REPOSITORY_ID }, error: null });
+    const organisationFilter = vi.fn().mockReturnValue({ maybeSingle });
+    const repositoryFilter = vi.fn().mockReturnValue({ eq: organisationFilter });
+    const select = vi.fn().mockReturnValue({ eq: repositoryFilter });
+    const from = vi.fn().mockReturnValue({ select });
+    hoisted.ctx = {
+      supabase: { from, rpc }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
+    };
+    const form = new FormData();
+    form.set("repositoryId", REPOSITORY_ID);
+    form.set("selected", "false");
+
+    await expect(setGitHubRepositorySelectedAction(form)).resolves.toEqual({
+      ok: true,
+      message: "Repository scope updated.",
+    });
+    expect(rpc).toHaveBeenCalledWith("set_github_repository_selected", {
+      target_repository_id: REPOSITORY_ID,
+      target_selected: false,
+    });
+    expect(hoisted.enforceRateLimit).toHaveBeenCalledWith(
+      `github-repository-scope:${ORGANISATION_ID}:${USER_ID}`,
+      { limit: 10, windowMs: 60_000 },
+    );
+    expect(maybeSingle.mock.invocationCallOrder[0]).toBeLessThan(hoisted.enforceRateLimit.mock.invocationCallOrder[0]);
+    expect(hoisted.enforceRateLimit.mock.invocationCallOrder[0]).toBeLessThan(rpc.mock.invocationCallOrder[0]);
+    expect(hoisted.revalidatePath).toHaveBeenCalledWith("/app/integrations");
+
+    rpc.mockResolvedValueOnce({ data: false, error: null });
+    await expect(setGitHubRepositorySelectedAction(form)).resolves.toEqual({
+      ok: false,
+      message: "Could not update repository scope. Please try again.",
+    });
+  });
+
+  it("maps a repository-scope rate-limit failure to the stable error before the RPC", async () => {
+    const rpc = vi.fn();
+    const maybeSingle = vi.fn().mockResolvedValue({ data: { id: REPOSITORY_ID }, error: null });
+    const query: Record<string, ReturnType<typeof vi.fn>> = {};
+    query.select = vi.fn(() => query);
+    query.eq = vi.fn(() => query);
+    query.maybeSingle = maybeSingle;
+    hoisted.enforceRateLimit.mockRejectedValue(new Error("private limiter detail"));
+    hoisted.ctx = {
+      supabase: { from: vi.fn(() => query), rpc }, user: { id: USER_ID },
+      organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
+    };
+    const form = new FormData();
+    form.set("repositoryId", REPOSITORY_ID);
+    form.set("selected", "true");
+
+    await expect(setGitHubRepositorySelectedAction(form)).resolves.toEqual({
+      ok: false,
+      message: "Could not update repository scope. Please try again.",
+    });
+    expect(rpc).not.toHaveBeenCalled();
+    expect(hoisted.createServiceClient).not.toHaveBeenCalled();
+  });
+
 });

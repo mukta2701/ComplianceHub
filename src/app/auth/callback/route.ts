@@ -8,7 +8,7 @@ export async function GET(request: Request) {
   const canonicalOrigin = siteUrl();
   const code = url.searchParams.get("code");
   const requestedNext = url.searchParams.get("next");
-  const next = new URL(safePostAuthPath(requestedNext, { allowResetPassword: true }), canonicalOrigin);
+  const next = new URL(safePostAuthPath(requestedNext, { allowResetPassword: true, allowOAuthConsent: true }), canonicalOrigin);
   if (code) {
     const supabase = await createSupabaseServerClient();
     const { error } = await supabase.auth.exchangeCodeForSession(code);
@@ -18,6 +18,6 @@ export async function GET(request: Request) {
   failure.searchParams.set("message", "The confirmation link is invalid or expired.");
   // A failed recovery has no recovery session, so /reset-password is not a
   // valid retry destination. The ordinary post-auth allowlist fails it to /app.
-  failure.searchParams.set("next", safePostAuthPath(requestedNext));
+  failure.searchParams.set("next", safePostAuthPath(requestedNext, { allowOAuthConsent: true }));
   return NextResponse.redirect(failure);
 }

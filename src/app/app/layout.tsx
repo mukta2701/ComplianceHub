@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getAuthUser, getMembership } from "@/lib/app-context";
 import { AppShell } from "@/components/app-shell";
+import { WorkspaceSessionSync } from "@/components/workspace-session-sync";
 import { one } from "@/lib/supabase/one";
 
 export const dynamic = "force-dynamic";
@@ -31,5 +32,5 @@ export default async function ProtectedLayout({ children }: { children: React.Re
   const organisation = membership ? one(membership.organisations) : null;
   const orgName = organisation?.name ?? "Your workspace";
   const displayName = profile?.display_name ?? user.email ?? "Member";
-  return <AppShell organisationId={organisation?.id ?? null} orgName={orgName} orgInitials={initials(orgName)} userInitials={initials(displayName)} unreadCount={unread ?? 0} role={membership?.role ?? null} jobTitle={membership?.job_title ?? null}>{children}</AppShell>;
+  return <><WorkspaceSessionSync userId={user.id} /><AppShell organisationId={organisation?.id ?? null} orgName={orgName} orgInitials={initials(orgName)} userInitials={initials(displayName)} unreadCount={unread ?? 0} role={membership?.role ?? null} jobTitle={membership?.job_title ?? null}>{children}</AppShell></>;
 }

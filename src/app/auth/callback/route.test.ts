@@ -32,6 +32,7 @@ describe("GET /auth/callback", () => {
     "/app/policies?status=approved",
     "/invite",
     "/reset-password",
+    "/oauth/consent?authorization_id=11111111-1111-4111-8111-111111111111",
   ])("preserves the allowed internal destination %s", async (next) => {
     const response = await GET(callbackRequest(next));
 

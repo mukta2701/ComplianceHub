@@ -12,15 +12,41 @@ import { MAX_IMPORT_ROWS } from "@/features/imports/limits";
 import { riskInputSchema } from "@/features/risks/application/risk";
 import { assetInputSchema } from "@/features/assets/application/asset";
 import { soaItemReviewSchema } from "@/features/soa/application/review";
+import type { SoaStatus } from "@/features/soa/domain/soa";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
+import { createHash } from "node:crypto";
 
 export type AnalyseResult = { headers: string[]; rows: string[][]; suggestion: Record<string, string> } | { error: string };
-export type ImportRunResult = { committed: boolean; total: number; valid: number; invalid: number; imported: number; updated: number; skipped: number; rowErrors: { row: number; errors: string[] }[]; notes: string[] };
+export type SoaImportChange = {
+  itemId: string;
+  expectedRevision: number;
+  applicable: boolean;
+  status: SoaStatus;
+  justification: string;
+  evidence: string;
+  ownerId: string | null;
+};
+export type SoaImportPreview = { identity: string; registerId: string; changes: SoaImportChange[] };
+export type ImportRunResult = { committed: boolean; total: number; valid: number; invalid: number; imported: number; updated: number; skipped: number; rowErrors: { row: number; errors: string[] }[]; notes: string[]; soaPreview?: SoaImportPreview; requiresFreshPreview?: boolean };
 
 const MODULES = new Set<ImportModule>(["risk", "soa", "asset"]);
 
 export async function analyseImportAction(formData: FormData): Promise<AnalyseResult> {
-  await requireAppContext(); // auth gate; parsing needs no org data
+  const { user, membership } = await requireAppContext();
   const moduleName = String(formData.get("module")) as ImportModule;
+  const canManage = moduleName === "risk"
+    ? workspaceAccess(membership.role).section("risks").canManage
+    : moduleName === "asset"
+      ? workspaceAccess(membership.role).section("assets").canManage
+      : workspaceAccess(membership.role).section("soa").canManage;
+  if (!canManage) {
+    return { error: "You do not have permission to manage imports." };
+  }
+  try {
+    await enforceRateLimit(`import-analyse:${user.id}`, { limit: 10, windowMs: 60_000 });
+  } catch {
+    return { error: "Too many import attempts. Please wait and try again." };
+  }
   if (!MODULES.has(moduleName)) return { error: "Unknown import type." };
   const file = formData.get("file");
   if (!(file instanceof File) || file.size === 0) return { error: "Choose a file to upload." };
@@ -39,11 +65,31 @@ export async function analyseImportAction(formData: FormData): Promise<AnalyseRe
   }
 }
 
+// Import decisions must not treat a capped or failed lookup as the whole workspace.
+async function assetImportLookup(supabase: SupabaseClient, table: "asset_categories" | "assets", organisationId: string): Promise<Record<string, unknown>[] | null> {
+  const rows: Record<string, unknown>[] = [];
+  let expectedCount: number | null = null;
+  while (true) {
+    const query = table === "asset_categories"
+      ? supabase.from("asset_categories").select("id,name,position", { count: "exact" })
+      : supabase.from("assets").select("id,reference", { count: "exact" });
+    const { data, error, count } = await query.eq("organisation_id", organisationId).order("id").range(rows.length, rows.length + 999);
+    if (error || !data || count === null || (expectedCount !== null && expectedCount !== count)) return null;
+    expectedCount = count;
+    rows.push(...data);
+    if (rows.length === count) return rows;
+    if (!data.length || rows.length > count) return null;
+  }
+}
+
 // Case-insensitive name -> id resolver for the per-org category tables; creates a missing category.
 // Explicitly scoped to organisationId (not just RLS) so a caller who belongs to several orgs never
 // resolves a name against a sibling org's rows.
 async function categoryResolver(supabase: SupabaseClient, table: "risk_categories" | "asset_categories", organisationId: string) {
-  const { data } = await supabase.from(table).select("id,name,position").eq("organisation_id", organisationId);
+  const { data } = table === "asset_categories"
+    ? { data: await assetImportLookup(supabase, table, organisationId) }
+    : await supabase.from(table).select("id,name,position").eq("organisation_id", organisationId);
+  if (table === "asset_categories" && !data) return async (): Promise<string | null> => null;
   const byName = new Map<string, string>();
   let maxPos = -1;
   for (const c of data ?? []) { byName.set(String(c.name).toLowerCase(), String(c.id)); maxPos = Math.max(maxPos, Number(c.position)); }
@@ -68,27 +114,81 @@ async function memberResolver(supabase: SupabaseClient, organisationId: string) 
   return (name: string | null): string | null => (name ? byName.get(name.trim().toLowerCase()) ?? null : null);
 }
 
+type AssetOwnerResolution = { ownerId: string | null; error: string | null };
+
+async function assetOwnerResolver(supabase: SupabaseClient, organisationId: string) {
+  const { data, error, count } = await supabase.from("memberships").select("user_id,profiles(display_name)", { count: "exact" }).eq("organisation_id", organisationId);
+  const byName = new Map<string, Set<string>>();
+  for (const membership of data ?? []) {
+    const profile = one(membership.profiles);
+    if (!profile?.display_name) continue;
+    const name = String(profile.display_name).trim().toLowerCase();
+    if (!name) continue;
+    const userIds = byName.get(name) ?? new Set<string>();
+    userIds.add(String(membership.user_id));
+    byName.set(name, userIds);
+  }
+  return (name: string | null): AssetOwnerResolution => {
+    const trimmedName = name?.trim();
+    if (!trimmedName) return { ownerId: null, error: null };
+    if (error || (count !== null && count > (data?.length ?? 0))) return { ownerId: null, error: "Could not look up the complete in-app owner list for this workspace." };
+    const userIds = byName.get(trimmedName.toLowerCase());
+    if (!userIds?.size) return { ownerId: null, error: `In-app owner "${trimmedName}" was not found in this workspace.` };
+    if (userIds.size > 1) return { ownerId: null, error: `In-app owner "${trimmedName}" matches more than one member in this workspace.` };
+    return { ownerId: [...userIds][0], error: null };
+  };
+}
+
 // Resolves the SoA register + its control_code -> item id map. Read-only, so it's safe to call from
 // both the dry-run preview and the real commit (Fix 4: keeps the preview's updated/skipped counts honest).
-async function loadSoaRegister(supabase: SupabaseClient, registerId: string | undefined, organisationId: string): Promise<{ registerId: string | null; byCode: Map<string, string> }> {
+type SoaItemIdentity = { id: string; decisionRevision: number };
+
+async function loadSoaRegister(supabase: SupabaseClient, registerId: string | undefined, organisationId: string): Promise<{ registerId: string | null; byCode: Map<string, SoaItemIdentity> }> {
   let id = registerId;
   if (!id) {
     const { data: latest } = await supabase.from("soa_registers").select("id").eq("organisation_id", organisationId).order("updated_at", { ascending: false }).limit(1).maybeSingle();
     id = latest?.id;
+  } else {
+    const { data: selected } = await supabase.from("soa_registers").select("id").eq("id", id).eq("organisation_id", organisationId).maybeSingle();
+    if (!selected) return { registerId: null, byCode: new Map() };
   }
   if (!id) return { registerId: null, byCode: new Map() };
-  const { data: items } = await supabase.from("soa_items").select("id,control_code").eq("soa_register_id", id);
-  const byCode = new Map<string, string>();
-  for (const it of items ?? []) byCode.set(String(it.control_code).toLowerCase(), String(it.id));
+  const { data: items } = await supabase.from("soa_items").select("id,control_code,decision_revision").eq("soa_register_id", id).eq("organisation_id", organisationId);
+  const byCode = new Map<string, SoaItemIdentity>();
+  for (const it of items ?? []) byCode.set(String(it.control_code).toLowerCase(), { id: String(it.id), decisionRevision: Number(it.decision_revision) });
   return { registerId: id, byCode };
+}
+
+function soaPreviewIdentity(
+  input: Pick<RunImportInput, "headers" | "rows" | "mapping">,
+  registerId: string,
+  changes: SoaImportChange[],
+) {
+  return createHash("sha256").update(JSON.stringify({
+    registerId,
+    headers: input.headers,
+    rows: input.rows,
+    mapping: Object.entries(input.mapping).sort(([left], [right]) => left.localeCompare(right)),
+    changes,
+  })).digest("hex");
 }
 
 function zodMessage(error: { issues: { message: string }[] }): string {
   return error.issues.map((issue) => issue.message).join("; ");
 }
 
-export async function runImportAction(input: { module: ImportModule; headers: string[]; rows: string[][]; mapping: Record<string, string>; commit: boolean; registerId?: string }): Promise<ImportRunResult> {
-  const { supabase, user, organisation } = await requireAppContext();
+type RunImportInput = { module: ImportModule; headers: string[]; rows: string[][]; mapping: Record<string, string>; commit: boolean; registerId?: string; soaPreview?: SoaImportPreview };
+
+export async function runImportAction(input: RunImportInput): Promise<ImportRunResult> {
+  const { supabase, user, organisation, membership } = await requireAppContext();
+  const canManage = input.module === "risk"
+    ? workspaceAccess(membership.role).section("risks").canManage
+    : input.module === "asset"
+      ? workspaceAccess(membership.role).section("assets").canManage
+      : workspaceAccess(membership.role).section("soa").canManage;
+  if (!canManage) {
+    throw new Error("You do not have permission to manage imports.");
+  }
   if (!MODULES.has(input.module)) return emptyResult(input.commit);
   // Fix 1: analyseImportAction only ever hands back MAX_IMPORT_ROWS rows, so a legitimate client never
   // exceeds the ceiling — but this action trusts its input directly, so a caller could otherwise post an
@@ -105,22 +205,51 @@ export async function runImportAction(input: { module: ImportModule; headers: st
   if (rows.length < input.rows.length) notes.push(`Import is limited to ${MAX_IMPORT_ROWS} rows per file; ${input.rows.length} rows were provided.`);
   let imported = 0, updated = 0, skipped = 0;
   results.forEach((r, i) => { if (!r.ok) rowErrors.push({ row: i + 1, errors: r.errors }); });
-  const valid = results.filter((r) => r.ok).length;
+  const assetOwners = new Map<number, AssetOwnerResolution>();
+  if (input.module === "asset") {
+    const resolveAssetOwner = await assetOwnerResolver(supabase, organisation.id);
+    results.forEach((r, index) => {
+      if (!r.ok) return;
+      const resolution = resolveAssetOwner((r.values as Record<string, string | number | boolean | null>).ownerName as string | null);
+      assetOwners.set(index, resolution);
+      if (resolution.error) rowErrors.push({ row: index + 1, errors: [resolution.error] });
+    });
+  }
+  const valid = results.filter((r, index) => r.ok && !assetOwners.get(index)?.error).length;
   const result: ImportRunResult = { committed: input.commit, total: results.length, valid, invalid: results.length - valid, imported: 0, updated: 0, skipped: 0, rowErrors, notes };
   if (!input.commit) {
     if (input.module === "soa") {
       // Fix 4: preview the real control_code match against the selected register instead of assuming every valid row updates.
       const { registerId, byCode } = await loadSoaRegister(supabase, input.registerId, organisation.id);
       if (!registerId) { notes.push("No SoA register found to update."); return result; }
-      let previewUpdated = 0, previewSkipped = 0;
+      const resolveMember = await memberResolver(supabase, organisation.id);
+      const changes: SoaImportChange[] = [];
+      let previewSkipped = 0;
       for (const r of results) {
         if (!r.ok) continue;
         const v = r.values as Record<string, string | number | boolean | null>;
-        if (byCode.has(String(v.controlCode).toLowerCase())) previewUpdated++;
-        else { previewSkipped++; notes.push(`Control ${v.controlCode} is not in this register — skipped.`); }
+        const item = byCode.get(String(v.controlCode).toLowerCase());
+        if (!item) { previewSkipped++; notes.push(`Control ${v.controlCode} is not in this register — skipped.`); continue; }
+        const parseResult = soaItemReviewSchema.safeParse({ itemId: item.id, status: v.status, applicable: v.applicable, justification: v.justification, evidence: (v.comments as string) ?? "" });
+        if (!parseResult.success) { previewSkipped++; notes.push(`Control ${v.controlCode}: ${zodMessage(parseResult.error)}`); continue; }
+        const parsed = parseResult.data;
+        changes.push({
+          itemId: parsed.itemId,
+          expectedRevision: item.decisionRevision,
+          applicable: parsed.applicable,
+          status: parsed.status,
+          justification: parsed.justification,
+          evidence: parsed.evidence,
+          ownerId: resolveMember(v.ownerName as string | null),
+        });
       }
-      result.updated = previewUpdated;
+      result.updated = changes.length;
       result.skipped = previewSkipped;
+      result.soaPreview = {
+        registerId,
+        changes,
+        identity: soaPreviewIdentity({ ...input, rows }, registerId, changes),
+      };
       return result;
     }
     result.imported = valid;
@@ -130,7 +259,7 @@ export async function runImportAction(input: { module: ImportModule; headers: st
   if (input.module === "risk") {
     const resolveCategory = await categoryResolver(supabase, "risk_categories", organisation.id);
     const resolveMember = await memberResolver(supabase, organisation.id);
-    const { count } = await supabase.from("risks").select("id", { count: "exact", head: true });
+    const { count } = await supabase.from("risks").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id);
     let n = count ?? 0;
     for (const r of results) {
       if (!r.ok) continue;
@@ -153,40 +282,102 @@ export async function runImportAction(input: { module: ImportModule; headers: st
     revalidatePath("/app/risks");
   } else if (input.module === "asset") {
     const resolveCategory = await categoryResolver(supabase, "asset_categories", organisation.id);
-    const resolveMember = await memberResolver(supabase, organisation.id);
-    const { count } = await supabase.from("assets").select("id", { count: "exact", head: true });
-    let n = count ?? 0;
-    for (const r of results) {
+    const existing = await assetImportLookup(supabase, "assets", organisation.id);
+    const occupied = new Set((existing ?? []).map((asset) => String(asset.reference)));
+    for (const [index, row] of results.entries()) {
+      if (row.ok && !assetOwners.get(index)?.error && row.values.reference) occupied.add(String(row.values.reference));
+    }
+    let nextReference = 1;
+    for (const [index, r] of results.entries()) {
       if (!r.ok) continue;
       const v = r.values as Record<string, string | number | boolean | null>;
-      const reference = (v.reference as string) || `AST-${String(++n).padStart(3, "0")}`;
+      let reference = (v.reference as string) || "";
+      const owner = assetOwners.get(index);
+      if (owner?.error) { skipped++; notes.push(`Row ${reference || index + 1}: ${owner.error}`); continue; }
+      if (!reference) {
+        if (!existing) { skipped++; notes.push(`Row ${index + 1}: Could not read the complete asset reference list; this asset was not imported. Try again or supply an explicit reference.`); continue; }
+        do { reference = `AST-${String(nextReference++).padStart(3, "0")}`; } while (occupied.has(reference));
+        occupied.add(reference);
+      }
+      const categoryId = v.categoryName ? await resolveCategory(String(v.categoryName)) : null;
+      if (v.categoryName && !categoryId) { skipped++; notes.push(`Row ${reference}: Could not resolve the requested category; this asset was not imported. Try again after checking the category.`); continue; }
       const parseResult = assetInputSchema.safeParse({
         organisationId: organisation.id, reference, description: String(v.description), ownerLocation: (v.ownerLocation as string) ?? "",
-        ownerId: resolveMember(v.ownerLocation as string | null) ?? "", classification: v.classification, valueCriticality: v.valueCriticality,
-        categoryId: (v.categoryName ? await resolveCategory(String(v.categoryName)) : null) ?? "", securityControls: (v.securityControls as string) ?? "",
+        ownerId: owner?.ownerId ?? "", classification: v.classification, valueCriticality: v.valueCriticality,
+        categoryId: categoryId ?? "", securityControls: (v.securityControls as string) ?? "",
         lifespan: (v.lifespan as string) ?? "", lastUpdated: (v.lastUpdated as string) ?? "", remarks: (v.remarks as string) ?? "",
       });
       if (!parseResult.success) { skipped++; notes.push(`Row ${reference}: ${zodMessage(parseResult.error)}`); continue; }
       const parsed = parseResult.data;
       const { error } = await supabase.from("assets").insert({ organisation_id: organisation.id, reference: parsed.reference, description: parsed.description, owner_location: parsed.ownerLocation, owner_id: parsed.ownerId, classification: parsed.classification, value_criticality: parsed.valueCriticality, category_id: parsed.categoryId, security_controls: parsed.securityControls, lifespan: parsed.lifespan, last_updated: parsed.lastUpdated, remarks: parsed.remarks, created_by: user.id });
-      if (error) { skipped++; notes.push(`Row ${reference}: ${error.message}`); } else imported++;
+      if (error) {
+        skipped++;
+        notes.push(`Row ${reference}: ${error.code === "23505"
+          ? "This reference already exists; this asset was not imported. Check the inventory and use a different reference."
+          : "Could not save this asset; it was not imported. Check its category and owner, then try again."}`);
+      } else imported++;
     }
     revalidatePath("/app/assets");
-  } else { // soa — UPDATE matched control_code rows in the selected register
+  } else { // soa — apply the exact previewed revisions in one guarded command
     const { registerId, byCode } = await loadSoaRegister(supabase, input.registerId, organisation.id);
     if (!registerId) { notes.push("No SoA register found to update."); return result; }
     const resolveMember = await memberResolver(supabase, organisation.id);
+    const previewChanges = input.soaPreview?.changes ?? [];
+    const expectedRevisionByItem = new Map(previewChanges.map((change) => [change.itemId, change.expectedRevision]));
+    const changes: SoaImportChange[] = [];
     for (const r of results) {
       if (!r.ok) continue;
       const v = r.values as Record<string, string | number | boolean | null>;
-      const itemId = byCode.get(String(v.controlCode).toLowerCase());
-      if (!itemId) { skipped++; notes.push(`Control ${v.controlCode} is not in this register — skipped.`); continue; }
-      const parseResult = soaItemReviewSchema.safeParse({ itemId, status: v.status, applicable: v.applicable, justification: v.justification, evidence: (v.comments as string) ?? "" });
+      const item = byCode.get(String(v.controlCode).toLowerCase());
+      if (!item) { skipped++; notes.push(`Control ${v.controlCode} is not in this register — skipped.`); continue; }
+      const parseResult = soaItemReviewSchema.safeParse({ itemId: item.id, status: v.status, applicable: v.applicable, justification: v.justification, evidence: (v.comments as string) ?? "" });
       if (!parseResult.success) { skipped++; notes.push(`Control ${v.controlCode}: ${zodMessage(parseResult.error)}`); continue; }
       const parsed = parseResult.data;
-      const { error } = await supabase.from("soa_items").update({ status: parsed.status, applicable: parsed.applicable, justification: parsed.justification, evidence: parsed.evidence, owner_id: resolveMember(v.ownerName as string | null) }).eq("id", parsed.itemId);
-      if (error) { skipped++; notes.push(`Control ${v.controlCode}: ${error.message}`); } else updated++;
+      const expectedRevision = expectedRevisionByItem.get(parsed.itemId);
+      if (expectedRevision === undefined) { skipped++; continue; }
+      changes.push({
+        itemId: parsed.itemId,
+        expectedRevision,
+        applicable: parsed.applicable,
+        status: parsed.status,
+        justification: parsed.justification,
+        evidence: parsed.evidence,
+        ownerId: resolveMember(v.ownerName as string | null),
+      });
     }
+    const previewMatches = input.soaPreview?.registerId === registerId
+      && input.soaPreview.identity === soaPreviewIdentity({ ...input, rows }, registerId, changes)
+      && JSON.stringify(input.soaPreview.changes) === JSON.stringify(changes);
+    if (!previewMatches || changes.length === 0) {
+      return {
+        ...result,
+        skipped,
+        requiresFreshPreview: true,
+        notes: [...notes, "The selected register, file, mapping, or validated rows changed after preview. No controls were updated; preview the file again before confirming."],
+      };
+    }
+    const { data, error } = await supabase.rpc("update_soa_decisions_guarded", {
+      target_register_id: registerId,
+      changes,
+    });
+    if (error) {
+      const stale = error.code === "PT409" && error.message === "control_decision_stale" && error.details === "revision_mismatch";
+      return {
+        ...result,
+        requiresFreshPreview: true,
+        notes: [...notes, stale
+          ? "A control decision changed after this preview. No controls were updated; preview the file again before confirming."
+          : "The control decisions could not be applied. No controls were updated; refresh access and preview the file again."],
+      };
+    }
+    if (!Array.isArray(data) || data.length !== changes.length) {
+      return {
+        ...result,
+        requiresFreshPreview: true,
+        notes: [...notes, "The control update did not return a complete result. Preview the file again before confirming."],
+      };
+    }
+    updated = data.length;
     revalidatePath("/app/soa");
   }
   return { ...result, imported, updated, skipped, notes };

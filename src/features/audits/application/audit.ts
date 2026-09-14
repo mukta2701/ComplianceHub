@@ -12,6 +12,14 @@ export const auditInputSchema = z.object({
   plannedStart: optionalDate,
   plannedEnd: optionalDate,
   framework: z.string().trim().min(1).max(120).default("ISO 27001:2022"),
+}).superRefine((value, context) => {
+  if (value.plannedStart && value.plannedEnd && value.plannedEnd < value.plannedStart) {
+    context.addIssue({
+      code: "custom",
+      path: ["plannedEnd"],
+      message: "Planned end must be on or after planned start",
+    });
+  }
 });
 export type AuditInput = z.infer<typeof auditInputSchema>;
 
@@ -39,5 +47,13 @@ export const findingInputSchema = z.object({
   ownerId: optionalUuid,
   dueOn: optionalDate,
   spawnTask: z.union([z.literal("on"), z.literal("")]).optional().transform((v) => v === "on"),
+}).superRefine((value, context) => {
+  if (value.spawnTask && !value.correctiveAction.trim()) {
+    context.addIssue({
+      code: "custom",
+      path: ["correctiveAction"],
+      message: "Corrective action is required when raising a task",
+    });
+  }
 });
 export type FindingInput = z.infer<typeof findingInputSchema>;

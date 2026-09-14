@@ -36,6 +36,8 @@ policies are reviewed.
 | `auditor_access_tokens` | R/W | — | Bearer-token lifecycle is operator-only. |
 | `audits` | R/W | R | Member receives the curated audit register. |
 | `control_crosswalks` | R/W | R | Organisation-authored mapping notes are read-only for Members. |
+| `baseline_progress` | R | — | Coordinator-only resumable objective and assessment selection. No direct writes; `save_baseline_progress` checks current operator membership, request identity and expected revision. Immediate draft retries replay; an earlier draft retry after a newer save rejects stale. |
+| `baseline_snapshots` | R | R | Immutable dated source copies; coordinator saves through `save_baseline_progress`. Snapshot request replay returns the original record without changing current progress. `/app/baseline` exposes preserved details to Members, with no editing controls or additional live-source route access. This does not publish or replace `leadership_report_snapshots`. |
 | `evidence` | R/W | R | Member can read metadata but cannot add/supersede evidence. |
 | `evidence_links` | R/W | R | Member cannot change evidence/control relationships. |
 | `evidence_sources` | R/W | — | Provider configuration and tokens are operator-only. |
@@ -59,6 +61,7 @@ policies are reviewed.
 | `soa_items` | R/W | R | Member receives read-only Statement of Applicability items. |
 | `soa_registers` | R/W | R | Draft/successor creation is operator-only. |
 | `soa_snapshots` | R/W* | R | Created by `finalise_soa`; finalised snapshots remain immutable. |
+| `task_contributions` | R | R | Immutable note payload and final review; no direct writes. Current assignee submits via guarded RPC; independent coordinator reviews exact version. Old assignment history remains readable but cannot be reviewed. |
 | `task_tickets` | R/W | R | External ticket state is read-only for Members. |
 | `tasks` | R/C/U | R | Member cannot create, complete, or revise tasks. |
 | `trust_center_settings` | R/W | — | Publishing configuration remains operator-only. |
@@ -101,14 +104,17 @@ depth for security-invoker functions.
 | `create_policy_feedback(uuid,text,text)` | Any current member on an approved policy | Derives the organisation, policy version, author, and time and creates the thread and first immutable comment atomically. |
 | `complete_recurring_task(uuid)` | Operator | Checks the operator before locking/completing and creating the successor. |
 | `create_evidence_record(jsonb)` | Operator | Derives the target organisation from the validated payload and checks operator before insert/supersession. |
-| `create_soa_draft(uuid,text)` | Operator | Target assessment must belong to an operated organisation. |
-| `create_soa_successor(uuid,text)` | Operator | Source snapshot must belong to an operated organisation. |
+| `create_or_reuse_soa_review(uuid)` | Operator | Locks and rechecks the source assessment, reuses an existing active review when present, or creates one complete 93-control working register atomically. |
+| `create_or_reuse_soa_successor(uuid)` | Operator | Locks and rechecks a finalised source register, reuses an existing successor when present, or creates a complete editable successor while removing unavailable owner assignments. |
 | `finalise_soa(uuid)` | Operator | Register must belong to an operated organisation; existing completeness/concurrency checks remain. |
 | `notify_policy_reaccept(uuid,text)` | Operator | Policy must belong to an operated organisation. |
 | `publish_leadership_report(uuid,jsonb)` | Operator | Derives organisation name, publisher, and time; rejects any payload outside the exact bounded `ReadinessReport` shape and inserts an immutable snapshot. |
 | `reply_policy_feedback(uuid,text)` | Any current member on an approved policy | Locks the open thread and policy lifecycle, derives author/time, and appends an immutable comment. |
 | `save_assessment_response(uuid,uuid,assessment_answer,text,bigint)` | Operator | Assessment must belong to an operated organisation; revision conflict protection remains. |
+| `submit_task_contribution(uuid,uuid,bigint,text,uuid)` | Current task assignee | Locks live membership and open task; checks database-owned assignment revision, tenant, bounded note and actor/request idempotency. One pending submission per current assignment; historical pending notes remain visibly obsolete after reassignment. |
+| `review_task_contribution(uuid,uuid,text,text,uuid)` | Independent Operator | Locks current memberships and task; rechecks assignment and open state, rejects self-review, binds retry to exact submission/decision/rationale, and atomically creates linked note evidence on acceptance. Does not change task or finding status. |
 | `set_policy_feedback_status(uuid,boolean)` | Operator | Locks the thread and atomically resolves or reopens it with trusted resolver metadata. |
+| `update_soa_decisions_guarded(uuid,jsonb)` | Operator | Locks the active register and each requested decision, rejects stale revisions and invalid owners or state combinations, and saves the whole batch or nothing. Direct authenticated edits to `soa_items` are revoked. |
 
 ### Lifecycle/self-service exceptions
 
@@ -135,3 +141,16 @@ the lifecycle assertions in `047`.
 - `increment_rate_limit(text,integer)` is executable only by `service_role`.
 - Trigger functions (`capture_audit_event`, immutable guards, seed triggers) are
   internal mutation mechanisms, not authenticated application APIs.
+
+## Assigned contribution portal (9 September 2026)
+
+Members can open the Tasks list and UUID task details; the Assigned tasks link
+filters to their current work. Only the current assignee can submit notes through
+the guarded RPC. Member task creation/edit routes, task exports and the Evidence
+vault route remain unavailable. Accepted note and coordinator review history are
+visible on the task; Members see evidence titles as text rather than vault links.
+Operator acceptance creates evidence without completing a task or verifying a
+finding. Reassignment invalidates prior pending submissions without rewriting
+history, and assignment revisions also change when membership removal clears an
+owner. Reviewed note evidence has no mutable member owner reference, so accepted
+history does not prevent ordinary member offboarding.

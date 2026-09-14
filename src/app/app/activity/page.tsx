@@ -2,10 +2,15 @@ import { requireAppContext } from "@/lib/app-context";
 import { Card, PageIntro, Pill } from "@/components/ui";
 import { SubTabs } from "@/components/sub-tabs";
 import { one } from "@/lib/supabase/one";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
+
+const auditNavigation = workspaceAccess("owner").section("audits").navigation!;
+const activityMetadata = workspaceAccess("owner").section("audit-activity");
+const auditTabs = [{ href: auditNavigation.href, label: auditNavigation.label }, { href: activityMetadata.href, label: activityMetadata.label }];
 
 export default async function ActivityPage() {
-  const { supabase } = await requireAppContext();
-  const { data } = await supabase.from("audit_events").select("id,action,entity_type,occurred_at,profiles(display_name)").order("occurred_at", { ascending: false }).limit(300);
+  const { supabase, organisation } = await requireAppContext();
+  const { data } = await supabase.from("audit_events").select("id,action,entity_type,occurred_at,profiles(display_name)").eq("organisation_id", organisation.id).order("occurred_at", { ascending: false }).limit(300);
 
   // Collapse consecutive same-second, same-actor, same-action events (e.g.
   // generating a 93-control SoA in one go) into a single counted row, so the
@@ -22,7 +27,7 @@ export default async function ActivityPage() {
 
   return <>
     <PageIntro eyebrow="AUDIT" title="Audit activity" body="Append-only record of important tenant changes." />
-    <SubTabs tabs={[{ href: "/app/audits", label: "Internal audits" }, { href: "/app/activity", label: "Audit trail" }]} />
+    <SubTabs tabs={auditTabs} />
     <Card>{groups.length
       ? groups.map((g) => <div style={{ padding: "14px 18px", borderTop: "1px solid #edf0f4", fontSize: "13px", display: "flex", alignItems: "center", gap: "8px" }} key={g.id}>
           <b style={{ textTransform: "capitalize" }}>{g.action}</b>

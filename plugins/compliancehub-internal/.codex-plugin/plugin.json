@@ -1,0 +1,22 @@
+{
+  "name": "compliancehub-internal",
+  "version": "0.4.0",
+  "description": "Inspect ComplianceHub status and prepare a verified Slack-ready brief for preview.",
+  "author": {
+    "name": "ComplianceHub"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "ComplianceHub Internal",
+    "shortDescription": "Verified compliance status and Slack-ready brief previews",
+    "longDescription": "Securely inspect internal ComplianceHub readiness, risks, evidence health, monitoring findings, and leadership reports. Prepare a fact-checked, Slack-ready daily brief for preview; Phase 3 is recommendation-only and has no delivery capability.",
+    "developerName": "ComplianceHub",
+    "category": "Productivity",
+    "capabilities": ["Read"],
+    "defaultPrompt": [
+      "Prepare today's verified compliance brief for preview.",
+      "Preview today's Slack-ready compliance brief and the items needing attention."
+    ]
+  },
+  "apps": "./.app.json"
+}

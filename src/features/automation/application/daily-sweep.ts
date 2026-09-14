@@ -75,8 +75,8 @@ export async function runDailySweep(deps: SweepDependencies): Promise<SweepSumma
   }
 
   // Scheduled policy reviews. A task is raised once per due policy and deduped by
-  // the open-task existence check plus the (organisation_id, policy_id, source)
-  // unique key, so it never re-raises day after day. The owner (or, if the policy
+  // the open-task check plus its preserved scheduled-cycle date. A later review
+  // date can raise new work after the prior task closes; same-cycle retries cannot. The owner (or, if the policy
   // is unowned, the org owners) is reminded each sweep, deduped per day by the
   // notifications day-scoped unique key.
   const policies = await deps.listReviewablePolicies();

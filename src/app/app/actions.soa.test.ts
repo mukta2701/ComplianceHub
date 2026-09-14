@@ -2,18 +2,21 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const hoisted = vi.hoisted(() => ({
   ctx: null as unknown,
+  enforceRateLimit: vi.fn(() => Promise.resolve()),
   redirect: vi.fn((url: string) => {
     throw new Error(`REDIRECT:${url}`);
   }),
 }));
 
 vi.mock("@/lib/app-context", () => ({ requireAppContext: () => Promise.resolve(hoisted.ctx) }));
-vi.mock("@/lib/security/rate-limit", () => ({ enforceRateLimit: () => Promise.resolve() }));
+vi.mock("@/lib/security/rate-limit", () => ({ enforceRateLimit: hoisted.enforceRateLimit }));
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 vi.mock("next/navigation", () => ({ redirect: hoisted.redirect }));
 
 type Row = Record<string, unknown>;
 type Store = {
+  assessment_sessions: Row[];
+  memberships: Row[];
   soa_registers: Row[];
   soa_items: Row[];
   requirement_control_mappings: Row[];
@@ -88,7 +91,7 @@ class Builder implements PromiseLike<Result> {
 
 function fakeSupabase(store: Store) {
   const queries: QueryLog[] = [];
-  const rpc = vi.fn(async () => ({ data: "snapshot-1", error: null }));
+  const rpc = vi.fn<() => Promise<Result>>(async () => ({ data: "snapshot-1", error: null }));
   return {
     client: {
       from: (table: keyof Store) => new Builder(table, store[table], queries),
@@ -103,6 +106,7 @@ const ORG_ID = "00000000-0000-4000-8000-000000000001";
 const OTHER_ORG_ID = "00000000-0000-4000-8000-000000000002";
 const USER_ID = "00000000-0000-4000-8000-000000000003";
 const REGISTER_ID = "00000000-0000-4000-8000-000000000004";
+const ASSESSMENT_ID = "00000000-0000-4000-8000-000000000009";
 const ITEM_ID = "00000000-0000-4000-8000-000000000005";
 const REQUIREMENT_ID = "00000000-0000-4000-8000-000000000006";
 const CONTROL_ID = "00000000-0000-4000-8000-000000000007";
@@ -114,9 +118,17 @@ function formData() {
   return data;
 }
 
+function assessmentFormData(assessmentId = ASSESSMENT_ID) {
+  const data = new FormData();
+  data.set("assessmentId", assessmentId);
+  return data;
+}
+
 function reviewFormData(itemId = ITEM_ID) {
   const data = new FormData();
+  data.set("registerId", REGISTER_ID);
   data.set("itemId", itemId);
+  data.set("expectedRevision", "0");
   data.set("status", "in_progress");
   data.set("applicable", "true");
   data.set("ownerId", OWNER_ID);
@@ -125,16 +137,19 @@ function reviewFormData(itemId = ITEM_ID) {
   return data;
 }
 
-function context(client: ReturnType<typeof fakeSupabase>["client"]) {
+function context(client: ReturnType<typeof fakeSupabase>["client"], role = "owner") {
   return {
     supabase: client,
     user: { id: USER_ID },
     organisation: { id: ORG_ID, name: "Tenant A" },
+    membership: { role },
   };
 }
 
 function reviewedStore(): Store {
   return {
+    assessment_sessions: [{ id: ASSESSMENT_ID, organisation_id: ORG_ID }],
+    memberships: [{ organisation_id: ORG_ID, user_id: OWNER_ID }],
     soa_registers: [{ id: REGISTER_ID, organisation_id: ORG_ID }],
     soa_items: [{
       id: ITEM_ID,
@@ -145,7 +160,12 @@ function reviewedStore(): Store {
       status: "operational",
       justification: "Reviewed rationale",
       owner_id: OWNER_ID,
-    }],
+      decision_revision: 0,
+    }, ...Array.from({ length: 92 }, (_, i) => ({
+      id: `excluded-${i}`, organisation_id: ORG_ID, soa_register_id: REGISTER_ID,
+      control_id: `requirement-${i}`, applicable: false, status: "not_applicable",
+      justification: "Outside the recorded scope", owner_id: null, decision_revision: 0,
+    }))],
     requirement_control_mappings: [{ requirement_id: REQUIREMENT_ID, control_id: CONTROL_ID }],
     evidence_links: [{
       organisation_id: ORG_ID,
@@ -155,9 +175,96 @@ function reviewedStore(): Store {
   };
 }
 
+describe("createSoaAction active workspace scope", () => {
+  it("opens the workspace returned by the atomic review RPC without direct inserts", async () => {
+    const fake = fakeSupabase(reviewedStore());
+    fake.rpc.mockResolvedValue({ data: REGISTER_ID, error: null });
+    hoisted.ctx = context(fake.client);
+    const { createSoaAction } = await import("./actions");
+    await expect(createSoaAction(assessmentFormData())).rejects.toThrow(`REDIRECT:/app/soa/${REGISTER_ID}`);
+    expect(fake.rpc).toHaveBeenCalledExactlyOnceWith("create_or_reuse_soa_review", { target_assessment_session_id: ASSESSMENT_ID });
+  });
+
+  it("does not redirect when the RPC fails or returns no workspace", async () => {
+    const fake = fakeSupabase(reviewedStore());
+    fake.rpc.mockResolvedValue({ data: null, error: null });
+    hoisted.ctx = context(fake.client);
+    const { createSoaAction } = await import("./actions");
+    await expect(createSoaAction(assessmentFormData())).rejects.toThrow("Could not start control review");
+  });
+
+  it("rejects an assessment id belonging to another organisation before calling the draft RPC", async () => {
+    const store = reviewedStore();
+    store.assessment_sessions[0] = { id: ASSESSMENT_ID, organisation_id: OTHER_ORG_ID };
+    const fake = fakeSupabase(store);
+    hoisted.ctx = context(fake.client);
+    const { createSoaAction } = await import("./actions");
+
+    await expect(createSoaAction(assessmentFormData())).rejects.toThrow("Assessment not found in the active workspace");
+    expect(fake.rpc).not.toHaveBeenCalled();
+    expect(fake.queries).toContainEqual({
+      table: "assessment_sessions",
+      operation: "eq",
+      column: "organisation_id",
+      value: ORG_ID,
+    });
+  });
+});
+
+describe("createSoaSuccessorAction", () => {
+  it("uses the source register contract and opens the returned active workspace", async () => {
+    const fake = fakeSupabase(reviewedStore());
+    fake.rpc.mockResolvedValue({ data: ASSESSMENT_ID, error: null });
+    hoisted.ctx = context(fake.client);
+    const { createSoaSuccessorAction } = await import("./actions");
+    await expect(createSoaSuccessorAction(formData())).rejects.toThrow(`REDIRECT:/app/soa/${ASSESSMENT_ID}`);
+    expect(fake.rpc).toHaveBeenCalledExactlyOnceWith("create_or_reuse_soa_successor", { source_register_id: REGISTER_ID });
+  });
+
+  it("rejects a source register from another active workspace before invoking the RPC", async () => {
+    const store = reviewedStore();
+    store.soa_registers[0].organisation_id = OTHER_ORG_ID;
+    const fake = fakeSupabase(store);
+    hoisted.ctx = context(fake.client);
+    const { createSoaSuccessorAction } = await import("./actions");
+    await expect(createSoaSuccessorAction(formData())).rejects.toThrow("Finalised statement not found in the active workspace");
+    expect(fake.rpc).not.toHaveBeenCalled();
+  });
+
+  it.each([{ data: null, error: null }, { data: null, error: { message: "private database detail" } }])("handles an unavailable successor without a success redirect", async (result) => {
+    const fake = fakeSupabase(reviewedStore());
+    fake.rpc.mockResolvedValue(result);
+    hoisted.ctx = context(fake.client);
+    const { createSoaSuccessorAction } = await import("./actions");
+    await expect(createSoaSuccessorAction(formData())).rejects.toThrow("Could not create next control review version");
+  });
+});
+
 describe("finaliseSoaAction preflight", () => {
   beforeEach(() => {
     hoisted.redirect.mockClear();
+    hoisted.enforceRateLimit.mockClear();
+  });
+
+  it("rejects Members before rate limiting or reading finalisation data", async () => {
+    const fake = fakeSupabase(reviewedStore());
+    hoisted.ctx = context(fake.client, "member");
+    const { finaliseSoaAction } = await import("./actions");
+
+    await expect(finaliseSoaAction(formData())).rejects.toThrow("Only workspace Owners and Admins can finalise a Statement of Applicability");
+    expect(hoisted.enforceRateLimit).not.toHaveBeenCalled();
+    expect(fake.queries).toEqual([]);
+    expect(fake.rpc).not.toHaveBeenCalled();
+  });
+
+  it("reports an incomplete catalogue before calling the finalisation RPC", async () => {
+    const store = reviewedStore();
+    store.soa_items = store.soa_items.slice(0, 1);
+    const fake = fakeSupabase(store);
+    hoisted.ctx = context(fake.client);
+    const { finaliseSoaAction } = await import("./actions");
+    await expect(finaliseSoaAction(formData())).rejects.toThrow("the complete 93-control catalogue is required");
+    expect(fake.rpc).not.toHaveBeenCalled();
   });
 
   it("rejects review blockers before calling the finalisation RPC", async () => {
@@ -208,6 +315,15 @@ describe("finaliseSoaAction preflight", () => {
     expect(fake.rpc).toHaveBeenCalledWith("finalise_soa", { target_register_id: REGISTER_ID });
   });
 
+  it("does not expose internal RPC details when finalisation fails", async () => {
+    const fake = fakeSupabase(reviewedStore());
+    fake.rpc.mockResolvedValue({ data: null, error: { message: "internal finalise policy detail" } });
+    hoisted.ctx = context(fake.client);
+    const { finaliseSoaAction } = await import("./actions");
+
+    await expect(finaliseSoaAction(formData())).rejects.toThrow("Could not finalise the SoA");
+  });
+
   it("rejects a requirement that has both current and expired evidence", async () => {
     const store = reviewedStore();
     store.evidence_links = [
@@ -224,40 +340,74 @@ describe("finaliseSoaAction preflight", () => {
 });
 
 describe("reviewSoaItemAction tenant scope", () => {
-  it("updates only an item in the active organisation and requests the changed id", async () => {
+  it("saves through the guarded command and returns the advanced revision", async () => {
+    const fake = fakeSupabase(reviewedStore());
+    fake.rpc.mockResolvedValue({ data: [{ item_id: ITEM_ID, decision_revision: 1 }], error: null });
+    hoisted.ctx = context(fake.client);
+    const { reviewSoaItemAction } = await import("./actions");
+
+    await expect(reviewSoaItemAction(reviewFormData())).resolves.toEqual({ status: "saved", revision: 1 });
+    expect(fake.rpc).toHaveBeenCalledExactlyOnceWith("update_soa_decisions_guarded", {
+      target_register_id: REGISTER_ID,
+      changes: [{
+        itemId: ITEM_ID,
+        expectedRevision: 0,
+        applicable: true,
+        status: "in_progress",
+        justification: "Reviewed rationale",
+        evidence: "Evidence reference",
+        ownerId: OWNER_ID,
+      }],
+    });
+  });
+
+  it.each([
+    [{ code: "PT409", message: "control_decision_stale", details: "revision_mismatch" }, { status: "stale", message: "This control changed after you opened it. Refresh and reconcile your draft before saving again." }],
+    [{ code: "P0002", message: "control_decision_missing", details: "item_unavailable" }, { status: "missing", message: "This control is no longer available. Refresh the review before saving again." }],
+    [{ code: "42501", message: "control_decision_forbidden", details: "register_unavailable" }, { status: "forbidden", message: "You cannot update this control review. Refresh to check your current access and review state." }],
+    [{ code: "22023", message: "control_decision_invalid", details: "owner_unavailable" }, { status: "forbidden", message: "This decision is no longer valid. Refresh and check the control owner before saving again." }],
+  ])("maps guarded database outcomes to recoverable results without leaking details", async (error, expected) => {
+    const fake = fakeSupabase(reviewedStore());
+    fake.rpc.mockResolvedValue({ data: null, error });
+    hoisted.ctx = context(fake.client);
+    const { reviewSoaItemAction } = await import("./actions");
+
+    await expect(reviewSoaItemAction(reviewFormData())).resolves.toEqual(expected);
+  });
+
+  it("does not turn an empty guarded response into a successful save", async () => {
+    const fake = fakeSupabase(reviewedStore());
+    fake.rpc.mockResolvedValue({ data: [], error: null });
+    hoisted.ctx = context(fake.client);
+    const { reviewSoaItemAction } = await import("./actions");
+
+    await expect(reviewSoaItemAction(reviewFormData())).resolves.toEqual({
+      status: "missing",
+      message: "This control is no longer available. Refresh the review before saving again.",
+    });
+  });
+
+  it("does not let a dual-membership operator mutate a sibling register while another workspace is active", async () => {
     const store = reviewedStore();
+    store.soa_registers[0] = { id: REGISTER_ID, organisation_id: OTHER_ORG_ID };
+    store.memberships.push(
+      { organisation_id: ORG_ID, user_id: USER_ID, role: "owner" },
+      { organisation_id: OTHER_ORG_ID, user_id: USER_ID, role: "owner" },
+    );
     const fake = fakeSupabase(store);
     hoisted.ctx = context(fake.client);
     const { reviewSoaItemAction } = await import("./actions");
 
-    await expect(reviewSoaItemAction(reviewFormData())).resolves.toBeUndefined();
-
+    await expect(reviewSoaItemAction(reviewFormData())).resolves.toEqual({
+      status: "forbidden",
+      message: "You cannot update this control review. Refresh to check your current access and review state.",
+    });
+    expect(fake.rpc).not.toHaveBeenCalled();
     expect(fake.queries).toContainEqual({
-      table: "soa_items",
+      table: "soa_registers",
       operation: "eq",
       column: "organisation_id",
       value: ORG_ID,
     });
-    expect(store.soa_items[0]).toMatchObject({ status: "in_progress", evidence: "Evidence reference" });
-  });
-
-  it("rejects an item id belonging only to another membership organisation", async () => {
-    const store = reviewedStore();
-    store.soa_items[0] = { ...store.soa_items[0], organisation_id: OTHER_ORG_ID };
-    const fake = fakeSupabase(store);
-    hoisted.ctx = context(fake.client);
-    const { reviewSoaItemAction } = await import("./actions");
-
-    await expect(reviewSoaItemAction(reviewFormData())).rejects.toThrow("SoA item not found in the active workspace");
-    expect(store.soa_items[0].status).toBe("operational");
-  });
-
-  it("throws when the scoped update changes zero rows", async () => {
-    const fake = fakeSupabase(reviewedStore());
-    hoisted.ctx = context(fake.client);
-    const { reviewSoaItemAction } = await import("./actions");
-
-    await expect(reviewSoaItemAction(reviewFormData("00000000-0000-4000-8000-000000000099")))
-      .rejects.toThrow("SoA item not found in the active workspace");
   });
 });

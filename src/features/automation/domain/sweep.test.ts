@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { planEvidenceTransitions, planExpiryTasks, planOverdueTaskAlerts, planPolicyReviewTasks } from "./sweep";
 
 const evidence = (over: Partial<Parameters<typeof planEvidenceTransitions>[0][number]>) => ({
-  id: "e1", organisationId: "org1", title: "Backup report", ownerId: "u1", status: "current" as const, validUntil: "2026-07-20", ...over,
+  id: "e1", organisationId: "org1", title: "Backup report", ownerId: "u1", status: "current" as const,
+  validUntil: "2026-07-20", isMachineManaged: false, ...over,
 });
 
 describe("planEvidenceTransitions", () => {
@@ -35,6 +36,12 @@ describe("planExpiryTasks", () => {
     expect(planExpiryTasks([evidence({ status: "expired", validUntil: "2026-07-01" })], [], "2026-07-02")).toEqual([
       { organisationId: "org1", evidenceId: "e1", title: "Replace stale evidence: Backup report", ownerId: "u1", dueOn: "2026-07-01" },
     ]);
+  });
+
+  it("does not create a manual replacement task for machine-managed evidence", () => {
+    expect(planExpiryTasks([
+      evidence({ status: "expiring", validUntil: "2026-07-20", isMachineManaged: true }),
+    ], [], "2026-07-02")).toEqual([]);
   });
 });
 

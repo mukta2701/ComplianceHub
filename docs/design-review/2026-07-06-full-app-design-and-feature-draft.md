@@ -154,3 +154,45 @@ These require the account owner (I cannot create accounts or enter secrets):
 5. **Go-live (user):** Part D.
 
 Each wave: build → screenshot → catalogue to backlog → Fable reviews → next wave. Every code change keeps the v2 §10 bar (RLS + pgTAP all-4-verbs on new tenant tables, domain-first tests, e2e + axe zero, en-GB, no service-role in request paths).
+
+
+## 2026-09-06 — evidence-based clarity polish of the existing app
+
+This continuation supersedes decorative readiness claims, not the historical design record.
+Audience: workspace operators and a leadership demonstration. Scope: the existing navigation
+and supported actions, with Northstar's saved fictional records; no new integration or module.
+
+Research consulted official product documentation on 6 September 2026. These describe their
+products, not ISO certification requirements or proof that ComplianceHub implements them.
+
+| Source | Documented pattern | Application decision |
+|---|---|---|
+| [Vanta Controls Page](https://help.vanta.com/en/articles/11345373-controls-page), updated 23 July 2026 | Control status reflects mapped tests/documents and is separate from an auditor assessment. | Label our existing weighted SoA score as maturity; do not call it audit readiness or live verification. |
+| [Vanta Automated Test Evidence](https://help.vanta.com/en/articles/11345529-automated-test-evidence), updated 29 June 2026 | Explain criteria, evaluated resources and supporting evidence; deeper details are available on demand. | Show a readable evidence excerpt, retain complete notes and linked records, put maintenance in a disclosure. |
+| [Drata Controls Ready](https://help.drata.com/en/articles/10723594-are-your-controls-ready-understanding-the-relationship-between-policies-evidence-and-controls), updated 12 June 2026 | Published policies, passing tests and current evidence contribute to readiness; some controls require further supporting evidence. | Keep freshness, task completion and verification separate. One generic baseline is illustrative, not adequate proof of every mapped control. |
+| [Drata Dashboard overview](https://help.drata.com/en/articles/13259515-dashboard-overview), updated 19 May 2026 | Dashboard combines program status, tasks, alerts and risk information. | Preserve the existing action queue and separate maturity, evidence and risk summaries; no invented trend chart. |
+| [Drata Test Details](https://help.drata.com/en/articles/13392374-view-and-manage-test-details-new-experience), updated 29 July 2026 | Next steps connect findings to corrective work; error states may have no findings. | Empty monitoring/notification views must not imply passing checks. Keep existing connection limitations visible. |
+
+Approaches considered: a wholesale visual rebuild would discard the familiar reference;
+cosmetic colour changes would leave misleading claims. The selected approach retains the
+existing cards, navigation, typography and application workflows while correcting hierarchy,
+status language, explanations and specific record navigation.
+
+Browser discovery covered Dashboard, Gap assessment, Risks, SoA, Evidence, Tasks, Monitoring,
+Automation, Policies, Audits, Performance, Leadership report, Trust Center, Settings and
+Notifications. No separate Research module exists in that navigation. Risks and monitoring
+are the relevant investigation workflows. Existing historical data is preserved.
+
+Observed gaps: dashboard claimed almost audit-ready from weighted maturity; report used READY;
+task explanation repeated its source; exports appeared as Export · Export; assessment copy
+referred to an original catalogue; risk scoring exposed jargon; Performance showed an empty
+creation form without context; empty Notifications implied no outstanding work. Evidence
+maintenance was more prominent than its contents. Findings and verification rules remain
+unchanged. Evidence baseline breadth, unavailable provider checks and incomplete organisation
+scope are documented limitations, not resolved by this presentation pass.
+
+Verification plan: focused rendering/access tests, production build, saved fictional connected
+journey and Member permissions, every navigation section at desktop/mobile widths, and actual
+in-app Browser review. Loading a section is not proof of every mutation or external connection.
+Research stopped after the primary sources supported the consequential design decisions;
+private Vanta/Drata tenants were not inspected and exact UI parity is not claimed.

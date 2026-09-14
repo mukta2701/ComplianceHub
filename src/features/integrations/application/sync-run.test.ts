@@ -24,9 +24,12 @@ describe("syncTickets connection enablement", () => {
         revoked_at: null, enabled: false,
       },
     }];
-    const taskTicketQuery = {
-      select: vi.fn().mockResolvedValue({ data: ticketRows, error: null }),
-    };
+    const taskTicketQuery: Record<string, unknown> = {};
+    for (const method of ["select", "order", "limit", "gt"]) {
+      taskTicketQuery[method] = vi.fn(() => taskTicketQuery);
+    }
+    taskTicketQuery.then = (resolve: (value: { data: unknown[]; error: null }) => unknown) =>
+      Promise.resolve({ data: ticketRows, error: null }).then(resolve);
     const supabase = {
       from: vi.fn((table: string) => {
         if (table === "task_tickets") return taskTicketQuery;
@@ -35,9 +38,11 @@ describe("syncTickets connection enablement", () => {
     };
 
     await expect(syncTickets(supabase as never)).resolves.toEqual({ synced: 0, failed: 0, tasksClosed: 0 });
-    expect(taskTicketQuery.select).toHaveBeenCalledWith(expect.stringContaining(
+    expect(taskTicketQuery.select as ReturnType<typeof vi.fn>).toHaveBeenCalledWith(expect.stringContaining(
       "integration_connections(config,access_token,revoked_at,enabled,connection_mode,broker_connection_id,broker_provider_config_key)",
     ));
+    expect(taskTicketQuery.order as ReturnType<typeof vi.fn>).toHaveBeenCalledWith("id", { ascending: true });
+    expect(taskTicketQuery.limit as ReturnType<typeof vi.fn>).toHaveBeenCalledWith(500);
     expect(hoisted.fetchTicket).not.toHaveBeenCalled();
   });
 
@@ -56,10 +61,14 @@ describe("syncTickets connection enablement", () => {
     const updateChain: Record<string, unknown> = {};
     updateChain.eq = vi.fn(() => updateChain);
     updateChain.then = (resolve: (value: { error: null }) => unknown) => Promise.resolve({ error: null }).then(resolve);
-    const taskTicketsTable = {
-      select: vi.fn().mockResolvedValue({ data: ticketRows, error: null }),
+    const taskTicketsTable: Record<string, unknown> = {
       update: vi.fn(() => updateChain),
     };
+    for (const method of ["select", "order", "limit", "gt"]) {
+      taskTicketsTable[method] = vi.fn(() => taskTicketsTable);
+    }
+    taskTicketsTable.then = (resolve: (value: { data: unknown[]; error: null }) => unknown) =>
+      Promise.resolve({ data: ticketRows, error: null }).then(resolve);
     const supabase = { from: vi.fn(() => taskTicketsTable) };
 
     await expect(syncTickets(supabase as never)).resolves.toEqual({ synced: 1, failed: 0, tasksClosed: 0 });

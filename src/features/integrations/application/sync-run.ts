@@ -4,16 +4,24 @@ import { isTerminalTicketStatus, isTicketSyncDue } from "../domain/mapping";
 import type { IntegrationProvider } from "../domain/provider";
 import { decryptSecret } from "@/lib/security/secrets";
 import { one } from "@/lib/supabase/one";
+import { collectIdPages } from "@/lib/supabase/paginate";
 
 export async function syncTickets(supabase: SupabaseClient): Promise<{ synced: number; failed: number; tasksClosed: number }> {
   const nowIso = new Date().toISOString();
-  const { data: tickets, error } = await supabase.from("task_tickets")
-    .select("id,organisation_id,task_id,connection_id,provider,external_id,last_synced_at,integration_connections(config,access_token,revoked_at,enabled,connection_mode,broker_connection_id,broker_provider_config_key)");
-  if (error) throw error;
+  const tickets = await collectIdPages(async (afterId, limit) => {
+    let query = supabase.from("task_tickets")
+      .select("id,organisation_id,task_id,connection_id,provider,external_id,last_synced_at,integration_connections(config,access_token,revoked_at,enabled,connection_mode,broker_connection_id,broker_provider_config_key)")
+      .order("id", { ascending: true })
+      .limit(limit);
+    if (afterId) query = query.gt("id", afterId);
+    const { data, error } = await query;
+    if (error) throw error;
+    return data ?? [];
+  });
   let synced = 0;
   let failed = 0;
   let tasksClosed = 0;
-  for (const ticket of tickets ?? []) {
+  for (const ticket of tickets) {
     if (!isTicketSyncDue({ lastSyncedAt: ticket.last_synced_at }, nowIso)) continue;
     const conn = one(ticket.integration_connections);
     if (!conn || conn.revoked_at || !conn.enabled) continue;

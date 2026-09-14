@@ -23,6 +23,9 @@ select set_config('app.session_a', (
   where organisation_id = current_setting('app.org_a')::uuid
 ), true);
 
+-- These separate historical drafts intentionally test distinct finalisation blockers.
+-- Legacy setup is privileged and rolled back; finalisation assertions remain authenticated.
+reset role;
 select set_config('app.register_pending', public.create_soa_draft(current_setting('app.session_a')::uuid, 'Pending status')::text, true);
 select set_config('app.register_owner', public.create_soa_draft(current_setting('app.session_a')::uuid, 'Missing owner')::text, true);
 select set_config('app.register_rationale', public.create_soa_draft(current_setting('app.session_a')::uuid, 'Missing rationale')::text, true);
@@ -30,6 +33,10 @@ select set_config('app.register_missing_evidence', public.create_soa_draft(curre
 select set_config('app.register_expired', public.create_soa_draft(current_setting('app.session_a')::uuid, 'Expired evidence')::text, true);
 select set_config('app.register_mixed', public.create_soa_draft(current_setting('app.session_a')::uuid, 'Mixed evidence')::text, true);
 select set_config('app.register_valid', public.create_soa_draft(current_setting('app.session_a')::uuid, 'Valid review')::text, true);
+
+-- Arrange the legacy invalid states as the test harness. Authenticated users
+-- must use update_soa_decisions_guarded and cannot update soa_items directly.
+reset role;
 
 update public.soa_items
 set applicable = false,
@@ -92,6 +99,8 @@ update public.soa_items set applicable = true, status = 'operational'
 where soa_register_id = current_setting('app.register_mixed')::uuid and position = 0;
 update public.soa_items set applicable = true, status = 'operational'
 where soa_register_id = current_setting('app.register_valid')::uuid and position = 3;
+
+set local role authenticated;
 
 select throws_ok(
   format($$ select public.finalise_soa(%L) $$, current_setting('app.register_pending')),

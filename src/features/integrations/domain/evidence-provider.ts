@@ -1,10 +1,16 @@
 // B3 continuous evidence automation — the provider abstraction (mirrors the
 // TicketProvider shape). A provider collects a stable set of evidence items from
 // an external source; the daily freshness sweep then ages them via valid_until.
-// The fake is deterministic so a collect -> re-collect (Stage 2) upserts by
-// externalRef rather than duplicating.
+// The fake is deterministic so an identical collect -> re-collect reuses its
+// exact observation rather than duplicating it.
 
 export type EvidenceProviderKind = "google_workspace" | "github" | "aws";
+
+export const EVIDENCE_PROVIDER_LABELS: Record<EvidenceProviderKind, string> = {
+  google_workspace: "Google Workspace",
+  github: "GitHub",
+  aws: "AWS",
+};
 
 export type EvidenceSourceConnection = {
   id: string;
