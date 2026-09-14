@@ -1,6 +1,6 @@
 import { hasCapability, type MembershipRole, type WorkspaceCapability } from "./access";
 
-export type WorkspaceSectionId = "assets" | "assessments" | "audit-activity" | "audits" | "baseline" | "evidence" | "frameworks" | "leadership-report" | "notifications" | "overview" | "policies" | "risks" | "scope" | "soa" | "tasks" | "trust-center";
+export type WorkspaceSectionId = "assets" | "assessments" | "audit-activity" | "audits" | "automation-setup" | "baseline" | "evidence" | "frameworks" | "leadership-report" | "notifications" | "overview" | "policies" | "risks" | "scope" | "soa" | "tasks" | "trust-center";
 
 export type WorkspaceSectionPresentation = "member" | "operator";
 
@@ -147,6 +147,18 @@ const sectionPolicies: Record<WorkspaceSectionId, WorkspaceSectionPolicy> = {
     operationDeniedMessages: {
       "auditor-access": "Only workspace operators can manage auditor access",
     },
+  },
+  "automation-setup": {
+    id: "automation-setup",
+    href: "/app/setup",
+    label: "Automation setup",
+    title: "Automation setup",
+    icon: "activity",
+    paths: [{ path: "/app/setup", requirement: "view" }],
+    viewRoles: new Set(["owner", "admin"]),
+    navigationGroups: {},
+    manageCapability: "manage_automation_setup",
+    manageDeniedMessage: "Only workspace owners can set up automation",
   },
   "audit-activity": {
     id: "audit-activity",

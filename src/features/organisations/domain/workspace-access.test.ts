@@ -861,3 +861,55 @@ describe("Tasks and member contributions workspace access", () => {
     expect(workspaceAccess("owner").sectionForPath(`/app/tasks/${taskId}/extra`)).toBeNull();
   });
 });
+
+describe("Automation setup workspace access", () => {
+  it("keeps Automation setup viewable and manageable by Owners", () => {
+    const access = workspaceAccess("owner");
+    const setup = access.section("automation-setup");
+
+    expect(setup).toMatchObject({
+      id: "automation-setup",
+      href: "/app/setup",
+      label: "Automation setup",
+      title: "Automation setup",
+      icon: "activity",
+      canView: true,
+      canManage: true,
+      navigation: null,
+      manageDeniedMessage: "Only workspace owners can set up automation",
+    });
+    expect(setup.canAccessPath("/app/setup")).toBe(true);
+    expect(() => setup.requireManage()).not.toThrow();
+  });
+
+  it("keeps Automation setup visible but read-only for Admins", () => {
+    const setup = workspaceAccess("admin").section("automation-setup");
+
+    expect(setup.canView).toBe(true);
+    expect(setup.canManage).toBe(false);
+    expect(setup.navigation).toBeNull();
+    expect(setup.canAccessPath("/app/setup")).toBe(true);
+    expect(() => setup.requireManage()).toThrow(
+      "Only workspace owners can set up automation",
+    );
+  });
+
+  it.each(["member", null] as const)("does not expose Automation setup to %s", (role) => {
+    const access = workspaceAccess(role);
+    const setup = access.section("automation-setup");
+
+    expect(setup.canView).toBe(false);
+    expect(setup.canManage).toBe(false);
+    expect(setup.navigation).toBeNull();
+    expect(setup.canAccessPath("/app/setup")).toBe(false);
+    expect(access.sectionForPath("/app/setup")?.id).toBe("automation-setup");
+  });
+
+  it("leaves the Automation inbox, cron, and invented setup routes outside this policy", () => {
+    const access = workspaceAccess("owner");
+
+    expect(access.sectionForPath("/app/automation")).toBeNull();
+    expect(access.sectionForPath("/api/cron/daily")).toBeNull();
+    expect(access.sectionForPath("/app/setup/extra")).toBeNull();
+  });
+});

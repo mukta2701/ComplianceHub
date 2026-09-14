@@ -23,6 +23,7 @@ const operatorEvidenceNavigation = workspaceAccess("owner").section("evidence").
 const operatorAuditNavigation = workspaceAccess("owner").section("audits").navigation!;
 const operatorAuditActivityMetadata = workspaceAccess("owner").section("audit-activity");
 const operatorTaskNavigation = workspaceAccess("owner").section("tasks").navigation!;
+const automationSetupMetadata = workspaceAccess("owner").section("automation-setup");
 
 const navGroups = [
   { label: "Work", items: [
@@ -90,8 +91,7 @@ const EXTRA_TITLES: Array<[string, string]> = [
   ["/app/policies/new", "Author a policy"],
   ["/app/onboarding", "Workspace setup"],
   ["/app/invitations", "Invitation"],
-  ["/app/automation", "Automation inbox"],
-  ["/app/setup", "Automation setup"],
+  [automationSetupMetadata.href, automationSetupMetadata.title],
 ];
 const TITLE_ROUTES: Array<[string, string]> = [
   ...navGroups.flatMap((g) => g.items.map(([href, , label]) => [href, label] as [string, string])),

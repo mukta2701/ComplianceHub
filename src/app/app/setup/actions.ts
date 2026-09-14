@@ -5,12 +5,13 @@ import { revalidatePath } from "next/cache";
 import { requireAppContext } from "@/lib/app-context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { automationSetupSchema, buildSetupSelections } from "@/features/automation/application/setup";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 
 const evidenceProviders = new Set(["google_workspace", "github", "aws"]);
 
 export async function saveAutomationSetupAction(formData: FormData) {
   const { supabase, user, organisation, membership } = await requireAppContext();
-  if (membership.role !== "owner") throw new Error("Only workspace owners can set up automation");
+  workspaceAccess(membership.role).section("automation-setup").requireManage();
   await enforceRateLimit(`automation-setup:${user.id}`, { limit: 5, windowMs: 60_000 });
   const setup = automationSetupSchema.parse({
     providers: formData.getAll("providers"),

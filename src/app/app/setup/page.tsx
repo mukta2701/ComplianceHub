@@ -1,6 +1,7 @@
 import { requireAppContext } from "@/lib/app-context";
 import { Card, PageIntro, Pill } from "@/components/ui";
 import { automationProviderDetails } from "@/features/automation/application/setup";
+import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import { saveAutomationSetupAction } from "./actions";
 
 const providers = ["google_workspace", "github", "aws", "jira", "linear"] as const;
@@ -14,11 +15,11 @@ const areas = [
 export default async function AutomationSetupPage() {
   const { supabase, user, membership, organisation } = await requireAppContext();
   const { data: members } = await supabase.from("memberships").select("user_id,profiles(display_name)").eq("organisation_id", organisation.id);
-  const isOwner = membership.role === "owner";
+  const canManage = workspaceAccess(membership.role).section("automation-setup").canManage;
   return <>
     <PageIntro eyebrow="AUTOMATION SETUP" title="Connect the systems that already know your work" body="ComplianceHub will collect bounded evidence and prepare reviewable drafts. It will never mark you compliant or make a final GRC decision." />
-    {!isOwner && <Card role="note" style={{ padding: "18px" }}>Only a workspace owner can choose sources and assign automation owners.</Card>}
-    {isOwner && <form action={saveAutomationSetupAction} className="app-form">
+    {!canManage && <Card role="note" style={{ padding: "18px" }}>Only a workspace owner can choose sources and assign automation owners.</Card>}
+    {canManage && <form action={saveAutomationSetupAction} className="app-form">
       <Card style={{ padding: "20px", marginBottom: "16px" }}>
         <h2 style={{ fontSize: "16px", margin: "0 0 6px" }}>Choose your systems</h2>
         <p style={{ color: "#596273", fontSize: "13px", margin: "0 0 16px" }}>Start with the tools that produce the most useful security evidence. You can skip any system and return later.</p>
