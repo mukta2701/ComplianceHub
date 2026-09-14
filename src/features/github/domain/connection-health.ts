@@ -98,7 +98,11 @@ export function decideConnectionReconciliation(input: {
     const retryDelays = [60_000, 5 * 60_000, 15 * 60_000] as const;
     const delay = retryDelays[Math.min(input.consecutiveFailures, retryDelays.length - 1)];
     let retryAt = now + delay;
-    if (input.providerRetryAt !== undefined && input.providerRetryAt !== null) {
+    if (
+      input.diagnostic === "provider_rate_limited"
+      && input.providerRetryAt !== undefined
+      && input.providerRetryAt !== null
+    ) {
       retryAt = Math.max(retryAt, parseTime(input.providerRetryAt, "provider retry time"));
     }
     return {

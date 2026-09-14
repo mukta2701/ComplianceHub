@@ -111,6 +111,15 @@ describe("GitHub connection reconciliation decisions", () => {
     }).retryAt).toBe("2026-09-14T10:05:00.000Z");
   });
 
+  it("ignores provider retry timing unless the diagnostic is rate limiting", () => {
+    expect(decision({
+      outcome: "temporary_failure",
+      diagnostic: "provider_temporary_failure",
+      consecutiveFailures: 0,
+      providerRetryAt: "2026-09-14T10:30:00.000Z",
+    }).retryAt).toBe("2026-09-14T10:01:00.000Z");
+  });
+
   it("rejects invalid time and failure-count inputs instead of manufacturing healthy state", () => {
     expect(() => decision({ now: "not-a-time" })).toThrow("valid reconciliation time");
     expect(() => decision({ consecutiveFailures: -1 })).toThrow("non-negative integer");

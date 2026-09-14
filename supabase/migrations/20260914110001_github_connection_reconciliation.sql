@@ -30,19 +30,11 @@ alter table public.github_installations
   add constraint github_installations_reconciliation_lease_check check (
     (reconciliation_locked_by is null and reconciliation_locked_until is null)
     or (reconciliation_locked_by is not null and reconciliation_locked_until is not null)
-  ),
-  add constraint github_installations_disconnected_schedule_check check (
-    health <> 'disconnected'
-    or (
-      next_reconciliation_at is null
-      and reconciliation_locked_by is null
-      and reconciliation_locked_until is null
-    )
   );
 
 create index github_installations_reconciliation_due_idx
 on public.github_installations(next_reconciliation_at, id)
-where health <> 'disconnected' and next_reconciliation_at is not null;
+where next_reconciliation_at is not null;
 
 create table public.github_connection_reconciliation_runs (
   id uuid primary key default extensions.gen_random_uuid(),
@@ -53,7 +45,7 @@ create table public.github_connection_reconciliation_runs (
   status text not null default 'running' check (
     status in (
       'running', 'success', 'partial', 'temporary_failure',
-      'action_required', 'disconnected'
+      'action_required', 'disconnected', 'cancelled'
     )
   ),
   diagnostic_code text check (
@@ -100,7 +92,13 @@ create table public.github_connection_reconciliation_runs (
       and incident_transition is not null
     )
     or (
-      status not in ('running', 'success')
+      status = 'cancelled'
+      and completed_at is not null
+      and diagnostic_code is null
+      and incident_transition = 'none'
+    )
+    or (
+      status not in ('running', 'success', 'cancelled')
       and completed_at is not null
       and diagnostic_code is not null
       and incident_transition is not null
@@ -185,23 +183,12 @@ security definer
 set search_path = ''
 as $$
 begin
-  if new.health <> 'retrying'
-    or new.consecutive_reconciliation_failures <> 0
-    or new.next_reconciliation_at is null
-    or new.health_diagnostic_code is not null
-    or new.reconciliation_locked_by is not null
-    or new.reconciliation_locked_until is not null
-  then
-    update public.github_installations
-    set health = 'retrying',
-        consecutive_reconciliation_failures = 0,
-        next_reconciliation_at = pg_catalog.now(),
-        health_diagnostic_code = null,
-        reconciliation_locked_by = null,
-        reconciliation_locked_until = null
-    where id = new.id
-      and organisation_id = new.organisation_id;
-  end if;
+  update public.github_installations
+  set next_reconciliation_at = pg_catalog.now(),
+      reconciliation_locked_by = null,
+      reconciliation_locked_until = null
+  where id = new.id
+    and organisation_id = new.organisation_id;
   return null;
 end;
 $$;
@@ -244,7 +231,6 @@ begin
            installation.last_reconciliation_attempt_at
     from public.github_installations installation
     where installation.status = 'active'
-      and installation.health <> 'disconnected'
       and installation.next_reconciliation_at is not null
       and installation.next_reconciliation_at <= target_now
       and (
@@ -369,8 +355,7 @@ begin
 
   select * into run_row
   from public.github_connection_reconciliation_runs
-  where id = target_run_id
-  for update;
+  where id = target_run_id;
 
   if not found then
     return 'not_finalized';
@@ -389,11 +374,36 @@ begin
   from public.github_installations
   where id = run_row.installation_id
     and organisation_id = run_row.organisation_id
-    and reconciliation_locked_by = target_worker_id
-    and reconciliation_locked_until > pg_catalog.now()
   for update;
 
   if not found then
+    return 'not_finalized';
+  end if;
+
+  select * into run_row
+  from public.github_connection_reconciliation_runs
+  where id = target_run_id
+    and installation_id = installation_row.id
+    and organisation_id = installation_row.organisation_id
+  for update;
+
+  if not found then
+    return 'not_finalized';
+  end if;
+
+  if run_row.status <> 'running' then
+    if run_row.status = target_outcome
+      and run_row.diagnostic_code is not distinct from target_diagnostic_code
+    then
+      return run_row.incident_transition;
+    end if;
+    return 'not_finalized';
+  end if;
+
+  if installation_row.reconciliation_locked_by is distinct from target_worker_id
+    or installation_row.reconciliation_locked_until is null
+    or installation_row.reconciliation_locked_until <= pg_catalog.now()
+  then
     return 'not_finalized';
   end if;
 
@@ -527,7 +537,11 @@ begin
       when installation_row.consecutive_reconciliation_failures = 1 then interval '5 minutes'
       else interval '15 minutes'
     end;
-    effective_next_attempt_at := greatest(target_next_attempt_at, retry_floor);
+    effective_next_attempt_at := case
+      when target_diagnostic_code = 'provider_rate_limited'
+        then greatest(target_next_attempt_at, retry_floor)
+      else retry_floor
+    end;
   end if;
 
   if target_outcome in ('success', 'partial') then
@@ -674,6 +688,7 @@ set search_path = ''
 as $$
 declare
   installation_row public.github_installations;
+  active_run_id uuid;
   actor_id uuid := (select auth.uid());
   disconnected_at timestamptz := pg_catalog.clock_timestamp();
 begin
@@ -703,6 +718,15 @@ begin
     return false;
   end if;
 
+  select run.id into active_run_id
+  from public.github_connection_reconciliation_runs run
+  where run.installation_id = installation_row.id
+    and run.organisation_id = installation_row.organisation_id
+    and run.status = 'running'
+  order by run.last_attempted_at desc, run.id
+  limit 1
+  for update;
+
   update public.github_installations
   set health = 'disconnected',
       next_reconciliation_at = null,
@@ -719,6 +743,38 @@ begin
   where repository.installation_id = installation_row.id
     and repository.organisation_id = installation_row.organisation_id
     and (repository.available or repository.selected);
+
+  if active_run_id is not null then
+    update public.github_connection_reconciliation_runs run
+    set status = 'cancelled',
+        diagnostic_code = null,
+        incident_transition = 'none',
+        completed_at = disconnected_at,
+        repository_count = (
+          select pg_catalog.count(*)::integer
+          from public.github_repositories repository
+          where repository.installation_id = installation_row.id
+            and repository.organisation_id = installation_row.organisation_id
+        ),
+        available_repository_count = (
+          select pg_catalog.count(*)::integer
+          from public.github_repositories repository
+          where repository.installation_id = installation_row.id
+            and repository.organisation_id = installation_row.organisation_id
+            and repository.available
+        ),
+        unavailable_repository_count = (
+          select pg_catalog.count(*)::integer
+          from public.github_repositories repository
+          where repository.installation_id = installation_row.id
+            and repository.organisation_id = installation_row.organisation_id
+            and not repository.available
+        )
+    where run.id = active_run_id
+      and run.organisation_id = installation_row.organisation_id
+      and run.installation_id = installation_row.id
+      and run.status = 'running';
+  end if;
 
   return true;
 end;

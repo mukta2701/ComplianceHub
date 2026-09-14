@@ -1,3 +1,23 @@
+create extension if not exists dblink with schema extensions;
+
+begin;
+set local session_replication_role = replica;
+delete from public.audit_events
+where organisation_id = 'a3610000-0000-4000-8000-000000000001';
+delete from public.github_connection_reconciliation_runs
+where organisation_id = 'a3610000-0000-4000-8000-000000000001';
+delete from public.github_repositories
+where organisation_id = 'a3610000-0000-4000-8000-000000000001';
+delete from public.github_installations
+where organisation_id = 'a3610000-0000-4000-8000-000000000001';
+delete from public.memberships
+where organisation_id = 'a3610000-0000-4000-8000-000000000001';
+delete from public.organisations
+where id = 'a3610000-0000-4000-8000-000000000001';
+delete from auth.users
+where id = 'a3600000-0000-4000-8000-000000000001';
+commit;
+
 begin;
 select no_plan();
 
@@ -460,13 +480,22 @@ select is(
     current_setting('app.fifth_run_id')::uuid,
     'a3400000-0000-4000-8000-000000000006',
     'temporary_failure', 'provider_temporary_failure',
-    now() + interval '1 minute', '[]'::jsonb
+    now() + interval '30 minutes', '[]'::jsonb
   ),
   'remained_open',
   'a still-unavailable retry cannot recover an incident opened by serious scope loss'
 );
 
 reset role;
+select is(
+  (select next_reconciliation_at
+   from public.github_installations
+   where id = 'a3200000-0000-4000-8000-000000000003'),
+  (select last_attempted_at + interval '5 minutes'
+   from public.github_connection_reconciliation_runs
+   where id = current_setting('app.fifth_run_id')::uuid),
+  'an ordinary temporary failure ignores a caller-supplied rate-limit time'
+);
 select throws_ok(
   $$ insert into public.github_connection_reconciliation_runs(
        organisation_id, installation_id, trigger, request_key
@@ -523,6 +552,65 @@ select throws_ok(
 );
 
 reset role;
+update public.github_installations
+set health = 'owner_action_required',
+    consecutive_reconciliation_failures = 4,
+    health_diagnostic_code = 'permission_mismatch',
+    next_reconciliation_at = null
+where id = 'a3200000-0000-4000-8000-000000000003';
+set local role service_role;
+select is(
+  public.claim_github_installation_server(
+    'a3100000-0000-4000-8000-000000000001',
+    'a3000000-0000-4000-8000-000000000001',
+    930003, 940003, 'Reconcile-Co-3', 'Organization', 'selected',
+    '{"metadata":"read"}'::jsonb, true,
+    '[{"id":950005,"owner":"Reconcile-Co-3","name":"delta","fullName":"Reconcile-Co-3/delta","htmlUrl":"https://github.com/Reconcile-Co-3/delta","visibility":"private","archived":false,"defaultBranch":"main"}]'::jsonb
+  ),
+  'a3200000-0000-4000-8000-000000000003'::uuid,
+  'a repeated verified Owner claim schedules an existing installation for reconciliation'
+);
+reset role;
+select ok(
+  (select health = 'owner_action_required'
+      and consecutive_reconciliation_failures = 4
+      and health_diagnostic_code = 'permission_mismatch'
+      and next_reconciliation_at is not null
+   from public.github_installations
+   where id = 'a3200000-0000-4000-8000-000000000003'),
+  'reconnect scheduling preserves incident-bearing health, failure count and diagnostic'
+);
+set local role service_role;
+select set_config(
+  'app.incident_reconnect_run_id',
+  (select id::text from public.claim_due_github_connection_reconciliations_server(
+    'a3400000-0000-4000-8000-000000000007', 1, now()
+  )),
+  true
+);
+select is(
+  public.finalize_github_connection_reconciliation_server(
+    current_setting('app.incident_reconnect_run_id')::uuid,
+    'a3400000-0000-4000-8000-000000000007',
+    'success', null, now() + interval '1 day',
+    '[{"id":950005,"owner":"Reconcile-Co-3","name":"delta","fullName":"Reconcile-Co-3/delta","htmlUrl":"https://github.com/Reconcile-Co-3/delta","visibility":"private","archived":false,"defaultBranch":"main"}]'::jsonb
+  ),
+  'recovered',
+  'only verified reconnect success resets the preserved incident and records recovery'
+);
+reset role;
+update public.github_installations
+set next_reconciliation_at = now() - interval '5 seconds'
+where id = 'a3200000-0000-4000-8000-000000000001';
+set local role service_role;
+select set_config(
+  'app.disconnect_active_run_id',
+  (select id::text from public.claim_due_github_connection_reconciliations_server(
+    'a3400000-0000-4000-8000-000000000009', 1, now()
+  )),
+  true
+);
+reset role;
 select set_config(
   'app.installation_audit_before_disconnect',
   (select count(*)::text from public.audit_events where entity_type = 'github_installations' and entity_id = 'a3200000-0000-4000-8000-000000000001'),
@@ -547,6 +635,20 @@ select is(public.disconnect_github_installation('a3200000-0000-4000-8000-0000000
 reset role;
 select is((select health::text from public.github_installations where id = 'a3200000-0000-4000-8000-000000000001'), 'disconnected', 'local disconnect has an explicit connection state');
 select ok((select next_reconciliation_at is null and reconciliation_locked_by is null and reconciliation_locked_until is null from public.github_installations where id = 'a3200000-0000-4000-8000-000000000001'), 'disconnect stops future lease claims');
+select is(
+  (select status from public.github_connection_reconciliation_runs
+   where id = current_setting('app.disconnect_active_run_id')::uuid),
+  'cancelled',
+  'disconnect terminalizes the current claimed run instead of stranding it as running'
+);
+select ok(
+  (select completed_at is not null
+      and diagnostic_code is null
+      and incident_transition = 'none'
+   from public.github_connection_reconciliation_runs
+   where id = current_setting('app.disconnect_active_run_id')::uuid),
+  'a local disconnect records a safe terminal run without provider diagnosis or recovery'
+);
 select ok((select bool_and(not available and not selected) from public.github_repositories where installation_id = 'a3200000-0000-4000-8000-000000000001'), 'disconnect makes every repository unavailable and unselected');
 select is((select count(*)::text from public.github_repositories where installation_id = 'a3200000-0000-4000-8000-000000000001'), current_setting('app.repository_rows_before_disconnect'), 'disconnect preserves all repository history');
 select is((select count(*)::text from public.github_connection_reconciliation_runs where installation_id = 'a3200000-0000-4000-8000-000000000001'), current_setting('app.run_rows_before_disconnect'), 'disconnect preserves all reconciliation history');
@@ -582,11 +684,36 @@ select is(
 );
 reset role;
 select ok(
-  (select health = 'retrying' and next_reconciliation_at is not null
+  (select health = 'disconnected' and next_reconciliation_at is not null
    from public.github_installations
    where id = 'a3200000-0000-4000-8000-000000000001'),
-  'a deliberate reconnect becomes due for verification without being called healthy by discovery'
+  'a deliberate reconnect becomes due without clearing its disconnected incident before verification'
 );
+set local role service_role;
+select set_config(
+  'app.local_reconnect_run_id',
+  (select id::text
+   from public.claim_due_github_connection_reconciliations_server(
+     'a3400000-0000-4000-8000-000000000008', 1, now()
+   )
+   where installation_id = 'a3200000-0000-4000-8000-000000000001'),
+  true
+);
+select ok(
+  nullif(current_setting('app.local_reconnect_run_id', true), '') is not null,
+  'a deliberate reconnect makes the disconnected installation claimable exactly once'
+);
+select is(
+  public.finalize_github_connection_reconciliation_server(
+    current_setting('app.local_reconnect_run_id', true)::uuid,
+    'a3400000-0000-4000-8000-000000000008',
+    'success', null, now() + interval '1 day',
+    '[{"id":950001,"owner":"Reconcile-Co","name":"alpha-renamed","fullName":"Reconcile-Co/alpha-renamed","htmlUrl":"https://github.com/Reconcile-Co/alpha-renamed","visibility":"private","archived":false,"defaultBranch":"trunk"}]'::jsonb
+  ),
+  'recovered',
+  'only verified success recovers a deliberately reconnected local disconnect'
+);
+reset role;
 
 select is(
   (select row(
@@ -599,6 +726,200 @@ select is(
   (select row(evidence_count, task_count, finding_count, signal_count, proposal_count)::text from reconciliation_compliance_counts),
   'connection reconciliation and disconnect create no compliance, Monitoring, Task, or Automation records'
 );
+
+select extensions.dblink_connect(
+  'reconciliation_lock_setup',
+  'host=' || pg_catalog.host(pg_catalog.inet_server_addr())
+    || ' port=' || pg_catalog.inet_server_port()::text
+    || ' dbname=' || current_database()
+    || ' user=postgres password=postgres connect_timeout=5'
+);
+select extensions.dblink_exec('reconciliation_lock_setup', $setup$
+  begin;
+  set local session_replication_role = replica;
+  delete from public.audit_events
+  where organisation_id = 'a3610000-0000-4000-8000-000000000001';
+  delete from public.github_connection_reconciliation_runs
+  where organisation_id = 'a3610000-0000-4000-8000-000000000001';
+  delete from public.github_repositories
+  where organisation_id = 'a3610000-0000-4000-8000-000000000001';
+  delete from public.github_installations
+  where organisation_id = 'a3610000-0000-4000-8000-000000000001';
+  delete from public.memberships
+  where organisation_id = 'a3610000-0000-4000-8000-000000000001';
+  delete from public.organisations
+  where id = 'a3610000-0000-4000-8000-000000000001';
+  delete from auth.users
+  where id = 'a3600000-0000-4000-8000-000000000001';
+  insert into auth.users(
+    id, instance_id, aud, role, email, encrypted_password, email_confirmed_at,
+    raw_app_meta_data, raw_user_meta_data
+  ) values (
+    'a3600000-0000-4000-8000-000000000001',
+    '00000000-0000-0000-0000-000000000000',
+    'authenticated', 'authenticated', 'reconciliation-lock@example.test', '',
+    now(), '{}', '{}'
+  );
+  insert into public.organisations(id, name, slug, created_by) values (
+    'a3610000-0000-4000-8000-000000000001',
+    'Reconciliation Lock Workspace',
+    'reconciliation-lock-workspace',
+    'a3600000-0000-4000-8000-000000000001'
+  );
+  insert into public.memberships(organisation_id, user_id, role) values (
+    'a3610000-0000-4000-8000-000000000001',
+    'a3600000-0000-4000-8000-000000000001',
+    'owner'
+  );
+  insert into public.github_installations(
+    id, organisation_id, provider_installation_id, account_id, account_login,
+    account_type, repository_selection, status, connected_by, permissions,
+    permissions_ok, health, last_reconciliation_attempt_at,
+    consecutive_reconciliation_failures, next_reconciliation_at,
+    reconciliation_locked_by, reconciliation_locked_until
+  ) values (
+    'a3620000-0000-4000-8000-000000000001',
+    'a3610000-0000-4000-8000-000000000001',
+    936001, 946001, 'Reconciliation-Lock-Co', 'Organization', 'selected',
+    'active', 'a3600000-0000-4000-8000-000000000001',
+    '{"metadata":"read"}', true, 'retrying', now(), 0,
+    now() - interval '1 minute',
+    'a3640000-0000-4000-8000-000000000001', now() + interval '5 minutes'
+  );
+  insert into public.github_connection_reconciliation_runs(
+    id, organisation_id, installation_id, trigger, request_key,
+    started_at, last_attempted_at
+  ) values (
+    'a3630000-0000-4000-8000-000000000001',
+    'a3610000-0000-4000-8000-000000000001',
+    'a3620000-0000-4000-8000-000000000001',
+    'scheduled', 'lock-order-fixture', now(), now()
+  );
+  commit;
+$setup$);
+
+select extensions.dblink_connect(
+  'reconciliation_lock_claim',
+  'host=' || pg_catalog.host(pg_catalog.inet_server_addr())
+    || ' port=' || pg_catalog.inet_server_port()::text
+    || ' dbname=' || current_database()
+    || ' user=postgres password=postgres connect_timeout=5'
+);
+select extensions.dblink_connect(
+  'reconciliation_lock_finalize',
+  'host=' || pg_catalog.host(pg_catalog.inet_server_addr())
+    || ' port=' || pg_catalog.inet_server_port()::text
+    || ' dbname=' || current_database()
+    || ' user=postgres password=postgres connect_timeout=5'
+);
+
+select extensions.dblink_exec('reconciliation_lock_claim', $claim_helper$
+  create or replace function pg_temp.claim_reconciliation_lock_fixture()
+  returns text
+  language plpgsql
+  as $body$
+  declare
+    claimed_count integer;
+  begin
+    select pg_catalog.count(*)::integer into claimed_count
+    from public.claim_due_github_connection_reconciliations_server(
+      'a3640000-0000-4000-8000-000000000002',
+      1,
+      pg_catalog.clock_timestamp() + interval '10 minutes'
+    );
+    return claimed_count::text;
+  exception
+    when deadlock_detected then return 'deadlock';
+  end;
+  $body$;
+$claim_helper$);
+select extensions.dblink_exec('reconciliation_lock_finalize', $finalize_helper$
+  create or replace function pg_temp.finalize_reconciliation_lock_fixture()
+  returns text
+  language plpgsql
+  as $body$
+  begin
+    return public.finalize_github_connection_reconciliation_server(
+      'a3630000-0000-4000-8000-000000000001',
+      'a3640000-0000-4000-8000-000000000001',
+      'temporary_failure',
+      'provider_temporary_failure',
+      pg_catalog.clock_timestamp() + interval '1 minute',
+      '[]'::jsonb
+    );
+  exception
+    when deadlock_detected then return 'deadlock';
+  end;
+  $body$;
+$finalize_helper$);
+select extensions.dblink_exec(
+  'reconciliation_lock_claim',
+  'begin; set local session_replication_role = replica; update public.github_installations set account_login = account_login where id = ''a3620000-0000-4000-8000-000000000001''; set local session_replication_role = origin; set local role service_role'
+);
+select extensions.dblink_exec(
+  'reconciliation_lock_finalize',
+  'set role service_role'
+);
+select extensions.dblink_send_query(
+  'reconciliation_lock_finalize',
+  'select pg_temp.finalize_reconciliation_lock_fixture()'
+);
+select pg_catalog.pg_sleep(0.1);
+select is(
+  extensions.dblink_is_busy('reconciliation_lock_finalize'),
+  1,
+  'finalization waits while the installation row is held by a stale takeover'
+);
+select extensions.dblink_send_query(
+  'reconciliation_lock_claim',
+  'select pg_temp.claim_reconciliation_lock_fixture()'
+);
+
+create temporary table reconciliation_lock_results(
+  operation text primary key,
+  outcome text not null
+);
+insert into reconciliation_lock_results(operation, outcome)
+select 'claim', outcome
+from extensions.dblink_get_result('reconciliation_lock_claim') as result(outcome text);
+select extensions.dblink_exec('reconciliation_lock_claim', 'commit');
+insert into reconciliation_lock_results(operation, outcome)
+select 'finalize', outcome
+from extensions.dblink_get_result('reconciliation_lock_finalize') as result(outcome text);
+
+select is(
+  (select outcome from reconciliation_lock_results where operation = 'claim'),
+  '1',
+  'a stale concurrent claim completes without a run-to-installation deadlock'
+);
+select is(
+  (select outcome from reconciliation_lock_results where operation = 'finalize'),
+  'not_finalized',
+  'the prior worker loses compare-and-set ownership without deadlocking'
+);
+
+select extensions.dblink_disconnect('reconciliation_lock_claim');
+select extensions.dblink_disconnect('reconciliation_lock_finalize');
+select extensions.dblink_exec('reconciliation_lock_setup', $cleanup$
+  begin;
+  set local session_replication_role = replica;
+  delete from public.audit_events
+  where organisation_id = 'a3610000-0000-4000-8000-000000000001';
+  delete from public.github_connection_reconciliation_runs
+  where organisation_id = 'a3610000-0000-4000-8000-000000000001';
+  delete from public.github_repositories
+  where organisation_id = 'a3610000-0000-4000-8000-000000000001';
+  delete from public.github_installations
+  where organisation_id = 'a3610000-0000-4000-8000-000000000001';
+  delete from public.memberships
+  where organisation_id = 'a3610000-0000-4000-8000-000000000001';
+  delete from public.organisations
+  where id = 'a3610000-0000-4000-8000-000000000001';
+  delete from auth.users
+  where id = 'a3600000-0000-4000-8000-000000000001';
+  commit;
+$cleanup$);
+select extensions.dblink_disconnect('reconciliation_lock_setup');
 
 select * from finish();
 rollback;
