@@ -56,17 +56,27 @@ function normaliseConnectionFact(fact: GitHubConnectionFact): GitHubConnectionFa
 /** Resolves independently sourced connection facts without downgrading risk. */
 export function resolveGitHubConnectionHealth(input: {
   installationStatus: GitHubInstallationStatus;
+  installationPermissionsOk: boolean;
   summary: GitHubConnectionFact;
   incident: GitHubConnectionFact | null;
-  permissionMismatch: boolean;
+  rawPermissionMismatch: boolean;
 }): GitHubConnectionFact {
   const facts: GitHubConnectionFact[] = [normaliseConnectionFact(input.summary)];
   if (input.incident) facts.push(normaliseConnectionFact(input.incident));
+  if (!input.installationPermissionsOk) facts.push({ health: "owner_action_required", diagnostic: null });
   if (input.installationStatus === "needs_attention") facts.push({ health: "owner_action_required", diagnostic: null });
-  if (input.permissionMismatch) facts.push({ health: "owner_action_required", diagnostic: "permission_mismatch" });
+  if (input.rawPermissionMismatch) facts.push({ health: "owner_action_required", diagnostic: "permission_mismatch" });
   if (input.installationStatus === "suspended") facts.push({ health: "owner_action_required", diagnostic: "installation_suspended" });
   if (input.installationStatus === "revoked") facts.push({ health: "disconnected", diagnostic: "installation_revoked" });
-  return facts.reduce((strongest, fact) => healthRank[fact.health] >= healthRank[strongest.health] ? fact : strongest);
+  return facts.reduce((strongest, fact) => {
+    const strongestRank = healthRank[strongest.health];
+    const factRank = healthRank[fact.health];
+    if (factRank > strongestRank) return fact;
+    if (factRank < strongestRank) return strongest;
+    if (fact.diagnostic && !strongest.diagnostic) return fact;
+    if (!fact.diagnostic && strongest.diagnostic) return strongest;
+    return fact;
+  });
 }
 
 function relativeTime(value: string | null, now: string): string | null {

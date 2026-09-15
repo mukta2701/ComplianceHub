@@ -7,22 +7,22 @@ const now = "2026-09-15T12:00:00.000Z";
 describe("presentGitHubConnectionHealth", () => {
   it.each([
     ["healthy summary with a permission diagnostic", {
-      installationStatus: "active", summary: { health: "healthy", diagnostic: "permission_mismatch" }, incident: null, permissionMismatch: false,
+      installationStatus: "active", installationPermissionsOk: true, summary: { health: "healthy", diagnostic: "permission_mismatch" }, incident: null, rawPermissionMismatch: false,
     }, { health: "owner_action_required", diagnostic: "permission_mismatch" }],
     ["retrying summary with a revoked diagnostic", {
-      installationStatus: "active", summary: { health: "retrying", diagnostic: "installation_revoked" }, incident: null, permissionMismatch: false,
+      installationStatus: "active", installationPermissionsOk: true, summary: { health: "retrying", diagnostic: "installation_revoked" }, incident: null, rawPermissionMismatch: false,
     }, { health: "disconnected", diagnostic: "installation_revoked" }],
     ["raw permission mismatch above a retrying incident", {
-      installationStatus: "active", summary: { health: "healthy", diagnostic: null }, incident: { health: "retrying", diagnostic: "provider_temporary_failure" }, permissionMismatch: true,
+      installationStatus: "active", installationPermissionsOk: true, summary: { health: "healthy", diagnostic: null }, incident: { health: "retrying", diagnostic: "provider_temporary_failure" }, rawPermissionMismatch: true,
     }, { health: "owner_action_required", diagnostic: "permission_mismatch" }],
     ["revoked status above a healthy summary", {
-      installationStatus: "revoked", summary: { health: "healthy", diagnostic: null }, incident: null, permissionMismatch: false,
+      installationStatus: "revoked", installationPermissionsOk: true, summary: { health: "healthy", diagnostic: null }, incident: null, rawPermissionMismatch: false,
     }, { health: "disconnected", diagnostic: "installation_revoked" }],
     ["suspended status above a healthy summary", {
-      installationStatus: "suspended", summary: { health: "healthy", diagnostic: null }, incident: null, permissionMismatch: false,
+      installationStatus: "suspended", installationPermissionsOk: true, summary: { health: "healthy", diagnostic: null }, incident: null, rawPermissionMismatch: false,
     }, { health: "owner_action_required", diagnostic: "installation_suspended" }],
     ["consistent healthy facts", {
-      installationStatus: "active", summary: { health: "healthy", diagnostic: null }, incident: null, permissionMismatch: false,
+      installationStatus: "active", installationPermissionsOk: true, summary: { health: "healthy", diagnostic: null }, incident: null, rawPermissionMismatch: false,
     }, { health: "healthy", diagnostic: null }],
   ] as const)("resolves %s without downgrading stronger facts", (_label, input, expected) => {
     expect(resolveGitHubConnectionHealth(input)).toEqual(expected);
@@ -31,16 +31,44 @@ describe("presentGitHubConnectionHealth", () => {
   it("keeps needs-attention generic while preserving a stronger explicit state over a weaker diagnostic", () => {
     expect(resolveGitHubConnectionHealth({
       installationStatus: "needs_attention",
+      installationPermissionsOk: true,
       summary: { health: "healthy", diagnostic: null },
       incident: null,
-      permissionMismatch: false,
+      rawPermissionMismatch: false,
     })).toEqual({ health: "owner_action_required", diagnostic: null });
     expect(resolveGitHubConnectionHealth({
       installationStatus: "active",
+      installationPermissionsOk: true,
       summary: { health: "owner_action_required", diagnostic: "repository_unavailable" },
       incident: null,
-      permissionMismatch: false,
+      rawPermissionMismatch: false,
     })).toEqual({ health: "owner_action_required", diagnostic: null });
+  });
+
+  it("keeps specific equal-rank diagnostics over later generic unsafe facts", () => {
+    expect(resolveGitHubConnectionHealth({
+      installationStatus: "needs_attention",
+      installationPermissionsOk: false,
+      summary: { health: "owner_action_required", diagnostic: "account_mismatch" },
+      incident: { health: "owner_action_required", diagnostic: "account_mismatch" },
+      rawPermissionMismatch: false,
+    })).toEqual({ health: "owner_action_required", diagnostic: "account_mismatch" });
+
+    expect(resolveGitHubConnectionHealth({
+      installationStatus: "active",
+      installationPermissionsOk: true,
+      summary: { health: "owner_action_required", diagnostic: null },
+      incident: { health: "owner_action_required", diagnostic: "account_mismatch" },
+      rawPermissionMismatch: false,
+    })).toEqual({ health: "owner_action_required", diagnostic: "account_mismatch" });
+
+    expect(resolveGitHubConnectionHealth({
+      installationStatus: "active",
+      installationPermissionsOk: true,
+      summary: { health: "owner_action_required", diagnostic: "account_mismatch" },
+      incident: null,
+      rawPermissionMismatch: true,
+    })).toEqual({ health: "owner_action_required", diagnostic: "permission_mismatch" });
   });
 
   it("presents a healthy connection only when the authoritative successful check is valid", () => {

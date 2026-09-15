@@ -48,6 +48,7 @@ const hoisted = vi.hoisted(() => ({
     }],
     github_repositories: [{
       id: "10000000-0000-4000-8000-000000000011",
+      organisation_id: "org-1",
       installation_id: "10000000-0000-4000-8000-000000000010",
       full_name: "Adtecher/compliancehub", html_url: "https://github.com/Adtecher/compliancehub",
       visibility: "private", default_branch: "main", archived: false, selected: true, available: true,
@@ -70,12 +71,14 @@ function query(table: string, source: "authenticated" | "service" = "authenticat
   const chain: Record<string, unknown> = {};
   let afterId: string | null = null;
   let pageLimit: number | null = null;
+  let repositoryOrganisationId: string | null = null;
   chain.select = vi.fn((columns: string) => {
     selectCalls.push({ table, columns });
     return chain;
   });
   chain.eq = vi.fn((column: string, value: string) => {
     filterCalls.push({ table, column, value });
+    if (table === "github_repositories" && column === "organisation_id") repositoryOrganisationId = value;
     return chain;
   });
   for (const method of ["is", "order"]) chain[method] = vi.fn(() => chain);
@@ -93,6 +96,7 @@ function query(table: string, source: "authenticated" | "service" = "authenticat
       if (source === "authenticated" && table === "github_repositories") {
         hoisted.repositoryPageCalls.push({ afterId, limit: pageLimit });
         const rows = sourceRows
+          .filter((row) => String((row as { organisation_id?: string }).organisation_id) === repositoryOrganisationId)
           .filter((row) => afterId === null || String((row as { id: string }).id) > afterId)
           .toSorted((left, right) => String((left as { id: string }).id).localeCompare(String((right as { id: string }).id)))
           .slice(0, Math.min(pageLimit ?? 1_000, 1_000));
@@ -283,16 +287,11 @@ describe("Settings Connections page", () => {
     }
   });
 
-  it.each([
-    ["not exact", (permissions: Record<string, string>) => ({ ...permissions, contents: "read" })],
-    ["not approved", (permissions: Record<string, string>) => permissions],
-  ])("fails closed to permission mismatch when the raw permission projection is %s", async (label, mutatePermissions) => {
+  it("fails closed to permission mismatch when the raw permission projection is not exact", async () => {
     const originalPermissions = (hoisted.serviceRows.github_installations[0] as { permissions: Record<string, string> }).permissions;
     const originalIncidents = hoisted.rows.github_connection_incidents;
-    const originalPermissionsOk = (hoisted.rows.github_installations[0] as { permissions_ok: boolean }).permissions_ok;
     try {
-      (hoisted.serviceRows.github_installations[0] as { permissions: Record<string, string> }).permissions = mutatePermissions(originalPermissions);
-      (hoisted.rows.github_installations[0] as { permissions_ok: boolean }).permissions_ok = label === "not approved" ? false : true;
+      (hoisted.serviceRows.github_installations[0] as { permissions: Record<string, string> }).permissions = { ...originalPermissions, contents: "read" };
       hoisted.rows.github_connection_incidents = [];
       render(await IntegrationsPage({ searchParams: Promise.resolve({}) }));
       expect(screen.getByText("Owner action required")).toBeVisible();
@@ -301,7 +300,45 @@ describe("Settings Connections page", () => {
     } finally {
       (hoisted.serviceRows.github_installations[0] as { permissions: Record<string, string> }).permissions = originalPermissions;
       hoisted.rows.github_connection_incidents = originalIncidents;
-      (hoisted.rows.github_installations[0] as { permissions_ok: boolean }).permissions_ok = originalPermissionsOk;
+    }
+  });
+
+  it("treats a false stored permission flag with exact raw permissions as generic Owner review", async () => {
+    const originalInstallations = hoisted.rows.github_installations;
+    const originalIncidents = hoisted.rows.github_connection_incidents;
+    try {
+      hoisted.rows.github_installations = [{ ...(originalInstallations[0] as Record<string, unknown>), permissions_ok: false }];
+      hoisted.rows.github_connection_incidents = [];
+      render(await IntegrationsPage({ searchParams: Promise.resolve({}) }));
+      expect(screen.getByText("Owner action required")).toBeVisible();
+      expect(screen.getAllByRole("status")[0]).toHaveTextContent("GitHub access needs a workspace Owner to review it.");
+      expect(screen.queryByText("GitHub App permissions no longer match the approved read-only access.")).not.toBeInTheDocument();
+      expect(screen.queryByText("Approved GitHub App permissions")).not.toBeInTheDocument();
+    } finally {
+      hoisted.rows.github_installations = originalInstallations;
+      hoisted.rows.github_connection_incidents = originalIncidents;
+    }
+  });
+
+  it("preserves an account mismatch over generic unsafe facts without approving the connected hint", async () => {
+    const originalInstallations = hoisted.rows.github_installations;
+    const originalHealth = hoisted.rows.github_connection_health_summaries;
+    const originalIncidents = hoisted.rows.github_connection_incidents;
+    try {
+      hoisted.rows.github_installations = [{ ...(originalInstallations[0] as Record<string, unknown>), status: "needs_attention", permissions_ok: false }];
+      hoisted.rows.github_connection_health_summaries = [{ ...(originalHealth[0] as Record<string, unknown>), health: "owner_action_required", health_diagnostic_code: "account_mismatch" }];
+      hoisted.rows.github_connection_incidents = [{ ...(originalIncidents[0] as Record<string, unknown>), health: "owner_action_required", diagnostic_code: "account_mismatch" }];
+      render(await IntegrationsPage({ searchParams: Promise.resolve({ github: "connected" }) }));
+      expect(screen.getByText("Owner action required")).toBeVisible();
+      expect(screen.getAllByRole("status")[0]).toHaveTextContent("The connected GitHub account no longer matches this workspace.");
+      expect(screen.getByText("Connection incident: The connected GitHub account no longer matches this workspace.")).toBeVisible();
+      expect(screen.queryByText("GitHub App permissions no longer match the approved read-only access.")).not.toBeInTheDocument();
+      expect(screen.queryByText("Approved GitHub App permissions")).not.toBeInTheDocument();
+      expect(screen.queryByRole("status", { name: "GitHub connection status" })).not.toBeInTheDocument();
+    } finally {
+      hoisted.rows.github_installations = originalInstallations;
+      hoisted.rows.github_connection_health_summaries = originalHealth;
+      hoisted.rows.github_connection_incidents = originalIncidents;
     }
   });
 
@@ -336,20 +373,32 @@ describe("Settings Connections page", () => {
     try {
       hoisted.role = "owner";
       hoisted.rows.github_connection_incidents = [];
-      hoisted.rows.github_repositories = Array.from({ length: 1_001 }, (_, index) => ({
-        id: `repository-${String(index + 1).padStart(5, "0")}`,
+      const idFor = (number: number) => `20000000-0000-4000-8000-${String(number).padStart(12, "0")}`;
+      hoisted.rows.github_repositories = [
+        ...Array.from({ length: 1_001 }, (_, index) => ({
+        id: idFor(index + 1),
+        organisation_id: "org-1",
         installation_id: "10000000-0000-4000-8000-000000000010",
-        full_name: `Adtecher/repository-${String(index + 1).padStart(5, "0")}`,
+        full_name: index === 0 ? "Adtecher/z-last-by-name" : index === 1_000 ? "Adtecher/a-first-by-name" : `Adtecher/repository-${String(index + 1).padStart(5, "0")}`,
         html_url: `https://github.com/Adtecher/repository-${String(index + 1).padStart(5, "0")}`,
         visibility: "private", default_branch: "main", archived: false, selected: index === 1_000, available: true,
-      }));
+        })),
+        {
+          id: "10000000-0000-4000-8000-000000000001", organisation_id: "other-org",
+          installation_id: "10000000-0000-4000-8000-000000000010", full_name: "Other/leaked-repository",
+          html_url: "https://github.com/Other/leaked-repository", visibility: "private", default_branch: "main",
+          archived: false, selected: true, available: true,
+        },
+      ];
       render(await IntegrationsPage({ searchParams: Promise.resolve({}) }));
       expect(screen.getByText("1001 repositories available to this GitHub App; 1 selected in ComplianceHub.")).toBeVisible();
-      expect(screen.getByRole("checkbox", { name: "Allow ComplianceHub to read and include Adtecher/repository-01001 in monitoring" })).toBeEnabled();
+      expect(screen.getByRole("checkbox", { name: "Allow ComplianceHub to read and include Adtecher/a-first-by-name in monitoring" })).toBeEnabled();
+      expect(screen.getAllByRole("checkbox")[0]).toHaveAccessibleName("Allow ComplianceHub to read and include Adtecher/a-first-by-name in monitoring");
+      expect(screen.queryByText("Other/leaked-repository")).not.toBeInTheDocument();
       expect(hoisted.repositoryPageCalls).toEqual([
         { afterId: null, limit: 500 },
-        { afterId: "repository-00500", limit: 500 },
-        { afterId: "repository-01000", limit: 500 },
+        { afterId: idFor(500), limit: 500 },
+        { afterId: idFor(1_000), limit: 500 },
       ]);
       expect(hoisted.filterCalls.filter((call) => call.table === "github_repositories")).toEqual([
         { table: "github_repositories", column: "organisation_id", value: "org-1" },
@@ -365,15 +414,17 @@ describe("Settings Connections page", () => {
   it("fails closed after one bounded probe beyond the 10000 repository contract", async () => {
     const originalRepositories = hoisted.rows.github_repositories;
     try {
+      const idFor = (number: number) => `20000000-0000-4000-8000-${String(number).padStart(12, "0")}`;
       hoisted.rows.github_repositories = Array.from({ length: 10_001 }, (_, index) => ({
-        id: `repository-${String(index + 1).padStart(5, "0")}`,
+        id: idFor(index + 1),
+        organisation_id: "org-1",
         installation_id: "10000000-0000-4000-8000-000000000010",
         full_name: `Adtecher/repository-${String(index + 1).padStart(5, "0")}`,
         html_url: `https://github.com/Adtecher/repository-${String(index + 1).padStart(5, "0")}`,
         visibility: "private", default_branch: "main", archived: false, selected: false, available: true,
       }));
       await expect(IntegrationsPage({ searchParams: Promise.resolve({}) })).rejects.toThrow("Could not load connection settings");
-      expect(hoisted.repositoryPageCalls.at(-1)).toEqual({ afterId: "repository-10000", limit: 1 });
+      expect(hoisted.repositoryPageCalls.at(-1)).toEqual({ afterId: idFor(10_000), limit: 1 });
     } finally {
       hoisted.rows.github_repositories = originalRepositories;
     }

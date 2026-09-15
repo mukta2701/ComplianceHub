@@ -344,19 +344,21 @@ export default async function IntegrationsPage({
         ? incident.diagnostic_code
         : (() => { throw new Error("Could not load connection settings"); })();
     if (incident && !incidentHealth) throw new Error("Could not load connection settings");
-    const permissionMismatch = !installation.permissions_ok || !hasExactReadPermissions(permission.permissions);
+    const rawPermissionMismatch = !hasExactReadPermissions(permission.permissions);
     const effectiveConnection = resolveGitHubConnectionHealth({
       installationStatus: installation.status,
+      installationPermissionsOk: installation.permissions_ok,
       summary: { health: health.health, diagnostic: healthDiagnostic },
       incident: incident && incidentHealth ? { health: incidentHealth, diagnostic: incidentDiagnostic } : null,
-      permissionMismatch,
+      rawPermissionMismatch,
     });
     const incidentConnection = incident && incidentHealth
       ? resolveGitHubConnectionHealth({
           installationStatus: "active",
+          installationPermissionsOk: true,
           summary: { health: incidentHealth, diagnostic: incidentDiagnostic },
           incident: null,
-          permissionMismatch: false,
+          rawPermissionMismatch: false,
         })
       : null;
     const incidentPresentation = incidentConnection
@@ -376,7 +378,7 @@ export default async function IntegrationsPage({
       health: effectiveConnection.health,
       health_diagnostic_code: effectiveConnection.diagnostic,
       last_successful_reconciliation_at: health.last_successful_reconciliation_at,
-      permission_labels: permissionMismatch ? [] : approvedPermissionLabelsFor(permission.permissions),
+      permission_labels: !installation.permissions_ok || rawPermissionMismatch ? [] : approvedPermissionLabelsFor(permission.permissions),
       installation_settings_url: installationSettingsUrl({
         account_login: installation.account_login,
         account_type: installation.account_type,
@@ -393,6 +395,7 @@ export default async function IntegrationsPage({
   const hasVerifiedActiveInstallation = installations.some((installation) => installation.status === "active"
     && installation.health !== "owner_action_required"
     && installation.health !== "disconnected"
+    && installation.permissions_ok
     && installation.permission_labels?.length === Object.keys(READ_PERMISSIONS).length);
   const showDeveloperTools = canShowDeveloperTools({
     nodeEnv: process.env.NODE_ENV,
