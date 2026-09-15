@@ -27,6 +27,9 @@ const installation: GitHubInstallationSummary = {
   status: "active",
   repository_selection: "selected",
   permissions_ok: true,
+  health: "healthy",
+  health_diagnostic_code: null,
+  last_successful_reconciliation_at: null,
 };
 
 function repository(
@@ -64,6 +67,7 @@ describe("GitHubInstallationPanel configuration boundary", () => {
     expect(within(region).getByText("READ-ONLY GITHUB MONITORING")).toBeVisible();
     expect(region).toHaveTextContent("ComplianceHub reads selected repositories for monitoring and never changes GitHub.");
     expect(within(region).getByRole("article", { name: "Adtecher GitHub installation" })).toHaveTextContent("Healthy");
+    expect(within(region).getByText("Healthy")).toHaveClass("pill", "green");
     expect(within(region).getByRole("checkbox", {
       name: "Allow ComplianceHub to read and include Adtecher/compliancehub in monitoring",
     })).toBeEnabled();
@@ -82,19 +86,25 @@ describe("GitHubInstallationPanel configuration boundary", () => {
 
   it("warns when repository access is all-repositories or permissions need attention", () => {
     render(<GitHubInstallationPanel
-      installations={[{ ...installation, repository_selection: "all", permissions_ok: false }]}
+      installations={[{
+        ...installation,
+        repository_selection: "all",
+        permissions_ok: false,
+        health: "owner_action_required",
+        health_diagnostic_code: "permission_mismatch",
+      }]}
       repositories={[repository()]}
       canManageInstallation={true}
       canManageRepositoryScope={true}
     />);
 
     const notes = screen.getAllByRole("note");
-    expect(notes).toHaveLength(2);
+    expect(notes).toHaveLength(1);
     expect(notes[0]).toHaveTextContent(/access to all repositories/i);
-    expect(notes[1]).toHaveTextContent(/permissions need attention/i);
+    expect(screen.getAllByRole("status")[0]).toHaveTextContent(/GitHub App permissions no longer match/i);
   });
 
-  it("shows Admins facts without mutation controls or an Owner-only action prompt", () => {
+  it("shows Admins facts and safe Owner guidance without mutation controls", () => {
     render(<GitHubInstallationPanel
       installations={[installation]}
       repositories={[repository()]}
@@ -169,7 +179,7 @@ describe("GitHubInstallationPanel configuration boundary", () => {
 
     expect(screen.getByText("Owner action required")).toBeVisible();
     expect(screen.getByText(/GitHub App permissions no longer match the approved read-only access/)).toBeVisible();
-    expect(screen.queryByText("Ask a workspace Owner to review the GitHub App permissions.")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("status")[0]).toHaveTextContent("Ask a workspace Owner to review the GitHub App permissions.");
     expect(screen.queryByRole("link", { name: "Manage repository access" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Open GitHub installation settings" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Disconnect from ComplianceHub" })).not.toBeInTheDocument();
@@ -197,7 +207,7 @@ describe("GitHubInstallationPanel configuration boundary", () => {
     expect(screen.getByText("ComplianceHub is disconnected. Its GitHub App installation was not removed from GitHub.")).toHaveTextContent("not removed from GitHub");
   });
 
-  it("offers plain-language setup when repository access is not connected", () => {
+  it("offers role-correct plain-language setup when repository access is not connected", () => {
     render(<GitHubInstallationPanel
       installations={[]}
       repositories={[]}
@@ -207,6 +217,16 @@ describe("GitHubInstallationPanel configuration boundary", () => {
 
     expect(screen.getByText("No GitHub repository access connected")).toBeVisible();
     expect(screen.getByRole("link", { name: "Set up repository access" })).toHaveAttribute("href", "/api/github/setup");
+    expect(screen.queryByText(/Ask a workspace Owner/)).not.toBeInTheDocument();
+
+    render(<GitHubInstallationPanel
+      installations={[]}
+      repositories={[]}
+      canManageInstallation={false}
+      canManageRepositoryScope={false}
+    />);
+    expect(screen.getByText("Ask a workspace Owner to set up GitHub repository access.")).toBeVisible();
+    expect(screen.queryAllByRole("link", { name: "Set up repository access" })).toHaveLength(1);
   });
 
   it("optimistically changes one repository and rolls only that repository back on failure", async () => {
@@ -254,7 +274,40 @@ describe("GitHubInstallationPanel configuration boundary", () => {
       canManageRepositoryScope={true}
     />);
 
-    expect(screen.getByRole("checkbox", { name: /include Adtecher\/compliancehub in monitoring/ })).toBeDisabled();
-    expect(screen.getByText("Unavailable to this GitHub App installation.")).toBeVisible();
+    expect(screen.getByRole("checkbox", { name: /previously selected, unavailable, and not currently monitored/i })).toBeDisabled();
+    expect(screen.getByText("Previously selected, unavailable, and not currently monitored.")).toBeVisible();
+  });
+
+  it.each([true, false])("treats selected unavailable repositories as not currently monitored for %s controls", (canManage) => {
+    render(<GitHubInstallationPanel
+      installations={[installation]}
+      repositories={[repository({ selected: true, available: false })]}
+      canManageInstallation={canManage}
+      canManageRepositoryScope={canManage}
+    />);
+
+    expect(screen.getByText("Previously selected, unavailable, and not currently monitored.")).toBeVisible();
+    expect(screen.queryByText("Selected for ComplianceHub monitoring.")).not.toBeInTheDocument();
+    if (canManage) {
+      expect(screen.getByRole("checkbox", { name: /previously selected, unavailable, and not currently monitored/i })).toBeDisabled();
+    } else {
+      expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    }
+  });
+
+  it.each([
+    ["healthy", null, "Healthy", "green"],
+    ["retrying", null, "Retrying", "amber"],
+    ["owner_action_required", "permission_mismatch", "Owner action required", "red"],
+    ["disconnected", null, "Disconnected", "neutral"],
+  ] as const)("maps %s health to the %s Pill class", (health, diagnostic, label, tone) => {
+    render(<GitHubInstallationPanel
+      installations={[{ ...installation, health, health_diagnostic_code: diagnostic }]}
+      repositories={[repository()]}
+      canManageInstallation={false}
+      canManageRepositoryScope={false}
+    />);
+
+    expect(screen.getByText(label, { exact: true })).toHaveClass("pill", tone);
   });
 });

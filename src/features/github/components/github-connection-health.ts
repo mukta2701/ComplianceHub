@@ -16,6 +16,7 @@ function relativeTime(value: string | null, now: string): string | null {
   const checked = Date.parse(value);
   const current = Date.parse(now);
   if (!Number.isFinite(checked) || !Number.isFinite(current)) return null;
+  if (checked - current > 60_000) return null;
   const seconds = Math.max(0, Math.floor((current - checked) / 1_000));
   if (seconds < 60) return "just now";
   const minutes = Math.floor(seconds / 60);
@@ -31,22 +32,22 @@ function ownerAction(diagnostic: GitHubConnectionDiagnostic | null): Pick<GitHub
     case "installation_suspended":
       return {
         summary: "GitHub has suspended this App installation.",
-        nextAction: "Ask a workspace Owner to review the GitHub App installation.",
+        nextAction: "Review the GitHub App installation.",
       };
     case "permission_mismatch":
       return {
         summary: "GitHub App permissions no longer match the approved read-only access.",
-        nextAction: "Ask a workspace Owner to review the GitHub App permissions.",
+        nextAction: "Review the GitHub App permissions.",
       };
     case "account_mismatch":
       return {
         summary: "The connected GitHub account no longer matches this workspace.",
-        nextAction: "Ask a workspace Owner to reconnect the approved GitHub organisation.",
+        nextAction: "Reconnect the approved GitHub organisation.",
       };
     default:
       return {
         summary: "GitHub access needs a workspace Owner to review it.",
-        nextAction: "Ask a workspace Owner to review the GitHub connection.",
+        nextAction: "Review the GitHub connection.",
       };
   }
 }
@@ -93,7 +94,7 @@ export function presentGitHubConnectionHealth(input: {
       return {
         label: "Disconnected",
         summary: "ComplianceHub is disconnected from this GitHub installation.",
-        nextAction: "A workspace Owner can reconnect when GitHub access is ready.",
+        nextAction: "Reconnect GitHub when access is ready.",
         tone: "neutral",
         checkedAt,
       };

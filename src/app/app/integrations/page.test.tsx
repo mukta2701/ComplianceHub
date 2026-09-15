@@ -193,8 +193,8 @@ describe("Settings Connections page", () => {
     expect(hoisted.selectCalls.map((call) => call.table)).not.toContain("github_repository_shadow_summaries");
     expect(hoisted.serviceSelectCalls).toEqual([{ table: "github_installations", columns: "id,permissions" }]);
     expect(hoisted.serviceFilterCalls).toEqual([{ table: "github_installations", column: "organisation_id", value: "org-1" }]);
-    expect(screen.getByText("Healthy")).toBeVisible();
-    expect(screen.getByText("GitHub is connected", { exact: false })).toBeVisible();
+    expect(screen.getByText("Owner action required")).toBeVisible();
+    expect(screen.queryByText("Healthy", { exact: true })).not.toBeInTheDocument();
     expect(screen.getByText("Connection incident: GitHub App permissions no longer match the approved read-only access.")).toBeVisible();
     expect(screen.getByText("Approved GitHub App permissions")).toBeVisible();
     expect(screen.getByText("Metadata — read")).toBeVisible();
@@ -223,6 +223,7 @@ describe("Settings Connections page", () => {
 
   it.each([
     "integration_connections", "alert_channels", "github_installations", "github_repositories",
+    "github_connection_health_summaries", "github_connection_incidents",
   ])("fails closed when %s cannot load", async (table) => {
     hoisted.errors[table] = { message: "query unavailable" };
 
@@ -233,6 +234,90 @@ describe("Settings Connections page", () => {
     hoisted.errors["service:github_installations"] = { message: "query unavailable" };
 
     await expect(IntegrationsPage({ searchParams: Promise.resolve({}) })).rejects.toThrow("Could not load connection settings");
+  });
+
+  it.each([
+    ["missing health", (rows: Record<string, unknown[]>) => { rows.github_connection_health_summaries = []; }],
+    ["duplicate health", (rows: Record<string, unknown[]>) => { rows.github_connection_health_summaries = [...rows.github_connection_health_summaries, rows.github_connection_health_summaries[0]!]; }],
+    ["misaligned health", (rows: Record<string, unknown[]>) => { rows.github_connection_health_summaries = [{ ...(rows.github_connection_health_summaries[0] as Record<string, unknown>), id: "10000000-0000-4000-8000-000000000099" }]; }],
+  ])("fails closed for %s connection-health rows", async (_label, mutate) => {
+    const original = hoisted.rows.github_connection_health_summaries;
+    try {
+      mutate(hoisted.rows);
+      await expect(IntegrationsPage({ searchParams: Promise.resolve({}) })).rejects.toThrow("Could not load connection settings");
+    } finally {
+      hoisted.rows.github_connection_health_summaries = original;
+    }
+  });
+
+  it.each([
+    ["missing", (rows: Record<string, unknown[]>) => { rows.github_installations = []; }],
+    ["duplicate", (rows: Record<string, unknown[]>) => { rows.github_installations = [...rows.github_installations, rows.github_installations[0]!]; }],
+    ["misaligned", (rows: Record<string, unknown[]>) => { rows.github_installations = [{ ...(rows.github_installations[0] as Record<string, unknown>), id: "10000000-0000-4000-8000-000000000099" }]; }],
+  ])("fails closed for %s server-only permission rows", async (_label, mutate) => {
+    const original = hoisted.serviceRows.github_installations;
+    try {
+      mutate(hoisted.serviceRows);
+      await expect(IntegrationsPage({ searchParams: Promise.resolve({}) })).rejects.toThrow("Could not load connection settings");
+    } finally {
+      hoisted.serviceRows.github_installations = original;
+    }
+  });
+
+  it.each([
+    ["not exact", (permissions: Record<string, string>) => ({ ...permissions, contents: "read" })],
+    ["not approved", (permissions: Record<string, string>) => permissions],
+  ])("fails closed to permission mismatch when the raw permission projection is %s", async (label, mutatePermissions) => {
+    const originalPermissions = (hoisted.serviceRows.github_installations[0] as { permissions: Record<string, string> }).permissions;
+    const originalIncidents = hoisted.rows.github_connection_incidents;
+    const originalPermissionsOk = (hoisted.rows.github_installations[0] as { permissions_ok: boolean }).permissions_ok;
+    try {
+      (hoisted.serviceRows.github_installations[0] as { permissions: Record<string, string> }).permissions = mutatePermissions(originalPermissions);
+      (hoisted.rows.github_installations[0] as { permissions_ok: boolean }).permissions_ok = label === "not approved" ? false : true;
+      hoisted.rows.github_connection_incidents = [];
+      render(await IntegrationsPage({ searchParams: Promise.resolve({}) }));
+      expect(screen.getByText("Owner action required")).toBeVisible();
+      expect(screen.getAllByRole("status")[0]).toHaveTextContent("GitHub App permissions no longer match the approved read-only access.");
+      expect(screen.queryByText("Approved GitHub App permissions")).not.toBeInTheDocument();
+    } finally {
+      (hoisted.serviceRows.github_installations[0] as { permissions: Record<string, string> }).permissions = originalPermissions;
+      hoisted.rows.github_connection_incidents = originalIncidents;
+      (hoisted.rows.github_installations[0] as { permissions_ok: boolean }).permissions_ok = originalPermissionsOk;
+    }
+  });
+
+  it("uses an open incident over a conflicting healthy summary", async () => {
+    render(await IntegrationsPage({ searchParams: Promise.resolve({}) }));
+
+    expect(screen.getByText("Owner action required")).toBeVisible();
+    expect(screen.queryByText("Healthy", { exact: true })).not.toBeInTheDocument();
+    expect(screen.getByText("Connection incident: GitHub App permissions no longer match the approved read-only access.")).toBeVisible();
+  });
+
+  it("constructs Owner settings links under the fixed GitHub origin only for organisations", async () => {
+    const original = hoisted.rows.github_installations;
+    try {
+      hoisted.role = "owner";
+      hoisted.rows.github_installations = [{ ...(original[0] as Record<string, unknown>), account_login: "evil.example/path?x=1" }];
+      render(await IntegrationsPage({ searchParams: Promise.resolve({}) }));
+      expect(screen.getByRole("link", { name: "Open GitHub installation settings" })).toHaveAttribute(
+        "href", "https://github.com/organizations/evil.example%2Fpath%3Fx%3D1/settings/installations/77",
+      );
+    } finally {
+      hoisted.rows.github_installations = original;
+    }
+  });
+
+  it("does not render an installation settings link for non-organisation accounts", async () => {
+    const original = hoisted.rows.github_installations;
+    try {
+      hoisted.role = "owner";
+      hoisted.rows.github_installations = [{ ...(original[0] as Record<string, unknown>), account_type: "User" }];
+      render(await IntegrationsPage({ searchParams: Promise.resolve({}) }));
+      expect(screen.queryByRole("link", { name: "Open GitHub installation settings" })).not.toBeInTheDocument();
+    } finally {
+      hoisted.rows.github_installations = original;
+    }
   });
 
   it("loads bounded delivery metadata for Owners without selecting message contents", async () => {

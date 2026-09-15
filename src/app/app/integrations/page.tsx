@@ -61,6 +61,36 @@ function approvedPermissionLabelsFor(permissions: unknown): string[] {
   return Object.keys(READ_PERMISSIONS).map((permission) => approvedPermissionLabels[permission as keyof typeof READ_PERMISSIONS]);
 }
 
+const connectionHealthValues = new Set<GitHubConnectionHealth>([
+  "healthy", "retrying", "partially_unavailable", "owner_action_required", "disconnected",
+]);
+const connectionDiagnosticValues = new Set<GitHubConnectionDiagnostic>([
+  "provider_rate_limited", "provider_temporary_failure", "installation_suspended", "installation_revoked",
+  "permission_mismatch", "account_mismatch", "repository_unavailable", "invalid_provider_response", "internal_failure",
+]);
+
+function exactRowsByInstallationId<T extends { id: string }>(
+  rows: readonly T[],
+  installationIds: ReadonlySet<string>,
+): Map<string, T> {
+  if (rows.length !== installationIds.size) throw new Error("Could not load connection settings");
+  const byId = new Map<string, T>();
+  for (const row of rows) {
+    if (!installationIds.has(row.id) || byId.has(row.id)) throw new Error("Could not load connection settings");
+    byId.set(row.id, row);
+  }
+  if (byId.size !== installationIds.size) throw new Error("Could not load connection settings");
+  return byId;
+}
+
+function isConnectionHealth(value: unknown): value is GitHubConnectionHealth {
+  return typeof value === "string" && connectionHealthValues.has(value as GitHubConnectionHealth);
+}
+
+function isConnectionDiagnostic(value: unknown): value is GitHubConnectionDiagnostic {
+  return typeof value === "string" && connectionDiagnosticValues.has(value as GitHubConnectionDiagnostic);
+}
+
 function installationSettingsUrl(input: {
   account_login: string;
   account_type: string;
@@ -243,18 +273,48 @@ export default async function IntegrationsPage({
     ...connection,
     target_count: Number(connection.target_count),
   })) as NativeJiraConnectionSummary[];
-  const healthByInstallationId = new Map((healthResult.data ?? []).map((health) => [health.id, health]));
+  const installationRows = installationResult.data ?? [];
+  const installationIds = new Set(installationRows.map((installation) => installation.id));
+  if (installationIds.size !== installationRows.length) throw new Error("Could not load connection settings");
+  const healthByInstallationId = exactRowsByInstallationId(
+    healthResult.data ?? [],
+    installationIds,
+  );
+  const permissionsByInstallationId = exactRowsByInstallationId(
+    permissionResult.data ?? [],
+    installationIds,
+  );
   const incidentByInstallationId = new Map((incidentResult.data ?? []).map((incident) => [incident.installation_id, incident]));
-  const permissionsByInstallationId = new Map((permissionResult.data ?? []).map((installation) => [installation.id, installation.permissions]));
   const now = new Date().toISOString();
-  const installations = (installationResult.data ?? []).map((installation) => {
+  const installations = installationRows.map((installation) => {
     const health = healthByInstallationId.get(installation.id);
     const incident = incidentByInstallationId.get(installation.id);
-    const incidentPresentation = incident
+    const permission = permissionsByInstallationId.get(installation.id);
+    if (!health || !permission || !isConnectionHealth(health.health)) throw new Error("Could not load connection settings");
+    const healthDiagnostic = health.health_diagnostic_code === null
+      ? null
+      : isConnectionDiagnostic(health.health_diagnostic_code)
+        ? health.health_diagnostic_code
+        : (() => { throw new Error("Could not load connection settings"); })();
+    const incidentHealth = incident && isConnectionHealth(incident.health) ? incident.health : null;
+    const incidentDiagnostic = incident?.diagnostic_code === null || incident?.diagnostic_code === undefined
+      ? null
+      : isConnectionDiagnostic(incident.diagnostic_code)
+        ? incident.diagnostic_code
+        : (() => { throw new Error("Could not load connection settings"); })();
+    if (incident && !incidentHealth) throw new Error("Could not load connection settings");
+    const permissionMismatch = !installation.permissions_ok || !hasExactReadPermissions(permission.permissions);
+    const effectiveHealth = incidentHealth ?? (permissionMismatch ? "owner_action_required" : health.health);
+    const effectiveDiagnostic = incidentHealth
+      ? incidentDiagnostic
+      : permissionMismatch
+        ? "permission_mismatch"
+        : healthDiagnostic;
+    const incidentPresentation = incident && incidentHealth
       ? presentGitHubConnectionHealth({
-          health: incident.health as GitHubConnectionHealth,
-          diagnostic: incident.diagnostic_code as GitHubConnectionDiagnostic | null,
-          lastSuccessfulReconciliationAt: health?.last_successful_reconciliation_at ?? null,
+          health: incidentHealth,
+          diagnostic: incidentDiagnostic,
+          lastSuccessfulReconciliationAt: health.last_successful_reconciliation_at,
           now,
         })
       : null;
@@ -264,10 +324,10 @@ export default async function IntegrationsPage({
       status: installation.status,
       repository_selection: installation.repository_selection,
       permissions_ok: installation.permissions_ok,
-      health: health?.health as GitHubConnectionHealth | undefined,
-      health_diagnostic_code: health?.health_diagnostic_code as GitHubConnectionDiagnostic | null | undefined,
-      last_successful_reconciliation_at: health?.last_successful_reconciliation_at ?? null,
-      permission_labels: approvedPermissionLabelsFor(permissionsByInstallationId.get(installation.id)),
+      health: effectiveHealth,
+      health_diagnostic_code: effectiveDiagnostic,
+      last_successful_reconciliation_at: health.last_successful_reconciliation_at,
+      permission_labels: permissionMismatch ? [] : approvedPermissionLabelsFor(permission.permissions),
       installation_settings_url: installationSettingsUrl({
         account_login: installation.account_login,
         account_type: installation.account_type,

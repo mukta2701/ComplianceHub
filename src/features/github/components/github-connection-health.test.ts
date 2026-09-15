@@ -38,6 +38,7 @@ describe("presentGitHubConnectionHealth", () => {
     ["1 hour ago", "2026-09-15T11:00:00.000Z"],
     ["2 hours ago", "2026-09-15T10:00:00.000Z"],
     ["1 day ago", "2026-09-14T12:00:00.000Z"],
+    ["just now", "2026-09-15T12:00:30.000Z"],
   ])("uses deterministic relative time at the %s boundary", (checkedAt, lastSuccessfulReconciliationAt) => {
     expect(presentGitHubConnectionHealth({
       health: "healthy",
@@ -45,6 +46,21 @@ describe("presentGitHubConnectionHealth", () => {
       lastSuccessfulReconciliationAt,
       now,
     }).checkedAt).toBe(checkedAt);
+  });
+
+  it("rejects freshness more than one minute in the future", () => {
+    expect(presentGitHubConnectionHealth({
+      health: "healthy",
+      diagnostic: null,
+      lastSuccessfulReconciliationAt: "2026-09-15T12:01:00.000Z",
+      now,
+    }).checkedAt).toBe("just now");
+    expect(presentGitHubConnectionHealth({
+      health: "healthy",
+      diagnostic: null,
+      lastSuccessfulReconciliationAt: "2026-09-15T12:01:00.001Z",
+      now,
+    }).checkedAt).toBeNull();
   });
 
   it.each([
@@ -83,9 +99,9 @@ describe("presentGitHubConnectionHealth", () => {
   });
 
   it.each([
-    ["installation_suspended", "GitHub has suspended this App installation.", "Ask a workspace Owner to review the GitHub App installation."],
-    ["permission_mismatch", "GitHub App permissions no longer match the approved read-only access.", "Ask a workspace Owner to review the GitHub App permissions."],
-    ["account_mismatch", "The connected GitHub account no longer matches this workspace.", "Ask a workspace Owner to reconnect the approved GitHub organisation."],
+    ["installation_suspended", "GitHub has suspended this App installation.", "Review the GitHub App installation."],
+    ["permission_mismatch", "GitHub App permissions no longer match the approved read-only access.", "Review the GitHub App permissions."],
+    ["account_mismatch", "The connected GitHub account no longer matches this workspace.", "Reconnect the approved GitHub organisation."],
   ] as const)("gives diagnostic-specific Owner guidance for %s", (diagnostic, summary, nextAction) => {
     expect(presentGitHubConnectionHealth({
       health: "owner_action_required",
@@ -112,7 +128,7 @@ describe("presentGitHubConnectionHealth", () => {
     expect(presentation).toEqual({
       label: "Disconnected",
       summary: "ComplianceHub is disconnected from this GitHub installation.",
-      nextAction: "A workspace Owner can reconnect when GitHub access is ready.",
+      nextAction: "Reconnect GitHub when access is ready.",
       tone: "neutral",
       checkedAt: "2 hours ago",
     });
