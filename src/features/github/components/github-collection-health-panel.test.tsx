@@ -13,6 +13,7 @@ import type { GitHubRepositoryMonitoringSummary } from "./github-collection-heal
 const installation: GitHubInstallationSummary = {
   id: "10000000-0000-4000-8000-000000000010", account_login: "Adtecher", status: "active",
   repository_selection: "selected", permissions_ok: true,
+  health: "healthy", health_diagnostic_code: null, last_successful_reconciliation_at: null,
 };
 const repository: GitHubRepositoryMonitoringSummary = {
   repository_id: "10000000-0000-4000-8000-000000000011", installation_id: installation.id,
