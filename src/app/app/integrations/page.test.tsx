@@ -6,6 +6,7 @@ const hoisted = vi.hoisted(() => ({
   filterCalls: [] as Array<{ table: string; column: string; value: string }>,
   serviceSelectCalls: [] as Array<{ table: string; columns: string }>,
   serviceFilterCalls: [] as Array<{ table: string; column: string; value: string }>,
+  repositoryPageCalls: [] as Array<{ afterId: string | null; limit: number | null }>,
   createServiceClient: vi.fn(),
   errors: {} as Record<string, { message: string } | undefined>,
   controlRoomLoads: [] as unknown[],
@@ -67,6 +68,8 @@ function query(table: string, source: "authenticated" | "service" = "authenticat
   const selectCalls = source === "service" ? hoisted.serviceSelectCalls : hoisted.selectCalls;
   const filterCalls = source === "service" ? hoisted.serviceFilterCalls : hoisted.filterCalls;
   const chain: Record<string, unknown> = {};
+  let afterId: string | null = null;
+  let pageLimit: number | null = null;
   chain.select = vi.fn((columns: string) => {
     selectCalls.push({ table, columns });
     return chain;
@@ -75,11 +78,27 @@ function query(table: string, source: "authenticated" | "service" = "authenticat
     filterCalls.push({ table, column, value });
     return chain;
   });
-  for (const method of ["is", "order", "limit"]) chain[method] = vi.fn(() => chain);
+  for (const method of ["is", "order"]) chain[method] = vi.fn(() => chain);
+  chain.gt = vi.fn((column: string, value: string) => {
+    if (column === "id") afterId = value;
+    return chain;
+  });
+  chain.limit = vi.fn((value: number) => {
+    pageLimit = value;
+    return chain;
+  });
   chain.then = (resolve: (value: { data: unknown[]; error: { message: string } | null }) => unknown) =>
-    Promise.resolve({
-      data: (source === "service" ? hoisted.serviceRows : hoisted.rows)[table] ?? [],
-      error: hoisted.errors[`${source}:${table}`] ?? hoisted.errors[table] ?? null,
+    Promise.resolve().then(() => {
+      const sourceRows = (source === "service" ? hoisted.serviceRows : hoisted.rows)[table] ?? [];
+      if (source === "authenticated" && table === "github_repositories") {
+        hoisted.repositoryPageCalls.push({ afterId, limit: pageLimit });
+        const rows = sourceRows
+          .filter((row) => afterId === null || String((row as { id: string }).id) > afterId)
+          .toSorted((left, right) => String((left as { id: string }).id).localeCompare(String((right as { id: string }).id)))
+          .slice(0, Math.min(pageLimit ?? 1_000, 1_000));
+        return { data: rows, error: hoisted.errors[table] ?? null };
+      }
+      return { data: sourceRows, error: hoisted.errors[`${source}:${table}`] ?? hoisted.errors[table] ?? null };
     }).then(resolve);
   return chain;
 }
@@ -145,6 +164,7 @@ describe("Settings Connections page", () => {
     hoisted.filterCalls = [];
     hoisted.serviceSelectCalls = [];
     hoisted.serviceFilterCalls = [];
+    hoisted.repositoryPageCalls = [];
     hoisted.errors = {};
     hoisted.controlRoomLoads = [];
     hoisted.mappingReviewLoads = [];
@@ -211,14 +231,13 @@ describe("Settings Connections page", () => {
   it("scopes every connection dataset to the active workspace", async () => {
     await IntegrationsPage({ searchParams: Promise.resolve({}) });
 
-    expect(hoisted.filterCalls).toEqual([
-      { table: "integration_connections", column: "organisation_id", value: "org-1" },
-      { table: "alert_channels", column: "organisation_id", value: "org-1" },
-      { table: "github_installations", column: "organisation_id", value: "org-1" },
-      { table: "github_repositories", column: "organisation_id", value: "org-1" },
-      { table: "github_connection_health_summaries", column: "organisation_id", value: "org-1" },
-      { table: "github_connection_incidents", column: "organisation_id", value: "org-1" },
-    ]);
+    expect(hoisted.filterCalls).toHaveLength(6);
+    for (const table of [
+      "integration_connections", "alert_channels", "github_installations", "github_repositories",
+      "github_connection_health_summaries", "github_connection_incidents",
+    ]) {
+      expect(hoisted.filterCalls).toContainEqual({ table, column: "organisation_id", value: "org-1" });
+    }
   });
 
   it.each([
@@ -292,6 +311,72 @@ describe("Settings Connections page", () => {
     expect(screen.getByText("Owner action required")).toBeVisible();
     expect(screen.queryByText("Healthy", { exact: true })).not.toBeInTheDocument();
     expect(screen.getByText("Connection incident: GitHub App permissions no longer match the approved read-only access.")).toBeVisible();
+  });
+
+  it("suppresses a weaker open incident when revoked status resolves as disconnected", async () => {
+    const originalInstallations = hoisted.rows.github_installations;
+    const originalIncidents = hoisted.rows.github_connection_incidents;
+    try {
+      hoisted.rows.github_installations = [{ ...(originalInstallations[0] as Record<string, unknown>), status: "revoked" }];
+      hoisted.rows.github_connection_incidents = [{
+        ...(originalIncidents[0] as Record<string, unknown>), health: "retrying", diagnostic_code: "provider_temporary_failure",
+      }];
+      render(await IntegrationsPage({ searchParams: Promise.resolve({}) }));
+      expect(screen.getByText("Disconnected")).toBeVisible();
+      expect(screen.queryByText(/Connection incident: ComplianceHub cannot currently verify GitHub access/i)).not.toBeInTheDocument();
+    } finally {
+      hoisted.rows.github_installations = originalInstallations;
+      hoisted.rows.github_connection_incidents = originalIncidents;
+    }
+  });
+
+  it("loads every repository page so an Owner can manage scope beyond the PostgREST ceiling", async () => {
+    const originalRepositories = hoisted.rows.github_repositories;
+    const originalIncidents = hoisted.rows.github_connection_incidents;
+    try {
+      hoisted.role = "owner";
+      hoisted.rows.github_connection_incidents = [];
+      hoisted.rows.github_repositories = Array.from({ length: 1_001 }, (_, index) => ({
+        id: `repository-${String(index + 1).padStart(5, "0")}`,
+        installation_id: "10000000-0000-4000-8000-000000000010",
+        full_name: `Adtecher/repository-${String(index + 1).padStart(5, "0")}`,
+        html_url: `https://github.com/Adtecher/repository-${String(index + 1).padStart(5, "0")}`,
+        visibility: "private", default_branch: "main", archived: false, selected: index === 1_000, available: true,
+      }));
+      render(await IntegrationsPage({ searchParams: Promise.resolve({}) }));
+      expect(screen.getByText("1001 repositories available to this GitHub App; 1 selected in ComplianceHub.")).toBeVisible();
+      expect(screen.getByRole("checkbox", { name: "Allow ComplianceHub to read and include Adtecher/repository-01001 in monitoring" })).toBeEnabled();
+      expect(hoisted.repositoryPageCalls).toEqual([
+        { afterId: null, limit: 500 },
+        { afterId: "repository-00500", limit: 500 },
+        { afterId: "repository-01000", limit: 500 },
+      ]);
+      expect(hoisted.filterCalls.filter((call) => call.table === "github_repositories")).toEqual([
+        { table: "github_repositories", column: "organisation_id", value: "org-1" },
+        { table: "github_repositories", column: "organisation_id", value: "org-1" },
+        { table: "github_repositories", column: "organisation_id", value: "org-1" },
+      ]);
+    } finally {
+      hoisted.rows.github_repositories = originalRepositories;
+      hoisted.rows.github_connection_incidents = originalIncidents;
+    }
+  });
+
+  it("fails closed after one bounded probe beyond the 10000 repository contract", async () => {
+    const originalRepositories = hoisted.rows.github_repositories;
+    try {
+      hoisted.rows.github_repositories = Array.from({ length: 10_001 }, (_, index) => ({
+        id: `repository-${String(index + 1).padStart(5, "0")}`,
+        installation_id: "10000000-0000-4000-8000-000000000010",
+        full_name: `Adtecher/repository-${String(index + 1).padStart(5, "0")}`,
+        html_url: `https://github.com/Adtecher/repository-${String(index + 1).padStart(5, "0")}`,
+        visibility: "private", default_branch: "main", archived: false, selected: false, available: true,
+      }));
+      await expect(IntegrationsPage({ searchParams: Promise.resolve({}) })).rejects.toThrow("Could not load connection settings");
+      expect(hoisted.repositoryPageCalls.at(-1)).toEqual({ afterId: "repository-10000", limit: 1 });
+    } finally {
+      hoisted.rows.github_repositories = originalRepositories;
+    }
   });
 
   it("constructs Owner settings links under the fixed GitHub origin only for organisations", async () => {

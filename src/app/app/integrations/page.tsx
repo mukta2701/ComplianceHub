@@ -6,6 +6,7 @@ import { workspaceAccess } from "@/features/organisations/domain/workspace-acces
 import { requireAppContext } from "@/lib/app-context";
 import { canShowDeveloperTools } from "@/lib/security/developer-tools";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
+import { collectIdPages, SUPABASE_PAGE_SIZE } from "@/lib/supabase/paginate";
 import { createJiraOAuthGateway } from "@/features/integrations/application/jira-oauth";
 import { createSupabaseJiraConnectionStore, getFreshJiraAccessToken, type JiraPersistenceDatabase } from "@/features/integrations/application/jira-token-store";
 import { getJiraProviderConfig } from "@/features/integrations/application/provider-config";
@@ -50,6 +51,8 @@ type AlertChannel = AlertChannelSummary & {
   revoked_at: string | null;
 };
 
+type GitHubRepositorySummaryRow = Omit<GitHubRepositoryConfigurationSummary, "repository_id"> & { id: string };
+
 const approvedPermissionLabels: Record<keyof typeof READ_PERMISSIONS, string> = {
   metadata: "Metadata — read",
   administration: "Administration — read",
@@ -74,6 +77,21 @@ const connectionDiagnosticValues = new Set<GitHubConnectionDiagnostic>([
 const installationStatusValues = new Set<GitHubInstallationSummary["status"]>([
   "active", "suspended", "revoked", "needs_attention",
 ]);
+const MAX_GITHUB_REPOSITORY_SUMMARIES = 10_000;
+const githubRepositorySummaryColumns = "id,installation_id,full_name,html_url,visibility,default_branch,archived,selected,available";
+
+async function collectBoundedRepositoryPages<T extends { id: string }>(
+  fetchPage: (afterId: string | null, limit: number) => Promise<T[]>,
+): Promise<T[]> {
+  let fetched = 0;
+  return collectIdPages(async (afterId, pageSize) => {
+    const limit = Math.min(pageSize, MAX_GITHUB_REPOSITORY_SUMMARIES + 1 - fetched);
+    const page = await fetchPage(afterId, limit);
+    fetched += page.length;
+    if (fetched > MAX_GITHUB_REPOSITORY_SUMMARIES) throw new Error("GitHub repository scope exceeded its approved maximum");
+    return page;
+  }, { pageSize: SUPABASE_PAGE_SIZE });
+}
 
 function exactRowsByInstallationId<T extends { id: string }>(
   rows: readonly T[],
@@ -220,7 +238,7 @@ export default async function IntegrationsPage({
   const jira = typeof params.jira === "string" ? params.jira : undefined;
   const setupId = typeof params.setup === "string" ? params.setup : undefined;
   const connectionId = typeof params.connection === "string" ? params.connection : undefined;
-  const [connectionsResult, alertChannelsResult, installationResult, repositorySummaryResult, healthResult, incidentResult, permissionResult, deliveryResult, nativeJiraResult] = await Promise.all([
+  const [connectionsResult, alertChannelsResult, installationResult, healthResult, incidentResult, permissionResult, deliveryResult, nativeJiraResult] = await Promise.all([
     supabase.from("integration_connections")
       .select("id,provider,label,config,connection_mode,enabled,created_at,revoked_at")
       .eq("organisation_id", organisation.id)
@@ -234,10 +252,6 @@ export default async function IntegrationsPage({
       .select("id,account_login,account_type,provider_installation_id,status,repository_selection,permissions_ok")
       .eq("organisation_id", organisation.id)
       .order("updated_at", { ascending: false }),
-    supabase.from("github_repositories")
-      .select("id,installation_id,full_name,html_url,visibility,default_branch,archived,selected,available")
-      .eq("organisation_id", organisation.id)
-      .order("full_name", { ascending: true }),
     supabase.from("github_connection_health_summaries")
       .select("id,health,health_diagnostic_code,last_successful_reconciliation_at")
       .eq("organisation_id", organisation.id),
@@ -264,7 +278,6 @@ export default async function IntegrationsPage({
     connectionsResult.error
     || alertChannelsResult.error
     || installationResult.error
-    || repositorySummaryResult.error
     || healthResult.error
     || incidentResult.error
     || permissionResult.error
@@ -273,6 +286,24 @@ export default async function IntegrationsPage({
   ) {
     throw new Error("Could not load connection settings");
   }
+  let repositorySummaryRows: GitHubRepositorySummaryRow[];
+  try {
+    repositorySummaryRows = await collectBoundedRepositoryPages(async (afterId, limit) => {
+      const query = supabase.from("github_repositories")
+        .select(githubRepositorySummaryColumns)
+        .eq("organisation_id", organisation.id)
+        .order("id", { ascending: true })
+        .limit(limit);
+      const { data, error } = afterId === null
+        ? await query
+        : await query.gt("id", afterId);
+      if (error) throw error;
+      return (data ?? []) as GitHubRepositorySummaryRow[];
+    });
+  } catch {
+    throw new Error("Could not load connection settings");
+  }
+  repositorySummaryRows.sort((left, right) => left.full_name.localeCompare(right.full_name) || left.id.localeCompare(right.id));
 
   const connections = ((connectionsResult.data ?? []) as Connection[])
     .filter((connection) => !connection.revoked_at);
@@ -351,7 +382,9 @@ export default async function IntegrationsPage({
         account_type: installation.account_type,
         provider_installation_id: installation.provider_installation_id,
       }),
-      incident: incident && incidentPresentation ? {
+      incident: incident && incidentPresentation
+        && incidentConnection?.health === effectiveConnection.health
+        && incidentConnection.diagnostic === effectiveConnection.diagnostic ? {
         summary: incidentPresentation.summary,
         lastObservedAt: incident.last_observed_at,
       } : null,
@@ -398,7 +431,7 @@ export default async function IntegrationsPage({
     />
     <GitHubInstallationPanel
       installations={installations}
-      repositories={(repositorySummaryResult.data ?? []).map((repository) => ({
+      repositories={repositorySummaryRows.map((repository) => ({
         ...repository,
         repository_id: repository.id,
       })) as GitHubRepositoryConfigurationSummary[]}

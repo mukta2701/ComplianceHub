@@ -28,6 +28,21 @@ describe("presentGitHubConnectionHealth", () => {
     expect(resolveGitHubConnectionHealth(input)).toEqual(expected);
   });
 
+  it("keeps needs-attention generic while preserving a stronger explicit state over a weaker diagnostic", () => {
+    expect(resolveGitHubConnectionHealth({
+      installationStatus: "needs_attention",
+      summary: { health: "healthy", diagnostic: null },
+      incident: null,
+      permissionMismatch: false,
+    })).toEqual({ health: "owner_action_required", diagnostic: null });
+    expect(resolveGitHubConnectionHealth({
+      installationStatus: "active",
+      summary: { health: "owner_action_required", diagnostic: "repository_unavailable" },
+      incident: null,
+      permissionMismatch: false,
+    })).toEqual({ health: "owner_action_required", diagnostic: null });
+  });
+
   it("presents a healthy connection only when the authoritative successful check is valid", () => {
     expect(presentGitHubConnectionHealth({
       health: "healthy",
