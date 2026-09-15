@@ -220,13 +220,7 @@ describe("Settings Connections page", () => {
     expect(screen.getByText("Owner action required")).toBeVisible();
     expect(screen.queryByText("Healthy", { exact: true })).not.toBeInTheDocument();
     expect(screen.getByText("Connection incident: GitHub App permissions no longer match the approved read-only access.")).toBeVisible();
-    expect(screen.getByText("Approved GitHub App permissions")).toBeVisible();
-    expect(screen.getByText("Metadata — read")).toBeVisible();
-    expect(screen.getByText("Administration — read")).toBeVisible();
-    expect(screen.getByText("Actions — read")).toBeVisible();
-    expect(screen.getByText("Vulnerability alerts — read")).toBeVisible();
-    expect(screen.getByText("Security events — read")).toBeVisible();
-    expect(screen.getByText("Secret scanning alerts — read")).toBeVisible();
+    expect(screen.queryByText("Approved GitHub App permissions")).not.toBeInTheDocument();
     expect(screen.queryByText(/collection health|freshness|recheck/i)).not.toBeInTheDocument();
     expect(hoisted.controlRoomLoads).toHaveLength(0);
     expect(hoisted.mappingReviewLoads).toHaveLength(0);
@@ -348,6 +342,15 @@ describe("Settings Connections page", () => {
     expect(screen.getByText("Owner action required")).toBeVisible();
     expect(screen.queryByText("Healthy", { exact: true })).not.toBeInTheDocument();
     expect(screen.getByText("Connection incident: GitHub App permissions no longer match the approved read-only access.")).toBeVisible();
+  });
+
+  it("does not present approved permission labels when another authoritative fact resolves permission mismatch", async () => {
+    render(await IntegrationsPage({ searchParams: Promise.resolve({}) }));
+
+    expect(screen.getByText("Owner action required")).toBeVisible();
+    expect(screen.getAllByRole("status")[0]).toHaveTextContent("GitHub App permissions no longer match the approved read-only access.");
+    expect(screen.queryByText("Approved GitHub App permissions")).not.toBeInTheDocument();
+    expect(screen.queryByText("Metadata — read")).not.toBeInTheDocument();
   });
 
   it("suppresses a weaker open incident when revoked status resolves as disconnected", async () => {
@@ -496,6 +499,11 @@ describe("Settings Connections page", () => {
       hoisted.rows.github_connection_incidents = [];
       render(await IntegrationsPage({ searchParams: Promise.resolve({ github: "connected" }) }));
       expect(screen.getByRole("status", { name: "GitHub connection status" })).toHaveTextContent("GitHub repository access connected");
+      expect(screen.getByText("Approved GitHub App permissions")).toBeVisible();
+      for (const label of [
+        "Metadata — read", "Administration — read", "Actions — read", "Vulnerability alerts — read",
+        "Security events — read", "Secret scanning alerts — read",
+      ]) expect(screen.getByText(label)).toBeVisible();
     } finally {
       hoisted.rows.github_connection_incidents = originalIncidents;
     }

@@ -378,7 +378,7 @@ export default async function IntegrationsPage({
       health: effectiveConnection.health,
       health_diagnostic_code: effectiveConnection.diagnostic,
       last_successful_reconciliation_at: health.last_successful_reconciliation_at,
-      permission_labels: !installation.permissions_ok || rawPermissionMismatch ? [] : approvedPermissionLabelsFor(permission.permissions),
+      permission_labels: !installation.permissions_ok || rawPermissionMismatch || effectiveConnection.diagnostic === "permission_mismatch" ? [] : approvedPermissionLabelsFor(permission.permissions),
       installation_settings_url: installationSettingsUrl({
         account_login: installation.account_login,
         account_type: installation.account_type,

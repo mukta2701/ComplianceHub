@@ -177,8 +177,46 @@ test("fictional GitHub connection health is usable on desktop and mobile", async
       await expect(panel.getByText("Healthy", { exact: true })).toBeVisible();
       await expect(healthStatus).toHaveAttribute("aria-live", "polite");
       await expect(panel.getByText("2 repositories available to this GitHub App; 1 selected in ComplianceHub.")).toBeVisible();
-      await expect(panel.getByRole("button", { name: "Disconnect from ComplianceHub" })).toBeVisible();
+      const management = panel.getByRole("group", { name: "GitHub installation details and Owner actions" });
+      const historicalDetail = management.getByText("1 historical repository is unavailable and cannot be selected.", { exact: true });
       const settingsLink = panel.getByRole("link", { name: "Open GitHub installation settings" });
+      const disconnectButton = panel.getByRole("button", { name: "Disconnect from ComplianceHub" });
+      await expect(historicalDetail).toBeVisible();
+      await expect(disconnectButton).toBeVisible();
+      expect(await management.evaluate((group) => Array.from(group.children).map((child) => ({
+        tagName: child.tagName,
+        text: child.textContent?.trim(),
+      })))).toEqual([
+        { tagName: "P", text: "1 historical repository is unavailable and cannot be selected." },
+        { tagName: "A", text: "Open GitHub installation settings" },
+        { tagName: "BUTTON", text: "Disconnect from ComplianceHub" },
+      ]);
+      const configurationNote = panel.getByText("2 repositories available to this GitHub App; 1 selected in ComplianceHub.", { exact: true });
+      const pilotRepository = panel.getByRole("article", { name: `${accountLogin}/pilot repository scope` });
+      const [managementBox, noteBox, repositoryBox, settingsBox, disconnectBox] = await Promise.all([
+        management.boundingBox(),
+        configurationNote.boundingBox(),
+        pilotRepository.boundingBox(),
+        settingsLink.boundingBox(),
+        disconnectButton.boundingBox(),
+      ]);
+      if (!managementBox || !noteBox || !repositoryBox || !settingsBox || !disconnectBox) {
+        throw new Error("GitHub installation details and controls must have layout boxes");
+      }
+      expect(settingsBox.height).toBeGreaterThanOrEqual(44);
+      expect(disconnectBox.height).toBeGreaterThanOrEqual(44);
+      if (viewport.width > 640) {
+        expect(Math.abs(managementBox.x - noteBox.x)).toBeLessThanOrEqual(4);
+        expect(Math.abs(managementBox.x - (repositoryBox.x + 24))).toBeLessThanOrEqual(4);
+        expect(Math.abs((managementBox.x + managementBox.width) - (noteBox.x + noteBox.width))).toBeLessThanOrEqual(4);
+        expect(Math.abs((managementBox.x + managementBox.width) - (repositoryBox.x + repositoryBox.width - 24))).toBeLessThanOrEqual(4);
+      } else {
+        expect(Math.abs(settingsBox.x - managementBox.x)).toBeLessThanOrEqual(2);
+        expect(Math.abs(disconnectBox.x - managementBox.x)).toBeLessThanOrEqual(2);
+        expect(Math.abs(settingsBox.width - managementBox.width)).toBeLessThanOrEqual(2);
+        expect(Math.abs(disconnectBox.width - managementBox.width)).toBeLessThanOrEqual(2);
+        expect(settingsBox.y + settingsBox.height).toBeLessThanOrEqual(disconnectBox.y);
+      }
       await focusByTab(page, settingsLink);
       const widths = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth }));
       expect(widths.scroll).toBeLessThanOrEqual(widths.client);
@@ -198,6 +236,10 @@ test("fictional GitHub connection health is usable on desktop and mobile", async
       const panel = page.getByRole("region", { name: "GitHub repository access" });
       await expect(panel.getByText("Healthy", { exact: true })).toBeVisible();
       await expect(panel.getByText("2 repositories available to this GitHub App; 1 selected in ComplianceHub.")).toBeVisible();
+      const details = panel.getByRole("group", { name: "GitHub installation details" });
+      await expect(details.getByText("1 historical repository is unavailable and cannot be selected.", { exact: true })).toBeVisible();
+      await expect(details.getByRole("link", { name: "Open GitHub installation settings" })).toHaveCount(0);
+      await expect(details.getByRole("button", { name: "Disconnect from ComplianceHub" })).toHaveCount(0);
       for (const label of [
         "Metadata — read",
         "Administration — read",
