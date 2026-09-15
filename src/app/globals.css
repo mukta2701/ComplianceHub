@@ -600,7 +600,7 @@ a.heat-cell:hover{outline:2px solid var(--ink);outline-offset:-2px}
 .github-installation-management>.field-hint{flex:1 1 100%;min-width:0;overflow-wrap:anywhere}
 .github-installation-management>a{display:inline-flex;align-items:center;min-height:44px;color:var(--ch-ink);font-size:13px;font-weight:750;overflow-wrap:anywhere}
 .github-installation-management>a:hover{text-decoration:underline}
-.github-installation-management>.button{min-height:44px;margin:0}
+.github-shadow-panel .github-installation-management>.button{min-height:48px;margin:0}
 .github-installation-head{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:var(--ch-space-5);padding:var(--ch-space-5) var(--ch-space-6);background:var(--ch-canvas)}
 .github-installation-head h3{margin:0;font-size:15px}
 .github-installation-head p{margin:4px 0 0;color:var(--ch-text-muted);font-size:12px}
