@@ -37,37 +37,32 @@ describe("MemberMonitoring", () => {
     expect(screen.queryByText(/connect a system/i)).not.toBeInTheDocument();
   });
 
-  it("counts an active GitHub installation once and hides a duplicate legacy source", () => {
-    render(<MemberMonitoring hasActiveGitHubInstallation data={{
+  it("does not derive Member system counts from hidden GitHub provider state", () => {
+    render(<MemberMonitoring data={{
       connectedSystems: [{ id: "source-1", provider: "github", label: "Legacy GitHub", connectedAt: "2026-01-01T00:00:00Z" }],
       findings: [],
       officialGitHubFindings: [],
     }} />);
 
-    expect(screen.getByText("No recorded active findings").closest(".monitor-banner")).toHaveTextContent("1 system monitored");
+    expect(screen.getByText("No recorded active findings").closest(".monitor-banner")).toHaveTextContent("0 systems monitored");
     expect(screen.queryByText("Legacy GitHub")).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Other monitored systems" })).not.toBeInTheDocument();
   });
 
-  it("places other systems after active findings and before technical review", () => {
-    render(<MemberMonitoring
-      githubMonitoring={<section aria-label="GitHub monitoring" />}
-      githubTechnicalReview={<details><summary>Technical review and recovery</summary></details>}
-      data={{
+  it("places other non-GitHub systems after active findings", () => {
+    render(<MemberMonitoring data={{
         connectedSystems: [{ id: "source-1", provider: "slack", label: "Production Slack", connectedAt: "2026-01-01T00:00:00Z" }],
         findings: [{
           id: "finding-1", controlRef: "A.8.32", severity: "high", title: "Branch protection disabled",
           detail: "The default branch is not protected.", status: "open", detectedAt: "2026-01-03T00:00:00Z", origin: "legacy",
         }],
         officialGitHubFindings: [],
-      }}
-    />);
+      }} />);
 
     const findings = screen.getByRole("heading", { name: "Active findings" });
     const otherSystems = screen.getByRole("heading", { name: "Other monitored systems" });
-    const technical = screen.getByText("Technical review and recovery");
     expect(findings.compareDocumentPosition(otherSystems) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(otherSystems.compareDocumentPosition(technical) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByText("Technical review and recovery")).not.toBeInTheDocument();
   });
 
   it("replaces provider-derived finding text with safe official provenance and honours exact selection", () => {

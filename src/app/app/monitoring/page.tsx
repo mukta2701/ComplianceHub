@@ -160,56 +160,23 @@ export default async function MonitoringPage({
 } = { searchParams: Promise.resolve({}) }) {
   const { supabase, organisation, membership } = await requireAppContext();
   const monitoringAccess = workspaceAccess(membership.role).section("monitoring");
-  const runtimeReadiness = getGitHubRuntimeReadiness();
   const params = await searchParams;
   const requestedFinding = parseOfficialRecordSelection(params.finding);
-  const requestedPage = Array.isArray(params.githubPage) ? params.githubPage[0] : params.githubPage;
-  const parsedPage = requestedPage && /^[1-9][0-9]{0,2}$/.test(requestedPage) ? Number(requestedPage) : 1;
-  const repositoryOffset = Math.min((parsedPage - 1) * 20, 10_000);
   if (monitoringAccess.presentation === "member") {
-    const [data, installationResult, repositorySummaryResult, controlRoom, mappingReview] = await Promise.all([
-      loadMemberMonitoring(supabase, organisation.id),
-      supabase.from("github_installations")
-        .select("id,account_login,status,repository_selection,permissions_ok")
-        .eq("organisation_id", organisation.id)
-        .order("updated_at", { ascending: false }),
-      supabase.from("github_repository_monitoring_summaries")
-        .select("repository_id,installation_id,full_name,html_url,visibility,default_branch,archived,selected,available,latest_run_id,latest_status,latest_failed_count,last_completed_collection_at")
-        .eq("organisation_id", organisation.id)
-        .order("full_name", { ascending: true }),
-      loadGitHubComplianceControlRoom(supabase, { organisationId: organisation.id, offset: repositoryOffset, limit: 20 }),
-      loadGitHubMappingReview(supabase, organisation.id),
-    ]);
-    if (installationResult.error || repositorySummaryResult.error) throw new Error("Could not load monitoring");
+    const data = await loadMemberMonitoring(supabase, organisation.id);
     const selectedFinding = requestedFinding && data.officialGitHubFindings.some((record) => record.findingId === requestedFinding)
       ? requestedFinding
       : null;
-    const installations = (installationResult.data ?? []) as GitHubInstallationSummary[];
-    const repositories = (repositorySummaryResult.data ?? []) as GitHubRepositoryMonitoringSummary[];
-    const hasActiveGitHubInstallation = installations.some(
-      (installation) => installation.status === "active",
-    );
     return <MemberMonitoring
       data={data}
       selectedFinding={selectedFinding}
-      hasActiveGitHubInstallation={hasActiveGitHubInstallation}
-      githubMonitoring={<GitHubMonitoringSection
-        role={membership.role}
-        installations={installations}
-        repositories={repositories}
-        nowIso={new Date().toISOString()}
-        room={controlRoom}
-        runtimeReadiness={runtimeReadiness}
-      />}
-      githubTechnicalReview={<GitHubTechnicalReview
-        room={controlRoom}
-        review={mappingReview}
-        role={membership.role}
-        unhealthyRepositoryIds={unhealthyGitHubRepositoryIds(controlRoom, installations, repositories)}
-      />}
     />;
   }
 
+  const runtimeReadiness = getGitHubRuntimeReadiness();
+  const requestedPage = Array.isArray(params.githubPage) ? params.githubPage[0] : params.githubPage;
+  const parsedPage = requestedPage && /^[1-9][0-9]{0,2}$/.test(requestedPage) ? Number(requestedPage) : 1;
+  const repositoryOffset = Math.min((parsedPage - 1) * 20, 10_000);
   const canManageMonitoringFindings = monitoringAccess.canManageOperation("manage-monitoring-findings");
   const [findingResult, sourceResult, installationResult, repositorySummaryResult, controlRoom, mappingReview] = await Promise.all([
     supabase.from("monitoring_findings")

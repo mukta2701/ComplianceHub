@@ -7,7 +7,7 @@ select has_view(
 );
 select ok(
   pg_catalog.has_table_privilege('authenticated', 'public.github_repository_monitoring_summaries', 'SELECT'),
-  'authenticated workspace members may read official GitHub repository health'
+  'authenticated operators may read official GitHub repository health'
 );
 select ok(
   not pg_catalog.has_table_privilege('anon', 'public.github_repository_monitoring_summaries', 'SELECT'),

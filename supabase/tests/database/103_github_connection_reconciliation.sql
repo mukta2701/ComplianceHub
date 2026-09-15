@@ -857,8 +857,8 @@ select throws_ok(
 
 select set_config('request.jwt.claims', '{"sub":"a3000000-0000-4000-8000-000000000003","role":"authenticated"}', true);
 select is((select count(*)::integer from public.github_connection_health_summaries), 0, 'a Member cannot read connection health');
-select is((select count(id)::integer from public.github_installations), 3, 'Member denial does not silently change older non-health installation reads');
-select is((select count(id)::integer from public.github_repositories), 5, 'Member denial does not silently change older Monitoring repository reads');
+select is((select count(id)::integer from public.github_installations), 0, 'a Member cannot read installation configuration');
+select is((select count(id)::integer from public.github_repositories), 0, 'a Member cannot read repository scope');
 select is((select count(*)::integer from public.github_connection_reconciliation_runs), 0, 'a Member cannot read reconciliation history');
 select throws_ok(
   $$ select public.disconnect_github_installation('a3200000-0000-4000-8000-000000000001') $$,

@@ -1,24 +1,16 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const hoisted = vi.hoisted(() => ({
   loadMemberMonitoring: vi.fn(),
-  tables: [] as string[],
+  from: vi.fn(),
   loadControlRoom: vi.fn(),
   loadMappingReview: vi.fn(),
-  rows: {} as Record<string, unknown[]>,
 }));
-
-function query(rows: unknown[]) {
-  const chain: Record<string, unknown> = {};
-  for (const method of ["select", "eq", "order"]) chain[method] = vi.fn(() => chain);
-  chain.then = (resolve: (value: { data: unknown[]; error: null }) => unknown) => Promise.resolve({ data: rows, error: null }).then(resolve);
-  return chain;
-}
 
 vi.mock("@/lib/app-context", () => ({
   requireAppContext: () => Promise.resolve({
-    supabase: { from: (table: string) => { hoisted.tables.push(table); return query(hoisted.rows[table] ?? []); } },
+    supabase: { from: hoisted.from },
     organisation: { id: "org-1", name: "Example Ltd" },
     membership: { role: "member" },
   }),
@@ -46,45 +38,53 @@ vi.mock("@/features/github/components/github-collection-health-panel", () => ({
 import MonitoringPage from "./page";
 
 describe("Member monitoring page branch", () => {
-  it("returns the Member-safe view before loading source config or alert channels", async () => {
-    hoisted.tables = [];
-    hoisted.rows = {};
+  beforeEach(() => {
+    vi.clearAllMocks();
+    hoisted.from.mockImplementation((table: string) => {
+      throw new Error(`Provider table queried for Member: ${table}`);
+    });
+  });
+
+  it("loads only the Member-safe monitoring projection and renders no provider diagnostics", async () => {
     hoisted.loadMemberMonitoring.mockResolvedValue({ connectedSystems: [], findings: [], officialGitHubFindings: [] });
-    hoisted.loadControlRoom.mockResolvedValue({ repositories: [], pagination: { offset: 0, limit: 20, total: 0, truncated: false } });
-    hoisted.loadMappingReview.mockResolvedValue({ pack: {}, entries: [], approvalHistory: [], limitations: [] });
 
     render(await MonitoringPage());
 
     expect(screen.getByRole("heading", { name: "Continuous monitoring" })).toBeInTheDocument();
     expect(hoisted.loadMemberMonitoring).toHaveBeenCalledWith(expect.anything(), "org-1");
-    expect(hoisted.tables).toEqual(["github_installations", "github_repository_monitoring_summaries"]);
-    expect(screen.getByRole("region", { name: "GitHub monitoring" })).toHaveTextContent("Read-only monitoring");
-    const technical = screen.getByText("Technical review and recovery").closest("details");
-    expect(technical).not.toHaveAttribute("open");
-    expect(technical).toContainElement(screen.getByRole("region", { name: "Technical GitHub review" }));
+    expect(hoisted.from).not.toHaveBeenCalled();
+    expect(hoisted.loadControlRoom).not.toHaveBeenCalled();
+    expect(hoisted.loadMappingReview).not.toHaveBeenCalled();
+    expect(screen.queryByRole("region", { name: "GitHub monitoring" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Technical review and recovery")).not.toBeInTheDocument();
   });
 
-  it("counts active GitHub as connected for Members even when permissions need attention", async () => {
-    hoisted.tables = [];
-    hoisted.rows = {
-      github_installations: [{
-        id: "43000000-0000-4000-8000-000000000001", account_login: "ExampleOrg", status: "active",
-        repository_selection: "selected", permissions_ok: false,
-      }],
-      github_repository_monitoring_summaries: [],
-    };
+  it("keeps a safe official GitHub finding visible without loading connection state", async () => {
+    const findingId = "74000000-0000-4000-8000-000000000001";
     hoisted.loadMemberMonitoring.mockResolvedValue({
       connectedSystems: [{ id: "source-1", provider: "github", label: "Legacy GitHub", connectedAt: "2026-01-01T00:00:00Z" }],
-      findings: [],
-      officialGitHubFindings: [],
+      findings: [{
+        id: findingId, controlRef: "A.8.32", severity: "high", title: "Provider title must stay hidden",
+        detail: "Provider detail must stay hidden.", status: "open", detectedAt: "2026-08-25T08:00:00.000Z", origin: "github",
+      }],
+      officialGitHubFindings: [{
+        findingId,
+        repository: { id: "75000000-0000-4000-8000-000000000001", name: "mukta2701/ComplianceHub", url: "https://github.com/mukta2701/ComplianceHub" },
+        checkId: "github.branch.force_pushes",
+        catalogueSummary: "A verified issue was materialised as an approved finding.",
+        observedAt: "2026-08-25T08:00:00.000Z", freshUntil: "2026-08-26T08:00:00.000Z", materialisedAt: "2026-08-25T08:01:00.000Z",
+        freshness: "current", ruleVersion: "github-repository-v1", mappingVersion: "github-iso-27001-v1", mappingChecksum: "b".repeat(64),
+        isoControlReferences: ["A.8.25"], severity: "high", firstDetectedAt: "2026-08-24T08:00:00.000Z", mostRecentDetectedAt: "2026-08-25T08:00:00.000Z",
+        allowedTransitions: ["acknowledged", "in_progress", "exception_requested", "risk_accepted"],
+      }],
     });
-    hoisted.loadControlRoom.mockResolvedValue({ repositories: [], pagination: { offset: 0, limit: 20, total: 0, truncated: false } });
-    hoisted.loadMappingReview.mockResolvedValue({ pack: {}, entries: [], approvalHistory: [], limitations: [] });
 
     render(await MonitoringPage());
 
-    const banner = screen.getByText("No recorded active findings").closest(".monitor-banner");
-    expect(banner).toHaveTextContent("1 system monitored");
+    expect(screen.getByRole("article", { name: "GitHub finding: Force pushes are allowed" })).toBeInTheDocument();
+    expect(hoisted.from).not.toHaveBeenCalled();
+    expect(hoisted.loadControlRoom).not.toHaveBeenCalled();
+    expect(hoisted.loadMappingReview).not.toHaveBeenCalled();
     expect(screen.queryByText("Legacy GitHub")).not.toBeInTheDocument();
   });
 });

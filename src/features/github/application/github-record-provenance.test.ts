@@ -123,7 +123,7 @@ describe("official GitHub record provenance", () => {
         created_at: "2026-08-25T08:01:00.000Z",
       }], error: null },
       github_official_compliance_results: { data: [officialResult()], error: null },
-      github_repositories: { data: [{ id: REPOSITORY, organisation_id: ORG, full_name: "mukta2701/ComplianceHub", html_url: "https://github.com/mukta2701/ComplianceHub" }], error: null },
+      github_official_repository_sources: { data: [{ id: REPOSITORY, organisation_id: ORG, full_name: "mukta2701/ComplianceHub", html_url: "https://github.com/mukta2701/ComplianceHub" }], error: null },
       github_mapping_entries: { data: [{ mapping_pack_id: PACK, check_id: "github.branch.force_pushes", rule_version: "github-repository-v1", iso_control_references: ["A.8.25", "A.8.32"] }], error: null },
     });
 
@@ -138,9 +138,12 @@ describe("official GitHub record provenance", () => {
       })]);
 
     expect(from).not.toHaveBeenCalledWith("github_observations");
+    expect(from).not.toHaveBeenCalledWith("github_repositories");
     expect(queries.get("github_evidence_provenance")?.eq).toHaveBeenCalledWith("organisation_id", ORG);
     expect(queries.get("github_evidence_provenance")?.in).toHaveBeenCalledWith("evidence_id", [EVIDENCE]);
     expect(queries.get("github_evidence_provenance")?.limit).toHaveBeenCalledWith(200);
+    expect(queries.get("github_official_repository_sources")?.eq).toHaveBeenCalledWith("organisation_id", ORG);
+    expect(queries.get("github_official_repository_sources")?.in).toHaveBeenCalledWith("id", [REPOSITORY]);
   });
 
   it("loads the latest failed finding lineage and exposes only the RPC-supported human lifecycle", async () => {
@@ -158,7 +161,7 @@ describe("official GitHub record provenance", () => {
         resolved_at: null,
       }], error: null },
       github_official_compliance_results: { data: [officialResult({ outcome: "fail", failure_severity: "high", evidence_id: null, finding_id: FINDING })], error: null },
-      github_repositories: { data: [{ id: REPOSITORY, organisation_id: ORG, full_name: "mukta2701/ComplianceHub", html_url: "https://github.com/mukta2701/ComplianceHub" }], error: null },
+      github_official_repository_sources: { data: [{ id: REPOSITORY, organisation_id: ORG, full_name: "mukta2701/ComplianceHub", html_url: "https://github.com/mukta2701/ComplianceHub" }], error: null },
       github_mapping_entries: { data: [{ mapping_pack_id: PACK, check_id: "github.branch.force_pushes", rule_version: "github-repository-v1", iso_control_references: ["A.8.25", "A.8.32"] }], error: null },
     });
 
@@ -177,6 +180,36 @@ describe("official GitHub record provenance", () => {
 
     await expect(loadOfficialGitHubFindingProvenance(client as never, ORG, [{ findingId: FINDING, status: "open" }]))
       .rejects.toThrow("Could not load official GitHub record provenance");
+  });
+
+  it("fails closed when an official result has no matching narrow repository source", async () => {
+    const { client, from } = clientFor({
+      github_evidence_provenance: { data: [{
+        evidence_id: EVIDENCE,
+        organisation_id: ORG,
+        repository_id: REPOSITORY,
+        observation_id: OBSERVATION,
+        mapping_pack_id: PACK,
+        check_id: "github.branch.force_pushes",
+        rule_version: "github-repository-v1",
+        mapping_version: "github-iso-27001-v1",
+        observed_at: "2026-08-25T08:00:00.000Z",
+        fresh_until: "2026-08-26T08:00:00.000Z",
+        created_at: "2026-08-25T08:01:00.000Z",
+      }], error: null },
+      github_official_compliance_results: { data: [officialResult()], error: null },
+      github_official_repository_sources: { data: [], error: null },
+      github_mapping_entries: { data: [{
+        mapping_pack_id: PACK,
+        check_id: "github.branch.force_pushes",
+        rule_version: "github-repository-v1",
+        iso_control_references: ["A.8.25"],
+      }], error: null },
+    });
+
+    await expect(loadOfficialGitHubEvidenceProvenance(client as never, ORG, [EVIDENCE]))
+      .rejects.toThrow("Could not load official GitHub record provenance");
+    expect(from).not.toHaveBeenCalledWith("github_repositories");
   });
 
   it("loads more than one mapping-query chunk by exact pack/check pairs", async () => {
@@ -202,7 +235,7 @@ describe("official GitHub record provenance", () => {
         observation_id: observationIds[index], mapping_pack_id: packIds[index], mapping_version: `github-iso-v${index}`,
         check_id: `github.test.check_${index}`, evidence_id: evidenceId,
       })), error: null },
-      github_repositories: { data: [{ id: REPOSITORY, organisation_id: ORG, full_name: "mukta2701/ComplianceHub", html_url: "https://github.com/mukta2701/ComplianceHub" }], error: null },
+      github_official_repository_sources: { data: [{ id: REPOSITORY, organisation_id: ORG, full_name: "mukta2701/ComplianceHub", html_url: "https://github.com/mukta2701/ComplianceHub" }], error: null },
       github_mapping_entries: [
         { data: mappings.slice(0, 20), error: null },
         { data: mappings.slice(20), error: null },
@@ -235,7 +268,7 @@ describe("official GitHub record provenance", () => {
         officialResult(),
         officialResult({ evidence_id: EVIDENCE_TWO, observation_id: OBSERVATION_TWO, repository_id: REPOSITORY_TWO, observed_at: "2026-08-25T09:00:00.000Z", fresh_until: "2026-08-26T09:00:00.000Z", materialised_at: "2026-08-25T09:01:00.000Z" }),
       ], error: null },
-      github_repositories: { data: [
+      github_official_repository_sources: { data: [
         { id: REPOSITORY, organisation_id: ORG, full_name: "mukta2701/ComplianceHub", html_url: "https://github.com/mukta2701/ComplianceHub" },
         { id: REPOSITORY_TWO, organisation_id: ORG, full_name: "mukta2701/Example", html_url: "https://github.com/mukta2701/Example" },
       ], error: null },
@@ -256,7 +289,7 @@ describe("official GitHub record provenance", () => {
         fresh_until: "2026-08-26T08:00:00.000Z", created_at: "2026-08-25T08:01:00.000Z",
       }], error: null },
       github_official_compliance_results: { data: [officialResult()], error: null },
-      github_repositories: { data: [{ id: REPOSITORY, organisation_id: ORG, full_name: "mukta2701/ComplianceHub", html_url: "https://github.com/mukta2701/ComplianceHub" }], error: null },
+      github_official_repository_sources: { data: [{ id: REPOSITORY, organisation_id: ORG, full_name: "mukta2701/ComplianceHub", html_url: "https://github.com/mukta2701/ComplianceHub" }], error: null },
       github_mapping_entries: { data: [
         { mapping_pack_id: PACK, check_id: "github.branch.force_pushes", rule_version: "github-repository-v1", iso_control_references: ["A.8.25"] },
         { mapping_pack_id: PACK, check_id: "github.branch.force_pushes", rule_version: "github-repository-v2", iso_control_references: ["A.8.25"] },
@@ -301,7 +334,7 @@ describe("official GitHub record provenance", () => {
         ...provenanceOverride,
       }], error: null },
       github_official_compliance_results: { data: [officialResult(resultOverride)], error: null },
-      github_repositories: { data: [{ id: REPOSITORY, organisation_id: ORG, full_name: "mukta2701/ComplianceHub", html_url: "https://github.com/mukta2701/ComplianceHub", ...repositoryOverride }], error: null },
+      github_official_repository_sources: { data: [{ id: REPOSITORY, organisation_id: ORG, full_name: "mukta2701/ComplianceHub", html_url: "https://github.com/mukta2701/ComplianceHub", ...repositoryOverride }], error: null },
       github_mapping_entries: { data: [mappingRow], error: null },
     });
 
@@ -314,7 +347,7 @@ describe("official GitHub record provenance", () => {
     const { client } = clientFor({
       github_evidence_provenance: { data: [{ evidence_id: EVIDENCE, organisation_id: ORG, repository_id: REPOSITORY, observation_id: OBSERVATION, mapping_pack_id: PACK, check_id: "github.branch.force_pushes", rule_version: "github-repository-v1", mapping_version: "github-iso-27001-v1", observed_at: "2026-08-25T08:00:00.000Z", fresh_until: atBoundary, created_at: "2026-08-25T08:01:00.000Z" }], error: null },
       github_official_compliance_results: { data: [officialResult({ fresh_until: atBoundary })], error: null },
-      github_repositories: { data: [{ id: REPOSITORY, organisation_id: ORG, full_name: "mukta2701/ComplianceHub", html_url: "https://github.com/mukta2701/ComplianceHub" }], error: null },
+      github_official_repository_sources: { data: [{ id: REPOSITORY, organisation_id: ORG, full_name: "mukta2701/ComplianceHub", html_url: "https://github.com/mukta2701/ComplianceHub" }], error: null },
       github_mapping_entries: { data: [{ mapping_pack_id: PACK, check_id: "github.branch.force_pushes", rule_version: "github-repository-v1", iso_control_references: ["A.8.25"] }], error: null },
     });
 

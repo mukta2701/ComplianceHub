@@ -117,7 +117,7 @@ select has_function(
 );
 select ok(
   has_function_privilege('authenticated','public.get_github_compliance_control_room_v1(uuid,integer,integer)','EXECUTE'),
-  'authenticated workspace members may invoke the control-room read'
+  'authenticated operators may invoke the role-gated control-room read'
 );
 select ok(
   not has_function_privilege('anon','public.get_github_compliance_control_room_v1(uuid,integer,integer)','EXECUTE'),
@@ -125,7 +125,7 @@ select ok(
 );
 select ok(
   not has_function_privilege('service_role','public.get_github_compliance_control_room_v1(uuid,integer,integer)','EXECUTE'),
-  'the service role cannot bypass member RLS through the control-room read'
+  'the service role cannot bypass the operator gate and RLS through the control-room read'
 );
 select ok(
   not exists (
@@ -313,7 +313,7 @@ select set_config('request.jwt.claims','{"sub":"75000000-0000-4000-8000-00000000
 select is(
   public.get_github_compliance_control_room_v1('75000000-0000-4000-8000-000000000101',0,20) #>> '{pagination,total}',
   '2',
-  'an Admin receives the same member-scoped read contract'
+  'an Admin receives the same operator-scoped read contract'
 );
 select throws_ok(
   $$ select public.set_github_repository_selected('75000000-0000-4000-8000-000000000301',false) $$,
@@ -322,9 +322,9 @@ select throws_ok(
 
 select set_config('request.jwt.claims','{"sub":"75000000-0000-4000-8000-000000000003","role":"authenticated"}',false);
 select is(
-  public.get_github_compliance_control_room_v1('75000000-0000-4000-8000-000000000101',0,20) #>> '{pagination,total}',
-  '2',
-  'a Member receives the same member-scoped read contract'
+  public.get_github_compliance_control_room_v1('75000000-0000-4000-8000-000000000101',0,20),
+  null::jsonb,
+  'a Member receives no provider control-room data'
 );
 select throws_ok(
   $$ select public.set_github_repository_selected('75000000-0000-4000-8000-000000000301',false) $$,

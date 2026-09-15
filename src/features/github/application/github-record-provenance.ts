@@ -205,7 +205,7 @@ async function loadSupportingRows(
     (_, index) => mappingRows.slice(index * MAPPING_QUERY_CHUNK, (index + 1) * MAPPING_QUERY_CHUNK),
   );
   const [repositoryResult, mappingResults] = await Promise.all([
-    supabase.from("github_repositories")
+    supabase.from("github_official_repository_sources")
       .select("id,organisation_id,full_name,html_url")
       .eq("organisation_id", organisationId)
       .in("id", repositoryIds)

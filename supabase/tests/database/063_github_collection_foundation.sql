@@ -693,7 +693,7 @@ select lives_ok(
 );
 
 select set_config('request.jwt.claims', '{"sub":"8b000000-0000-4000-8000-000000000003","role":"authenticated"}', true);
-select is((select count(id)::int from public.github_observations where organisation_id = current_setting('app.github_org')::uuid), 1, 'a Member sees safe observation summaries in their workspace');
+select is((select count(id)::int from public.github_observations where organisation_id = current_setting('app.github_org')::uuid), 0, 'a Member cannot read provisional observation diagnostics');
 select throws_ok(
   $$ insert into public.github_observations(organisation_id, installation_id, repository_id, provider_repository_id, collection_run_id, observation_key, check_id, rule_version, subject_type, subject_id, result, title, explanation, observed_at, fresh_until, source_url, fingerprint) values (current_setting('app.github_org')::uuid, '8b000000-0000-4000-8000-000000000101', '8b000000-0000-4000-8000-000000000201', 83001, '8b000000-0000-4000-8000-000000000301', 'forged-member', 'forged', 'github-repository-v1', 'github_repository', 'github:repository:83001', 'pass', 'Forged', 'Forged', now(), now() + interval '36 hours', 'https://github.com/Example-Co/alpha', repeat('e', 64)) $$,
   '42501', null, 'a Member cannot directly insert an observation'

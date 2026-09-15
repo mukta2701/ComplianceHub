@@ -70,7 +70,8 @@ insert into auth.users(id,instance_id,aud,role,email,encrypted_password,email_co
  ('72000000-0000-4000-8000-000000000001','00000000-0000-0000-0000-000000000000','authenticated','authenticated','github-job-owner-a@example.test','',now(),'{}','{}'),
  ('72000000-0000-4000-8000-000000000002','00000000-0000-0000-0000-000000000000','authenticated','authenticated','github-job-owner-b@example.test','',now(),'{}','{}'),
  ('72000000-0000-4000-8000-000000000003','00000000-0000-0000-0000-000000000000','authenticated','authenticated','github-job-outsider@example.test','',now(),'{}','{}'),
- ('72000000-0000-4000-8000-000000000004','00000000-0000-0000-0000-000000000000','authenticated','authenticated','github-job-sentinel@example.test','',now(),'{}','{}');
+ ('72000000-0000-4000-8000-000000000004','00000000-0000-0000-0000-000000000000','authenticated','authenticated','github-job-sentinel@example.test','',now(),'{}','{}'),
+ ('72000000-0000-4000-8000-000000000005','00000000-0000-0000-0000-000000000000','authenticated','authenticated','github-job-member@example.test','',now(),'{}','{}');
 insert into public.organisations(id,name,slug,created_by) values
  ('72000000-0000-4000-8000-000000000001','GitHub Job Org A','github-job-org-a','72000000-0000-4000-8000-000000000001'),
  ('72000000-0000-4000-8000-000000000002','GitHub Job Org B','github-job-org-b','72000000-0000-4000-8000-000000000002'),
@@ -78,7 +79,8 @@ insert into public.organisations(id,name,slug,created_by) values
 insert into public.memberships(organisation_id,user_id,role) values
  ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000001','owner'),
  ('72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000002','owner'),
- ('72000000-0000-4000-8000-000000000004','72000000-0000-4000-8000-000000000004','owner');
+ ('72000000-0000-4000-8000-000000000004','72000000-0000-4000-8000-000000000004','owner'),
+ ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000005','member');
 insert into public.github_installations(
  id,organisation_id,provider_installation_id,account_id,account_login,account_type,
  repository_selection,status,connected_by,permissions,permissions_ok
@@ -365,7 +367,9 @@ reset role;
 
 set role authenticated;
 select set_config('request.jwt.claims','{"sub":"72000000-0000-4000-8000-000000000001","role":"authenticated"}',false);
-select is((select count(*) from public.github_materialisation_jobs),3::bigint,'a member sees only their tenant jobs through RLS');
+select is((select count(*) from public.github_materialisation_jobs),3::bigint,'an Owner sees only their tenant jobs through RLS');
+select set_config('request.jwt.claims','{"sub":"72000000-0000-4000-8000-000000000005","role":"authenticated"}',false);
+select is((select count(*) from public.github_materialisation_jobs),0::bigint,'a Member cannot read recovery-queue state');
 select set_config('request.jwt.claims','{"sub":"72000000-0000-4000-8000-000000000003","role":"authenticated"}',false);
 select is((select count(*) from public.github_materialisation_jobs),0::bigint,'an outsider sees no materialisation jobs');
 reset role;

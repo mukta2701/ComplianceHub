@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import { Card, PageIntro, Pill } from "@/components/ui";
 import { StatusLabel, type StatusTone } from "@/components/status-label";
 import type { MemberMonitoringData } from "@/features/monitoring/application/load-member-monitoring";
@@ -25,21 +24,15 @@ function providerLabel(provider: string): string {
 export function MemberMonitoring({
   data,
   selectedFinding = null,
-  hasActiveGitHubInstallation = false,
-  githubMonitoring,
-  githubTechnicalReview,
 }: {
   data: MemberMonitoringData;
   selectedFinding?: string | null;
-  hasActiveGitHubInstallation?: boolean;
-  githubMonitoring?: ReactNode;
-  githubTechnicalReview?: ReactNode;
 }) {
   const highOrCritical = data.findings.filter(
     (finding) => finding.severity === "high" || finding.severity === "critical",
   ).length;
   const otherSystems = data.connectedSystems.filter((source) => source.provider !== "github");
-  const monitoredSystemCount = otherSystems.length + (hasActiveGitHubInstallation ? 1 : 0);
+  const monitoredSystemCount = otherSystems.length;
 
   return <div className="monitoring-page">
     <PageIntro
@@ -55,8 +48,6 @@ export function MemberMonitoring({
         <p>{highOrCritical} high or critical · {monitoredSystemCount} system{monitoredSystemCount === 1 ? "" : "s"} monitored{data.findings.length === 0 ? ". Monitoring status is not yet confirmed." : ""}</p>
       </div>
     </Card>
-
-    {githubMonitoring}
 
     <Card className="monitor-findings-card" id="active-findings">
       <div className="card-head"><div><h3>Active findings</h3><p>Current violations and drift, newest first</p></div></div>
@@ -107,7 +98,5 @@ export function MemberMonitoring({
             </li>)}
       </ul>
     </Card>}
-
-    {githubTechnicalReview}
   </div>;
 }
