@@ -258,19 +258,23 @@ export function GitHubInstallationPanel({
           <p className="github-configuration-note">
             {availableCount} {availableCount === 1 ? "repository" : "repositories"} available to this GitHub App; {selectedCount} selected in ComplianceHub.
           </p>
-          {unavailableCount > 0 && <p className="field-hint">
-            {unavailableCount} historical {unavailableCount === 1 ? "repository is" : "repositories are"} unavailable and cannot be selected.
-          </p>}
-          {canManageInstallation && installation.installation_settings_url && <p>
-            <a href={installation.installation_settings_url} target="_blank" rel="noreferrer">Open GitHub installation settings</a>
-          </p>}
-          {canManageInstallation && <button
-            className="button secondary"
-            type="button"
-            disabled={disconnecting}
-            aria-busy={disconnecting}
-            onClick={() => void disconnectInstallation(installation)}
-          >{disconnecting ? "Disconnecting…" : "Disconnect from ComplianceHub"}</button>}
+          {(unavailableCount > 0 || canManageInstallation) && <div
+            className="github-installation-management"
+            role="group"
+            aria-label={canManageInstallation ? "GitHub installation details and Owner actions" : "GitHub installation details"}
+          >
+            {unavailableCount > 0 && <p className="field-hint">
+              {unavailableCount} historical {unavailableCount === 1 ? "repository is" : "repositories are"} unavailable and cannot be selected.
+            </p>}
+            {canManageInstallation && installation.installation_settings_url && <a href={installation.installation_settings_url} target="_blank" rel="noreferrer">Open GitHub installation settings</a>}
+            {canManageInstallation && <button
+              className="button secondary"
+              type="button"
+              disabled={disconnecting}
+              aria-busy={disconnecting}
+              onClick={() => void disconnectInstallation(installation)}
+            >{disconnecting ? "Disconnecting…" : "Disconnect from ComplianceHub"}</button>}
+          </div>}
 
           {installation.repository_selection === "all" && <p className="github-configuration-note" role="note">
             This GitHub App installation has access to all repositories.{canManageInstallation ? " Review the installation if you want GitHub to limit access to selected repositories." : ""}

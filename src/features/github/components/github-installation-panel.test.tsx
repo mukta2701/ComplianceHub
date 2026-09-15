@@ -149,16 +149,18 @@ describe("GitHubInstallationPanel configuration boundary", () => {
     expect(within(region).getByText("Healthy")).toBeVisible();
     expect(within(region).getByText("GitHub is connected and was checked 5 minutes ago. No action is needed.")).toBeVisible();
     expect(within(region).getByText("2 repositories available to this GitHub App; 1 selected in ComplianceHub.")).toBeVisible();
-    expect(within(region).getByText("1 historical repository is unavailable and cannot be selected.")).toBeVisible();
+    const management = within(region).getByRole("group", { name: "GitHub installation details and Owner actions" });
+    expect(management).toHaveClass("github-installation-management");
+    expect(within(management).getByText("1 historical repository is unavailable and cannot be selected.")).toBeVisible();
     for (const permission of [
       "Metadata — read", "Administration — read", "Actions — read", "Vulnerability alerts — read",
       "Security events — read", "Secret scanning alerts — read",
     ]) expect(within(region).getByText(permission)).toBeVisible();
     expect(within(region).queryByText(/contents/i)).not.toBeInTheDocument();
-    expect(within(region).getByRole("link", { name: "Open GitHub installation settings" })).toHaveAttribute(
+    expect(within(management).getByRole("link", { name: "Open GitHub installation settings" })).toHaveAttribute(
       "href", "https://github.com/organizations/Adtecher/settings/installations/77",
     );
-    expect(within(region).getByRole("button", { name: "Disconnect from ComplianceHub" })).toBeEnabled();
+    expect(within(management).getByRole("button", { name: "Disconnect from ComplianceHub" })).toBeEnabled();
   });
 
   it("keeps the same connection facts for Admins but removes all GitHub management controls", () => {
@@ -171,7 +173,7 @@ describe("GitHubInstallationPanel configuration boundary", () => {
         permission_labels: ["Metadata — read"],
         installation_settings_url: "https://github.com/organizations/Adtecher/settings/installations/77",
       }]}
-      repositories={[repository()]}
+      repositories={[repository({ selected: true, available: false })]}
       canManageInstallation={false}
       canManageRepositoryScope={false}
       now="2026-09-15T12:00:00.000Z"
@@ -180,6 +182,10 @@ describe("GitHubInstallationPanel configuration boundary", () => {
     expect(screen.getByText("Owner action required")).toBeVisible();
     expect(screen.getByText(/GitHub App permissions no longer match the approved read-only access/)).toBeVisible();
     expect(screen.getAllByRole("status")[0]).toHaveTextContent("Ask a workspace Owner to review the GitHub App permissions.");
+    const details = screen.getByRole("group", { name: "GitHub installation details" });
+    expect(within(details).getByText("1 historical repository is unavailable and cannot be selected.")).toBeVisible();
+    expect(within(details).queryByRole("link", { name: "Open GitHub installation settings" })).not.toBeInTheDocument();
+    expect(within(details).queryByRole("button", { name: "Disconnect from ComplianceHub" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Manage repository access" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Open GitHub installation settings" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Disconnect from ComplianceHub" })).not.toBeInTheDocument();
