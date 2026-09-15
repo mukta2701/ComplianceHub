@@ -25,6 +25,9 @@ export type GitHubRepositoryMonitoringSummary = {
   last_completed_collection_at: string | null;
 };
 
+export type GitHubCollectionInstallationSummary = Pick<GitHubInstallationSummary,
+  "id" | "account_login" | "status" | "repository_selection" | "permissions_ok">;
+
 function isStale(repository: GitHubRepositoryMonitoringSummary, nowIso: string): boolean {
   if (!repository.last_completed_collection_at) return false;
   const now = Date.parse(nowIso);
@@ -34,7 +37,7 @@ function isStale(repository: GitHubRepositoryMonitoringSummary, nowIso: string):
 
 function monitoringHealth(
   repository: GitHubRepositoryMonitoringSummary,
-  installation: GitHubInstallationSummary,
+  installation: GitHubCollectionInstallationSummary,
   nowIso: string,
 ): { label: string; tone: string } {
   if (!repository.available) return { label: "Repository access needs attention", tone: "amber" };
@@ -78,7 +81,7 @@ export function GitHubCollectionHealthPanel({
   role,
   runtimeReadiness = { available: false, status: "unavailable" },
 }: {
-  installations: GitHubInstallationSummary[];
+  installations: GitHubCollectionInstallationSummary[];
   repositories: GitHubRepositoryMonitoringSummary[];
   nowIso: string;
   role: MembershipRole;
@@ -92,7 +95,7 @@ export function GitHubCollectionHealthPanel({
   const canRecheckGitHub = monitoringAccess.canManageOperation("recheck-github-installation");
   const canManageConnection = workspaceAccess(role).section("connections").canManageOperation("manage-github-app");
 
-  async function recheckInstallation(installation: GitHubInstallationSummary) {
+  async function recheckInstallation(installation: GitHubCollectionInstallationSummary) {
     if (pendingInstallations.has(installation.id)) return;
     setMessages((current) => ({ ...current, [installation.id]: "" }));
     setPendingInstallations((current) => new Set(current).add(installation.id));

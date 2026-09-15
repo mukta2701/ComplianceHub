@@ -15,7 +15,10 @@ import {
   type GitHubInstallationSummary,
   type GitHubRepositoryConfigurationSummary,
 } from "@/features/github/components/github-installation-panel";
-import { presentGitHubConnectionHealth } from "@/features/github/components/github-connection-health";
+import {
+  presentGitHubConnectionHealth,
+  resolveGitHubConnectionHealth,
+} from "@/features/github/components/github-connection-health";
 import {
   hasExactReadPermissions,
   READ_PERMISSIONS,
@@ -68,6 +71,9 @@ const connectionDiagnosticValues = new Set<GitHubConnectionDiagnostic>([
   "provider_rate_limited", "provider_temporary_failure", "installation_suspended", "installation_revoked",
   "permission_mismatch", "account_mismatch", "repository_unavailable", "invalid_provider_response", "internal_failure",
 ]);
+const installationStatusValues = new Set<GitHubInstallationSummary["status"]>([
+  "active", "suspended", "revoked", "needs_attention",
+]);
 
 function exactRowsByInstallationId<T extends { id: string }>(
   rows: readonly T[],
@@ -89,6 +95,10 @@ function isConnectionHealth(value: unknown): value is GitHubConnectionHealth {
 
 function isConnectionDiagnostic(value: unknown): value is GitHubConnectionDiagnostic {
   return typeof value === "string" && connectionDiagnosticValues.has(value as GitHubConnectionDiagnostic);
+}
+
+function isInstallationStatus(value: unknown): value is GitHubInstallationSummary["status"] {
+  return typeof value === "string" && installationStatusValues.has(value as GitHubInstallationSummary["status"]);
 }
 
 function installationSettingsUrl(input: {
@@ -290,7 +300,7 @@ export default async function IntegrationsPage({
     const health = healthByInstallationId.get(installation.id);
     const incident = incidentByInstallationId.get(installation.id);
     const permission = permissionsByInstallationId.get(installation.id);
-    if (!health || !permission || !isConnectionHealth(health.health)) throw new Error("Could not load connection settings");
+    if (!health || !permission || !isConnectionHealth(health.health) || !isInstallationStatus(installation.status)) throw new Error("Could not load connection settings");
     const healthDiagnostic = health.health_diagnostic_code === null
       ? null
       : isConnectionDiagnostic(health.health_diagnostic_code)
@@ -304,16 +314,24 @@ export default async function IntegrationsPage({
         : (() => { throw new Error("Could not load connection settings"); })();
     if (incident && !incidentHealth) throw new Error("Could not load connection settings");
     const permissionMismatch = !installation.permissions_ok || !hasExactReadPermissions(permission.permissions);
-    const effectiveHealth = incidentHealth ?? (permissionMismatch ? "owner_action_required" : health.health);
-    const effectiveDiagnostic = incidentHealth
-      ? incidentDiagnostic
-      : permissionMismatch
-        ? "permission_mismatch"
-        : healthDiagnostic;
-    const incidentPresentation = incident && incidentHealth
+    const effectiveConnection = resolveGitHubConnectionHealth({
+      installationStatus: installation.status,
+      summary: { health: health.health, diagnostic: healthDiagnostic },
+      incident: incident && incidentHealth ? { health: incidentHealth, diagnostic: incidentDiagnostic } : null,
+      permissionMismatch,
+    });
+    const incidentConnection = incident && incidentHealth
+      ? resolveGitHubConnectionHealth({
+          installationStatus: "active",
+          summary: { health: incidentHealth, diagnostic: incidentDiagnostic },
+          incident: null,
+          permissionMismatch: false,
+        })
+      : null;
+    const incidentPresentation = incidentConnection
       ? presentGitHubConnectionHealth({
-          health: incidentHealth,
-          diagnostic: incidentDiagnostic,
+          health: incidentConnection.health,
+          diagnostic: incidentConnection.diagnostic,
           lastSuccessfulReconciliationAt: health.last_successful_reconciliation_at,
           now,
         })
@@ -324,8 +342,8 @@ export default async function IntegrationsPage({
       status: installation.status,
       repository_selection: installation.repository_selection,
       permissions_ok: installation.permissions_ok,
-      health: effectiveHealth,
-      health_diagnostic_code: effectiveDiagnostic,
+      health: effectiveConnection.health,
+      health_diagnostic_code: effectiveConnection.diagnostic,
       last_successful_reconciliation_at: health.last_successful_reconciliation_at,
       permission_labels: permissionMismatch ? [] : approvedPermissionLabelsFor(permission.permissions),
       installation_settings_url: installationSettingsUrl({
@@ -339,6 +357,10 @@ export default async function IntegrationsPage({
       } : null,
     };
   }) as GitHubInstallationSummary[];
+  const hasVerifiedActiveInstallation = installations.some((installation) => installation.status === "active"
+    && installation.health !== "owner_action_required"
+    && installation.health !== "disconnected"
+    && installation.permission_labels?.length === Object.keys(READ_PERMISSIONS).length);
   const showDeveloperTools = canShowDeveloperTools({
     nodeEnv: process.env.NODE_ENV,
     enabled: process.env.E2E_TEST_TOOLS_ENABLED === "1",
@@ -356,7 +378,7 @@ export default async function IntegrationsPage({
     </Card>}
     {jiraSetup && jira === "select-site" && setupId && <JiraSetupPanel step="site" setupId={setupId} sites={jiraSetup.sites} />}
     {jiraSetup && jira === "select-project" && connectionId && <JiraSetupPanel step="project" connectionId={connectionId} projects={jiraSetup.projects} />}
-    {github === "connected" && <Card
+    {github === "connected" && hasVerifiedActiveInstallation && <Card
       role="status"
       aria-label="GitHub connection status"
       style={{ padding: "16px", background: "#eef7f0", borderColor: "#cfe6d5", margin: "0 auto 16px", maxWidth: "1100px" }}

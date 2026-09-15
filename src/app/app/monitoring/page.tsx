@@ -29,11 +29,9 @@ import {
 } from "@/features/github/application/github-compliance-control-room";
 import { loadGitHubMappingReview, type GitHubMappingReview } from "@/features/github/application/github-mapping-review";
 import { GitHubComplianceControlRoomPanel } from "@/features/github/components/github-compliance-control-room";
-import type {
-  GitHubInstallationSummary,
-} from "@/features/github/components/github-installation-panel";
 import {
   GitHubCollectionHealthPanel,
+  type GitHubCollectionInstallationSummary,
   type GitHubRepositoryMonitoringSummary,
 } from "@/features/github/components/github-collection-health-panel";
 import { getGitHubRuntimeReadiness, type GitHubRuntimeReadiness } from "@/features/github/application/github-runtime-config";
@@ -78,7 +76,7 @@ function providerLabel(provider: string): string {
 
 function unhealthyGitHubRepositoryIds(
   room: GitHubComplianceControlRoom,
-  installations: GitHubInstallationSummary[],
+  installations: GitHubCollectionInstallationSummary[],
   repositories: GitHubRepositoryMonitoringSummary[],
 ): string[] {
   return room.repositories
@@ -99,7 +97,7 @@ function GitHubMonitoringSection({
   runtimeReadiness,
 }: {
   role: "owner" | "admin" | "member";
-  installations: GitHubInstallationSummary[];
+  installations: GitHubCollectionInstallationSummary[];
   repositories: GitHubRepositoryMonitoringSummary[];
   nowIso: string;
   room: GitHubComplianceControlRoom;
@@ -227,7 +225,7 @@ export default async function MonitoringPage({
   const officialByFinding = new Map(officialGitHubFindings.map((record) => [record.findingId, record]));
   const selectedFinding = requestedFinding && officialByFinding.has(requestedFinding) ? requestedFinding : null;
   const sources = parsedSources.data;
-  const installations = (installationResult.data ?? []) as GitHubInstallationSummary[];
+  const installations = (installationResult.data ?? []) as GitHubCollectionInstallationSummary[];
   const repositories = (repositorySummaryResult.data ?? []) as GitHubRepositoryMonitoringSummary[];
   const hasActiveGitHubInstallation = installations.some(
     (installation) => installation.status === "active",

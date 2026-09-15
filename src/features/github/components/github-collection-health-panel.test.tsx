@@ -7,13 +7,12 @@ vi.mock("@/app/app/monitoring/github-actions", () => ({ recheckGitHubInstallatio
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: hoisted.refresh }) }));
 
 import { GitHubCollectionHealthPanel } from "./github-collection-health-panel";
-import type { GitHubInstallationSummary } from "./github-installation-panel";
+import type { GitHubCollectionInstallationSummary } from "./github-collection-health-panel";
 import type { GitHubRepositoryMonitoringSummary } from "./github-collection-health-panel";
 
-const installation: GitHubInstallationSummary = {
+const installation: GitHubCollectionInstallationSummary = {
   id: "10000000-0000-4000-8000-000000000010", account_login: "Adtecher", status: "active",
   repository_selection: "selected", permissions_ok: true,
-  health: "healthy", health_diagnostic_code: null, last_successful_reconciliation_at: null,
 };
 const repository: GitHubRepositoryMonitoringSummary = {
   repository_id: "10000000-0000-4000-8000-000000000011", installation_id: installation.id,
@@ -27,7 +26,7 @@ const cleanCollectionSummary = {
 };
 
 function renderPanel({ installations = [installation], repositories = [repository], role = "owner" }: {
-  installations?: GitHubInstallationSummary[];
+  installations?: GitHubCollectionInstallationSummary[];
   repositories?: GitHubRepositoryMonitoringSummary[];
   role?: "owner" | "admin" | "member";
 } = {}) {

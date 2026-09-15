@@ -1,10 +1,33 @@
 import { describe, expect, it } from "vitest";
 
-import { presentGitHubConnectionHealth } from "./github-connection-health";
+import { presentGitHubConnectionHealth, resolveGitHubConnectionHealth } from "./github-connection-health";
 
 const now = "2026-09-15T12:00:00.000Z";
 
 describe("presentGitHubConnectionHealth", () => {
+  it.each([
+    ["healthy summary with a permission diagnostic", {
+      installationStatus: "active", summary: { health: "healthy", diagnostic: "permission_mismatch" }, incident: null, permissionMismatch: false,
+    }, { health: "owner_action_required", diagnostic: "permission_mismatch" }],
+    ["retrying summary with a revoked diagnostic", {
+      installationStatus: "active", summary: { health: "retrying", diagnostic: "installation_revoked" }, incident: null, permissionMismatch: false,
+    }, { health: "disconnected", diagnostic: "installation_revoked" }],
+    ["raw permission mismatch above a retrying incident", {
+      installationStatus: "active", summary: { health: "healthy", diagnostic: null }, incident: { health: "retrying", diagnostic: "provider_temporary_failure" }, permissionMismatch: true,
+    }, { health: "owner_action_required", diagnostic: "permission_mismatch" }],
+    ["revoked status above a healthy summary", {
+      installationStatus: "revoked", summary: { health: "healthy", diagnostic: null }, incident: null, permissionMismatch: false,
+    }, { health: "disconnected", diagnostic: "installation_revoked" }],
+    ["suspended status above a healthy summary", {
+      installationStatus: "suspended", summary: { health: "healthy", diagnostic: null }, incident: null, permissionMismatch: false,
+    }, { health: "owner_action_required", diagnostic: "installation_suspended" }],
+    ["consistent healthy facts", {
+      installationStatus: "active", summary: { health: "healthy", diagnostic: null }, incident: null, permissionMismatch: false,
+    }, { health: "healthy", diagnostic: null }],
+  ] as const)("resolves %s without downgrading stronger facts", (_label, input, expected) => {
+    expect(resolveGitHubConnectionHealth(input)).toEqual(expected);
+  });
+
   it("presents a healthy connection only when the authoritative successful check is valid", () => {
     expect(presentGitHubConnectionHealth({
       health: "healthy",

@@ -11,6 +11,64 @@ export type GitHubConnectionPresentation = {
   checkedAt: string | null;
 };
 
+type GitHubInstallationStatus = "active" | "suspended" | "revoked" | "needs_attention";
+type GitHubConnectionFact = {
+  health: GitHubConnectionHealth;
+  diagnostic: GitHubConnectionDiagnostic | null;
+};
+
+const healthRank: Record<GitHubConnectionHealth, number> = {
+  healthy: 0,
+  retrying: 1,
+  partially_unavailable: 2,
+  owner_action_required: 3,
+  disconnected: 4,
+};
+
+function diagnosticHealth(diagnostic: GitHubConnectionDiagnostic | null): GitHubConnectionHealth | null {
+  switch (diagnostic) {
+    case "provider_rate_limited":
+    case "provider_temporary_failure":
+    case "invalid_provider_response":
+    case "internal_failure":
+      return "retrying";
+    case "repository_unavailable":
+      return "partially_unavailable";
+    case "installation_suspended":
+    case "permission_mismatch":
+    case "account_mismatch":
+      return "owner_action_required";
+    case "installation_revoked":
+      return "disconnected";
+    default:
+      return null;
+  }
+}
+
+function normaliseConnectionFact(fact: GitHubConnectionFact): GitHubConnectionFact {
+  const impliedHealth = diagnosticHealth(fact.diagnostic);
+  if (!impliedHealth || healthRank[fact.health] <= healthRank[impliedHealth]) {
+    return { health: impliedHealth ?? fact.health, diagnostic: fact.diagnostic };
+  }
+  return { health: fact.health, diagnostic: null };
+}
+
+/** Resolves independently sourced connection facts without downgrading risk. */
+export function resolveGitHubConnectionHealth(input: {
+  installationStatus: GitHubInstallationStatus;
+  summary: GitHubConnectionFact;
+  incident: GitHubConnectionFact | null;
+  permissionMismatch: boolean;
+}): GitHubConnectionFact {
+  const facts: GitHubConnectionFact[] = [normaliseConnectionFact(input.summary)];
+  if (input.incident) facts.push(normaliseConnectionFact(input.incident));
+  if (input.installationStatus === "needs_attention") facts.push({ health: "owner_action_required", diagnostic: null });
+  if (input.permissionMismatch) facts.push({ health: "owner_action_required", diagnostic: "permission_mismatch" });
+  if (input.installationStatus === "suspended") facts.push({ health: "owner_action_required", diagnostic: "installation_suspended" });
+  if (input.installationStatus === "revoked") facts.push({ health: "disconnected", diagnostic: "installation_revoked" });
+  return facts.reduce((strongest, fact) => healthRank[fact.health] >= healthRank[strongest.health] ? fact : strongest);
+}
+
 function relativeTime(value: string | null, now: string): string | null {
   if (!value) return null;
   const checked = Date.parse(value);

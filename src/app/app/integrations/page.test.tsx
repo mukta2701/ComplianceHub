@@ -354,11 +354,50 @@ describe("Settings Connections page", () => {
     expect(screen.getByRole("link", { name: "Open GitHub monitoring" })).toHaveAttribute("href", "/app/monitoring");
   });
 
-  it("shows only the whitelisted GitHub connection success state", async () => {
-    const { unmount } = render(await IntegrationsPage({ searchParams: Promise.resolve({ github: "connected" }) }));
-    expect(screen.getByRole("status", { name: "GitHub connection status" })).toHaveTextContent("GitHub repository access connected");
-    unmount();
+  it("shows the connected hint only for an assembled active, verified connection", async () => {
+    const originalIncidents = hoisted.rows.github_connection_incidents;
+    try {
+      hoisted.rows.github_connection_incidents = [];
+      render(await IntegrationsPage({ searchParams: Promise.resolve({ github: "connected" }) }));
+      expect(screen.getByRole("status", { name: "GitHub connection status" })).toHaveTextContent("GitHub repository access connected");
+    } finally {
+      hoisted.rows.github_connection_incidents = originalIncidents;
+    }
+  });
 
+  it.each([
+    ["there are no installations", () => {
+      hoisted.rows.github_installations = [];
+      hoisted.rows.github_connection_health_summaries = [];
+      hoisted.rows.github_connection_incidents = [];
+      hoisted.serviceRows.github_installations = [];
+    }],
+    ["the installation is revoked", () => {
+      hoisted.rows.github_installations = [{ ...(hoisted.rows.github_installations[0] as Record<string, unknown>), status: "revoked" }];
+      hoisted.rows.github_connection_incidents = [];
+    }],
+    ["the installation is suspended", () => {
+      hoisted.rows.github_installations = [{ ...(hoisted.rows.github_installations[0] as Record<string, unknown>), status: "suspended" }];
+      hoisted.rows.github_connection_incidents = [];
+    }],
+    ["raw permissions are not exact", () => {
+      hoisted.serviceRows.github_installations = [{ ...(hoisted.serviceRows.github_installations[0] as Record<string, unknown>), permissions: { metadata: "read" } }];
+      hoisted.rows.github_connection_incidents = [];
+    }],
+  ])("does not trust the connected hint when %s", async (_label, mutate) => {
+    const originalRows = { ...hoisted.rows };
+    const originalServiceRows = { ...hoisted.serviceRows };
+    try {
+      mutate();
+      render(await IntegrationsPage({ searchParams: Promise.resolve({ github: "connected" }) }));
+      expect(screen.queryByRole("status", { name: "GitHub connection status" })).not.toBeInTheDocument();
+    } finally {
+      hoisted.rows = originalRows;
+      hoisted.serviceRows = originalServiceRows;
+    }
+  });
+
+  it("ignores unrecognised GitHub query hints", async () => {
     render(await IntegrationsPage({ searchParams: Promise.resolve({ github: "not_authorized" }) }));
     expect(screen.queryByText("GitHub repository access connected")).not.toBeInTheDocument();
   });

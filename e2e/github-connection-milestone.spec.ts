@@ -57,16 +57,21 @@ async function createConnectionFixture(): Promise<ConnectionFixture> {
   return { actors, organisationId, owner, service };
 }
 
-async function assertNoUnrelatedDueOrLeasedReconciliations(service: SupabaseClient) {
-  const now = Date.now();
-  const { data, error } = await service.from("github_installations")
+async function assertNoUnrelatedDueOrLeasedReconciliations(input: {
+  service: SupabaseClient;
+  claimAt: string;
+  installationId: string;
+}) {
+  const claimAt = Date.parse(input.claimAt);
+  const { data, error } = await input.service.from("github_installations")
     .select("id,next_reconciliation_at,reconciliation_locked_by,reconciliation_locked_until");
   if (error) throw error;
   const unsafe = (data ?? []).filter((installation) => {
+    if (installation.id === input.installationId) return false;
     const dueAt = installation.next_reconciliation_at === null
       ? Number.NaN
       : Date.parse(installation.next_reconciliation_at);
-    return (Number.isFinite(dueAt) && dueAt <= now)
+    return (Number.isFinite(dueAt) && dueAt <= claimAt)
       || installation.reconciliation_locked_by !== null
       || installation.reconciliation_locked_until !== null;
   });
@@ -85,7 +90,6 @@ test("fictional GitHub connection health is usable on desktop and mobile", async
   test.setTimeout(120_000);
   const fixture = await createConnectionFixture();
   const { service } = fixture;
-  await assertNoUnrelatedDueOrLeasedReconciliations(service);
 
   const providerInstallationId = Number(`8${Date.now().toString().slice(-11)}`);
   const accountLogin = `fictional-${randomUUID().slice(0, 8)}`;
@@ -143,11 +147,12 @@ test("fictional GitHub connection health is usable on desktop and mobile", async
     expect(selectionResult).toBe(true);
 
     const workerId = randomUUID();
-    const now = new Date().toISOString();
+    const claimAt = new Date().toISOString();
+    await assertNoUnrelatedDueOrLeasedReconciliations({ service, claimAt, installationId });
     const { data: claimedRuns, error: claimRunError } = await service.rpc("claim_due_github_connection_reconciliations_server", {
       target_worker_id: workerId,
       target_limit: 1,
-      target_now: now,
+      target_now: claimAt,
     });
     if (claimRunError || !Array.isArray(claimedRuns) || claimedRuns.length !== 1 || claimedRuns[0]?.installation_id !== installationId) {
       throw claimRunError ?? new Error("Only the new fictional installation reconciliation run must be claimed");
@@ -182,8 +187,8 @@ test("fictional GitHub connection health is usable on desktop and mobile", async
         if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
       });
       await page.screenshot({ animations: "disabled", path: testInfo.outputPath(`github-connection-${viewport.width}.png`), fullPage: true });
+      expect((await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze()).violations).toEqual([]);
     }
-    expect((await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze()).violations).toEqual([]);
 
     await page.context().clearCookies();
     await signIn(page, fixture.actors.admin);
@@ -205,6 +210,7 @@ test("fictional GitHub connection health is usable on desktop and mobile", async
       await expect(panel.getByRole("button", { name: "Disconnect from ComplianceHub" })).toHaveCount(0);
       await expect(panel.getByRole("link", { name: "Manage repository access" })).toHaveCount(0);
       await expect(panel.getByRole("link", { name: "Open GitHub installation settings" })).toHaveCount(0);
+      expect((await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze()).violations).toEqual([]);
     }
 
     await page.context().clearCookies();
