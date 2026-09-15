@@ -39,6 +39,7 @@ const githubRepositorySelectionSchema = z.object({
   repositoryId: z.uuid(),
   selected: z.enum(["true", "false"]).transform((value) => value === "true"),
 }).strict();
+const githubInstallationIdSchema = z.uuid();
 const monitorSourceSchema = z.object({
   owner: z.string().trim().min(1, "GitHub owner is required").max(120),
   repo: z.string().trim().min(1, "Repository is required").max(120),
@@ -119,6 +120,19 @@ const repositorySelectionFailure = {
   message: "Could not update repository scope. Please try again.",
 } as const;
 
+const githubDisconnectFailure = {
+  ok: false,
+  message: "Could not disconnect GitHub. Please try again.",
+} as const;
+
+function readSingleInstallationId(formData: FormData): string {
+  const entries = Array.from(formData.entries());
+  if (entries.length !== 1 || entries[0]?.[0] !== "installationId" || typeof entries[0][1] !== "string") {
+    throw new Error("invalid installation input");
+  }
+  return githubInstallationIdSchema.parse(entries[0][1]);
+}
+
 export async function setGitHubRepositorySelectedAction(formData: FormData): Promise<GitHubMutationResult> {
   try {
     const { supabase, user, organisation } = await requireGitHubOwner();
@@ -142,6 +156,35 @@ export async function setGitHubRepositorySelectedAction(formData: FormData): Pro
     return { ok: true, message: "Repository scope updated." };
   } catch {
     return repositorySelectionFailure;
+  }
+}
+
+export async function disconnectGitHubInstallationAction(formData: FormData): Promise<GitHubMutationResult> {
+  try {
+    const { supabase, user, organisation } = await requireGitHubOwner();
+    const installationId = readSingleInstallationId(formData);
+    const { data: installation, error: installationError } = await supabase.from("github_installations")
+      .select("id")
+      .eq("id", installationId)
+      .eq("organisation_id", organisation.id)
+      .maybeSingle();
+    if (installationError || !installation) return githubDisconnectFailure;
+    await enforceRateLimit(`github-disconnect:${organisation.id}:${user.id}`, {
+      limit: 5,
+      windowMs: 60_000,
+    });
+    const { data, error } = await supabase.rpc("disconnect_github_installation", {
+      target_installation_id: installationId,
+    });
+    if (error || data !== true) return githubDisconnectFailure;
+    revalidatePath("/app/integrations");
+    revalidatePath("/app/monitoring");
+    return {
+      ok: true,
+      message: "ComplianceHub is disconnected. Its GitHub App installation was not removed from GitHub.",
+    };
+  } catch {
+    return githubDisconnectFailure;
   }
 }
 

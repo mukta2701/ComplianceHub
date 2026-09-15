@@ -90,7 +90,7 @@ export function GitHubCollectionHealthPanel({
   const selectedRepositories = repositories.filter((repository) => repository.selected);
   const monitoringAccess = workspaceAccess(role).section("monitoring");
   const canRecheckGitHub = monitoringAccess.canManageOperation("recheck-github-installation");
-  const canManageConnection = workspaceAccess(role).section("connections").canManage;
+  const canManageConnection = workspaceAccess(role).section("connections").canManageOperation("manage-github-app");
 
   async function recheckInstallation(installation: GitHubInstallationSummary) {
     if (pendingInstallations.has(installation.id)) return;
@@ -142,7 +142,7 @@ export function GitHubCollectionHealthPanel({
     {installations.length === 0 ? <div className="github-repositories-empty">
       <p>{canManageConnection
         ? "GitHub is not connected."
-        : "GitHub is not connected. Ask a workspace Owner or Admin to manage the connection."}</p>
+        : "Ask a workspace Owner to connect GitHub"}</p>
       {canManageConnection && <Link className="button secondary" href="/app/integrations">Connect GitHub</Link>}
     </div> : <div className="github-installation-list">
       {installations.map((installation) => {

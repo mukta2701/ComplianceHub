@@ -7,6 +7,7 @@ const hoisted = vi.hoisted(() => ({
   errors: {} as Record<string, { message: string } | undefined>,
   controlRoomLoads: [] as unknown[],
   mappingReviewLoads: [] as unknown[],
+  redirect: vi.fn((href: string) => { throw new Error(`redirect:${href}`); }),
   role: "admin" as "owner" | "admin" | "member",
   rows: {
     integration_connections: [{
@@ -30,7 +31,20 @@ const hoisted = vi.hoisted(() => ({
     }],
     github_installations: [{
       id: "10000000-0000-4000-8000-000000000010", account_login: "Adtecher", status: "active",
-      repository_selection: "selected", permissions_ok: true,
+      account_type: "Organization", provider_installation_id: 77, repository_selection: "selected", permissions_ok: true,
+      permissions: {
+        metadata: "read", administration: "read", actions: "read", vulnerability_alerts: "read",
+        security_events: "read", secret_scanning_alerts: "read",
+      },
+    }],
+    github_connection_health_summaries: [{
+      id: "10000000-0000-4000-8000-000000000010", health: "healthy", health_diagnostic_code: null,
+      last_successful_reconciliation_at: "2026-09-15T11:55:00.000Z",
+    }],
+    github_connection_incidents: [{
+      id: "10000000-0000-4000-8000-000000000014", installation_id: "10000000-0000-4000-8000-000000000010",
+      diagnostic_code: "permission_mismatch", health: "owner_action_required",
+      opened_at: "2026-09-15T10:00:00.000Z", last_observed_at: "2026-09-15T11:00:00.000Z",
     }],
     github_repositories: [{
       id: "10000000-0000-4000-8000-000000000011",
@@ -103,7 +117,11 @@ vi.mock("@/features/github/application/github-mapping-review", () => ({
     });
   },
 }));
-vi.mock("next/navigation", () => ({ usePathname: () => "/app/integrations", useRouter: () => ({ refresh: vi.fn() }) }));
+vi.mock("next/navigation", () => ({
+  redirect: hoisted.redirect,
+  usePathname: () => "/app/integrations",
+  useRouter: () => ({ refresh: vi.fn() }),
+}));
 
 import IntegrationsPage from "./page";
 
@@ -114,6 +132,7 @@ describe("Settings Connections page", () => {
     hoisted.errors = {};
     hoisted.controlRoomLoads = [];
     hoisted.mappingReviewLoads = [];
+    hoisted.redirect.mockClear();
     hoisted.role = "admin";
   });
 
@@ -137,20 +156,26 @@ describe("Settings Connections page", () => {
     expect(screen.getByRole("heading", { name: "GitHub repository access" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "From repository facts to reviewed records" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Set up repository access" })).not.toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: /include Adtecher\/compliancehub in monitoring/ })).toBeDisabled();
+    expect(screen.queryByRole("checkbox", { name: /include Adtecher\/compliancehub in monitoring/ })).not.toBeInTheDocument();
+    expect(screen.getByText("Selected for ComplianceHub monitoring.")).toBeVisible();
 
     const expectedColumns: Record<string, string> = {
       integration_connections: "id,provider,label,config,connection_mode,enabled,created_at,revoked_at",
       alert_channels: "id,type,label,min_severity,enabled,daily_digest_enabled,created_at,revoked_at",
-      github_installations: "id,account_login,status,repository_selection,permissions_ok",
+      github_installations: "id,account_login,account_type,provider_installation_id,status,repository_selection,permissions_ok,permissions",
       github_repositories: "id,installation_id,full_name,html_url,visibility,default_branch,archived,selected,available",
+      github_connection_health_summaries: "id,health,health_diagnostic_code,last_successful_reconciliation_at",
+      github_connection_incidents: "id,installation_id,diagnostic_code,health,opened_at,last_observed_at",
     };
-    expect(hoisted.selectCalls).toHaveLength(4);
+    expect(hoisted.selectCalls).toHaveLength(6);
     for (const call of hoisted.selectCalls) {
       expect(call.columns).toBe(expectedColumns[call.table]);
       expect(call.columns).not.toMatch(/latest_|last_completed|failed_count/);
     }
     expect(hoisted.selectCalls.map((call) => call.table)).not.toContain("github_repository_shadow_summaries");
+    expect(screen.getByText("Healthy")).toBeVisible();
+    expect(screen.getByText("GitHub is connected", { exact: false })).toBeVisible();
+    expect(screen.getByText("Connection incident: GitHub App permissions no longer match the approved read-only access.")).toBeVisible();
     expect(screen.queryByText(/collection health|freshness|recheck/i)).not.toBeInTheDocument();
     expect(hoisted.controlRoomLoads).toHaveLength(0);
     expect(hoisted.mappingReviewLoads).toHaveLength(0);
@@ -164,6 +189,8 @@ describe("Settings Connections page", () => {
       { table: "alert_channels", column: "organisation_id", value: "org-1" },
       { table: "github_installations", column: "organisation_id", value: "org-1" },
       { table: "github_repositories", column: "organisation_id", value: "org-1" },
+      { table: "github_connection_health_summaries", column: "organisation_id", value: "org-1" },
+      { table: "github_connection_incidents", column: "organisation_id", value: "org-1" },
     ]);
   });
 
@@ -191,23 +218,12 @@ describe("Settings Connections page", () => {
     });
   });
 
-  it("gives Members only the safe GitHub read view with repository scope disabled", async () => {
+  it("redirects Members before any GitHub connection or incident query", async () => {
     hoisted.role = "member";
 
-    render(await IntegrationsPage({ searchParams: Promise.resolve({ github: "connected" }) }));
-
-    expect(hoisted.selectCalls.map((call) => call.table)).toEqual([
-      "github_installations",
-      "github_repositories",
-    ]);
-    expect(screen.getByRole("heading", { name: "GitHub repository access" })).toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: /include Adtecher\/compliancehub in monitoring/ })).toBeDisabled();
-    expect(screen.queryByRole("article", { name: "Slack connection" })).not.toBeInTheDocument();
-    expect(screen.queryByText("GitHub repository access connected.")).not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "From repository facts to reviewed records" })).not.toBeInTheDocument();
-    expect(hoisted.controlRoomLoads).toHaveLength(0);
-    expect(hoisted.mappingReviewLoads).toHaveLength(0);
-    expect(screen.getByRole("link", { name: "Open GitHub monitoring" })).toHaveAttribute("href", "/app/monitoring");
+    await expect(IntegrationsPage({ searchParams: Promise.resolve({ github: "connected" }) })).rejects.toThrow("redirect:/app");
+    expect(hoisted.redirect).toHaveBeenCalledWith("/app");
+    expect(hoisted.selectCalls).toHaveLength(0);
   });
 
   it("allows only Owners to change repository scope", async () => {

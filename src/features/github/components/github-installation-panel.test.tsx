@@ -5,10 +5,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const hoisted = vi.hoisted(() => ({
   refresh: vi.fn(),
   selectRepository: vi.fn(),
+  disconnectInstallation: vi.fn(),
 }));
 
 vi.mock("@/app/app/integrations/actions", () => ({
   setGitHubRepositorySelectedAction: hoisted.selectRepository,
+  disconnectGitHubInstallationAction: hoisted.disconnectInstallation,
 }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: hoisted.refresh }) }));
 
@@ -61,7 +63,7 @@ describe("GitHubInstallationPanel configuration boundary", () => {
     const region = screen.getByRole("region", { name: "GitHub repository access" });
     expect(within(region).getByText("READ-ONLY GITHUB MONITORING")).toBeVisible();
     expect(region).toHaveTextContent("ComplianceHub reads selected repositories for monitoring and never changes GitHub.");
-    expect(within(region).getByRole("article", { name: "Adtecher GitHub installation" })).toHaveTextContent("Active");
+    expect(within(region).getByRole("article", { name: "Adtecher GitHub installation" })).toHaveTextContent("Healthy");
     expect(within(region).getByRole("checkbox", {
       name: "Allow ComplianceHub to read and include Adtecher/compliancehub in monitoring",
     })).toBeEnabled();
@@ -71,7 +73,7 @@ describe("GitHubInstallationPanel configuration boundary", () => {
       "href", "https://github.com/Adtecher/compliancehub",
     );
     for (const operationalText of [
-      "Collection health", "Freshness", "Collected", "Stale", "checks need attention", "Recheck Adtecher",
+      "Collection health", "Collected", "Stale", "checks need attention", "Recheck Adtecher",
     ]) {
       expect(within(region).queryByText(operationalText, { exact: false })).not.toBeInTheDocument();
     }
@@ -92,8 +94,7 @@ describe("GitHubInstallationPanel configuration boundary", () => {
     expect(notes[1]).toHaveTextContent(/permissions need attention/i);
   });
 
-  it("is read-only for Admins and Members while preserving full accessible labels", async () => {
-    const user = userEvent.setup();
+  it("shows Admins facts without mutation controls or an Owner-only action prompt", () => {
     render(<GitHubInstallationPanel
       installations={[installation]}
       repositories={[repository()]}
@@ -101,14 +102,99 @@ describe("GitHubInstallationPanel configuration boundary", () => {
       canManageRepositoryScope={false}
     />);
 
-    const checkbox = screen.getByRole("checkbox", {
-      name: "Allow ComplianceHub to read and include Adtecher/compliancehub in monitoring",
-    });
-    expect(checkbox).toBeDisabled();
-    expect(screen.getByText("Only workspace Owners can change repository scope.")).toBeVisible();
-    expect(screen.getByText("Only workspace Owners can set up or manage repository access.")).toBeVisible();
-    await user.click(checkbox);
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(screen.getByText("Selected for ComplianceHub monitoring.")).toBeVisible();
+    expect(screen.queryByText(/Only workspace Owners can/)).not.toBeInTheDocument();
     expect(hoisted.selectRepository).not.toHaveBeenCalled();
+  });
+
+  it("shows the exact approved read permissions, full scope totals, and Owner-only protected controls", () => {
+    render(<GitHubInstallationPanel
+      installations={[{
+        ...installation,
+        health: "healthy",
+        health_diagnostic_code: null,
+        last_successful_reconciliation_at: "2026-09-15T11:55:00.000Z",
+        permission_labels: [
+          "Metadata — read",
+          "Administration — read",
+          "Actions — read",
+          "Vulnerability alerts — read",
+          "Security events — read",
+          "Secret scanning alerts — read",
+        ],
+        installation_settings_url: "https://github.com/organizations/Adtecher/settings/installations/77",
+      }]}
+      repositories={[
+        repository({ selected: true }),
+        repository({ repository_id: "10000000-0000-4000-8000-000000000012", full_name: "Adtecher/available", selected: false }),
+        repository({ repository_id: "10000000-0000-4000-8000-000000000013", full_name: "Adtecher/historical", selected: false, available: false }),
+      ]}
+      canManageInstallation={true}
+      canManageRepositoryScope={true}
+      now="2026-09-15T12:00:00.000Z"
+    />);
+
+    const region = screen.getByRole("region", { name: "GitHub repository access" });
+    expect(within(region).getByText("Healthy")).toBeVisible();
+    expect(within(region).getByText("GitHub is connected and was checked 5 minutes ago. No action is needed.")).toBeVisible();
+    expect(within(region).getByText("2 repositories available to this GitHub App; 1 selected in ComplianceHub.")).toBeVisible();
+    expect(within(region).getByText("1 historical repository is unavailable and cannot be selected.")).toBeVisible();
+    for (const permission of [
+      "Metadata — read", "Administration — read", "Actions — read", "Vulnerability alerts — read",
+      "Security events — read", "Secret scanning alerts — read",
+    ]) expect(within(region).getByText(permission)).toBeVisible();
+    expect(within(region).queryByText(/contents/i)).not.toBeInTheDocument();
+    expect(within(region).getByRole("link", { name: "Open GitHub installation settings" })).toHaveAttribute(
+      "href", "https://github.com/organizations/Adtecher/settings/installations/77",
+    );
+    expect(within(region).getByRole("button", { name: "Disconnect from ComplianceHub" })).toBeEnabled();
+  });
+
+  it("keeps the same connection facts for Admins but removes all GitHub management controls", () => {
+    render(<GitHubInstallationPanel
+      installations={[{
+        ...installation,
+        health: "owner_action_required",
+        health_diagnostic_code: "permission_mismatch",
+        last_successful_reconciliation_at: null,
+        permission_labels: ["Metadata — read"],
+        installation_settings_url: "https://github.com/organizations/Adtecher/settings/installations/77",
+      }]}
+      repositories={[repository()]}
+      canManageInstallation={false}
+      canManageRepositoryScope={false}
+      now="2026-09-15T12:00:00.000Z"
+    />);
+
+    expect(screen.getByText("Owner action required")).toBeVisible();
+    expect(screen.getByText(/GitHub App permissions no longer match the approved read-only access/)).toBeVisible();
+    expect(screen.queryByText("Ask a workspace Owner to review the GitHub App permissions.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Manage repository access" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Open GitHub installation settings" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Disconnect from ComplianceHub" })).not.toBeInTheDocument();
+  });
+
+  it("reports a local-only disconnect without claiming the GitHub App was removed", async () => {
+    const user = userEvent.setup();
+    hoisted.disconnectInstallation.mockResolvedValueOnce({
+      ok: true,
+      message: "ComplianceHub is disconnected. Its GitHub App installation was not removed from GitHub.",
+    });
+    render(<GitHubInstallationPanel
+      installations={[installation]}
+      repositories={[repository()]}
+      canManageInstallation={true}
+      canManageRepositoryScope={true}
+      now="2026-09-15T12:00:00.000Z"
+    />);
+
+    await user.click(screen.getByRole("button", { name: "Disconnect from ComplianceHub" }));
+    await waitFor(() => expect(screen.getByText("ComplianceHub is disconnected. Its GitHub App installation was not removed from GitHub.")).toBeVisible());
+    expect(Object.fromEntries(hoisted.disconnectInstallation.mock.calls[0][0] as FormData)).toEqual({
+      installationId: INSTALLATION_ID,
+    });
+    expect(screen.getByText("ComplianceHub is disconnected. Its GitHub App installation was not removed from GitHub.")).toHaveTextContent("not removed from GitHub");
   });
 
   it("offers plain-language setup when repository access is not connected", () => {
@@ -156,8 +242,8 @@ describe("GitHubInstallationPanel configuration boundary", () => {
 
     resolveSelection({ ok: false, message: "Could not update repository scope. Please try again." });
     await waitFor(() => expect(first).not.toBeChecked());
-    expect(screen.getByRole("status")).toHaveTextContent("Could not update repository scope. Please try again.");
-    expect(screen.getAllByRole("status")).toHaveLength(1);
+    expect(screen.getAllByRole("status").at(-1)).toHaveTextContent("Could not update repository scope. Please try again.");
+    expect(screen.getAllByRole("status")).toHaveLength(2);
   });
 
   it("disables an unavailable repository and explains why", () => {

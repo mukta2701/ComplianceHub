@@ -1,4 +1,5 @@
-import { Card, PageIntro } from "@/components/ui";
+import { Card } from "@/components/ui";
+import { redirect } from "next/navigation";
 import { z } from "zod";
 import { SubTabs } from "@/components/sub-tabs";
 import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
@@ -14,6 +15,15 @@ import {
   type GitHubInstallationSummary,
   type GitHubRepositoryConfigurationSummary,
 } from "@/features/github/components/github-installation-panel";
+import { presentGitHubConnectionHealth } from "@/features/github/components/github-connection-health";
+import {
+  hasExactReadPermissions,
+  READ_PERMISSIONS,
+} from "@/features/github/application/github-app-auth";
+import type {
+  GitHubConnectionDiagnostic,
+  GitHubConnectionHealth,
+} from "@/features/github/domain/connection-health";
 import {
   addConnectionAction,
   addEvidenceSourceAction,
@@ -36,6 +46,31 @@ type AlertChannel = AlertChannelSummary & {
   created_at: string;
   revoked_at: string | null;
 };
+
+const approvedPermissionLabels: Record<keyof typeof READ_PERMISSIONS, string> = {
+  metadata: "Metadata — read",
+  administration: "Administration — read",
+  actions: "Actions — read",
+  vulnerability_alerts: "Vulnerability alerts — read",
+  security_events: "Security events — read",
+  secret_scanning_alerts: "Secret scanning alerts — read",
+};
+
+function approvedPermissionLabelsFor(permissions: unknown): string[] {
+  if (!hasExactReadPermissions(permissions)) return [];
+  return Object.keys(READ_PERMISSIONS).map((permission) => approvedPermissionLabels[permission as keyof typeof READ_PERMISSIONS]);
+}
+
+function installationSettingsUrl(input: {
+  account_login: string;
+  account_type: string;
+  provider_installation_id: number;
+}): string | null {
+  if (input.account_type !== "Organization" || !Number.isSafeInteger(input.provider_installation_id) || input.provider_installation_id <= 0) {
+    return null;
+  }
+  return `https://github.com/organizations/${encodeURIComponent(input.account_login)}/settings/installations/${input.provider_installation_id}`;
+}
 
 const jiraSiteSchema = z.object({
   cloudId: z.string().min(1),
@@ -137,48 +172,14 @@ export default async function IntegrationsPage({
 }) {
   const { supabase, membership, organisation, user } = await requireAppContext();
   const connectionsAccess = workspaceAccess(membership.role).section("connections");
-  const canManageConnections = connectionsAccess.canManage;
+  if (!connectionsAccess.canView) redirect("/app");
   const params = await searchParams;
-  if (!canManageConnections) {
-    const [installationResult, repositorySummaryResult] = await Promise.all([
-      supabase.from("github_installations")
-        .select("id,account_login,status,repository_selection,permissions_ok")
-        .eq("organisation_id", organisation.id)
-        .order("updated_at", { ascending: false }),
-      supabase.from("github_repositories")
-        .select("id,installation_id,full_name,html_url,visibility,default_branch,archived,selected,available")
-        .eq("organisation_id", organisation.id)
-        .order("full_name", { ascending: true }),
-    ]);
-    if (installationResult.error || repositorySummaryResult.error) {
-      throw new Error("Could not load GitHub connection status");
-    }
-    return <>
-      <PageIntro
-        eyebrow="SETTINGS · CONNECTIONS"
-        title={connectionsAccess.title}
-        body="Connected workplace systems are managed by workspace operators."
-      />
-      <Card style={{ padding: "18px" }} role="note">
-        <p style={{ margin: 0 }}>Connections are managed by workspace Owners and Admins.</p>
-      </Card>
-      <GitHubInstallationPanel
-        installations={(installationResult.data ?? []) as GitHubInstallationSummary[]}
-        repositories={(repositorySummaryResult.data ?? []).map((repository) => ({
-          ...repository,
-          repository_id: repository.id,
-        })) as GitHubRepositoryConfigurationSummary[]}
-        canManageInstallation={false}
-        canManageRepositoryScope={false}
-      />
-    </>;
-  }
 
   const { github } = params;
   const jira = typeof params.jira === "string" ? params.jira : undefined;
   const setupId = typeof params.setup === "string" ? params.setup : undefined;
   const connectionId = typeof params.connection === "string" ? params.connection : undefined;
-  const [connectionsResult, alertChannelsResult, installationResult, repositorySummaryResult, deliveryResult, nativeJiraResult] = await Promise.all([
+  const [connectionsResult, alertChannelsResult, installationResult, repositorySummaryResult, healthResult, incidentResult, deliveryResult, nativeJiraResult] = await Promise.all([
     supabase.from("integration_connections")
       .select("id,provider,label,config,connection_mode,enabled,created_at,revoked_at")
       .eq("organisation_id", organisation.id)
@@ -189,13 +190,20 @@ export default async function IntegrationsPage({
       .eq("organisation_id", organisation.id)
       .order("created_at", { ascending: false }),
     supabase.from("github_installations")
-      .select("id,account_login,status,repository_selection,permissions_ok")
+      .select("id,account_login,account_type,provider_installation_id,status,repository_selection,permissions_ok,permissions")
       .eq("organisation_id", organisation.id)
       .order("updated_at", { ascending: false }),
     supabase.from("github_repositories")
       .select("id,installation_id,full_name,html_url,visibility,default_branch,archived,selected,available")
       .eq("organisation_id", organisation.id)
       .order("full_name", { ascending: true }),
+    supabase.from("github_connection_health_summaries")
+      .select("id,health,health_diagnostic_code,last_successful_reconciliation_at")
+      .eq("organisation_id", organisation.id),
+    supabase.from("github_connection_incidents")
+      .select("id,installation_id,diagnostic_code,health,opened_at,last_observed_at")
+      .eq("organisation_id", organisation.id)
+      .is("resolved_at", null),
     connectionsAccess.canManageOperation("select-daily-digest-channel")
       ? supabase.from("daily_digest_deliveries")
         .select("id,digest_on,channel_id,status,attempt_count,error_code,last_attempted_at,delivered_at")
@@ -213,6 +221,8 @@ export default async function IntegrationsPage({
     || alertChannelsResult.error
     || installationResult.error
     || repositorySummaryResult.error
+    || healthResult.error
+    || incidentResult.error
     || deliveryResult.error
     || nativeJiraResult.error
   ) {
@@ -228,6 +238,41 @@ export default async function IntegrationsPage({
     ...connection,
     target_count: Number(connection.target_count),
   })) as NativeJiraConnectionSummary[];
+  const healthByInstallationId = new Map((healthResult.data ?? []).map((health) => [health.id, health]));
+  const incidentByInstallationId = new Map((incidentResult.data ?? []).map((incident) => [incident.installation_id, incident]));
+  const now = new Date().toISOString();
+  const installations = (installationResult.data ?? []).map((installation) => {
+    const health = healthByInstallationId.get(installation.id);
+    const incident = incidentByInstallationId.get(installation.id);
+    const incidentPresentation = incident
+      ? presentGitHubConnectionHealth({
+          health: incident.health as GitHubConnectionHealth,
+          diagnostic: incident.diagnostic_code as GitHubConnectionDiagnostic | null,
+          lastSuccessfulReconciliationAt: health?.last_successful_reconciliation_at ?? null,
+          now,
+        })
+      : null;
+    return {
+      id: installation.id,
+      account_login: installation.account_login,
+      status: installation.status,
+      repository_selection: installation.repository_selection,
+      permissions_ok: installation.permissions_ok,
+      health: health?.health as GitHubConnectionHealth | undefined,
+      health_diagnostic_code: health?.health_diagnostic_code as GitHubConnectionDiagnostic | null | undefined,
+      last_successful_reconciliation_at: health?.last_successful_reconciliation_at ?? null,
+      permission_labels: approvedPermissionLabelsFor(installation.permissions),
+      installation_settings_url: installationSettingsUrl({
+        account_login: installation.account_login,
+        account_type: installation.account_type,
+        provider_installation_id: installation.provider_installation_id,
+      }),
+      incident: incident && incidentPresentation ? {
+        summary: incidentPresentation.summary,
+        lastObservedAt: incident.last_observed_at,
+      } : null,
+    };
+  }) as GitHubInstallationSummary[];
   const showDeveloperTools = canShowDeveloperTools({
     nodeEnv: process.env.NODE_ENV,
     enabled: process.env.E2E_TEST_TOOLS_ENABLED === "1",
@@ -264,13 +309,14 @@ export default async function IntegrationsPage({
       ]} />}
     />
     <GitHubInstallationPanel
-      installations={(installationResult.data ?? []) as GitHubInstallationSummary[]}
+      installations={installations}
       repositories={(repositorySummaryResult.data ?? []).map((repository) => ({
         ...repository,
         repository_id: repository.id,
       })) as GitHubRepositoryConfigurationSummary[]}
       canManageInstallation={connectionsAccess.canManageOperation("manage-github-app")}
       canManageRepositoryScope={connectionsAccess.canManageOperation("manage-github-app")}
+      now={now}
     />
     {showDeveloperTools && <DeveloperConnectionTools />}
   </>;

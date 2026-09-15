@@ -53,21 +53,22 @@ describe("GitHubCollectionHealthPanel", () => {
     }
   });
 
-  it("shows disconnected guidance by role", () => {
+  it("shows the Owner-only connection prompt without a misleading Admin management link", () => {
     const { rerender } = render(<GitHubCollectionHealthPanel installations={[]} repositories={[]} nowIso="2026-09-01T10:00:00Z" role="owner" runtimeReadiness={{ available: true, status: "ready" }} />);
     expect(screen.getByText("GITHUB MONITORING")).toBeVisible();
     expect(screen.queryByText("CONNECTED MONITORING")).not.toBeInTheDocument();
     expect(screen.getByText("GitHub is not connected.")).toBeVisible();
     expect(screen.getByRole("link", { name: "Connect GitHub" })).toHaveAttribute("href", "/app/integrations");
-    rerender(<GitHubCollectionHealthPanel installations={[]} repositories={[]} nowIso="2026-09-01T10:00:00Z" role="member" runtimeReadiness={{ available: true, status: "ready" }} />);
-    expect(screen.getByText("GitHub is not connected. Ask a workspace Owner or Admin to manage the connection.")).toBeVisible();
+    rerender(<GitHubCollectionHealthPanel installations={[]} repositories={[]} nowIso="2026-09-01T10:00:00Z" role="admin" runtimeReadiness={{ available: true, status: "ready" }} />);
+    expect(screen.getByText("Ask a workspace Owner to connect GitHub")).toBeVisible();
     expect(screen.queryByRole("link", { name: "Connect GitHub" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /connect|manage github/i })).not.toBeInTheDocument();
   });
 
   it("shows connected-without-selection guidance and keeps non-Owners read-only", () => {
     renderPanel({ repositories: [], role: "admin" });
     expect(screen.getByText("No repositories are selected for GitHub monitoring.")).toBeVisible();
-    expect(screen.getByRole("link", { name: "Choose repositories" })).toHaveAttribute("href", "/app/integrations");
+    expect(screen.queryByRole("link", { name: "Choose repositories" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Check GitHub now" })).not.toBeInTheDocument();
     expect(screen.getByText("Only workspace Owners can check GitHub from here.")).toBeVisible();
   });

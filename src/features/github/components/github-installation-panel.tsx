@@ -5,7 +5,15 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { Pill } from "@/components/ui";
-import { setGitHubRepositorySelectedAction } from "@/app/app/integrations/actions";
+import {
+  disconnectGitHubInstallationAction,
+  setGitHubRepositorySelectedAction,
+} from "@/app/app/integrations/actions";
+import type {
+  GitHubConnectionDiagnostic,
+  GitHubConnectionHealth,
+} from "@/features/github/domain/connection-health";
+import { presentGitHubConnectionHealth } from "./github-connection-health";
 
 export type GitHubInstallationSummary = {
   id: string;
@@ -13,6 +21,12 @@ export type GitHubInstallationSummary = {
   status: "active" | "suspended" | "revoked" | "needs_attention";
   repository_selection: "all" | "selected";
   permissions_ok: boolean;
+  health?: GitHubConnectionHealth;
+  health_diagnostic_code?: GitHubConnectionDiagnostic | null;
+  last_successful_reconciliation_at?: string | null;
+  permission_labels?: readonly string[];
+  installation_settings_url?: string | null;
+  incident?: { summary: string; lastObservedAt: string } | null;
 };
 
 export type GitHubRepositoryConfigurationSummary = {
@@ -73,11 +87,18 @@ function rollbackSelectionState(
   return { ...state, overrides };
 }
 
-function installationHealth(installation: GitHubInstallationSummary): { label: string; tone: string } {
-  if (installation.status === "suspended") return { label: "Suspended", tone: "amber" };
-  if (installation.status === "revoked") return { label: "Revoked", tone: "neutral" };
-  if (installation.status === "active" && installation.permissions_ok) return { label: "Active", tone: "green" };
-  return { label: "Needs attention", tone: "red" };
+function healthForInstallation(installation: GitHubInstallationSummary): {
+  health: GitHubConnectionHealth;
+  diagnostic: GitHubConnectionDiagnostic | null;
+} {
+  if (installation.health) return {
+    health: installation.health,
+    diagnostic: installation.health_diagnostic_code ?? null,
+  };
+  if (installation.status === "revoked") return { health: "disconnected", diagnostic: "installation_revoked" };
+  if (installation.status === "suspended") return { health: "owner_action_required", diagnostic: "installation_suspended" };
+  if (!installation.permissions_ok) return { health: "owner_action_required", diagnostic: "permission_mismatch" };
+  return { health: "healthy", diagnostic: null };
 }
 
 function repositoryDetail(repository: GitHubRepositoryConfigurationSummary): string {
@@ -91,11 +112,13 @@ export function GitHubInstallationPanel({
   repositories,
   canManageInstallation,
   canManageRepositoryScope,
+  now = new Date().toISOString(),
 }: {
   installations: GitHubInstallationSummary[];
   repositories: GitHubRepositoryConfigurationSummary[];
   canManageInstallation: boolean;
   canManageRepositoryScope: boolean;
+  now?: string;
 }) {
   const router = useRouter();
   const serverSelections = selectionSnapshot(repositories);
@@ -107,6 +130,7 @@ export function GitHubInstallationPanel({
     setSelectionState(reconcileSelectionState(selectionState, serverSelections));
   }
   const [pendingRepositories, setPendingRepositories] = useState<Set<string>>(() => new Set());
+  const [disconnectingInstallation, setDisconnectingInstallation] = useState<string | null>(null);
   const [message, setMessage] = useState("");
 
   async function changeRepository(
@@ -155,6 +179,23 @@ export function GitHubInstallationPanel({
     }
   }
 
+  async function disconnectInstallation(installation: GitHubInstallationSummary) {
+    if (!canManageInstallation || disconnectingInstallation !== null) return;
+    setMessage("");
+    setDisconnectingInstallation(installation.id);
+    const formData = new FormData();
+    formData.set("installationId", installation.id);
+    try {
+      const result = await disconnectGitHubInstallationAction(formData);
+      setMessage(result.message);
+      if (result.ok) router.refresh();
+    } catch {
+      setMessage("Could not disconnect GitHub. Please try again.");
+    } finally {
+      setDisconnectingInstallation(null);
+    }
+  }
+
   return <section className="github-shadow-panel" aria-labelledby="github-connection-title">
     <header className="github-shadow-panel-head">
       <div>
@@ -164,11 +205,9 @@ export function GitHubInstallationPanel({
       </div>
       <div className="github-connection-actions">
         <Link className="button secondary" href="/app/monitoring">Open GitHub monitoring</Link>
-        {canManageInstallation
-          ? <a className="button primary" href="/api/github/setup">
+        {canManageInstallation && <a className="button primary" href="/api/github/setup">
             {installations.length > 0 ? "Manage repository access" : "Set up repository access"}
-          </a>
-          : <span className="field-hint">Only workspace Owners can set up or manage repository access.</span>}
+          </a>}
       </div>
     </header>
 
@@ -177,8 +216,18 @@ export function GitHubInstallationPanel({
       <p>Set up read-only access to choose which repositories ComplianceHub may include in monitoring.</p>
     </div> : <div className="github-installation-list">
       {installations.map((installation) => {
-        const health = installationHealth(installation);
+        const healthInput = healthForInstallation(installation);
+        const presentation = presentGitHubConnectionHealth({
+          health: healthInput.health,
+          diagnostic: healthInput.diagnostic,
+          lastSuccessfulReconciliationAt: installation.last_successful_reconciliation_at ?? null,
+          now,
+        });
         const installationRepositories = repositories.filter((repository) => repository.installation_id === installation.id);
+        const availableCount = installationRepositories.filter((repository) => repository.available).length;
+        const selectedCount = installationRepositories.filter((repository) => repository.selected).length;
+        const unavailableCount = installationRepositories.length - availableCount;
+        const disconnecting = disconnectingInstallation === installation.id;
         return <article className="github-installation" aria-label={`${installation.account_login} GitHub installation`} key={installation.id}>
           <div className="github-installation-head">
             <div>
@@ -186,9 +235,37 @@ export function GitHubInstallationPanel({
               <p>{installation.repository_selection === "selected" ? "Selected repositories" : "All repositories"}</p>
             </div>
             <dl className="github-health-facts">
-              <div><dt>Connection status</dt><dd><Pill tone={health.tone}>{health.label}</Pill></dd></div>
+              <div><dt>Connection status</dt><dd><Pill tone={presentation.tone}>{presentation.label}</Pill></dd></div>
+              {presentation.checkedAt && <div><dt>Last successful check</dt><dd>{presentation.checkedAt}</dd></div>}
             </dl>
           </div>
+
+          <p className="github-configuration-note" role="status" aria-live="polite" aria-atomic="true">
+            {presentation.summary}{canManageInstallation && presentation.nextAction ? ` ${presentation.nextAction}` : ""}
+          </p>
+          {installation.incident && <p className="github-configuration-note" role="note">
+            Connection incident: {installation.incident.summary}
+          </p>}
+          {installation.permission_labels && installation.permission_labels.length > 0 && <div className="github-configuration-note" role="note">
+            <strong>Approved GitHub App permissions</strong>
+            <ul>{installation.permission_labels.map((label) => <li key={label}>{label}</li>)}</ul>
+          </div>}
+          <p className="github-configuration-note">
+            {availableCount} {availableCount === 1 ? "repository" : "repositories"} available to this GitHub App; {selectedCount} selected in ComplianceHub.
+          </p>
+          {unavailableCount > 0 && <p className="field-hint">
+            {unavailableCount} historical {unavailableCount === 1 ? "repository is" : "repositories are"} unavailable and cannot be selected.
+          </p>}
+          {canManageInstallation && installation.installation_settings_url && <p>
+            <a href={installation.installation_settings_url} target="_blank" rel="noreferrer">Open GitHub installation settings</a>
+          </p>}
+          {canManageInstallation && <button
+            className="button secondary"
+            type="button"
+            disabled={disconnecting}
+            aria-busy={disconnecting}
+            onClick={() => void disconnectInstallation(installation)}
+          >{disconnecting ? "Disconnecting…" : "Disconnect from ComplianceHub"}</button>}
 
           {installation.repository_selection === "all" && <p className="github-configuration-note" role="note">
             This GitHub App installation has access to all repositories. Review the installation if you want GitHub to limit access to selected repositories.
@@ -196,7 +273,6 @@ export function GitHubInstallationPanel({
           {!installation.permissions_ok && <p className="github-configuration-note" role="note">
             GitHub App permissions need attention. Manage the installation before relying on repository monitoring.
           </p>}
-          {!canManageRepositoryScope && <p className="field-hint">Only workspace Owners can change repository scope.</p>}
           {installationRepositories.length === 0 ? <p className="github-repositories-empty">
             No repositories are available for this installation.
           </p> : <div className="github-repository-list">
@@ -209,7 +285,7 @@ export function GitHubInstallationPanel({
                 key={repository.repository_id}
               >
                 <div className="github-repository-scope">
-                  <label>
+                  {canManageRepositoryScope ? <label>
                     <input
                       type="checkbox"
                       checked={selectionState.overrides[repository.repository_id] ?? repository.selected}
@@ -218,7 +294,13 @@ export function GitHubInstallationPanel({
                       onChange={(event) => void changeRepository(repository, event.target.checked)}
                     />
                     <span>Allow ComplianceHub to read and include {repository.full_name} in monitoring</span>
-                  </label>
+                  </label> : <p className="field-hint">
+                    {repository.selected
+                      ? "Selected for ComplianceHub monitoring."
+                      : repository.available
+                        ? "Available to select for ComplianceHub monitoring."
+                        : "Unavailable to this GitHub App installation."}
+                  </p>}
                   <div>
                     <a
                       href={repository.html_url}

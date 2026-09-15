@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as integrationActions from "./actions";
 
 const ORGANISATION_ID = "20000000-0000-4000-8000-000000000001";
 const USER_ID = "20000000-0000-4000-8000-000000000002";
@@ -919,4 +920,84 @@ describe("GitHub repository scope actions", () => {
     expect(hoisted.createServiceClient).not.toHaveBeenCalled();
   });
 
+});
+
+describe("GitHub installation disconnect action", () => {
+  const INSTALLATION_ID = "20000000-0000-4000-8000-000000000012";
+
+  function disconnectAction() {
+    const action = (integrationActions as Record<string, unknown>).disconnectGitHubInstallationAction;
+    expect(action).toBeTypeOf("function");
+    return action as (formData: FormData) => Promise<{ ok: boolean; message: string }>;
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    hoisted.enforceRateLimit.mockResolvedValue(undefined);
+  });
+
+  it.each(["member", "admin"] as const)("rejects %s before an installation lookup or disconnect RPC", async (role) => {
+    const from = vi.fn();
+    const rpc = vi.fn();
+    hoisted.ctx = {
+      supabase: { from, rpc }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role },
+    };
+    const form = new FormData();
+    form.set("installationId", INSTALLATION_ID);
+
+    await expect(disconnectAction()(form)).resolves.toEqual({
+      ok: false,
+      message: "Could not disconnect GitHub. Please try again.",
+    });
+    expect(from).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("rejects duplicate or invalid untrusted installation identifiers before Supabase", async () => {
+    const from = vi.fn();
+    const rpc = vi.fn();
+    hoisted.ctx = {
+      supabase: { from, rpc }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
+    };
+    const form = new FormData();
+    form.append("installationId", INSTALLATION_ID);
+    form.append("installationId", "20000000-0000-4000-8000-000000000013");
+
+    await expect(disconnectAction()(form)).resolves.toEqual({
+      ok: false,
+      message: "Could not disconnect GitHub. Please try again.",
+    });
+    expect(from).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("binds a validated Owner disconnect to the active workspace and only calls the established RPC", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: true, error: null });
+    const maybeSingle = vi.fn().mockResolvedValue({ data: { id: INSTALLATION_ID }, error: null });
+    const organisationFilter = vi.fn().mockReturnValue({ maybeSingle });
+    const installationFilter = vi.fn().mockReturnValue({ eq: organisationFilter });
+    const select = vi.fn().mockReturnValue({ eq: installationFilter });
+    const from = vi.fn().mockReturnValue({ select });
+    hoisted.ctx = {
+      supabase: { from, rpc }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
+    };
+    const form = new FormData();
+    form.set("installationId", INSTALLATION_ID);
+
+    await expect(disconnectAction()(form)).resolves.toEqual({
+      ok: true,
+      message: "ComplianceHub is disconnected. Its GitHub App installation was not removed from GitHub.",
+    });
+    expect(from).toHaveBeenCalledWith("github_installations");
+    expect(select).toHaveBeenCalledWith("id");
+    expect(installationFilter).toHaveBeenCalledWith("id", INSTALLATION_ID);
+    expect(organisationFilter).toHaveBeenCalledWith("organisation_id", ORGANISATION_ID);
+    expect(hoisted.enforceRateLimit).toHaveBeenCalledWith(
+      `github-disconnect:${ORGANISATION_ID}:${USER_ID}`,
+      { limit: 5, windowMs: 60_000 },
+    );
+    expect(rpc).toHaveBeenCalledWith("disconnect_github_installation", { target_installation_id: INSTALLATION_ID });
+    expect(hoisted.revalidatePath).toHaveBeenCalledWith("/app/integrations");
+    expect(hoisted.revalidatePath).toHaveBeenCalledWith("/app/monitoring");
+  });
 });
