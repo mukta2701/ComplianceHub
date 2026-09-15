@@ -18,6 +18,8 @@ jobs:
         with:
           context: .
           push: false
+          load: true
+          tags: compliancehub:ci
           platforms: linux/amd64
           build-args: |
             NEXT_PUBLIC_SUPABASE_URL=https://example.supabase.co
@@ -26,6 +28,35 @@ jobs:
             NEXT_PUBLIC_SITE_URL=https://compliancehub-staging.example
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Smoke test web and finite runner image
+        shell: bash
+        run: |
+          set -euo pipefail
+          web_container="compliancehub-web-ci"
+          docker run --detach --name "$web_container" --publish 3100:3100 \
+            --env NEXT_PUBLIC_SUPABASE_URL=https://example.supabase.co \
+            --env NEXT_PUBLIC_SUPABASE_ANON_KEY=ci-anon-key-placeholder-long \
+            --env NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=ci-publishable-key-placeholder-long \
+            compliancehub:ci
+          trap 'docker rm --force "$web_container" >/dev/null 2>&1 || true' EXIT
+          for attempt in {1..30}; do
+            if curl --silent --show-error --fail http://127.0.0.1:3100/api/health/live >/dev/null; then break; fi
+            sleep 1
+          done
+          curl --silent --show-error --fail http://127.0.0.1:3100/api/health/live >/dev/null
+          test "$(docker inspect --format '{{.Config.User}}' compliancehub:ci)" = "nextjs"
+          runner_log="$RUNNER_TEMP/compliancehub-runner.log"
+          set +e
+          timeout --signal=TERM 30s docker run --rm \
+            --env NEXT_PUBLIC_SUPABASE_URL=https://example.supabase.co \
+            --env SUPABASE_SERVICE_ROLE_KEY=ci-runner-fictional-key \
+            --env GITHUB_CONNECTION_TIME_BUDGET_MS=1000 \
+            compliancehub:ci node dist/github-connection-reconcile.mjs >"$runner_log" 2>&1
+          runner_status=$?
+          set -e
+          test "$runner_status" -ne 124
+          ! grep -Eiq 'ci-runner-fictional-key|BEGIN .*PRIVATE KEY|Bearer |raw webhook' "$runner_log"
+          ! docker history --no-trunc compliancehub:ci | grep -Eiq 'ci-runner-fictional-key|BEGIN .*PRIVATE KEY'
 
   application:
     runs-on: ubuntu-latest

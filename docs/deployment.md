@@ -1,5 +1,23 @@
 # Deployment / Go-live runbook
 
+## Milestone 1 immutable image contract (Task 8)
+
+The production image contains the Next standalone web service and the finite
+GitHub connection reconciliation bundle built from the same source revision.
+The default command is exactly `node server.js`; the separately scheduled
+reconciliation invocation is exactly:
+
+```sh
+node dist/github-connection-reconcile.mjs
+```
+
+The image runs as the non-root `nextjs` user. The reconciliation command is one
+bounded cycle: it has no polling timer, writes only a sanitised summary or a
+generic failure, and exits. It requires the runtime Supabase and GitHub App
+secrets; those values must be supplied by the approved AWS staging contract,
+never baked into the image or CI logs. Task 9 owns that AWS contract and its
+deployment path; this section does not authorise staging or live-provider work.
+
 ## GitHub shadow collection maintenance
 
 The personal Azure staging environment runs the read-only GitHub shadow collector
