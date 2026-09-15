@@ -27,6 +27,26 @@ test("fictional GitHub connection health is usable on desktop and mobile", async
   );
   const providerInstallationId = Number(`8${Date.now().toString().slice(-11)}`);
   const accountLogin = `fictional-${randomUUID().slice(0, 8)}`;
+  const canonicalRepositories = ["pilot", "available"].map((name, index) => ({
+    id: providerInstallationId + 10 + index,
+    owner: accountLogin,
+    name,
+    fullName: `${accountLogin}/${name}`,
+    htmlUrl: `https://github.com/${accountLogin}/${name}`,
+    visibility: "private",
+    archived: false,
+    defaultBranch: "main",
+  }));
+  const initialRepositories = [...canonicalRepositories, {
+    id: providerInstallationId + 12,
+    owner: accountLogin,
+    name: "historical",
+    fullName: `${accountLogin}/historical`,
+    htmlUrl: `https://github.com/${accountLogin}/historical`,
+    visibility: "private",
+    archived: false,
+    defaultBranch: "main",
+  }];
   const { data: installationId, error: claimError } = await service.rpc("claim_github_installation_server", {
     target_organisation_id: fixture.organisationId,
     target_actor_id: fixture.actors[0].id,
@@ -37,38 +57,45 @@ test("fictional GitHub connection health is usable on desktop and mobile", async
     target_repository_selection: "selected",
     target_permissions: permissions,
     target_permissions_ok: true,
-    target_repositories: ["pilot", "available", "historical"].map((name, index) => ({
-      id: providerInstallationId + 10 + index,
-      owner: accountLogin,
-      name,
-      fullName: `${accountLogin}/${name}`,
-      htmlUrl: `https://github.com/${accountLogin}/${name}`,
-      visibility: "private",
-      archived: false,
-      defaultBranch: "main",
-    })),
+    target_repositories: initialRepositories,
   });
   expect(claimError).toBeNull();
   if (typeof installationId !== "string") throw new Error("Fictional GitHub installation was not created");
 
-  const { error: statusError } = await service.from("github_installations").update({
-    health: "healthy",
-    health_diagnostic_code: null,
-    last_successful_reconciliation_at: "2026-09-15T11:55:00.000Z",
-  }).eq("id", installationId).eq("organisation_id", fixture.organisationId);
-  if (statusError) throw statusError;
-  const { error: scopeError } = await service.from("github_repositories")
-    .update({ selected: true })
+  const { data: repositories, error: repositoryError } = await service.from("github_repositories")
+    .select("id,name")
     .eq("installation_id", installationId)
-    .eq("organisation_id", fixture.organisationId)
-    .eq("name", "pilot");
-  if (scopeError) throw scopeError;
-  const { error: historyError } = await service.from("github_repositories")
-    .update({ available: false, selected: false })
-    .eq("installation_id", installationId)
-    .eq("organisation_id", fixture.organisationId)
-    .eq("name", "historical");
-  if (historyError) throw historyError;
+    .eq("organisation_id", fixture.organisationId);
+  if (repositoryError) throw repositoryError;
+  const pilot = repositories?.filter((repository) => repository.name === "pilot") ?? [];
+  if (pilot.length !== 1) throw new Error("Fictional pilot repository was not found exactly once");
+  const { data: selectionResult, error: selectionError } = await fixture.coordinator.rpc("set_github_repository_selected", {
+    target_repository_id: pilot[0].id,
+    target_selected: true,
+  });
+  expect(selectionError).toBeNull();
+  expect(selectionResult).toBe(true);
+
+  const workerId = randomUUID();
+  const now = new Date().toISOString();
+  const { data: claimedRuns, error: claimRunError } = await service.rpc("claim_due_github_connection_reconciliations_server", {
+    target_worker_id: workerId,
+    target_limit: 100,
+    target_now: now,
+  });
+  if (claimRunError || !Array.isArray(claimedRuns)) throw claimRunError ?? new Error("Fictional reconciliation runs were not claimed");
+  const matchingRuns = claimedRuns.filter((run) => run.installation_id === installationId);
+  if (matchingRuns.length !== 1) throw new Error("Fictional installation reconciliation run was not claimed exactly once");
+  const { data: finalization, error: finalizationError } = await service.rpc("finalize_github_connection_reconciliation_server", {
+    target_run_id: matchingRuns[0].id,
+    target_worker_id: workerId,
+    target_outcome: "success",
+    target_diagnostic_code: null,
+    target_next_attempt_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    target_repository_snapshot: canonicalRepositories,
+  });
+  expect(finalizationError).toBeNull();
+  expect(finalization).toMatchObject({ effectiveHealth: "healthy", incidentTransition: "none" });
 
   await signIn(page, fixture.actors[0]);
   for (const viewport of [{ width: 1440, height: 1000 }, { width: 393, height: 851 }]) {
@@ -76,11 +103,11 @@ test("fictional GitHub connection health is usable on desktop and mobile", async
     await page.goto("/app/integrations");
     const panel = page.getByRole("region", { name: "GitHub repository access" });
     await expect(panel.getByText("Healthy", { exact: true })).toBeVisible();
-    await expect(panel.getByText("GitHub is connected and was checked", { exact: false })).toBeVisible();
+    const healthStatus = panel.getByText("GitHub is connected and was checked", { exact: false });
+    await expect(healthStatus).toBeVisible();
     await expect(panel.getByText("2 repositories available to this GitHub App; 1 selected in ComplianceHub.")).toBeVisible();
     await expect(panel.getByRole("button", { name: "Disconnect from ComplianceHub" })).toBeVisible();
-    const status = panel.getByRole("status");
-    await expect(status).toHaveAttribute("aria-live", "polite");
+    await expect(healthStatus).toHaveAttribute("aria-live", "polite");
     await panel.getByRole("link", { name: "Open GitHub installation settings" }).focus();
     await expect(panel.getByRole("link", { name: "Open GitHub installation settings" })).toBeFocused();
     const widths = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth }));

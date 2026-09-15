@@ -4,6 +4,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const hoisted = vi.hoisted(() => ({
   selectCalls: [] as Array<{ table: string; columns: string }>,
   filterCalls: [] as Array<{ table: string; column: string; value: string }>,
+  serviceSelectCalls: [] as Array<{ table: string; columns: string }>,
+  serviceFilterCalls: [] as Array<{ table: string; column: string; value: string }>,
+  createServiceClient: vi.fn(),
   errors: {} as Record<string, { message: string } | undefined>,
   controlRoomLoads: [] as unknown[],
   mappingReviewLoads: [] as unknown[],
@@ -32,10 +35,6 @@ const hoisted = vi.hoisted(() => ({
     github_installations: [{
       id: "10000000-0000-4000-8000-000000000010", account_login: "Adtecher", status: "active",
       account_type: "Organization", provider_installation_id: 77, repository_selection: "selected", permissions_ok: true,
-      permissions: {
-        metadata: "read", administration: "read", actions: "read", vulnerability_alerts: "read",
-        security_events: "read", secret_scanning_alerts: "read",
-      },
     }],
     github_connection_health_summaries: [{
       id: "10000000-0000-4000-8000-000000000010", health: "healthy", health_diagnostic_code: null,
@@ -53,21 +52,35 @@ const hoisted = vi.hoisted(() => ({
       visibility: "private", default_branch: "main", archived: false, selected: true, available: true,
     }],
   } as Record<string, unknown[]>,
+  serviceRows: {
+    github_installations: [{
+      id: "10000000-0000-4000-8000-000000000010",
+      permissions: {
+        metadata: "read", administration: "read", actions: "read", vulnerability_alerts: "read",
+        security_events: "read", secret_scanning_alerts: "read",
+      },
+    }],
+  } as Record<string, unknown[]>,
 }));
 
-function query(table: string) {
+function query(table: string, source: "authenticated" | "service" = "authenticated") {
+  const selectCalls = source === "service" ? hoisted.serviceSelectCalls : hoisted.selectCalls;
+  const filterCalls = source === "service" ? hoisted.serviceFilterCalls : hoisted.filterCalls;
   const chain: Record<string, unknown> = {};
   chain.select = vi.fn((columns: string) => {
-    hoisted.selectCalls.push({ table, columns });
+    selectCalls.push({ table, columns });
     return chain;
   });
   chain.eq = vi.fn((column: string, value: string) => {
-    hoisted.filterCalls.push({ table, column, value });
+    filterCalls.push({ table, column, value });
     return chain;
   });
   for (const method of ["is", "order", "limit"]) chain[method] = vi.fn(() => chain);
   chain.then = (resolve: (value: { data: unknown[]; error: { message: string } | null }) => unknown) =>
-    Promise.resolve({ data: hoisted.rows[table] ?? [], error: hoisted.errors[table] ?? null }).then(resolve);
+    Promise.resolve({
+      data: (source === "service" ? hoisted.serviceRows : hoisted.rows)[table] ?? [],
+      error: hoisted.errors[`${source}:${table}`] ?? hoisted.errors[table] ?? null,
+    }).then(resolve);
   return chain;
 }
 
@@ -82,6 +95,7 @@ vi.mock("@/lib/app-context", () => ({
     user: { id: "user-1", email: "admin@example.test" },
   }),
 }));
+vi.mock("@/lib/supabase/service", () => ({ createSupabaseServiceClient: hoisted.createServiceClient }));
 vi.mock("@/features/github/application/github-compliance-control-room", () => ({
   GITHUB_MATERIALISATION_RETRY_REASON_CODES: ["configuration_corrected", "provider_recovered", "owner_reviewed"],
   retryGitHubMaterialisationJob: vi.fn(),
@@ -129,10 +143,14 @@ describe("Settings Connections page", () => {
   beforeEach(() => {
     hoisted.selectCalls = [];
     hoisted.filterCalls = [];
+    hoisted.serviceSelectCalls = [];
+    hoisted.serviceFilterCalls = [];
     hoisted.errors = {};
     hoisted.controlRoomLoads = [];
     hoisted.mappingReviewLoads = [];
     hoisted.redirect.mockClear();
+    hoisted.createServiceClient.mockReset();
+    hoisted.createServiceClient.mockReturnValue({ from: (table: string) => query(table, "service") });
     hoisted.role = "admin";
   });
 
@@ -162,7 +180,7 @@ describe("Settings Connections page", () => {
     const expectedColumns: Record<string, string> = {
       integration_connections: "id,provider,label,config,connection_mode,enabled,created_at,revoked_at",
       alert_channels: "id,type,label,min_severity,enabled,daily_digest_enabled,created_at,revoked_at",
-      github_installations: "id,account_login,account_type,provider_installation_id,status,repository_selection,permissions_ok,permissions",
+      github_installations: "id,account_login,account_type,provider_installation_id,status,repository_selection,permissions_ok",
       github_repositories: "id,installation_id,full_name,html_url,visibility,default_branch,archived,selected,available",
       github_connection_health_summaries: "id,health,health_diagnostic_code,last_successful_reconciliation_at",
       github_connection_incidents: "id,installation_id,diagnostic_code,health,opened_at,last_observed_at",
@@ -173,9 +191,18 @@ describe("Settings Connections page", () => {
       expect(call.columns).not.toMatch(/latest_|last_completed|failed_count/);
     }
     expect(hoisted.selectCalls.map((call) => call.table)).not.toContain("github_repository_shadow_summaries");
+    expect(hoisted.serviceSelectCalls).toEqual([{ table: "github_installations", columns: "id,permissions" }]);
+    expect(hoisted.serviceFilterCalls).toEqual([{ table: "github_installations", column: "organisation_id", value: "org-1" }]);
     expect(screen.getByText("Healthy")).toBeVisible();
     expect(screen.getByText("GitHub is connected", { exact: false })).toBeVisible();
     expect(screen.getByText("Connection incident: GitHub App permissions no longer match the approved read-only access.")).toBeVisible();
+    expect(screen.getByText("Approved GitHub App permissions")).toBeVisible();
+    expect(screen.getByText("Metadata — read")).toBeVisible();
+    expect(screen.getByText("Administration — read")).toBeVisible();
+    expect(screen.getByText("Actions — read")).toBeVisible();
+    expect(screen.getByText("Vulnerability alerts — read")).toBeVisible();
+    expect(screen.getByText("Security events — read")).toBeVisible();
+    expect(screen.getByText("Secret scanning alerts — read")).toBeVisible();
     expect(screen.queryByText(/collection health|freshness|recheck/i)).not.toBeInTheDocument();
     expect(hoisted.controlRoomLoads).toHaveLength(0);
     expect(hoisted.mappingReviewLoads).toHaveLength(0);
@@ -202,6 +229,12 @@ describe("Settings Connections page", () => {
     await expect(IntegrationsPage({ searchParams: Promise.resolve({}) })).rejects.toThrow("Could not load connection settings");
   });
 
+  it("fails closed when the server-only permission projection cannot load", async () => {
+    hoisted.errors["service:github_installations"] = { message: "query unavailable" };
+
+    await expect(IntegrationsPage({ searchParams: Promise.resolve({}) })).rejects.toThrow("Could not load connection settings");
+  });
+
   it("loads bounded delivery metadata for Owners without selecting message contents", async () => {
     hoisted.role = "owner";
 
@@ -224,6 +257,7 @@ describe("Settings Connections page", () => {
     await expect(IntegrationsPage({ searchParams: Promise.resolve({ github: "connected" }) })).rejects.toThrow("redirect:/app");
     expect(hoisted.redirect).toHaveBeenCalledWith("/app");
     expect(hoisted.selectCalls).toHaveLength(0);
+    expect(hoisted.createServiceClient).not.toHaveBeenCalled();
   });
 
   it("allows only Owners to change repository scope", async () => {

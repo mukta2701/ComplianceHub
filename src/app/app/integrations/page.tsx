@@ -174,12 +174,13 @@ export default async function IntegrationsPage({
   const connectionsAccess = workspaceAccess(membership.role).section("connections");
   if (!connectionsAccess.canView) redirect("/app");
   const params = await searchParams;
+  const service = createSupabaseServiceClient();
 
   const { github } = params;
   const jira = typeof params.jira === "string" ? params.jira : undefined;
   const setupId = typeof params.setup === "string" ? params.setup : undefined;
   const connectionId = typeof params.connection === "string" ? params.connection : undefined;
-  const [connectionsResult, alertChannelsResult, installationResult, repositorySummaryResult, healthResult, incidentResult, deliveryResult, nativeJiraResult] = await Promise.all([
+  const [connectionsResult, alertChannelsResult, installationResult, repositorySummaryResult, healthResult, incidentResult, permissionResult, deliveryResult, nativeJiraResult] = await Promise.all([
     supabase.from("integration_connections")
       .select("id,provider,label,config,connection_mode,enabled,created_at,revoked_at")
       .eq("organisation_id", organisation.id)
@@ -190,7 +191,7 @@ export default async function IntegrationsPage({
       .eq("organisation_id", organisation.id)
       .order("created_at", { ascending: false }),
     supabase.from("github_installations")
-      .select("id,account_login,account_type,provider_installation_id,status,repository_selection,permissions_ok,permissions")
+      .select("id,account_login,account_type,provider_installation_id,status,repository_selection,permissions_ok")
       .eq("organisation_id", organisation.id)
       .order("updated_at", { ascending: false }),
     supabase.from("github_repositories")
@@ -204,6 +205,9 @@ export default async function IntegrationsPage({
       .select("id,installation_id,diagnostic_code,health,opened_at,last_observed_at")
       .eq("organisation_id", organisation.id)
       .is("resolved_at", null),
+    service.from("github_installations")
+      .select("id,permissions")
+      .eq("organisation_id", organisation.id),
     connectionsAccess.canManageOperation("select-daily-digest-channel")
       ? supabase.from("daily_digest_deliveries")
         .select("id,digest_on,channel_id,status,attempt_count,error_code,last_attempted_at,delivered_at")
@@ -223,6 +227,7 @@ export default async function IntegrationsPage({
     || repositorySummaryResult.error
     || healthResult.error
     || incidentResult.error
+    || permissionResult.error
     || deliveryResult.error
     || nativeJiraResult.error
   ) {
@@ -240,6 +245,7 @@ export default async function IntegrationsPage({
   })) as NativeJiraConnectionSummary[];
   const healthByInstallationId = new Map((healthResult.data ?? []).map((health) => [health.id, health]));
   const incidentByInstallationId = new Map((incidentResult.data ?? []).map((incident) => [incident.installation_id, incident]));
+  const permissionsByInstallationId = new Map((permissionResult.data ?? []).map((installation) => [installation.id, installation.permissions]));
   const now = new Date().toISOString();
   const installations = (installationResult.data ?? []).map((installation) => {
     const health = healthByInstallationId.get(installation.id);
@@ -261,7 +267,7 @@ export default async function IntegrationsPage({
       health: health?.health as GitHubConnectionHealth | undefined,
       health_diagnostic_code: health?.health_diagnostic_code as GitHubConnectionDiagnostic | null | undefined,
       last_successful_reconciliation_at: health?.last_successful_reconciliation_at ?? null,
-      permission_labels: approvedPermissionLabelsFor(installation.permissions),
+      permission_labels: approvedPermissionLabelsFor(permissionsByInstallationId.get(installation.id)),
       installation_settings_url: installationSettingsUrl({
         account_login: installation.account_login,
         account_type: installation.account_type,
