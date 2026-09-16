@@ -370,7 +370,8 @@ describe("Settings Connections page", () => {
     }
   });
 
-  it("loads every repository page so an Owner can manage scope beyond the PostgREST ceiling", async () => {
+  // Rendering 1,001 jsdom rows sits near the default timeout on shared CI runners.
+  it("loads every repository page so an Owner can manage scope beyond the PostgREST ceiling", { timeout: 20_000 }, async () => {
     const originalRepositories = hoisted.rows.github_repositories;
     const originalIncidents = hoisted.rows.github_connection_incidents;
     try {
