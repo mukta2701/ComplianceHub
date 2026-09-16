@@ -27,6 +27,9 @@ export async function buildRuntimeBundles(
     logLevel: "info",
     metafile: false,
     sourcemap: false,
+    alias: {
+      "server-only": path.resolve(root, "scripts/bundle-shims/server-only.ts"),
+    },
     legalComments: "none",
     banner: { js: "/* eslint-disable */" },
   });

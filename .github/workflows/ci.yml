@@ -55,8 +55,13 @@ jobs:
           runner_status=$?
           set -e
           test "$runner_status" -ne 124
-          ! grep -Eiq 'ci-runner-fictional-key|BEGIN .*PRIVATE KEY|Bearer |raw webhook' "$runner_log"
-          ! docker history --no-trunc compliancehub:ci | grep -Eiq 'ci-runner-fictional-key|BEGIN .*PRIVATE KEY'
+          # Without a database the cycle must end in the sanitised fail-closed
+          # message; a module crash would not print it.
+          grep -Eq 'GitHub connection reconciliation failed' "$runner_log"
+          # Match a PEM header only when followed by key material; library
+          # validation literals legitimately contain the bare header.
+          ! grep -Eiq 'ci-runner-fictional-key|-----BEGIN [A-Z ]*PRIVATE KEY-----[A-Za-z0-9+/=]{40,}|Bearer |raw webhook' "$runner_log"
+          ! docker history --no-trunc compliancehub:ci | grep -Eiq 'ci-runner-fictional-key|-----BEGIN [A-Z ]*PRIVATE KEY-----[A-Za-z0-9+/=]{40,}'
 
   application:
     runs-on: ubuntu-latest
