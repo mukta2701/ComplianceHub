@@ -89,7 +89,7 @@ jobs:
             --arg encryption "$APP_ENCRYPTION_KEY" \
             --arg release "$DEPLOY_SHA" \
             '{ImageRepository: {ImageIdentifier: $image, ImageRepositoryType: "ECR", ImageConfiguration: {Port: "3100", RuntimeEnvironmentVariables: {NEXT_PUBLIC_SUPABASE_URL: $supabaseUrl, NEXT_PUBLIC_SUPABASE_ANON_KEY: $anonKey, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: $publishableKey, NEXT_PUBLIC_SITE_URL: $siteUrl, SUPABASE_SERVICE_ROLE_KEY: $serviceRole, CRON_SECRET: $cron, APP_ENCRYPTION_KEY: $encryption, COMPLIANCEHUB_RELEASE_SHA: $release}}}, AuthenticationConfiguration: {AccessRoleArn: $accessRole}, AutoDeploymentsEnabled: false}')" 
-          aws apprunner update-service --region "$AWS_REGION" --service-arn "$SERVICE_ARN" --source-configuration "$source_config" --output none
+          aws apprunner update-service --region "$AWS_REGION" --service-arn "$SERVICE_ARN" --source-configuration "$source_config" --query Service.Status --output text
           for _ in $(seq 1 40); do
             status="$(aws apprunner describe-service --region "$AWS_REGION" --service-arn "$SERVICE_ARN" --query Service.Status --output text)"
             test "$status" = RUNNING && break
