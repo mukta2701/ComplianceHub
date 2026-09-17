@@ -47,8 +47,16 @@ jobs:
       - name: Log in to ECR
         run: aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "${{ vars.AWS_DEV_ECR_REGISTRY }}"
 
+      - name: Resolve image
+        id: image
+        run: |
+          set -euo pipefail
+          digest="$(aws ecr describe-images --region "$AWS_REGION" --repository-name "$ECR_REPOSITORY" --image-ids "imageTag=$DEPLOY_SHA" --query 'imageDetails[0].imageDigest' --output text 2>/dev/null || true)"
+          if [ -n "$digest" ] && [ "$digest" != None ]; then echo "digest=$digest" >> "$GITHUB_OUTPUT"; fi
+
       - name: Build and push immutable image
         id: build
+        if: steps.image.outputs.digest == ''
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
@@ -63,9 +71,17 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Set image reference
+        run: |
+          if [ -n "${{ steps.image.outputs.digest }}" ]; then
+            echo "IMAGE_URI=${{ vars.AWS_DEV_ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}@${{ steps.image.outputs.digest }}" >> "$GITHUB_ENV"
+          else
+            echo "IMAGE_URI=${{ vars.AWS_DEV_ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}@${{ steps.build.outputs.digest }}" >> "$GITHUB_ENV"
+          fi
+
       - name: Update App Runner service
         env:
-          IMAGE: ${{ vars.AWS_DEV_ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}@${{ steps.build.outputs.digest }}
+          IMAGE: ${{ env.IMAGE_URI }}
           SERVICE_ARN: ${{ vars.AWS_DEV_SERVICE_ARN }}
           ACCESS_ROLE_ARN: ${{ vars.AWS_DEV_ACCESS_ROLE_ARN }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
