@@ -91,6 +91,14 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           APP_ENCRYPTION_KEY: ${{ secrets.APP_ENCRYPTION_KEY }}
+          GITHUB_APP_ID: ${{ secrets.GITHUB_APP_ID }}
+          GITHUB_APP_CLIENT_ID: ${{ secrets.GITHUB_APP_CLIENT_ID }}
+          GITHUB_APP_CLIENT_SECRET: ${{ secrets.GITHUB_APP_CLIENT_SECRET }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.GITHUB_APP_PRIVATE_KEY }}
+          GITHUB_WEBHOOK_SECRET: ${{ secrets.GITHUB_WEBHOOK_SECRET }}
+          GITHUB_APP_SLUG: ${{ secrets.GITHUB_APP_SLUG }}
+          GITHUB_ALLOWED_ACCOUNT_ID: ${{ secrets.GITHUB_ALLOWED_ACCOUNT_ID }}
+          GITHUB_APPROVED_SECURITY_WORKFLOW_IDS: ${{ secrets.GITHUB_APPROVED_SECURITY_WORKFLOW_IDS }}
         run: |
           set -euo pipefail
           source_config="$(jq -n \
@@ -104,7 +112,15 @@ jobs:
             --arg cron "$CRON_SECRET" \
             --arg encryption "$APP_ENCRYPTION_KEY" \
             --arg release "$DEPLOY_SHA" \
-            '{ImageRepository: {ImageIdentifier: $image, ImageRepositoryType: "ECR", ImageConfiguration: {Port: "3100", RuntimeEnvironmentVariables: {HOSTNAME: "::", NEXT_PUBLIC_SUPABASE_URL: $supabaseUrl, NEXT_PUBLIC_SUPABASE_ANON_KEY: $anonKey, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: $publishableKey, NEXT_PUBLIC_SITE_URL: $siteUrl, SUPABASE_SERVICE_ROLE_KEY: $serviceRole, CRON_SECRET: $cron, APP_ENCRYPTION_KEY: $encryption, COMPLIANCEHUB_RELEASE_SHA: $release}}}, AuthenticationConfiguration: {AccessRoleArn: $accessRole}, AutoDeploymentsEnabled: false}')" 
+            --arg githubAppId "$GITHUB_APP_ID" \
+            --arg githubClientId "$GITHUB_APP_CLIENT_ID" \
+            --arg githubClientSecret "$GITHUB_APP_CLIENT_SECRET" \
+            --arg githubPrivateKey "$GITHUB_APP_PRIVATE_KEY" \
+            --arg githubWebhookSecret "$GITHUB_WEBHOOK_SECRET" \
+            --arg githubSlug "$GITHUB_APP_SLUG" \
+            --arg githubAccountId "$GITHUB_ALLOWED_ACCOUNT_ID" \
+            --arg githubWorkflowIds "$GITHUB_APPROVED_SECURITY_WORKFLOW_IDS" \
+            '{ImageRepository: {ImageIdentifier: $image, ImageRepositoryType: "ECR", ImageConfiguration: {Port: "3100", RuntimeEnvironmentVariables: {HOSTNAME: "::", NEXT_PUBLIC_SUPABASE_URL: $supabaseUrl, NEXT_PUBLIC_SUPABASE_ANON_KEY: $anonKey, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: $publishableKey, NEXT_PUBLIC_SITE_URL: $siteUrl, SUPABASE_SERVICE_ROLE_KEY: $serviceRole, CRON_SECRET: $cron, APP_ENCRYPTION_KEY: $encryption, COMPLIANCEHUB_RELEASE_SHA: $release, GITHUB_APP_ID: $githubAppId, GITHUB_APP_CLIENT_ID: $githubClientId, GITHUB_APP_CLIENT_SECRET: $githubClientSecret, GITHUB_APP_PRIVATE_KEY: $githubPrivateKey, GITHUB_WEBHOOK_SECRET: $githubWebhookSecret, GITHUB_APP_SLUG: $githubSlug, GITHUB_ALLOWED_ACCOUNT_ID: $githubAccountId, GITHUB_ALLOWED_ACCOUNT_TYPE: "Organization", GITHUB_APPROVED_SECURITY_WORKFLOW_IDS: $githubWorkflowIds}}}, AuthenticationConfiguration: {AccessRoleArn: $accessRole}, AutoDeploymentsEnabled: false}')" 
           aws apprunner update-service --region "$AWS_REGION" --service-arn "$SERVICE_ARN" --source-configuration "$source_config" --query Service.Status --output text
           for _ in $(seq 1 80); do
             status="$(aws apprunner describe-service --region "$AWS_REGION" --service-arn "$SERVICE_ARN" --query Service.Status --output text)"

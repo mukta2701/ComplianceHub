@@ -4,6 +4,12 @@
 max_ttl_days: 14
 require_github_issue: false
 entries:
+  - id: "d8cd970b1ba4e546"
+    reason: "Deploy workflow passes GitHub secret references by name into the App Runner update call; no credential value, personal data, or unapproved transfer exists in source"
+    privacy_approver: "Repo owner dev-pipeline review"
+    security_approver: "Repo owner dev-pipeline review"
+    created_on: "2026-09-18"
+    expires_on: "2026-10-01"
   - id: "5b860e1541398aff"
     reason: "Assessment detail reads the fixed catalogue question prompt column from the local database for ordinary UI rendering; no model call, external transfer, or personal data occurs on this line"
     privacy_approver: "Codex architecture refactor review"
