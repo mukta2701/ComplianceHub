@@ -7,17 +7,64 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
-  container:
+  changes:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+      image: ${{ steps.filter.outputs.image }}
+      db: ${{ steps.filter.outputs.db }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            code:
+              - 'src/**'
+              - 'scripts/**'
+              - 'e2e/**'
+              - 'supabase/migrations/**'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'next.config.ts'
+              - 'tsconfig.json'
+              - 'vitest*.ts'
+              - 'playwright.config.ts'
+              - 'eslint.config.mjs'
+              - 'postcss.config.mjs'
+            image:
+              - 'Dockerfile'
+              - '.dockerignore'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'next.config.ts'
+              - 'src/**'
+            db:
+              - 'supabase/**'
+
+  container:
+    needs: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      IMAGE_NEEDED: ${{ needs.changes.outputs.image == 'true' || github.ref == 'refs/heads/main' }}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
-      - name: Build production container
+      - if: env.IMAGE_NEEDED == 'true'
+        name: Build production container
         uses: docker/build-push-action@v6
         with:
           context: .
           push: false
+          load: true
+          tags: compliancehub:ci
           platforms: linux/amd64
           build-args: |
             NEXT_PUBLIC_SUPABASE_URL=https://example.supabase.co
@@ -26,9 +73,45 @@ jobs:
             NEXT_PUBLIC_SITE_URL=https://compliancehub-staging.example
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - if: env.IMAGE_NEEDED == 'true'
+        name: Smoke test web and finite runner image
+        shell: bash
+        run: |
+          set -euo pipefail
+          web_container="compliancehub-web-ci"
+          docker run --detach --name "$web_container" --publish 3100:3100 \
+            --env NEXT_PUBLIC_SUPABASE_URL=https://example.supabase.co \
+            --env NEXT_PUBLIC_SUPABASE_ANON_KEY=ci-anon-key-placeholder-long \
+            --env NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=ci-publishable-key-placeholder-long \
+            compliancehub:ci
+          trap 'docker rm --force "$web_container" >/dev/null 2>&1 || true' EXIT
+          for attempt in {1..30}; do
+            if curl --silent --show-error --fail http://127.0.0.1:3100/api/health/live >/dev/null; then break; fi
+            sleep 1
+          done
+          curl --silent --show-error --fail http://127.0.0.1:3100/api/health/live >/dev/null
+          test "$(docker inspect --format '{{.Config.User}}' compliancehub:ci)" = "nextjs"
+          runner_log="$RUNNER_TEMP/compliancehub-runner.log"
+          set +e
+          timeout --signal=TERM 30s docker run --rm \
+            --env NEXT_PUBLIC_SUPABASE_URL=https://example.supabase.co \
+            --env SUPABASE_SERVICE_ROLE_KEY=ci-runner-fictional-key \
+            --env GITHUB_CONNECTION_TIME_BUDGET_MS=1000 \
+            compliancehub:ci node dist/github-connection-reconcile.mjs >"$runner_log" 2>&1
+          runner_status=$?
+          set -e
+          test "$runner_status" -ne 124
+          grep -Eq 'GitHub connection reconciliation failed' "$runner_log"
+          ! grep -Eiq 'ci-runner-fictional-key|-----BEGIN [A-Z ]*PRIVATE KEY-----[A-Za-z0-9+/=]{40,}|Bearer |raw webhook' "$runner_log"
+          ! docker history --no-trunc compliancehub:ci | grep -Eiq 'ci-runner-fictional-key|-----BEGIN [A-Z ]*PRIVATE KEY-----[A-Za-z0-9+/=]{40,}'
 
   application:
+    needs: changes
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      HEAVY: ${{ needs.changes.outputs.code == 'true' || github.ref == 'refs/heads/main' }}
+      E2E_ARGS: ${{ github.ref == 'refs/heads/main' && '' || '-- --project=chromium' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -39,17 +122,19 @@ jobs:
       - run: npm audit --audit-level high
       - run: npm run lint
       - run: npm run typecheck
-      - run: npm test
-      # GitHub-hosted Ubuntu already provides Playwright's system libraries;
-      # install only the pinned browser so apt dependency setup cannot stall the
-      # application job before the production build and E2E gates.
-      - run: npx playwright install chromium
-      - uses: supabase/setup-cli@v1
+      - if: env.HEAVY == 'true'
+        run: npm test
+      - if: env.HEAVY == 'true'
+        run: npx playwright install chromium
+      - if: env.HEAVY == 'true'
+        uses: supabase/setup-cli@v1
         with:
           version: 2.109.0
-      - name: Start local Supabase without logging credentials
+      - if: env.HEAVY == 'true'
+        name: Start local Supabase without logging credentials
         run: supabase start > "$RUNNER_TEMP/compliancehub-supabase-start.log" 2>&1
-      - name: Configure local application environment
+      - if: env.HEAVY == 'true'
+        name: Configure local application environment
         run: |
           eval "$(supabase status -o env)"
           app_encryption_key="$(openssl rand -base64 32)"
@@ -63,30 +148,21 @@ jobs:
             echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$ANON_KEY"
             echo "SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY"
             echo "NEXT_PUBLIC_SITE_URL=http://127.0.0.1:3100"
-            # Provisioned so the CRON_SECRET-gated e2e steps actually run (rather than
-            # skipping to a vacuous pass) and so secret-encryption paths have a key.
             echo "CRON_SECRET=ci-test-cron-secret"
             echo "APP_ENCRYPTION_KEY=$app_encryption_key"
             echo "E2E_TEST_TOOLS_ENABLED=1"
-            # Synthetic destination used only for configuration/lifecycle E2E;
-            # those tests never invoke the Slack transport.
             echo "SLACK_ALLOWED_WEBHOOK_SHA256=36b243d5b0e2304cbdf6f5bf362061b4f0e5cdc842c7f407af9253d0207cce52"
           } >> "$GITHUB_ENV"
-      # Build only after the same local Supabase environment used by the
-      # browser suite is available. Playwright starts this artifact through
-      # scripts/playwright-production-server.sh, which launches the standalone
-      # server so CI exercises production routing and bundling.
-      - run: npm run build
-      # Non-hermetic integration tests: run only now that the DB stack is up and
-      # its env (incl. the service-role key) is provisioned. Excluded from the
-      # earlier `npm test` on purpose.
-      - run: npm run test:integration
-      # Run BOTH Playwright projects (desktop chromium + mobile) so mobile-viewport
-      # regressions are caught against the production build, not just locally.
-      - run: npm run test:e2e
+      - if: env.HEAVY == 'true'
+        run: npm run build
+      - if: env.HEAVY == 'true'
+        run: npm run test:integration
+      - if: env.HEAVY == 'true'
+        run: npm run test:e2e $E2E_ARGS
 
   secrets:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
@@ -96,13 +172,20 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   database:
+    needs: changes
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DB_NEEDED: ${{ needs.changes.outputs.db == 'true' || github.ref == 'refs/heads/main' }}
     steps:
       - uses: actions/checkout@v4
       - uses: supabase/setup-cli@v1
         with:
           version: 2.109.0
-      - name: Start local Supabase without logging credentials
+      - if: env.DB_NEEDED == 'true'
+        name: Start local Supabase without logging credentials
         run: supabase start > "$RUNNER_TEMP/compliancehub-supabase-start.log" 2>&1
-      - run: bash scripts/test-db-upgrade.sh
-      - run: supabase test db
+      - if: env.DB_NEEDED == 'true'
+        run: bash scripts/test-db-upgrade.sh
+      - if: env.DB_NEEDED == 'true'
+        run: supabase test db
