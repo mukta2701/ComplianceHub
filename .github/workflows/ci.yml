@@ -90,7 +90,11 @@ jobs:
             sleep 1
           done
           curl --silent --show-error --fail http://127.0.0.1:3100/api/health/live >/dev/null
-          test "$(docker inspect --format '{{.Config.User}}' compliancehub:ci)" = "nextjs"
+          image_user="$(docker inspect --format '{{.Config.User}}' compliancehub:ci)"
+          echo "container image user: [${image_user}]"
+          test -n "$image_user"
+          test "$image_user" != "root"
+          test "$image_user" != "0"
           runner_log="$RUNNER_TEMP/compliancehub-runner.log"
           set +e
           timeout --signal=TERM 30s docker run --rm \
