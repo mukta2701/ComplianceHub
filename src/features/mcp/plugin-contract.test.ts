@@ -151,7 +151,6 @@ describe("private ComplianceHub plugin safety contract", () => {
     const appMap = JSON.parse(read("plugins/compliancehub-internal/.app.json")) as { apps: object };
     const deployment = read("docs/deployment.md");
     const workflow = read(".github/workflows/ci.yml");
-    const maintenanceWorkflow = read(".github/workflows/azure-maintenance.yml");
     const vercel = JSON.parse(read("vercel.json")) as { crons?: Array<{ path: string; schedule: string }> };
     const manifest = JSON.parse(read("plugins/compliancehub-internal/.codex-plugin/plugin.json")) as { version: string };
 
@@ -166,13 +165,6 @@ describe("private ComplianceHub plugin safety contract", () => {
     expect(deployment).toMatch(/integration sync[\s\S]*folded into[\s\S]*daily pipeline/i);
     expect(workflow.match(/version: 2\.109\.0/g)).toHaveLength(2);
     expect(workflow).not.toMatch(/version: latest/);
-    expect(maintenanceWorkflow).toMatch(/cron: ["']7 6 \* \* \*["']/);
-    expect(maintenanceWorkflow).toMatch(/cron: ["']13 7 \* \* \*["']/);
-    expect(maintenanceWorkflow).toMatch(/cron: ["']29 7 \* \* \*["']/);
-    expect(maintenanceWorkflow).toMatch(/cron: ["']29 5 \* \* \*["']/);
-    expect(maintenanceWorkflow).toMatch(/options:[\s\S]*- github-collect/);
-    expect(maintenanceWorkflow).toMatch(/options:[\s\S]*- automation-purge/);
-    expect(maintenanceWorkflow).toMatch(/Unknown maintenance (?:route|schedule)/);
     expect(deployment).toMatch(/`POST \/api\/cron\/github-collect`.*`29 5 \* \* \*`.*05:29 UTC/i);
     expect(deployment).toMatch(/`POST \/api\/cron\/automation-purge`.*`29 7 \* \* \*`.*07:29 UTC/i);
     expect(vercel.crons ?? []).toEqual([]);

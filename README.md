@@ -87,9 +87,9 @@ upgrade harness exits before invoking Supabase.
 
 ## Deployment
 
-The active staging target is Azure Container Apps with managed Supabase; Vercel
+The live target is the AWS dev environment (ECR image plus App Runner) with managed Supabase; Vercel
 is not used by the current rollout. See `docs/deployment.md` and the checked-in
-release checklist. Hosted migrations, Azure credentials, GitHub App approval,
+release checklist. Hosted migrations, AWS credentials, GitHub App approval,
 and real Slack delivery remain explicit owner-controlled gates. The application
 remains portable because schema changes are SQL migrations and core domain logic
 is framework-independent TypeScript.

@@ -33,14 +33,11 @@ describe("canonical application port", () => {
     expect(read("e2e/github-shadow-collection.spec.ts")).toContain('process.env.PLAYWRIGHT_PORT ?? "3100"');
   });
 
-  it("routes the container and every Azure probe through 3100", () => {
+  it("routes the container through 3100", () => {
     const dockerfile = read("Dockerfile");
-    const bicep = read("infra/azure/application.bicep");
 
     expect(dockerfile).toMatch(/PORT=3100/);
     expect(dockerfile).toMatch(/EXPOSE 3100/);
-    expect(bicep).toContain("targetPort: 3100");
-    expect(bicep.match(/port: 3100/g)).toHaveLength(3);
   });
 
   it("documents current local cron checks on 3100", () => {

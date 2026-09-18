@@ -7,25 +7,16 @@ or Slack output.
 
 ## Before the pilot
 
-- [ ] Confirm the exact Azure origin and set
+- [ ] Confirm the exact AWS dev origin and set
       `REGISTERED_GITHUB_APP_SITE_URL` to that origin.
 - [ ] Confirm the dedicated GitHub App is approved and installed for the
       intended owner account and repository. Record only the repository name,
       installation ID, and reviewed permission/event set; never record keys.
 - [ ] Verify the hosted Supabase backup and the complete pending migration set
-      through `20260825124025` before setting the protected schema attestation.
-- [ ] Complete the documented staged Slack compatibility rollout: manually
-      deploy `bridge` with migration `20260825040825`, verify the non-secret
-      `v1`/`bridge` capability and exact release SHA, apply additive migrations
-      `20260825053718`, `20260825073650`, `20260825082411`,
-      `20260825094343`, and `20260825124025`, then manually deploy
-      `final`/`strict`. Never use bridge
-      for an automatic deployment. The first final must follow that exact
-      bridge revision. In steady-state operation, subsequent manual final and
-      automatic deployments remain strict and accept only an exact `v1`
-      predecessor in captured `bridge` or `strict` mode; rollback must match
-      that captured previous mode and release SHA.
-- [ ] Confirm all eight server-only `AZURE_GITHUB_*` values are present in the
+      through `20260825124025` before the pilot. Deploy dev through the AWS
+      dev workflow, verify `/api/health` and `/api/health/live`, and confirm
+      the release SHA matches before collecting.
+- [ ] Confirm all eight server-only `AWS_DEV_GITHUB_*` values are present in the
       protected environment, with the private key in escaped-newline PKCS#8
       form. Do not copy values into this document or build inputs.
 - [ ] Capture a baseline for readiness percentage, evidence count, finding
