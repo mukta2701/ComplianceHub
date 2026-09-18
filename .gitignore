@@ -48,3 +48,4 @@ next-env.d.ts
 
 # Local scratch: subagent UX-audit screenshots and export smoke-test downloads
 artifacts/
+.worktrees/
