@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 
 import { buildGitHubAuthorizeUrl, createOAuthFlow } from "@/features/github/application/github-user-oauth";
+import { getGitHubConnectionConfig } from "@/features/github/application/github-runtime-config";
 import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import { requireAppContext } from "@/lib/app-context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
@@ -77,19 +78,17 @@ export async function GET(request: Request): Promise<NextResponse> {
   const installationId = readInstallationId(new URL(request.url));
   if (installationId === "invalid") return errorRedirect("invalid_request");
 
-  const slug = process.env.GITHUB_APP_SLUG;
-  const allowedAccountId = Number(process.env.GITHUB_ALLOWED_ACCOUNT_ID);
-  if (
-    !slug
-    || !/^[a-z0-9](?:[a-z0-9-]{0,98}[a-z0-9])?$/.test(slug)
-    || !Number.isSafeInteger(allowedAccountId)
-    || allowedAccountId <= 0
-  ) return errorRedirect("configuration_error");
-  if (installationId === null) return redirectTo(new URL(`/apps/${slug}/installations/new`, "https://github.com"));
+  let connection: Awaited<ReturnType<typeof getGitHubConnectionConfig>> | null = null;
+  try {
+    connection = getGitHubConnectionConfig();
+  } catch {
+    return errorRedirect("configuration_error");
+  }
+  if (installationId === null) {
+    return redirectTo(new URL(`/apps/${connection.appSlug}/installations/new`, "https://github.com"));
+  }
 
-  const clientId = process.env.GITHUB_APP_CLIENT_ID;
-  const clientSecret = process.env.GITHUB_APP_CLIENT_SECRET;
-  if (!clientId || !clientSecret) return errorRedirect("configuration_error");
+  const clientSecret = connection.clientSecret;
 
   try {
     const callbackUrl = canonicalSiteUrl("/api/github/callback").toString();
@@ -118,7 +117,7 @@ export async function GET(request: Request): Promise<NextResponse> {
       maxAge: 600,
     });
     return redirectTo(buildGitHubAuthorizeUrl({
-      clientId,
+      clientId: connection.clientId,
       callbackUrl,
       state: flow.state,
       codeChallenge: flow.codeChallenge,

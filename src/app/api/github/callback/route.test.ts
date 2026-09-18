@@ -55,7 +55,9 @@ describe("GET /api/github/callback", () => {
     vi.stubEnv("GITHUB_APP_CLIENT_ID", "client-id");
     vi.stubEnv("GITHUB_APP_CLIENT_SECRET", "client-secret");
     vi.stubEnv("GITHUB_APP_ID", "123");
+    vi.stubEnv("GITHUB_APP_SLUG", "compliancehub-app");
     vi.stubEnv("GITHUB_APP_PRIVATE_KEY", "private-key");
+    vi.stubEnv("GITHUB_WEBHOOK_SECRET", "webhook-secret");
     vi.stubEnv("GITHUB_ALLOWED_ACCOUNT_ID", "99");
     hoisted.sequence.length = 0;
     hoisted.context = { organisation: { id: ORG_ID }, user: { id: ACTOR_ID }, membership: { role: "owner" } };
@@ -95,7 +97,7 @@ describe("GET /api/github/callback", () => {
         userInstallationIds: [77],
         repositories: [REPOSITORY],
       }),
-      { allowedAccountType: "Organization" },
+      { allowedAccountId: 99, allowedAccountType: "Organization" },
     );
   });
 
@@ -136,7 +138,7 @@ describe("GET /api/github/callback", () => {
         appInstallation,
         repositories,
       }),
-      { allowedAccountType: "User" },
+      { allowedAccountId: 99, allowedAccountType: "User" },
     );
   });
 

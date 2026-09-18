@@ -3,7 +3,8 @@ import "server-only";
 import { z } from "zod";
 
 import type { GitHubAccountType } from "./github-account-policy";
-import { READ_PERMISSIONS } from "./github-app-auth";
+import { hasExactReadPermissions, READ_PERMISSIONS } from "./github-app-auth";
+import { MAX_DISCOVERED_REPOSITORIES } from "./github-user-oauth";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
 export type VerifiedInstallationClaim = {
@@ -57,20 +58,14 @@ function requiredAllowedAccountId(value: number | undefined): number {
   return parsed.data;
 }
 
-function exactPermissions(value: Record<string, string>): value is typeof READ_PERMISSIONS {
-  const expectedEntries = Object.entries(READ_PERMISSIONS).sort(([a], [b]) => a.localeCompare(b));
-  const actualEntries = Object.entries(value).sort(([a], [b]) => a.localeCompare(b));
-  return JSON.stringify(actualEntries) === JSON.stringify(expectedEntries);
-}
-
 function canonicalizeRepositories(
   repositories: VerifiedInstallationClaim["repositories"],
   accountLogin: string,
 ): VerifiedInstallationClaim["repositories"] {
-  if (repositories.length > 100) throw failure();
+  if (repositories.length > MAX_DISCOVERED_REPOSITORIES) throw failure();
   const ids = new Set<number>();
   const names = new Set<string>();
-  return repositories.map((repository) => {
+  const canonical = repositories.map((repository) => {
     const id = safeId.safeParse(repository.id);
     const owner = login.safeParse(repository.owner);
     const name = repoName.safeParse(repository.name);
@@ -95,6 +90,7 @@ function canonicalizeRepositories(
       defaultBranch: defaultBranch.data,
     };
   });
+  return canonical.sort((left, right) => left.id - right.id);
 }
 
 async function persistWithServiceRole(input: CanonicalInstallationClaim): Promise<string> {
@@ -133,7 +129,7 @@ export async function claimInstallation(
     if (app.id !== claim.requestedInstallationId) throw failure();
     if (app.repositorySelection !== "selected") throw failure();
     if (app.account.type !== allowedAccountType || app.account.id !== allowedAccountId) throw failure();
-    if (app.suspendedAt !== null || !exactPermissions(app.permissions)) throw failure();
+    if (app.suspendedAt !== null || !hasExactReadPermissions(app.permissions)) throw failure();
     const accountLogin = login.parse(app.account.login);
     const repositories = canonicalizeRepositories(claim.repositories, accountLogin);
     const canonical: CanonicalInstallationClaim = {
