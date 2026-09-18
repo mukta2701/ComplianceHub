@@ -1,0 +1,171 @@
+import "server-only";
+
+import { z } from "zod";
+
+import { GITHUB_CONNECTION_DIAGNOSTICS, GITHUB_CONNECTION_HEALTHS } from "../domain/connection-health";
+
+export type ConnectionStoreClient = {
+  rpc: (name: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>;
+  from: (table: string) => {
+    select: (columns: string) => {
+      eq: (column: string, value: unknown) => Promise<{ data: unknown; error: unknown }> & {
+        single: () => Promise<{ data: unknown; error: unknown }>;
+      };
+      single: () => Promise<{ data: unknown; error: unknown }>;
+    };
+  };
+};
+
+export type StoredReconciliationRun = {
+  runId: string;
+  organisationId: string;
+  installationUuid: string;
+};
+
+export type StoredInstallationContext = {
+  installationUuid: string;
+  providerInstallationId: number;
+  organisationId: string;
+  previousHealth: (typeof GITHUB_CONNECTION_HEALTHS)[number];
+  consecutiveFailures: number;
+  expectedAccount: { id: number; login: string; type: "Organization" | "User" };
+};
+
+export type StoredRepositoryIdentity = {
+  providerId: number;
+  fullName: string;
+};
+
+function unavailable(): never {
+  throw new Error("GitHub reconciliation store is unavailable");
+}
+
+const uuidSchema = z.uuid();
+const positiveIdSchema = z.number().int().positive().safe();
+
+const runRowSchema = z.object({
+  id: uuidSchema,
+  organisation_id: uuidSchema,
+  installation_id: uuidSchema,
+}).passthrough();
+
+const installationContextRowSchema = z.object({
+  provider_installation_id: positiveIdSchema,
+  organisation_id: uuidSchema,
+  health: z.enum(GITHUB_CONNECTION_HEALTHS),
+  consecutive_reconciliation_failures: z.number().int().nonnegative(),
+  account_id: positiveIdSchema,
+  account_login: z.string().min(1).max(100),
+  account_type: z.enum(["Organization", "User"]),
+}).passthrough();
+
+const repositoryRowSchema = z.object({
+  provider_repository_id: positiveIdSchema,
+  full_name: z.string().min(3).max(201),
+}).passthrough();
+
+const incidentSignalSchema = z.enum(["opened", "remained_open", "recovered", "none"]);
+
+const snapshotRowSchema = z.object({
+  id: positiveIdSchema,
+  owner: z.string().min(1).max(100),
+  name: z.string().min(1).max(100),
+  fullName: z.string().min(3).max(201),
+  htmlUrl: z.string().url().max(500),
+  visibility: z.enum(["public", "private", "internal"]),
+  archived: z.boolean(),
+  defaultBranch: z.string().min(1).max(255),
+}).passthrough();
+
+export async function claimDueReconciliations(
+  client: ConnectionStoreClient,
+  input: { workerId: string; limit: number; nowIso: string },
+): Promise<StoredReconciliationRun[]> {
+  if (!uuidSchema.safeParse(input.workerId).success) unavailable();
+  if (!Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 100) unavailable();
+  if (!Number.isFinite(new Date(input.nowIso).getTime())) unavailable();
+  const { data, error } = await client.rpc("claim_due_github_connection_reconciliations_server", {
+    target_worker_id: input.workerId,
+    target_limit: input.limit,
+    target_now: input.nowIso,
+  });
+  if (error) unavailable();
+  const parsed = z.array(runRowSchema).safeParse(data);
+  if (!parsed.success) unavailable();
+  return parsed.data.map((row) => ({
+    runId: row.id,
+    organisationId: row.organisation_id,
+    installationUuid: row.installation_id,
+  }));
+}
+
+export async function loadInstallationContext(
+  client: ConnectionStoreClient,
+  installationUuid: string,
+): Promise<StoredInstallationContext> {
+  if (!uuidSchema.safeParse(installationUuid).success) unavailable();
+  const { data, error } = await client
+    .from("github_installations")
+    .select("provider_installation_id,organisation_id,health,consecutive_reconciliation_failures,account_id,account_login,account_type")
+    .eq("id", installationUuid)
+    .single();
+  if (error) unavailable();
+  const parsed = installationContextRowSchema.safeParse(data);
+  if (!parsed.success) unavailable();
+  return {
+    installationUuid,
+    providerInstallationId: parsed.data.provider_installation_id,
+    organisationId: parsed.data.organisation_id,
+    previousHealth: parsed.data.health,
+    consecutiveFailures: parsed.data.consecutive_reconciliation_failures,
+    expectedAccount: {
+      id: parsed.data.account_id,
+      login: parsed.data.account_login,
+      type: parsed.data.account_type,
+    },
+  };
+}
+
+export async function listStoredRepositories(
+  client: ConnectionStoreClient,
+  installationUuid: string,
+): Promise<StoredRepositoryIdentity[]> {
+  if (!uuidSchema.safeParse(installationUuid).success) unavailable();
+  const { data, error } = await client
+    .from("github_repositories")
+    .select("provider_repository_id,full_name")
+    .eq("installation_id", installationUuid);
+  if (error) unavailable();
+  const parsed = z.array(repositoryRowSchema).safeParse(data);
+  if (!parsed.success) unavailable();
+  return parsed.data.map((row) => ({ providerId: row.provider_repository_id, fullName: row.full_name }));
+}
+
+export async function finalizeReconciliationRun(
+  client: ConnectionStoreClient,
+  input: {
+    runId: string;
+    workerId: string;
+    outcome: "success" | "partial" | "temporary_failure" | "action_required" | "disconnected";
+    diagnostic: (typeof GITHUB_CONNECTION_DIAGNOSTICS)[number] | null;
+    nextAttemptAt: string | null;
+    snapshot: unknown;
+  },
+): Promise<string> {
+  if (!uuidSchema.safeParse(input.runId).success || !uuidSchema.safeParse(input.workerId).success) unavailable();
+  if (!Array.isArray(input.snapshot)) unavailable();
+  const rows = input.snapshot as unknown[];
+  if (!rows.every((row) => snapshotRowSchema.safeParse(row).success)) unavailable();
+  const { data, error } = await client.rpc("finalize_github_connection_reconciliation_server", {
+    target_run_id: input.runId,
+    target_worker_id: input.workerId,
+    target_outcome: input.outcome,
+    target_diagnostic_code: input.diagnostic,
+    target_next_attempt_at: input.nextAttemptAt,
+    target_repository_snapshot: input.snapshot,
+  });
+  if (error) unavailable();
+  const parsed = incidentSignalSchema.safeParse(data);
+  if (!parsed.success) unavailable();
+  return parsed.data;
+}

@@ -12,6 +12,11 @@ const FLOW_TTL_MS = 10 * 60_000;
 const MAX_COOKIE_BYTES = 4_096;
 const MAX_PAGES = 100;
 const USER_AGENT = "ComplianceHub-GitHub-App";
+const API_VERSION = "2026-03-10";
+
+export const GITHUB_API_ORIGIN = API_ORIGIN;
+export const GITHUB_API_VERSION = API_VERSION;
+export const GITHUB_USER_AGENT = USER_AGENT;
 
 const positiveId = z.number().int().positive().safe();
 const flowSchema = z.object({
@@ -35,7 +40,7 @@ const installationListSchema = z.object({
   installations: z.array(z.object({ id: positiveId }).passthrough()).max(100),
 }).passthrough();
 
-const appInstallationSchema = z.object({
+export const appInstallationSchema = z.object({
   id: positiveId,
   account: z.object({
     id: positiveId,
@@ -304,14 +309,23 @@ export async function getAppInstallation(input: { appJwt: string; installationId
 export const MAX_GITHUB_DISCOVERY_PAGES = 100;
 export const MAX_DISCOVERED_REPOSITORIES = 10_000;
 
-export async function collectUserInstallationRepositories(input: { userToken: string; installationId: number; fetchImpl?: FetchLike }): Promise<UserInstallationRepository[]> {
-  if (!Number.isSafeInteger(input.installationId) || input.installationId <= 0) throw verificationError();
+export async function collectPaginatedInstallationRepositories(input: {
+  startUrl: string;
+  token: string;
+  fetchImpl?: FetchLike;
+}): Promise<UserInstallationRepository[]> {
+  let url: URL;
+  try {
+    url = new URL(input.startUrl);
+  } catch {
+    throw verificationError();
+  }
+  if (!input.token || input.token.length > 2_000) throw verificationError();
   const fetchImpl = input.fetchImpl ?? fetch;
-  let url = new URL(`/user/installations/${input.installationId}/repositories?per_page=100`, API_ORIGIN);
   const collected: UserInstallationRepository[] = [];
   let expectedCount: number | null = null;
   for (let page = 0; page < MAX_GITHUB_DISCOVERY_PAGES; page += 1) {
-    const response = await fetchVerifiedGitHubApi(url, input.userToken, fetchImpl);
+    const response = await fetchVerifiedGitHubApi(url, input.token, fetchImpl);
     let parsed: z.infer<typeof repositoryListSchema>;
     try { parsed = repositoryListSchema.parse(await response.json()); } catch { throw verificationError(); }
     if (parsed.total_count > MAX_DISCOVERED_REPOSITORIES) throw verificationError();
@@ -339,4 +353,13 @@ export async function collectUserInstallationRepositories(input: { userToken: st
     url = next;
   }
   throw verificationError();
+}
+
+export async function collectUserInstallationRepositories(input: { userToken: string; installationId: number; fetchImpl?: FetchLike }): Promise<UserInstallationRepository[]> {
+  if (!Number.isSafeInteger(input.installationId) || input.installationId <= 0) throw verificationError();
+  return collectPaginatedInstallationRepositories({
+    startUrl: new URL(`/user/installations/${input.installationId}/repositories?per_page=100`, API_ORIGIN).toString(),
+    token: input.userToken,
+    fetchImpl: input.fetchImpl,
+  });
 }
