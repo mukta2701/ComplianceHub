@@ -2,7 +2,7 @@
 
 ## GitHub shadow collection maintenance
 
-The personal Azure staging environment runs the read-only GitHub shadow collector
+The AWS dev environment runs the read-only GitHub shadow collector
 at `05:29 UTC`, before the existing daily and monitoring maintenance jobs. The
 same job can be started with the `github-collect` workflow-dispatch option. Its
 request key is the UTC day (`scheduled:YYYY-MM-DD`), so workflow retries reserve
@@ -88,8 +88,8 @@ before the bridge revision is healthy:
 
 1. Apply and verify migrations 1–19 through
    `20260825040825_mcp_github_digest_v2.sql`. Set the protected migration
-   attestation temporarily to `20260825040825` and manually dispatch **Deploy
-   Azure staging** with `rollout_phase=bridge`. This deploys the policy-capable
+   attestation temporarily to `20260825040825` and manually run **Deploy
+   AWS dev**. This deploys the policy-capable
    image with `DAILY_DIGEST_RESERVATION_MODE=bridge`; it tries the six-argument
    reservation first and may use the service-only legacy overload only when
    PostgREST returns exact `PGRST202`.
@@ -122,94 +122,44 @@ target project invalidates the gate. These attestations are not substitutes for
 the list, dry run, backup, or direct verification. Rolling the Container App
 back never rolls the database back.
 
-## 2. Azure Container Apps staging **(you — external authorization checkpoint)**
+## 2. AWS dev hosting **(you — external authorization checkpoint)**
 
-The staging target is Azure Container Apps Consumption in UK South. It scales
-from zero to one replica and uses a public immutable image in GHCR; do not create
-an Azure Container Registry. Render, AWS, and Vercel hosting are not used.
+The dev target is AWS App Runner in `eu-west-2`, running one immutable image
+from ECR (`compliancehub-dev`). Render, Azure, and Vercel hosting are not used.
 
-1. Install Azure CLI and Bicep, then sign in to the intended subscription.
-2. Deploy `infra/azure/foundation.bicep` at subscription scope. Supply the owner
-   email for budget alerts. The template creates the resource group, capped
-   30-day Log Analytics workspace, Consumption environment, bootstrap app, and a
-   one-unit monthly budget in the subscription's billing currency with 50%, 80%,
-   and 100% notifications. The bootstrap app intentionally serves Microsoft's
-   sample on port 80; do not change that sample to port 3100. The first real
-   application rollout derives a template-only ARM patch from that exact
-   authorised revision, replaces the application image, environment, scale, and
-   all health probes, then separately migrates ingress to port 3100.
-3. Record the `containerAppFqdn` output. Set `NEXT_PUBLIC_SITE_URL` to its HTTPS
+1. Confirm the AWS account, region, ECR registry, App Runner service, and
+   access role with the company AWS administrator. The workflow assumes the
+   `aws-dev` GitHub environment and an OIDC deploy role; no long-lived AWS
+   credential lives in the repository.
+2. Record the App Runner service URL. Set `NEXT_PUBLIC_SITE_URL` to its HTTPS
    origin and `MCP_RESOURCE_URL` to the same origin ending exactly in `/mcp`.
-4. Create the protected GitHub environment `azure-staging`. Configure the
+3. Create the protected GitHub environment `aws-dev`. Configure the
    variables and secrets below. Public values are build inputs; secret values
-   are written directly to alternating Container Apps secret slots and are never
-   placed in the Bicep parameters file or container image.
-5. Create a Microsoft Entra application and GitHub federated credential only
-   after the account owner approves the persistent authorization. Grant only the
-   minimum Container App read/write and `listSecrets/action` permissions at the
-   exact app, plus `Microsoft.App/managedEnvironments/join/action` at the exact
-   managed environment. The existing `secret set` command performs a full
-   secret update and may internally read existing secret values to preserve the
-   untouched rollback slot; the workflow itself never prints those values. Do
-   not grant resource-group deployment permission, subscription scope,
-   Contributor, delete, exec, role-management, or any broader
-   managed-environment permission.
-6. The **Deploy Azure staging** workflow publishes and deploys `main` only after
-   the complete `CI` workflow succeeds. A manual run may publish without
-   deploying, or deploy a deliberately selected ref after the workflow exists on
-   the default branch. The deploy job alone receives the Azure OIDC token and
-   environment secrets; build and test actions run outside that trust boundary.
-7. Verify the GHCR package is anonymously pullable before deployment. This
-   public repository's package inherits public visibility, so Container Apps
-   needs no long-lived registry credential. The workflow deploys the immutable
-   image digest, not a mutable tag.
-8. Only a manual `bridge` rollout may initialise slot `a` when all four core
-   references are absent, or accept a coherent core a/b slot whose Slack
-   allow-digest reference is absent or in that same slot. A `final` or automatic
-   rollout accepts only a coherent a/b core plus the exact same-slot Slack
-   reference; there is no general blank-reference exception. Immediately before
-   the first secret mutation, the workflow re-reads and compares the captured
-   `latestReadyRevisionName`, immutable image, and complete secret-reference
-   fingerprint. The first final proves that the exact rollback revision is the
-   policy-capable bridge image; a steady-state final accepts a policy-capable
-   `bridge` or `strict` predecessor. Both paths match the non-secret health
-   marker, captured mode, and release SHA. Before mutation it also records the
-   captured previous ingress target port. The workflow then binds the inactive
-   secret slot exactly once and creates one exact new revision with a
-   mode-`0600`, template-only JSON payload derived from the authorised previous
-   revision. It does not apply `infra/azure/application.bicep` during rollout:
-   that full resource template intentionally omits `configuration.secrets`, so
-   applying it to an existing app could reset app-level secrets. This preserves
-   the existing app-level secrets: the workflow's partial PATCH contains only
-   `properties.template`, never requests secret
-   values, deletes the private payload on every step exit, compares the app's
-   secret-name inventory before and after without values, and separately updates
-   ingress. It then proves ingress plus all three health probes use port 3100
-   before accepting Healthy/Running,
-   `latestReadyRevisionName`, marker/release identity, or OAuth/MCP smoke. On
-   failure or cancellation it restores the captured previous ingress target
-   port before copying only the captured previous revision, so the port-80
-   bootstrap and any older revision can recover without a hardcoded legacy
-   port. It verifies the copied image and references are identical and, for a
-   final rollback, proves the restored `v1`, exact captured previous mode
-   (`bridge` or `strict`), and release identity.
-9. Do not merge or deploy this release until the hosted migration checkpoint and
-   GitHub organisation-owner registration checkpoint below are complete. The
-   current environment has no GitHub App values, `main` auto-deploys after CI,
-   and no environment reviewer currently supplies a second approval boundary.
+   are passed only to the App Runner update call as runtime environment
+   variables and are never baked into the container image.
+4. The **Deploy AWS dev** workflow (`.github/workflows/deploy-aws-dev.yml`)
+   builds and pushes the immutable image for `main` (reusing the image when
+   the commit is already built), updates the App Runner service, waits for it
+   to report `RUNNING`, then verifies `/api/health/live` matches the deployed
+   SHA and `/api/health` reports database access. The deploy job alone
+   receives the AWS OIDC token and environment secrets; build and test actions
+   run outside that trust boundary.
+5. Do not merge or deploy a release until the hosted migration checkpoint and
+   GitHub organisation-owner registration checkpoint below are complete.
 
-GitHub environment variables:
+GitHub environment variables (`aws-dev` environment):
 
 | Variable | Value |
 |---|---|
-| `AZURE_RESOURCE_GROUP` | `rg-compliancehub-staging-uks` |
-| `AZURE_CONTAINER_ENVIRONMENT` | `cae-compliancehub-staging-uks` |
-| `AZURE_CONTAINER_APP` | `ca-compliancehub-staging` |
-| `NEXT_PUBLIC_SUPABASE_URL` | Staging Supabase project URL |
+| `AWS_DEV_ECR_REGISTRY` | ECR registry host for the dev repository |
+| `AWS_DEV_SERVICE_ARN` | App Runner service ARN for dev |
+| `AWS_DEV_ACCESS_ROLE_ARN` | IAM role App Runner uses to pull the ECR image |
+| `AWS_DEV_SITE_URL` | Exact AWS dev HTTPS origin |
+| `NEXT_PUBLIC_SUPABASE_URL` | Dev Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Required legacy public key used by current browser/server clients |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Preferred public key |
-| `NEXT_PUBLIC_SITE_URL` | Exact Azure HTTPS origin |
-| `MCP_RESOURCE_URL` | Exact Azure HTTPS origin plus `/mcp` |
+| `NEXT_PUBLIC_SITE_URL` | Exact AWS dev HTTPS origin |
+| `MCP_RESOURCE_URL` | Exact AWS dev HTTPS origin plus `/mcp` |
 | `SUPABASE_OAUTH_ISSUER` | `https://<project-ref>.supabase.co/auth/v1` |
 | `SUPABASE_OAUTH_JWKS_URL` | `<issuer>/.well-known/jwks.json` |
 | `MCP_JWT_ALGORITHMS` | `RS256,ES256` |
@@ -220,27 +170,25 @@ GitHub environment variables:
 GitHub environment secrets:
 
 GitHub Actions does not allow user-defined secret names beginning `GITHUB_`, so
-the protected environment uses the `AZURE_GITHUB_*` source names below. The
-deploy job maps them to the exact `GITHUB_*` Container App runtime names without
+the protected environment uses the `AWS_DEV_GITHUB_*` source names below. The
+deploy job maps them to the exact `GITHUB_*` App Runner runtime names without
 printing their values.
 
 | Secret | Purpose |
 |---|---|
-| `AZURE_CLIENT_ID` | OIDC application/client ID |
-| `AZURE_TENANT_ID` | OIDC tenant ID |
-| `AZURE_SUBSCRIPTION_ID` | Target subscription ID |
+| `AWS_DEV_DEPLOY_ROLE_ARN` | OIDC role the deploy job assumes |
 | `SUPABASE_SERVICE_ROLE_KEY` | Server-only cron and validated digest lifecycle |
 | `APP_ENCRYPTION_KEY` | Stable AES-256-GCM application key |
 | `CRON_SECRET` | Authenticates maintenance workflow calls |
 | `SLACK_ALLOWED_WEBHOOK_SHA256` | Exact lowercase SHA-256 of the canonical Mukta-owned, server-approved private Slack destination; server-only and blank until verified |
-| `AZURE_GITHUB_APP_ID` | Maps to runtime `GITHUB_APP_ID`; numeric private App ID |
-| `AZURE_GITHUB_APP_CLIENT_ID` | Maps to runtime `GITHUB_APP_CLIENT_ID`; App OAuth client ID |
-| `AZURE_GITHUB_APP_CLIENT_SECRET` | Maps to runtime `GITHUB_APP_CLIENT_SECRET`; App OAuth client secret |
-| `AZURE_GITHUB_APP_PRIVATE_KEY` | Maps to runtime `GITHUB_APP_PRIVATE_KEY`; PKCS#8/PEM key stored as one line with literal escaped `\n` markers |
-| `AZURE_GITHUB_WEBHOOK_SECRET` | Maps to runtime `GITHUB_WEBHOOK_SECRET`; high-entropy webhook HMAC secret |
-| `AZURE_GITHUB_APP_SLUG` | Maps to runtime `GITHUB_APP_SLUG`; exact private App slug |
-| `AZURE_GITHUB_ALLOWED_ACCOUNT_ID` | Maps to runtime `GITHUB_ALLOWED_ACCOUNT_ID`; immutable numeric Adtecher organisation ID |
-| `AZURE_GITHUB_APPROVED_SECURITY_WORKFLOW_IDS` | Maps to runtime `GITHUB_APPROVED_SECURITY_WORKFLOW_IDS`; one to twenty comma-separated numeric workflow IDs for the dedicated pilot repository |
+| `AWS_DEV_GITHUB_APP_ID` | Maps to runtime `GITHUB_APP_ID`; numeric private App ID |
+| `AWS_DEV_GITHUB_APP_CLIENT_ID` | Maps to runtime `GITHUB_APP_CLIENT_ID`; App OAuth client ID |
+| `AWS_DEV_GITHUB_APP_CLIENT_SECRET` | Maps to runtime `GITHUB_APP_CLIENT_SECRET`; App OAuth client secret |
+| `AWS_DEV_GITHUB_APP_PRIVATE_KEY` | Maps to runtime `GITHUB_APP_PRIVATE_KEY`; PKCS#8/PEM key stored as one line with literal escaped `\n` markers |
+| `AWS_DEV_GITHUB_WEBHOOK_SECRET` | Maps to runtime `GITHUB_WEBHOOK_SECRET`; high-entropy webhook HMAC secret |
+| `AWS_DEV_GITHUB_APP_SLUG` | Maps to runtime `GITHUB_APP_SLUG`; exact private App slug |
+| `AWS_DEV_GITHUB_ALLOWED_ACCOUNT_ID` | Maps to runtime `GITHUB_ALLOWED_ACCOUNT_ID`; immutable numeric organisation ID |
+| `AWS_DEV_GITHUB_APPROVED_SECURITY_WORKFLOW_IDS` | Maps to runtime `GITHUB_APPROVED_SECURITY_WORKFLOW_IDS`; one to twenty comma-separated numeric workflow IDs for the dedicated pilot repository |
 
 GitHub may download an RSA private key with a `BEGIN RSA PRIVATE KEY` header,
 but the runtime deliberately accepts PKCS#8 only. Convert the downloaded key
@@ -329,17 +277,17 @@ variable `REGISTERED_GITHUB_APP_SITE_URL`. The deploy preflight requires it to
 equal `NEXT_PUBLIC_SITE_URL`, ensuring any canonical URL change pauses rollout
 until the GitHub callback, setup, and webhook registration is updated.
 
-Enter the eight GitHub runtime values only through their `AZURE_GITHUB_*` secret
-aliases in the protected personal `azure-staging` environment. Do not add them to `.env.local`, repository
+Enter the eight GitHub runtime values only through their `AWS_DEV_GITHUB_*` secret
+aliases in the protected `aws-dev` environment. Do not add them to `.env.local`, repository
 variables, Docker build arguments, application tables, workflow output, forks,
-or the unavailable Adtecher Azure environment. The local seeded Playwright proof
+or any other hosting environment. The local seeded Playwright proof
 does not require these values and makes no GitHub request.
 
-## 3. Cron automation (GitHub Actions calling Azure)
+## 3. Cron automation (scheduled calls to AWS dev)
 
-`.github/workflows/azure-maintenance.yml` declares four UTC schedules and calls
-the Azure origin with `CRON_SECRET` from the protected `azure-staging`
-environment:
+The four cron routes below run on the AWS dev origin with `CRON_SECRET`.
+Scheduled invocation is re-established on the AWS side; until then invoke them
+manually or on a reviewed schedule. Their intended UTC cadence is:
 
 - `POST /api/cron/github-collect` — `29 5 * * *` (05:29 UTC daily). Runs the lease-protected, read-only GitHub shadow collector before any downstream maintenance. During the first pilot, select exactly one dedicated repository.
 - `POST /api/cron/daily` — `7 6 * * *` (06:07 UTC daily). First classifies digest reservations left in-flight for more than 15 minutes as `unknown` for human review (never automatic retry), runs a bounded fair recovery claim for durable GitHub materialisation jobs, and reports exhausted 25-attempt jobs as explicit needs-attention dead letters. Exhausted jobs are not silently reset; recovery requires a separately reviewed, audited operator workflow. It then collects evidence, runs integration sync, and performs the evidence-freshness + policy-review sweep. Notifications are deduplicated per day and a new task is opened only when none is already open for that item, so retries and manual runs are safe.
@@ -369,9 +317,8 @@ cannot execute either lifecycle RPC directly.
 1. Verify a dedicated sending subdomain in Resend and publish the required SPF and DKIM records; publish a DMARC policy as well. Create `RESEND_API_KEY` and set `INVITATION_FROM_EMAIL` only after verification. This enables ComplianceHub's workspace-membership invitations.
 2. Configure a custom SMTP provider in Supabase Auth for sign-up, confirmation, password-reset, and other Auth-owned emails, with the verified application URL matching `NEXT_PUBLIC_SITE_URL`. This is separate from the Resend HTTP adapter used for workspace-membership invitations.
 3. Spend controls, monitoring, and database backups; exercise a restore into a separate project before public launch.
-4. Supabase Free and Azure's monthly Container Apps grant are for internal
-   staging, not a dependable production SLA. Scale-to-zero creates cold starts;
-   budget alerts do not impose a hard spending cap.
+4. Supabase Free and the AWS dev budget guard are for internal
+   dev, not a dependable production SLA. Budget alerts do not impose a hard spending cap.
 5. Confirm the hosted project's exposed schemas remain the Supabase defaults and
    verify Storage operations through the official API. `storage.objects` is owned
    by `supabase_storage_admin`; do not change its ownership or revoke its managed
