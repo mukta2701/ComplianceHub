@@ -799,6 +799,14 @@ select is(
   '8b000000-0000-4000-8000-000000000001'::uuid,
   'repository selection audit retains the Owner actor'
 );
+select ok(has_column_privilege('authenticated', 'public.github_installations', 'health', 'SELECT'), 'authenticated may read connection health');
+select ok(has_column_privilege('authenticated', 'public.github_installations', 'health_diagnostic_code', 'SELECT'), 'authenticated may read the connection health diagnostic');
+select ok(has_column_privilege('authenticated', 'public.github_installations', 'next_reconciliation_at', 'SELECT'), 'authenticated may read the next reconciliation time');
+select ok(not has_column_privilege('authenticated', 'public.github_installations', 'reconciliation_locked_by', 'SELECT'), 'authenticated cannot read reconciliation lease ownership');
+select ok(not has_column_privilege('authenticated', 'public.github_installations', 'reconciliation_locked_until', 'SELECT'), 'authenticated cannot read reconciliation lease expiry');
+select ok(has_column_privilege('authenticated', 'public.github_connection_reconciliation_runs', 'status', 'SELECT'), 'authenticated may read reconciliation run status');
+select ok(not has_column_privilege('authenticated', 'public.github_connection_reconciliation_runs', 'request_key', 'SELECT'), 'authenticated cannot read reconciliation idempotency keys');
+select ok(not has_column_privilege('authenticated', 'public.github_connection_reconciliation_runs', 'locked_by', 'SELECT'), 'authenticated cannot read reconciliation run lease ownership');
 select is(
   (select count(*) from public.audit_events where organisation_id = current_setting('app.github_org')::uuid and entity_type = 'github_observations'),
   0::bigint,

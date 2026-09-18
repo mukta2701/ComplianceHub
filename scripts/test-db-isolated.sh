@@ -26,9 +26,20 @@ identity="$($docker_bin info --format '{{.Name}}|{{.ServerVersion}}' 2>/dev/null
 [[ -n "$identity" ]] || fail "local Docker is unavailable"
 
 mode="both"
-if [[ $# -gt 1 ]]; then fail "usage: $0 [fresh|upgrade|both]"; fi
-[[ $# -eq 0 || "$1" == "fresh" || "$1" == "upgrade" || "$1" == "both" ]] || fail "usage: $0 [fresh|upgrade|both]"
-[[ $# -eq 0 ]] || mode="$1"
+test_paths=()
+if [[ $# -gt 0 && ("$1" == "fresh" || "$1" == "upgrade" || "$1" == "both") ]]; then
+  mode="$1"
+  shift
+fi
+test_paths=()
+if [[ $# -gt 0 ]]; then
+  for test_path in "$@"; do
+    case "$test_path" in
+      supabase/tests/database|supabase/tests/database/*.sql) test_paths+=("$test_path") ;;
+      *) fail "usage: $0 [fresh|upgrade|both] [supabase/tests/database[/<name>.sql] ...]" ;;
+    esac
+  done
+fi
 
 suffix="$(mktemp -u XXXXXX)"
 [[ "$suffix" =~ ^[A-Za-z0-9]+$ ]] || fail "could not generate a safe isolated suffix"
@@ -78,5 +89,9 @@ if [[ "$mode" == "upgrade" || "$mode" == "both" ]]; then
   "$supabase_bin" db reset --local --no-seed --version 20260807047000 --workdir "$project_dir"
   "$supabase_bin" migration up --local --workdir "$project_dir"
 fi
-"$supabase_bin" test db --local --workdir "$project_dir"
+if [[ "${#test_paths[@]}" -gt 0 ]]; then
+  "$supabase_bin" test db --local --workdir "$project_dir" "${test_paths[@]}"
+else
+  "$supabase_bin" test db --local --workdir "$project_dir"
+fi
 echo "isolated database validation passed (${mode})"
