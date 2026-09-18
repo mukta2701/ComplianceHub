@@ -2,7 +2,7 @@
 
 ## Start here — plain-language project status
 
-**Azure staging removed, AWS only — 18 September 2026:** The old Azure staging deployment, its scheduled-maintenance workflow and its infrastructure files are deleted. The only hosted target is the AWS dev environment, which deploys from `main` on every push. Older notes below that mention Azure are history, not current instructions. The Microsoft (Azure AD) sign-in button is unrelated and unchanged.
+**Azure staging removed, AWS only — 18 September 2026:** The old Azure staging deployment, its scheduled-maintenance workflow and its infrastructure files are deleted (merged as #15; live AWS dev release `63ff4a4` verified healthy). The `azure-staging` GitHub environment and its secrets are deleted; only `aws-dev` remains. The only hosted target is the AWS dev environment, which deploys from `main` on every push. Older notes below that mention Azure are history, not current instructions. The Microsoft (Azure AD) sign-in button is unrelated and unchanged.
 
 **AWS dev is live and working — 17 September 2026:** The app auto-deploys to a cheap dev address on every push to main (ECR image plus App Runner, inside the $100 budget guard). Proven live in a real browser: account sign-up, organisation setup, dashboard with live counts, 2 risks, 2 linked tasks and an in-progress gap assessment with saved answers, all against your ComplianceHub Supabase project (wired off the old staging project, which is untouched; its 15 missing migrations were applied). CI is faster too: small changes clear in about a minute with the same four gates.
 
