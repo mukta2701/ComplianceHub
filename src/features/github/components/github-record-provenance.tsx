@@ -18,7 +18,7 @@ import type {
   OfficialGitHubFindingProvenance,
   OfficialGitHubRecordProvenance,
 } from "../application/github-record-provenance";
-import { githubEvidenceTitle, githubFindingPresentation } from "./github-check-presentation";
+import { githubCheckGroup, githubEvidenceTitle, githubFindingPresentation, githubVerifyHint } from "./github-check-presentation";
 import { formatMonitoringTime } from "./format-monitoring-time";
 
 const STATUS_LABEL: Record<GitHubFindingTransitionStatus, string> = {
@@ -100,9 +100,11 @@ export function OfficialGitHubEvidenceCard({
   >
     <div className="finding-head">
       <Pill tone="blue">Official GitHub evidence</Pill>
+      <Pill tone="neutral">{githubCheckGroup(record.checkId).title}</Pill>
       <h2>{githubEvidenceTitle(record.checkId)}</h2>
     </div>
     <ProvenanceDetails record={record} />
+    <p className="github-verify-hint"><strong>Where to verify:</strong> {githubVerifyHint(record.checkId)}</p>
     <p className="github-official-boundary" role="note">
       This is approved technical repository evidence for human review. It does not certify ISO/IEC 27001 compliance or change readiness by itself.
     </p>
@@ -210,6 +212,7 @@ export function OfficialGitHubFindingCard({
       <h3>{presentation.title}</h3>
       <Pill tone={status === "risk_accepted" ? "blue" : status === "open" ? "red" : "amber"}>{STATUS_LABEL[status]}</Pill>
     </div>
+    <p className="github-finding-area"><strong>{githubCheckGroup(record.checkId).title}</strong></p>
     <div className="github-official-record-head">
       <a href={record.repository.url} target="_blank" rel="noreferrer" aria-label={`Open ${record.repository.name} on GitHub`}>
         {record.repository.name}
@@ -218,6 +221,7 @@ export function OfficialGitHubFindingCard({
     </div>
     <p className="github-official-record-summary">{presentation.explanation}</p>
     <p className="github-finding-remediation"><strong>Recommended action:</strong> {presentation.remediation}</p>
+    <p className="github-verify-hint"><strong>Where to verify:</strong> {githubVerifyHint(record.checkId)}</p>
     <dl className="github-finding-overview">
       <div><dt>ISO references</dt><dd>{record.isoControlReferences.join(" · ")}</dd></div>
       <div><dt>Observed</dt><dd><time dateTime={record.observedAt}>{formatTime(record.observedAt)}</time></dd></div>

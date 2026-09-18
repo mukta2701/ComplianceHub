@@ -119,3 +119,99 @@ export function githubEvidenceTitle(checkId: string): string {
     ? EVIDENCE_TITLES[checkId as ExpectedGitHubCheckId]
     : "Repository check";
 }
+
+export type GitHubCheckGroup = {
+  id: string;
+  title: string;
+};
+
+const CHECK_GROUPS = [
+  {
+    id: "repository",
+    title: "Repository basics",
+    checkIds: ["github.repository.visibility", "github.repository.archived"],
+  },
+  {
+    id: "branch",
+    title: "Branch protection",
+    checkIds: [
+      "github.branch.force_pushes",
+      "github.branch.deletions",
+      "github.branch.approving_reviews",
+      "github.branch.stale_approvals",
+      "github.branch.code_owner_reviews",
+      "github.branch.status_checks",
+    ],
+  },
+  {
+    id: "alerts",
+    title: "Dependency and code alerts",
+    checkIds: ["github.dependabot.high_critical", "github.code_scanning.high_critical"],
+  },
+  {
+    id: "secrets",
+    title: "Secret protection",
+    checkIds: [
+      "github.secret_scanning.enabled",
+      "github.secret_scanning.push_protection",
+      "github.secret_scanning.open_alerts",
+    ],
+  },
+  {
+    id: "governance",
+    title: "Workflows and access",
+    checkIds: [
+      "github.workflow.security",
+      "github.administration.outside_collaborator_admins",
+    ],
+  },
+] satisfies Array<{ id: string; title: string; checkIds: ExpectedGitHubCheckId[] }>;
+
+const UNKNOWN_GROUP: GitHubCheckGroup = { id: "other", title: "Other checks" };
+
+export const GITHUB_CHECK_GROUPS: GitHubCheckGroup[] = [
+  ...CHECK_GROUPS.map(({ id, title }) => ({ id, title })),
+  UNKNOWN_GROUP,
+];
+
+export function githubCheckGroup(checkId: string): GitHubCheckGroup {
+  const group = CHECK_GROUPS.find((candidate) => (candidate.checkIds as string[]).includes(checkId));
+  return group ? { id: group.id, title: group.title } : UNKNOWN_GROUP;
+}
+
+export function groupChecksByArea<T extends { checkId: string }>(
+  items: T[],
+): Array<{ group: GitHubCheckGroup; items: T[] }> {
+  return GITHUB_CHECK_GROUPS
+    .map((group) => ({
+      group,
+      items: items.filter((item) => githubCheckGroup(item.checkId).id === group.id),
+    }))
+    .filter((section) => section.items.length > 0);
+}
+
+const VERIFY_HINTS = {
+  "github.repository.visibility": "GitHub → the repository Settings → General → Danger Zone (Change visibility).",
+  "github.repository.archived": "GitHub → the repository Settings → General → Archive/Unarchive repository.",
+  "github.branch.force_pushes": "GitHub → the repository Settings → Rules → branch rules for the default branch.",
+  "github.branch.deletions": "GitHub → the repository Settings → Rules → branch rules for the default branch.",
+  "github.branch.approving_reviews": "GitHub → the repository Settings → Rules → branch rules for the default branch.",
+  "github.branch.stale_approvals": "GitHub → the repository Settings → Rules → branch rules for the default branch.",
+  "github.branch.code_owner_reviews": "GitHub → the repository Settings → Rules → branch rules for the default branch.",
+  "github.branch.status_checks": "GitHub → the repository Settings → Rules → branch rules for the default branch.",
+  "github.dependabot.high_critical": "GitHub → the repository Security tab → Dependabot alerts.",
+  "github.code_scanning.high_critical": "GitHub → the repository Security tab → Code scanning alerts.",
+  "github.secret_scanning.enabled": "GitHub → the repository Settings → Code security → Secret scanning.",
+  "github.secret_scanning.push_protection": "GitHub → the repository Settings → Code security → Push protection.",
+  "github.secret_scanning.open_alerts": "GitHub → the repository Security tab → Secret scanning alerts.",
+  "github.workflow.security": "GitHub → the repository Actions tab → the approved security workflow runs.",
+  "github.administration.outside_collaborator_admins": "GitHub → the organisation People page and the repository Settings → Collaborators.",
+} satisfies Record<ExpectedGitHubCheckId, string>;
+
+const UNKNOWN_VERIFY_HINT = "GitHub → the repository Settings and Security tab.";
+
+export function githubVerifyHint(checkId: string): string {
+  return Object.prototype.hasOwnProperty.call(VERIFY_HINTS, checkId)
+    ? VERIFY_HINTS[checkId as ExpectedGitHubCheckId]
+    : UNKNOWN_VERIFY_HINT;
+}

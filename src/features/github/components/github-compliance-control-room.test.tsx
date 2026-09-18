@@ -114,6 +114,12 @@ describe("GitHubComplianceControlRoomPanel", () => {
     expect(screen.getByText(STANDARD_GITHUB_ISO_MAPPING_PACK.version)).toBeVisible();
     expect(screen.getByText(STANDARD_GITHUB_ISO_MAPPING_PACK.checksum)).toBeVisible();
     expect(screen.getAllByRole("article", { name: /mapping check$/ })).toHaveLength(15);
+    const mapping = screen.getByText("Review all 15 mapped checks").closest("details") as HTMLElement;
+    for (const group of ["Repository basics", "Branch protection", "Dependency and code alerts", "Secret protection", "Workflows and access"]) {
+      expect(within(mapping).getByRole("heading", { name: group })).toBeInTheDocument();
+    }
+    expect(within(mapping).getByText("Force-push protection")).toBeInTheDocument();
+    expect(within(mapping).getByText("github.branch.force_pushes")).toBeInTheDocument();
     expect(screen.getByText("A.5.18 · A.8.2")).not.toBeVisible();
     expect(screen.getAllByText(/Verified technical pass → evidence/).length).toBeGreaterThan(0);
     expect(screen.getByText(/do not certify ISO\/IEC 27001 compliance/)).toBeVisible();
@@ -141,6 +147,8 @@ describe("GitHubComplianceControlRoomPanel", () => {
       "/app/monitoring?finding=a4000000-0000-4000-8000-000000000002#finding-a4000000-0000-4000-8000-000000000002",
     );
     expect(repository).toHaveTextContent("Rule github-repository-v1 · Mapping github-iso-27001-v1");
+    expect(within(repository).getByRole("heading", { name: "Branch protection" })).toBeInTheDocument();
+    expect(within(repository).getByText("Force-push protection")).toBeInTheDocument();
     expect(repository).not.toHaveTextContent(/compliant|certified|secure|readiness improved/i);
   });
 
