@@ -26,8 +26,8 @@ export type ClaimedSlackAlertDelivery = SlackDeliveryLeaseIdentity & {
 export type QueueSlackDeliveryInput = {
   organisationId: string;
   channelId: string;
-  kind: "monitoring_finding";
-  subjectType: "monitoring_finding";
+  kind: "monitoring_finding" | "github_connection_health";
+  subjectType: "monitoring_finding" | "github_installation";
   subjectId: string;
   payload: SafeSlackDeliveryPayload;
 };
@@ -41,7 +41,7 @@ export type SlackAlertDeliveryStore = {
 
 const SEVERITY_EMOJI: Record<CheckSeverity, string> = { low: "🔵", medium: "🟡", high: "🟠", critical: "🔴" };
 
-function safeSlackText(value: string, maximum: number): string {
+export function safeSlackText(value: string, maximum: number): string {
   const normalized = value.replace(/[\u0000-\u001F\u007F\s]+/g, " ").trim();
   return (normalized || "Compliance monitoring update").slice(0, maximum);
 }

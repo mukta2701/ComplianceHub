@@ -5,7 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { decryptSecret } from "@/lib/security/secrets";
 import { approveSlackDestination, approveStoredSlackDestination } from "@/features/mcp/application/slack-destination-policy";
 import { postSlackIncomingWebhook } from "@/lib/integrations/slack-incoming-webhook";
-import { drainSlackAlertDeliveries, type ClaimedSlackAlertDelivery, type QueueSlackDeliveryInput, type SlackAlertDeliveryStore, type SlackDeliveryLeaseIdentity } from "./slack-alert-queue";
+import { drainSlackAlertDeliveries, type ClaimedSlackAlertDelivery, type QueueSlackDeliveryInput, type SafeSlackDeliveryPayload, type SlackAlertDeliveryStore, type SlackDeliveryLeaseIdentity } from "./slack-alert-queue";
 
 const slackLeaseIdentitySchema = z.object({
   delivery_id: z.uuid(),
@@ -85,6 +85,43 @@ export function createSupabaseSlackAlertDeliveryStore(
       if (error || typeof data !== "boolean") throw new Error("Alert delivery failure recording failed");
       return data;
     },
+  };
+}
+
+export type EnqueueGitHubConnectionAlertInput = {
+  organisationId: string;
+  channelId: string;
+  installationId: string;
+  kind: "incident" | "recovery";
+  diagnostic: string | null;
+  payload: SafeSlackDeliveryPayload;
+};
+
+export async function enqueueGitHubConnectionAlertDelivery(
+  database: Pick<SupabaseClient, "rpc">,
+  input: EnqueueGitHubConnectionAlertInput,
+): Promise<SlackDeliveryLeaseIdentity | null> {
+  const { data, error } = await database.rpc("enqueue_github_connection_alert_delivery", {
+    target_organisation_id: input.organisationId,
+    target_channel_id: input.channelId,
+    target_installation_id: input.installationId,
+    target_kind: input.kind,
+    target_diagnostic_code: input.diagnostic,
+    safe_payload: {
+      type: "connection_health",
+      severity: input.payload.severity,
+      title: input.payload.title,
+      controlRef: input.payload.controlRef,
+      subjectId: input.payload.subjectId,
+      detail: input.payload.detail,
+    },
+  });
+  const row = oneRpcRow(data, "Connection alert delivery queue failed");
+  const parsed = slackLeaseIdentitySchema.safeParse(row);
+  if (error || (row !== null && !parsed.success)) throw new Error("Connection alert delivery queue failed");
+  return row === null ? null : {
+    deliveryId: parsed.data!.delivery_id,
+    lockToken: parsed.data!.lock_token,
   };
 }
 

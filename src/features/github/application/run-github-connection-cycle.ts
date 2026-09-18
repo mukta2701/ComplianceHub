@@ -35,9 +35,18 @@ export type GitHubConnectionCycleDependencies = {
     expectedAccount: { id: number; login: string; type: "Organization" | "User" };
   }>;
   reconcileClaim(claim: ClaimedGitHubConnectionReconciliation): Promise<{
-    decision: { health: string; closeIncident: boolean };
+    decision: { health: string; closeIncident: boolean; openIncident: boolean; diagnostic: string | null };
     repositoriesSeen: number;
   }>;
+  notifyTransition(input: {
+    kind: "incident" | "recovery";
+    installationId: string;
+    organisationId: string;
+    accountLogin: string;
+    health: "partially_unavailable" | "owner_action_required" | "disconnected" | "healthy" | "retrying";
+    diagnostic: string | null;
+    occurredAt: string;
+  }): Promise<unknown>;
 };
 
 export class GitHubConnectionCycleBudgetExceededError extends Error {
@@ -179,6 +188,21 @@ export async function runGitHubConnectionCycle(
       else if (result.decision.health === "retrying") summary.retrying += 1;
       else if (result.decision.health === "owner_action_required") summary.actionRequired += 1;
       else summary.ownershipLost += 1;
+      if (result.decision.openIncident || result.decision.closeIncident) {
+        try {
+          await deps.notifyTransition({
+            kind: result.decision.closeIncident ? "recovery" : "incident",
+            installationId: parsed.data.installationUuid,
+            organisationId: context.organisationId,
+            accountLogin: context.expectedAccount.login,
+            health: result.decision.health as "partially_unavailable" | "owner_action_required" | "disconnected" | "healthy" | "retrying",
+            diagnostic: result.decision.diagnostic,
+            occurredAt: new Date().toISOString(),
+          });
+        } catch {
+          summary.ownershipLost += 1;
+        }
+      }
     } catch {
       summary.ownershipLost += 1;
     }

@@ -5,14 +5,21 @@ import { createAppJwt, createInstallationToken } from "@/features/github/applica
 import { getGitHubConnectionConfig } from "@/features/github/application/github-runtime-config";
 import {
   claimDueReconciliations,
+  enqueueConnectionSlackAlert,
   finalizeReconciliationRun,
   listSelectedRepositoryIds,
   listStoredRepositories,
   loadInstallationContext,
+  recordConnectionNotice,
+  resolveConnectionSlackChannel,
   scheduleConnectionReconciliation,
   type ConnectionStoreClient,
   type StoredReconciliationRun,
 } from "@/features/github/application/github-connection-store";
+import {
+  queueGitHubConnectionNotice,
+  type GitHubConnectionNotice,
+} from "@/features/github/application/github-connection-alerts";
 import { readInstallationSnapshot } from "@/features/github/application/github-installation-api";
 import {
   reconcileGitHubConnection,
@@ -139,6 +146,32 @@ async function main(): Promise<void> {
           return runs;
         },
         loadInstallationContext: (installationUuid) => loadInstallationContext(client, installationUuid),
+        notifyTransition: (notice: {
+          kind: "incident" | "recovery";
+          installationId: string;
+          organisationId: string;
+          accountLogin: string;
+          health: "partially_unavailable" | "owner_action_required" | "disconnected" | "healthy" | "retrying";
+          diagnostic: string | null;
+          occurredAt: string;
+        }) =>
+          queueGitHubConnectionNotice(
+            {
+              recordNotice: (recordInput) => recordConnectionNotice(client, recordInput),
+              resolveSlackChannelId: (organisationId) => resolveConnectionSlackChannel(client, organisationId),
+              enqueueSlackAlert: (enqueueInput) => enqueueConnectionSlackAlert(client, enqueueInput),
+            },
+            {
+              kind: notice.kind,
+              installationId: notice.installationId,
+              organisationId: notice.organisationId,
+              accountLogin: notice.accountLogin,
+              health: notice.health as GitHubConnectionNotice["health"],
+              diagnostic: notice.diagnostic as GitHubConnectionNotice["diagnostic"],
+              occurredAt: notice.occurredAt,
+              connectionHref: "/app/integrations",
+            },
+          ),
         reconcileClaim: async (claim: ClaimedGitHubConnectionReconciliation) => {
           const repositoryIds = await listSelectedRepositoryIds(client, claim.installationUuid);
           const installationToken = await createInstallationToken({

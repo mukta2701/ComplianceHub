@@ -2,6 +2,7 @@ import "server-only";
 
 import { z } from "zod";
 
+import type { SafeSlackDeliveryPayload } from "@/features/monitoring/application/slack-alert-queue";
 import { GITHUB_CONNECTION_DIAGNOSTICS, GITHUB_CONNECTION_HEALTHS } from "../domain/connection-health";
 
 export type ConnectionStoreClient = {
@@ -205,4 +206,106 @@ export async function listSelectedRepositoryIds(
     .map((row) => row.provider_repository_id)
     .sort((left, right) => left - right)
     .slice(0, 100);
+}
+
+const recordNoticeRowSchema = z.object({
+  incident_id: uuidSchema.nullable(),
+  is_new: z.boolean(),
+  notified_user_ids: z.array(uuidSchema),
+}).passthrough();
+
+const leaseRowSchema = z.object({
+  delivery_id: uuidSchema,
+  lock_token: uuidSchema,
+}).passthrough();
+
+export async function recordConnectionNotice(
+  client: ConnectionStoreClient,
+  input: {
+    organisationId: string;
+    installationId: string;
+    kind: "incident" | "recovery";
+    diagnostic: (typeof GITHUB_CONNECTION_DIAGNOSTICS)[number] | null;
+    accountLogin: string;
+  },
+): Promise<{ incidentId: string | null; isNew: boolean; notifiedUserIds: string[] }> {
+  if (!uuidSchema.safeParse(input.organisationId).success
+    || !uuidSchema.safeParse(input.installationId).success
+    || (input.kind !== "incident" && input.kind !== "recovery")
+    || input.accountLogin.trim().length < 1) unavailable();
+  const { data, error } = await client.rpc("record_github_connection_notice_server", {
+    target_organisation_id: input.organisationId,
+    target_installation_id: input.installationId,
+    target_kind: input.kind,
+    target_diagnostic_code: input.diagnostic,
+    target_account_login: input.accountLogin,
+  });
+  if (error) unavailable();
+  const parsed = recordNoticeRowSchema.safeParse(data);
+  if (!parsed.success) unavailable();
+  return {
+    incidentId: parsed.data.incident_id,
+    isNew: parsed.data.is_new,
+    notifiedUserIds: parsed.data.notified_user_ids,
+  };
+}
+
+export async function resolveConnectionSlackChannel(
+  client: ConnectionStoreClient,
+  organisationId: string,
+): Promise<string | null> {
+  if (!uuidSchema.safeParse(organisationId).success) unavailable();
+  const { data, error } = await client
+    .from("alert_channels")
+    .select("id,type,enabled,revoked_at")
+    .eq("organisation_id", organisationId);
+  if (error) unavailable();
+  const parsed = z.array(z.object({
+    id: uuidSchema,
+    type: z.string(),
+    enabled: z.boolean(),
+    revoked_at: z.string().nullable(),
+  }).passthrough()).safeParse(data);
+  if (!parsed.success) unavailable();
+  const channel = parsed.data.find((row) => row.type === "slack" && row.enabled && row.revoked_at === null);
+  return channel ? channel.id : null;
+}
+
+const connectionSlackPayloadSchema = z.object({
+  type: z.literal("connection_health"),
+  severity: z.enum(["low", "medium", "high", "critical"]),
+  title: z.string().min(1).max(240),
+  controlRef: z.string().min(1).max(80),
+  subjectId: z.string().min(1).max(255),
+  detail: z.string().min(1).max(500),
+}).strict();
+
+export async function enqueueConnectionSlackAlert(
+  client: ConnectionStoreClient,
+  input: {
+    organisationId: string;
+    channelId: string;
+    installationId: string;
+    kind: "incident" | "recovery";
+    diagnostic: (typeof GITHUB_CONNECTION_DIAGNOSTICS)[number] | null;
+    payload: SafeSlackDeliveryPayload;
+  },
+): Promise<{ deliveryId: string; lockToken: string } | null> {
+  if (!uuidSchema.safeParse(input.organisationId).success
+    || !uuidSchema.safeParse(input.channelId).success
+    || !uuidSchema.safeParse(input.installationId).success
+    || input.payload.type !== "connection_health") unavailable();
+  const { data, error } = await client.rpc("enqueue_github_connection_alert_delivery", {
+    target_organisation_id: input.organisationId,
+    target_channel_id: input.channelId,
+    target_installation_id: input.installationId,
+    target_kind: input.kind,
+    target_diagnostic_code: input.diagnostic,
+    safe_payload: input.payload,
+  });
+  if (error) unavailable();
+  const rows = z.array(leaseRowSchema).safeParse(data);
+  if (!rows.success || rows.data.length > 1) unavailable();
+  if (rows.data.length === 0) return null;
+  return { deliveryId: rows.data[0]!.delivery_id, lockToken: rows.data[0]!.lock_token };
 }
