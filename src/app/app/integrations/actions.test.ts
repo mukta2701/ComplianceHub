@@ -51,6 +51,7 @@ import {
   setMonitorSourceEnabledAction,
   startProviderAuthorizationAction,
   setGitHubRepositorySelectedAction,
+  disconnectGitHubInstallationAction,
 } from "./actions";
 
 function connectionForm() {
@@ -919,4 +920,68 @@ describe("GitHub repository scope actions", () => {
     expect(hoisted.createServiceClient).not.toHaveBeenCalled();
   });
 
+});
+
+describe("disconnectGitHubInstallationAction", () => {
+  const INSTALLATION_ID = "30000000-0000-4000-8000-000000000001";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    hoisted.enforceRateLimit.mockResolvedValue(undefined);
+  });
+
+  function disconnectForm() {
+    const form = new FormData();
+    form.set("installationId", INSTALLATION_ID);
+    return form;
+  }
+
+  it("rejects members and Admins before reaching Supabase", async () => {
+    for (const role of ["member", "admin"] as const) {
+      const rpc = vi.fn();
+      hoisted.ctx = {
+        supabase: { from: vi.fn(), rpc }, user: { id: USER_ID },
+        organisation: { id: ORGANISATION_ID }, membership: { role },
+      };
+      await expect(disconnectGitHubInstallationAction(disconnectForm())).resolves.toEqual({
+        ok: false,
+        message: "Could not disconnect the GitHub installation. Please try again.",
+      });
+      expect(rpc).not.toHaveBeenCalled();
+    }
+  });
+
+  it("disconnects through the Owner lifecycle RPC without claiming provider removal", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: true, error: null });
+    hoisted.ctx = {
+      supabase: { from: vi.fn(), rpc }, user: { id: USER_ID },
+      organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
+    };
+    await expect(disconnectGitHubInstallationAction(disconnectForm())).resolves.toEqual({
+      ok: true,
+      message: "GitHub installation disconnected. Repositories will no longer be checked. The GitHub-side installation is unchanged.",
+    });
+    expect(rpc).toHaveBeenCalledWith("disconnect_github_installation", {
+      target_installation_id: INSTALLATION_ID,
+    });
+  });
+
+  it("fails closed on invalid input and RPC failure", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: false, error: null });
+    hoisted.ctx = {
+      supabase: { from: vi.fn(), rpc }, user: { id: USER_ID },
+      organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
+    };
+    const bad = new FormData();
+    bad.set("installationId", "not-a-uuid");
+    await expect(disconnectGitHubInstallationAction(bad)).resolves.toEqual({
+      ok: false,
+      message: "Could not disconnect the GitHub installation. Please try again.",
+    });
+    expect(rpc).not.toHaveBeenCalled();
+    await expect(disconnectGitHubInstallationAction(disconnectForm())).resolves.toEqual({
+      ok: false,
+      message: "Could not disconnect the GitHub installation. Please try again.",
+    });
+  });
 });

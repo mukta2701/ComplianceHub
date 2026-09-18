@@ -5,10 +5,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const hoisted = vi.hoisted(() => ({
   refresh: vi.fn(),
   selectRepository: vi.fn(),
+  disconnectInstallation: vi.fn(),
 }));
 
 vi.mock("@/app/app/integrations/actions", () => ({
   setGitHubRepositorySelectedAction: hoisted.selectRepository,
+  disconnectGitHubInstallationAction: hoisted.disconnectInstallation,
 }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: hoisted.refresh }) }));
 
@@ -25,7 +27,12 @@ const installation: GitHubInstallationSummary = {
   status: "active",
   repository_selection: "selected",
   permissions_ok: true,
+  health: "healthy",
+  health_diagnostic_code: null,
+  last_successful_reconciliation_at: "2026-09-01T08:00:00.000Z",
 };
+
+const NOW_ISO = "2026-09-01T10:00:00.000Z";
 
 function repository(
   overrides: Partial<GitHubRepositoryConfigurationSummary> = {},
@@ -56,12 +63,13 @@ describe("GitHubInstallationPanel configuration boundary", () => {
       repositories={[repository()]}
       canManageInstallation={true}
       canManageRepositoryScope={true}
+      nowIso={NOW_ISO}
     />);
 
     const region = screen.getByRole("region", { name: "GitHub repository access" });
     expect(within(region).getByText("READ-ONLY GITHUB MONITORING")).toBeVisible();
     expect(region).toHaveTextContent("ComplianceHub reads selected repositories for monitoring and never changes GitHub.");
-    expect(within(region).getByRole("article", { name: "Adtecher GitHub installation" })).toHaveTextContent("Active");
+    expect(within(region).getByRole("article", { name: "Adtecher GitHub installation" })).toHaveTextContent("Healthy");
     expect(within(region).getByRole("checkbox", {
       name: "Allow ComplianceHub to read and include Adtecher/compliancehub in monitoring",
     })).toBeEnabled();
@@ -84,6 +92,7 @@ describe("GitHubInstallationPanel configuration boundary", () => {
       repositories={[repository()]}
       canManageInstallation={true}
       canManageRepositoryScope={true}
+      nowIso={NOW_ISO}
     />);
 
     const notes = screen.getAllByRole("note");
@@ -99,6 +108,7 @@ describe("GitHubInstallationPanel configuration boundary", () => {
       repositories={[repository()]}
       canManageInstallation={false}
       canManageRepositoryScope={false}
+      nowIso={NOW_ISO}
     />);
 
     const checkbox = screen.getByRole("checkbox", {
@@ -117,6 +127,7 @@ describe("GitHubInstallationPanel configuration boundary", () => {
       repositories={[]}
       canManageInstallation={true}
       canManageRepositoryScope={true}
+      nowIso={NOW_ISO}
     />);
 
     expect(screen.getByText("No GitHub repository access connected")).toBeVisible();
@@ -140,6 +151,7 @@ describe("GitHubInstallationPanel configuration boundary", () => {
       ]}
       canManageInstallation={true}
       canManageRepositoryScope={true}
+      nowIso={NOW_ISO}
     />);
 
     const first = screen.getByRole("checkbox", { name: /include Adtecher\/compliancehub in monitoring/ });
@@ -166,9 +178,91 @@ describe("GitHubInstallationPanel configuration boundary", () => {
       repositories={[repository({ available: false })]}
       canManageInstallation={true}
       canManageRepositoryScope={true}
+      nowIso={NOW_ISO}
     />);
 
     expect(screen.getByRole("checkbox", { name: /include Adtecher\/compliancehub in monitoring/ })).toBeDisabled();
     expect(screen.getByText("Unavailable to this GitHub App installation.")).toBeVisible();
+  });
+});
+
+describe("GitHubInstallationPanel connection health", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    hoisted.disconnectInstallation.mockResolvedValue({
+      ok: true,
+      message: "GitHub installation disconnected. Repositories will no longer be checked. The GitHub-side installation is unchanged.",
+    });
+  });
+
+  function renderPanel(
+    installationOverrides: Partial<GitHubInstallationSummary> = {},
+    manage = true,
+  ) {
+    render(<GitHubInstallationPanel
+      installations={[{ ...installation, ...installationOverrides }]}
+      repositories={[repository(), repository({
+        repository_id: "10000000-0000-4000-8000-000000000012",
+        full_name: "Adtecher/second",
+        html_url: "https://github.com/Adtecher/second",
+        selected: false,
+        available: false,
+      })]}
+      canManageInstallation={manage}
+      canManageRepositoryScope={manage}
+      nowIso={NOW_ISO}
+    />);
+  }
+
+  it("shows plain-language status, exact permissions and scope totals", () => {
+    renderPanel();
+
+    const article = screen.getByRole("article", { name: "Adtecher GitHub installation" });
+    expect(within(article).getByText("Healthy")).toBeVisible();
+    expect(within(article).getByText(/checked 2 hours ago/i)).toBeVisible();
+    expect(within(article).getByText(/Approved read-only access:/)).toBeVisible();
+    for (const permission of ["Metadata", "Administration", "Actions", "Dependabot alerts", "Code scanning alerts", "Secret scanning alerts"]) {
+      expect(within(article).getByText(permission, { exact: false })).toBeVisible();
+    }
+    expect(within(article).getByText("2 repositories · 1 selected · 1 available")).toBeVisible();
+  });
+
+  it("shows action-required status with the next step", () => {
+    renderPanel({ health: "owner_action_required", health_diagnostic_code: "permission_mismatch", last_successful_reconciliation_at: null });
+
+    const article = screen.getByRole("article", { name: "Adtecher GitHub installation" });
+    expect(within(article).getByText("Owner action required")).toBeVisible();
+    expect(within(article).getByText(/permission may have changed/i)).toBeVisible();
+    expect(within(article).getByText(/Next step:/)).toBeVisible();
+  });
+
+  it("disconnects only after a deliberate second click and never claims provider removal", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+
+    const disconnect = screen.getByRole("button", { name: "Disconnect" });
+    await user.click(disconnect);
+    expect(hoisted.disconnectInstallation).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Click again to confirm disconnect" })).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Click again to confirm disconnect" }));
+    expect(hoisted.disconnectInstallation).toHaveBeenCalledOnce();
+    expect(Object.fromEntries(hoisted.disconnectInstallation.mock.calls[0][0] as FormData)).toEqual({
+      installationId: INSTALLATION_ID,
+    });
+    await waitFor(() => expect(screen.getByText(/GitHub-side installation is unchanged/i)).toBeVisible());
+    expect(hoisted.refresh).toHaveBeenCalled();
+  });
+
+  it("hides the disconnect control from non-Owners", () => {
+    renderPanel({}, false);
+    expect(screen.queryByRole("button", { name: /disconnect/i })).not.toBeInTheDocument();
+  });
+
+  it("hides the disconnect control on disconnected installations", () => {
+    renderPanel({ health: "disconnected" }, true);
+    const article = screen.getByRole("article", { name: "Adtecher GitHub installation" });
+    expect(within(article).queryByRole("button", { name: /disconnect/i })).not.toBeInTheDocument();
+    expect(within(article).getByText("Disconnected")).toBeVisible();
   });
 });
