@@ -287,7 +287,7 @@ insert into public.github_webhook_deliveries(
 ) values (
   '8b000000-0000-4000-8000-000000000501', current_setting('app.github_org')::uuid,
   '8b000000-0000-4000-8000-000000000101', '8b000000-0000-4000-8000-000000000201',
-  81001, 83001, '123e4567-e89b-12d3-a456-426614174000', 'repository', repeat('b', 64), 'queued', now() - interval '1 hour'
+  81001, 83001, '123e4567-e89b-12d3-a456-426614174000', 'branch_protection_rule', repeat('b', 64), 'queued', now() - interval '1 hour'
 );
 set local role service_role;
 select lives_ok(
@@ -320,7 +320,7 @@ insert into public.github_webhook_deliveries(
 ) values (
   '8b000000-0000-4000-8000-000000000502', current_setting('app.github_org')::uuid,
   '8b000000-0000-4000-8000-000000000101', '8b000000-0000-4000-8000-000000000201',
-  81001, 83001, '123e4567-e89b-12d3-a456-426614174002', 'repository', repeat('8', 64),
+  81001, 83001, '123e4567-e89b-12d3-a456-426614174002', 'branch_protection_rule', repeat('8', 64),
   'processing', 9, now() - interval '30 minutes', now() - interval '16 minutes'
 );
 
@@ -400,7 +400,7 @@ insert into public.github_webhook_deliveries(
   event_name, payload_sha256
 ) values (
   81002, 83003, '123e4567-e89b-12d3-a456-426614174003',
-  'repository', repeat('7', 64)
+  'branch_protection_rule', repeat('7', 64)
 );
 select is(
   (select repository_id from public.claim_github_webhook_deliveries_server(1)),
@@ -425,7 +425,7 @@ insert into public.github_webhook_deliveries(
   event_name, payload_sha256
 ) values (
   81002, 83003, '123e4567-e89b-12d3-a456-426614174004',
-  'repository', repeat('6', 64)
+  'branch_protection_rule', repeat('6', 64)
 );
 select is(
   (select installation_id from public.claim_github_webhook_deliveries_server(1)),
@@ -459,7 +459,7 @@ select throws_ok(
 );
 select throws_ok(
   $$ insert into public.github_webhook_deliveries(provider_installation_id, provider_delivery_id, event_name, payload_sha256)
-     values (81001, '123e4567-e89b-12d3-a456-426614174000', 'repository', repeat('c', 64)) $$,
+     values (81001, '123e4567-e89b-12d3-a456-426614174000', 'branch_protection_rule', repeat('c', 64)) $$,
   '23505', null, 'provider webhook delivery identifiers are replay-safe and unique'
 );
 

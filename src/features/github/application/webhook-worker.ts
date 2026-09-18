@@ -15,12 +15,19 @@ import { runGitHubCollection, type CollectionDependencies, type CollectionReques
 export type ClaimedWebhookDelivery = {
   id: string;
   providerDeliveryId: string;
+  eventName: string;
   attemptCount: number;
   providerInstallationId: number;
   providerRepositoryId: number | null;
   installationId: string | null;
   repositoryId: string | null;
 };
+
+export const CONNECTION_WEBHOOK_EVENTS: ReadonlySet<string> = new Set([
+  "installation",
+  "installation_repositories",
+  "repository",
+]);
 
 export type WebhookDeliveryLease = Pick<ClaimedWebhookDelivery, "id" | "attemptCount">;
 
@@ -32,6 +39,7 @@ export type WebhookWorkerDependencies = {
   finalise(delivery: WebhookDeliveryLease, outcome: WebhookOutcome, diagnosticCode: WebhookDiagnostic | null): Promise<boolean>;
   runCollection(request: CollectionRequest): Promise<CollectionSummary>;
   reconcile(scope: ReconciliationScope): Promise<ReconciliationSummary>;
+  scheduleConnectionReconciliation(providerInstallationId: number): Promise<boolean>;
 };
 
 export type WebhookDrainSummary = {
@@ -49,6 +57,7 @@ const uuid = z.string().uuid();
 const claimedSchema = z.object({
   id: uuid,
   providerDeliveryId: z.string().regex(/^[!-~]{1,100}$/),
+  eventName: z.string().regex(/^[a-z][a-z0-9_]{0,99}$/),
   attemptCount: z.number().int().min(1).max(10),
   providerInstallationId: z.number().int().positive().safe(),
   providerRepositoryId: z.number().int().positive().safe().nullable(),
@@ -90,16 +99,24 @@ export function buildWebhookWorkerDependencies(
       return data.map((value) => {
         if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
         const row = value as Record<string, unknown>;
-        return {
-          id: row.id,
-          providerDeliveryId: row.provider_delivery_id,
-          attemptCount: row.attempt_count,
-          providerInstallationId: row.provider_installation_id,
-          providerRepositoryId: row.provider_repository_id,
-          installationId: row.installation_id,
-          repositoryId: row.repository_id,
-        };
+      return {
+        id: row.id,
+        providerDeliveryId: row.provider_delivery_id,
+        eventName: row.event_name,
+        attemptCount: row.attempt_count,
+        providerInstallationId: row.provider_installation_id,
+        providerRepositoryId: row.provider_repository_id,
+        installationId: row.installation_id,
+        repositoryId: row.repository_id,
+      };
       });
+    },
+    async scheduleConnectionReconciliation(providerInstallationId) {
+      const { data, error } = await service.rpc("schedule_github_connection_reconciliation_server", {
+        target_provider_installation_id: providerInstallationId,
+      });
+      if (error || typeof data !== "boolean") throw safeFailure();
+      return data;
     },
     async finalise(delivery, outcome, diagnosticCode) {
       const { data, error } = await service.rpc("finalize_github_webhook_delivery_server", {
@@ -157,6 +174,19 @@ export async function drainGitHubWebhookDeliveries(
     const delivery = parsed.data;
     let outcome: WebhookOutcome = "processed";
     let diagnosticCode: WebhookDiagnostic | null = null;
+    if (CONNECTION_WEBHOOK_EVENTS.has(delivery.eventName)) {
+      try {
+        if (await deps.scheduleConnectionReconciliation(delivery.providerInstallationId)) {
+          outcome = "processed";
+        } else {
+          outcome = "failed";
+          diagnosticCode = "invalid_response";
+        }
+      } catch {
+        outcome = "failed";
+        diagnosticCode = "internal_error";
+      }
+    } else {
     try {
       if (!delivery.installationId || (delivery.providerRepositoryId !== null && !delivery.repositoryId)) {
         outcome = "ignored";
@@ -192,6 +222,7 @@ export async function drainGitHubWebhookDeliveries(
     } catch (error) {
       outcome = "failed";
       diagnosticCode = diagnosticFor(error);
+    }
     }
 
     if (input.signal?.aborted && outcome === "processed") {

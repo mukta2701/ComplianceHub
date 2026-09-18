@@ -4,8 +4,10 @@ import { describe, expect, it, vi } from "vitest";
 import {
   claimDueReconciliations,
   finalizeReconciliationRun,
+  listSelectedRepositoryIds,
   listStoredRepositories,
   loadInstallationContext,
+  scheduleConnectionReconciliation,
 } from "./github-connection-store";
 
 function clientDouble(selectResult: { data: unknown; error: unknown }, rpcResult: { data: unknown; error: unknown }) {
@@ -132,5 +134,40 @@ describe("github-connection-store", () => {
       nextAttemptAt: null,
       snapshot: [],
     })).rejects.toThrow("GitHub reconciliation store is unavailable");
+  });
+});
+
+describe("connection scheduling helpers", () => {
+  it("schedules reconciliation through the service RPC", async () => {
+    const client = clientDouble({ data: null, error: null }, { data: true, error: null });
+    await expect(scheduleConnectionReconciliation(client as never, 77)).resolves.toBe(true);
+    expect(client.rpc).toHaveBeenCalledWith("schedule_github_connection_reconciliation_server", {
+      target_provider_installation_id: 77,
+    });
+  });
+
+  it("rejects an invalid installation identifier without calling the database", async () => {
+    const client = clientDouble({ data: null, error: null }, { data: true, error: null });
+    await expect(scheduleConnectionReconciliation(client as never, 0)).rejects.toThrow(
+      "GitHub reconciliation store is unavailable",
+    );
+    expect(client.rpc).not.toHaveBeenCalled();
+  });
+
+  it("lists at most 100 selected available repository ids in canonical order", async () => {
+    const client = clientDouble(
+      {
+        data: [
+          { provider_repository_id: 103, selected: true, available: true },
+          { provider_repository_id: 101, selected: true, available: true },
+          { provider_repository_id: 102, selected: false, available: true },
+          { provider_repository_id: 104, selected: true, available: false },
+        ],
+        error: null,
+      },
+      { data: null, error: null },
+    );
+    await expect(listSelectedRepositoryIds(client as never, "22222222-2222-4222-8222-222222222222")).resolves.toEqual([101, 103]);
+    expect(client.eq).toHaveBeenCalledWith("installation_id", "22222222-2222-4222-8222-222222222222");
   });
 });
