@@ -40,6 +40,8 @@ describe("official GitHub provenance cards", () => {
   it("uses a readable catalogue label and keeps technical metadata out of the initial view", () => {
     render(<OfficialGitHubEvidenceCard record={{ ...common, evidenceId: "evidence-compact" }} selected={false} />);
     expect(screen.getByRole("heading", { name: "Force-push protection" })).toBeVisible();
+    expect(screen.getByText("Branch protection")).toBeVisible();
+    expect(screen.getByText("GitHub → the repository Settings → Rules → branch rules for the default branch.")).toBeVisible();
     expect(screen.getByText(common.mappingChecksum)).not.toBeVisible();
     fireEvent.click(screen.getByText("Technical details"));
     expect(screen.getByText(common.mappingChecksum)).toBeVisible();
@@ -82,6 +84,8 @@ describe("official GitHub provenance cards", () => {
 
     const article = screen.getByRole("article", { name: "GitHub finding: Stale approvals are not dismissed" });
     expect(within(article).getByRole("heading", { name: "Stale approvals are not dismissed" })).toBeVisible();
+    expect(within(article).getByText("Branch protection")).toBeVisible();
+    expect(within(article).getByText("GitHub → the repository Settings → Rules → branch rules for the default branch.")).toBeVisible();
     expect(within(article).getByText("Approvals remain valid after new commits are pushed.")).toBeVisible();
     expect(within(article).getByText("Dismiss stale approvals when new commits are pushed.")).toBeVisible();
     expect(within(article).getByRole("link", { name: "Open mukta2701/ComplianceHub on GitHub" })).toBeVisible();

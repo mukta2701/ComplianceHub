@@ -19,6 +19,7 @@ import {
   countGitHubOfficialOutcomes,
   type GitHubRepositoryComplianceState,
 } from "../domain/compliance-control-room-state";
+import { githubEvidenceTitle, groupChecksByArea } from "./github-check-presentation";
 
 const STATE_PRESENTATION: Record<GitHubRepositoryComplianceState, { label: string; tone: string; detail: string }> = {
   needs_attention: {
@@ -157,9 +158,11 @@ function MappingReviewSection({
     <details className="github-mapping-details">
       <summary>Review all 15 mapped checks</summary>
       <div className="github-mapping-list">
-        {review.entries.map((entry) => <article key={entry.id} aria-label={`${entry.checkId} mapping check`}>
+        {groupChecksByArea(review.entries).map((section) => <section key={section.group.id} aria-label={section.group.title}>
+          <h4 className="github-mapping-group">{section.group.title}</h4>
+          {section.items.map((entry) => <article key={entry.id} aria-label={`${entry.checkId} mapping check`}>
           <div className="github-mapping-check-head">
-            <div><code>{entry.checkId}</code><small>Rule {entry.ruleVersion}</small></div>
+            <div><strong>{githubEvidenceTitle(entry.checkId)}</strong><code>{entry.checkId}</code><small>Rule {entry.ruleVersion}</small></div>
             <Pill tone={entry.failureSeverity}>{entry.failureSeverity} if failed</Pill>
           </div>
           <p><strong>ISO references:</strong> {entry.isoControlReferences.join(" · ")}</p>
@@ -168,7 +171,8 @@ function MappingReviewSection({
           <p><strong>Could not verify:</strong> {entry.treatments.unknown.summary}</p>
           <p><strong>Not applicable:</strong> {entry.treatments.not_applicable.summary}</p>
           <p><strong>Suggested remediation:</strong> {entry.remediation}</p>
-        </article>)}
+          </article>)}
+        </section>)}
       </div>
     </details>
 
@@ -255,8 +259,11 @@ function RepositoryOfficialCard({
 
     {repository.officialResults.length > 0 && <details className="github-official-results">
       <summary>Inspect {repository.officialResults.length} latest results</summary>
-      <ul>{repository.officialResults.map((result) => <li key={result.id}>
+      {groupChecksByArea(repository.officialResults).map((section) => <section key={section.group.id} aria-label={`${section.group.title} results`}>
+        <h4 className="github-results-group">{section.group.title}</h4>
+        <ul>{section.items.map((result) => <li key={result.id}>
         <div>
+          <strong>{githubEvidenceTitle(result.checkId)}</strong>
           <code>{result.checkId}</code>
           <Pill tone={outcomeTone(result.outcome)}>{outcomeLabel(result.outcome)}</Pill>
         </div>
@@ -267,7 +274,8 @@ function RepositoryOfficialCard({
           {result.evidenceId && <a href={`/app/evidence?evidence=${result.evidenceId}#evidence-${result.evidenceId}`} aria-label={`View evidence for ${result.checkId}`}>View evidence</a>}
           {result.findingId && <a href={`/app/monitoring?finding=${result.findingId}#finding-${result.findingId}`} aria-label={`View finding for ${result.checkId}`}>View finding</a>}
         </span>
-      </li>)}</ul>
+        </li>)}</ul>
+      </section>)}
     </details>}
 
     {canProcessResults && exactReviewedApprovalActive && run && job && ["pending", "awaiting_approval", "retryable"].includes(job.status)
