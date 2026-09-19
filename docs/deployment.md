@@ -1,5 +1,33 @@
 # Deployment / Go-live runbook
 
+## Milestone 1 Task 8: one image, two commands
+
+The production image contains both the standalone web application and the
+finite GitHub connection-reconciliation runner. Its default command remains:
+
+```text
+node server.js
+```
+
+A scheduler can override that command with exactly:
+
+```text
+node dist/github-connection-reconcile.mjs
+```
+
+The override runs one bounded cycle and exits; it does not contain a timer or
+remain resident. Supply the GitHub App and Supabase credentials only as runtime
+environment variables. Do not pass them as Docker build arguments or include
+them in the bundle, image history, image environment, or captured logs.
+
+The local and CI container checks use fictional configuration. They prove that
+the same non-root image serves its web health endpoint, runs the exact finite
+command within an external timeout, and keeps the fictional secret markers out
+of the inspected bundle, image history, image environment, and logs. That
+evidence does not prove a live GitHub App or provider cycle, Slack delivery,
+production Supabase behavior, company AWS ECS/EventBridge staging, a hosted
+release, or human acceptance. Those remain separate gates.
+
 ## GitHub shadow collection maintenance
 
 The AWS dev environment runs the read-only GitHub shadow collector

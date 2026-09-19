@@ -89,125 +89,184 @@ type ServiceClient = {
 function asStoreClient(service: ServiceClient): ConnectionStoreClient {
   return {
     rpc: (name, args) => service.rpc(name, args),
-    from: (table) => (service as unknown as ConnectionStoreClient["from"])(table),
+    from: (table) => service.from(table) as ReturnType<ConnectionStoreClient["from"]>,
   };
 }
 
-async function main(): Promise<void> {
+export type GitHubConnectionReconcileRuntimeDependencies = {
+  getConfig: typeof getGitHubConnectionConfig;
+  createServiceClient: () => ServiceClient;
+  createAppJwt: typeof createAppJwt;
+  createInstallationToken: typeof createInstallationToken;
+  readInstallationSnapshot: typeof readInstallationSnapshot;
+  runCycle: typeof runGitHubConnectionCycle;
+  now: () => Date;
+};
+
+const productionDependencies: GitHubConnectionReconcileRuntimeDependencies = {
+  getConfig: getGitHubConnectionConfig,
+  createServiceClient: () => createSupabaseServiceClient() as unknown as ServiceClient,
+  createAppJwt,
+  createInstallationToken,
+  readInstallationSnapshot,
+  runCycle: runGitHubConnectionCycle,
+  now: () => new Date(),
+};
+
+export async function runGitHubConnectionReconcile(input: {
+  environment: Record<string, string | undefined>;
+  executionId?: string;
+  signal?: AbortSignal;
+  dependencies?: Partial<GitHubConnectionReconcileRuntimeDependencies>;
+}): Promise<{ executionId: string; summary: GitHubConnectionCycleSummary }> {
+  const executionId = input.executionId ?? randomUUID();
+  const dependencies = { ...productionDependencies, ...input.dependencies };
+  const environment = parseCycleEnvironment(input.environment);
+  const config = dependencies.getConfig(input.environment);
+  const service = dependencies.createServiceClient();
+  const client = asStoreClient(service);
+  const appJwt = await dependencies.createAppJwt(
+    { appId: config.appId, privateKey: config.privateKey },
+    dependencies.now(),
+  );
+
+  const summary = await dependencies.runCycle(
+    {
+      claimConnectionDeliveries: async (limit) => {
+        const { data, error } = await service.rpc("claim_github_connection_webhook_deliveries_server", {
+          target_limit: limit,
+        });
+        if (error || !Array.isArray(data)) throw new Error("GitHub connection cycle store is unavailable");
+        return data.map((row) => {
+          const record = row as Record<string, unknown>;
+          return {
+            id: record.id,
+            attemptCount: record.attempt_count,
+            providerDeliveryId: record.provider_delivery_id,
+            eventName: record.event_name,
+            providerInstallationId: record.provider_installation_id,
+          };
+        });
+      },
+      finalizeConnectionDelivery: async (delivery, outcome, diagnosticCode) => {
+        const { data, error } = await service.rpc("finalize_github_webhook_delivery_server", {
+          target_delivery_id: delivery.id,
+          target_attempt_count: delivery.attemptCount,
+          target_status: outcome,
+          target_diagnostic_code: diagnosticCode,
+        });
+        if (error || typeof data !== "boolean") throw new Error("GitHub connection cycle store is unavailable");
+        return data;
+      },
+      scheduleConnection: (providerInstallationId) =>
+        scheduleConnectionReconciliation(client, providerInstallationId),
+      claimDueInstallations: async (limit) => {
+        const runs: StoredReconciliationRun[] = await claimDueReconciliations(client, {
+          workerId: executionId,
+          limit,
+          nowIso: dependencies.now().toISOString(),
+        });
+        return runs;
+      },
+      loadInstallationContext: (installationUuid) => loadInstallationContext(client, installationUuid),
+      notifyTransition: (notice: {
+        kind: "incident" | "recovery";
+        installationId: string;
+        organisationId: string;
+        accountLogin: string;
+        health: "partially_unavailable" | "owner_action_required" | "disconnected" | "healthy" | "retrying";
+        diagnostic: string | null;
+        occurredAt: string;
+      }) =>
+        queueGitHubConnectionNotice(
+          {
+            recordNotice: (recordInput) => recordConnectionNotice(client, recordInput),
+            resolveSlackChannelId: (organisationId) => resolveConnectionSlackChannel(client, organisationId),
+            enqueueSlackAlert: (enqueueInput) => enqueueConnectionSlackAlert(client, enqueueInput),
+          },
+          {
+            kind: notice.kind,
+            installationId: notice.installationId,
+            organisationId: notice.organisationId,
+            accountLogin: notice.accountLogin,
+            health: notice.health as GitHubConnectionNotice["health"],
+            diagnostic: notice.diagnostic as GitHubConnectionNotice["diagnostic"],
+            occurredAt: notice.occurredAt,
+            connectionHref: "/app/integrations",
+          },
+        ),
+      reconcileClaim: async (claim: ClaimedGitHubConnectionReconciliation) => {
+        const repositoryIds = await listSelectedRepositoryIds(client, claim.installationUuid);
+        const installationToken = await dependencies.createInstallationToken({
+          installationId: claim.providerInstallationId,
+          repositoryIds,
+          appJwt,
+        });
+        return reconcileGitHubConnection(
+          {
+            readSnapshot: (snapshotInput) => dependencies.readInstallationSnapshot(snapshotInput),
+            provideCredentials: async () => ({ appJwt, installationToken: installationToken.token }),
+            loadStoredRepositories: (installationUuid) => listStoredRepositories(client, installationUuid),
+            finalize: (finalizeInput) => finalizeReconciliationRun(client, {
+              ...finalizeInput,
+              workerId: executionId,
+            }),
+          },
+          claim,
+        );
+      },
+    },
+    {
+      executionId,
+      maximumWebhookDeliveries: environment.maximumWebhookDeliveries,
+      maximumInstallations: environment.maximumInstallations,
+      timeBudgetMs: environment.timeBudgetMs,
+      signal: input.signal,
+    },
+  );
+
+  return { executionId, summary };
+}
+
+export async function runGitHubConnectionReconcileCli(input: {
+  environment: Record<string, string | undefined>;
+  dependencies?: Partial<GitHubConnectionReconcileRuntimeDependencies>;
+  signal?: AbortSignal;
+  stdout?: (value: string) => void;
+  stderr?: (value: string) => void;
+}): Promise<number> {
   const executionId = randomUUID();
+  const stdout = input.stdout ?? ((value: string) => process.stdout.write(value));
+  const stderr = input.stderr ?? ((value: string) => process.stderr.write(value));
+  try {
+    const result = await runGitHubConnectionReconcile({
+      environment: input.environment,
+      executionId,
+      signal: input.signal,
+      dependencies: input.dependencies,
+    });
+    stdout(`${summariseCycleForLog(result.executionId, result.summary)}\n`);
+    return 0;
+  } catch {
+    stderr(`github-connection-reconcile execution=${executionId} failed\n`);
+    return 1;
+  }
+}
+
+async function main(): Promise<void> {
   const controller = new AbortController();
   const onAbortSignal = () => controller.abort();
   process.once("SIGTERM", onAbortSignal);
   process.once("SIGINT", onAbortSignal);
-  let failure: unknown = null;
   try {
-    const environment = parseCycleEnvironment(process.env);
-    const config = getGitHubConnectionConfig();
-    const service = createSupabaseServiceClient() as unknown as ServiceClient;
-    const client = asStoreClient(service);
-    const appJwt = await createAppJwt({ appId: config.appId, privateKey: config.privateKey }, new Date());
-
-    const summary = await runGitHubConnectionCycle(
-      {
-        claimConnectionDeliveries: async (limit) => {
-          const { data, error } = await service.rpc("claim_github_connection_webhook_deliveries_server", {
-            target_limit: limit,
-          });
-          if (error || !Array.isArray(data)) throw new Error("GitHub connection cycle store is unavailable");
-          return data.map((row) => {
-            const record = row as Record<string, unknown>;
-            return {
-              id: record.id,
-              attemptCount: record.attempt_count,
-              providerDeliveryId: record.provider_delivery_id,
-              eventName: record.event_name,
-              providerInstallationId: record.provider_installation_id,
-            };
-          });
-        },
-        finalizeConnectionDelivery: async (delivery, outcome, diagnosticCode) => {
-          const { data, error } = await service.rpc("finalize_github_webhook_delivery_server", {
-            target_delivery_id: delivery.id,
-            target_attempt_count: delivery.attemptCount,
-            target_status: outcome,
-            target_diagnostic_code: diagnosticCode,
-          });
-          if (error || typeof data !== "boolean") throw new Error("GitHub connection cycle store is unavailable");
-          return data;
-        },
-        scheduleConnection: (providerInstallationId) =>
-          scheduleConnectionReconciliation(client, providerInstallationId),
-        claimDueInstallations: async (limit) => {
-          const runs: StoredReconciliationRun[] = await claimDueReconciliations(client, {
-            workerId: executionId,
-            limit,
-            nowIso: new Date().toISOString(),
-          });
-          return runs;
-        },
-        loadInstallationContext: (installationUuid) => loadInstallationContext(client, installationUuid),
-        notifyTransition: (notice: {
-          kind: "incident" | "recovery";
-          installationId: string;
-          organisationId: string;
-          accountLogin: string;
-          health: "partially_unavailable" | "owner_action_required" | "disconnected" | "healthy" | "retrying";
-          diagnostic: string | null;
-          occurredAt: string;
-        }) =>
-          queueGitHubConnectionNotice(
-            {
-              recordNotice: (recordInput) => recordConnectionNotice(client, recordInput),
-              resolveSlackChannelId: (organisationId) => resolveConnectionSlackChannel(client, organisationId),
-              enqueueSlackAlert: (enqueueInput) => enqueueConnectionSlackAlert(client, enqueueInput),
-            },
-            {
-              kind: notice.kind,
-              installationId: notice.installationId,
-              organisationId: notice.organisationId,
-              accountLogin: notice.accountLogin,
-              health: notice.health as GitHubConnectionNotice["health"],
-              diagnostic: notice.diagnostic as GitHubConnectionNotice["diagnostic"],
-              occurredAt: notice.occurredAt,
-              connectionHref: "/app/integrations",
-            },
-          ),
-        reconcileClaim: async (claim: ClaimedGitHubConnectionReconciliation) => {
-          const repositoryIds = await listSelectedRepositoryIds(client, claim.installationUuid);
-          const installationToken = await createInstallationToken({
-            installationId: claim.providerInstallationId,
-            repositoryIds,
-            appJwt,
-          });
-          return reconcileGitHubConnection(
-            {
-              readSnapshot: (input) => readInstallationSnapshot(input),
-              provideCredentials: async () => ({ appJwt, installationToken: installationToken.token }),
-              loadStoredRepositories: (installationUuid) => listStoredRepositories(client, installationUuid),
-              finalize: (input) => finalizeReconciliationRun(client, { ...input, workerId: executionId }),
-            },
-            claim,
-          );
-        },
-      },
-      {
-        executionId,
-        maximumWebhookDeliveries: environment.maximumWebhookDeliveries,
-        maximumInstallations: environment.maximumInstallations,
-        timeBudgetMs: environment.timeBudgetMs,
-        signal: controller.signal,
-      },
-    );
-    process.stdout.write(`${summariseCycleForLog(executionId, summary)}\n`);
-  } catch (error) {
-    failure = error;
-    const message = error instanceof Error ? error.message : "GitHub connection cycle failed";
-    process.stderr.write(`github-connection-reconcile execution=${executionId} error=${message}\n`);
+    process.exitCode = await runGitHubConnectionReconcileCli({
+      environment: process.env,
+      signal: controller.signal,
+    });
   } finally {
     process.removeListener("SIGTERM", onAbortSignal);
     process.removeListener("SIGINT", onAbortSignal);
   }
-  process.exitCode = exitCodeForCycle(failure);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
