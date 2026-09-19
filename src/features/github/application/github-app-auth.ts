@@ -4,6 +4,7 @@ import { importPKCS8, SignJWT } from "jose";
 import { z } from "zod";
 
 import { throwIfGitHubRateLimited } from "./github-collection-error";
+import { GITHUB_API_VERSION } from "./github-user-oauth";
 
 type FetchLike = typeof fetch;
 
@@ -89,7 +90,7 @@ export async function createInstallationToken(input: {
           Authorization: `Bearer ${parsed.data.appJwt}`,
           "Content-Type": "application/json",
           "User-Agent": "ComplianceHub-GitHub-App",
-          "X-GitHub-Api-Version": "2026-03-10",
+          "X-GitHub-Api-Version": GITHUB_API_VERSION,
         },
         body: JSON.stringify({
           repository_ids: parsed.data.repositoryIds,
