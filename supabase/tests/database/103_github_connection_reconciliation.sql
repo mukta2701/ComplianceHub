@@ -2,6 +2,7 @@ create extension if not exists dblink with schema extensions;
 
 begin;
 set local session_replication_role = replica;
+delete from public.github_webhook_deliveries where provider_delivery_id in ('conn-exclusivity-1', 'mon-exclusivity-1');
 delete from public.audit_events where organisation_id in (
   '78000000-0000-0000-0000-000000000101','78000000-0000-0000-0000-000000000102'
 );
@@ -403,10 +404,85 @@ reset statement_timeout;
 select extensions.dblink_exec('reconcile_holder','rollback');
 select extensions.dblink_disconnect('reconcile_holder');
 
+insert into public.github_webhook_deliveries(
+  provider_installation_id, provider_delivery_id, event_name, payload_sha256, status
+) values
+ (78101, 'conn-exclusivity-1', 'installation', repeat('a', 64), 'queued'),
+ (78101, 'mon-exclusivity-1', 'workflow_run', repeat('b', 64), 'queued');
+set role service_role;
+select is(
+  (select pg_catalog.string_agg(claimed.provider_delivery_id, ',' order by claimed.provider_delivery_id)
+   from public.claim_github_webhook_deliveries_server(10) claimed),
+  'mon-exclusivity-1',
+  'the Monitoring claim takes only Monitoring-class deliveries'
+);
+select is(
+  (select pg_catalog.string_agg(claimed.provider_delivery_id, ',' order by claimed.provider_delivery_id)
+   from public.claim_github_connection_webhook_deliveries_server(10) claimed),
+  'conn-exclusivity-1',
+  'the connection claim takes only connection-class deliveries'
+);
+select is(
+  (select event_name from public.github_webhook_deliveries where provider_delivery_id = 'conn-exclusivity-1'),
+  'installation',
+  'claimed connection deliveries keep their event name for routing'
+);
+select is(
+  (select pg_catalog.count(*) from public.claim_github_webhook_deliveries_server(10)),
+  0::bigint,
+  'a claimed Monitoring delivery is not visible twice'
+);
+select is(
+  (select pg_catalog.count(*) from public.claim_github_connection_webhook_deliveries_server(10)),
+  0::bigint,
+  'a claimed connection delivery is not visible twice'
+);
+reset role;
+update public.github_webhook_deliveries
+set status = 'failed', last_attempted_at = now() - interval '1 minute',
+    processed_at = now() - interval '1 minute', diagnostic_code = 'internal_error',
+    received_at = now() - interval '2 minutes'
+where provider_delivery_id = 'conn-exclusivity-1';
+set role service_role;
+select is(
+  (select pg_catalog.count(*) from public.claim_github_connection_webhook_deliveries_server(10)),
+  1::bigint,
+  'a failed connection delivery becomes reclaimable'
+);
+select is(
+  public.finalize_github_webhook_delivery_server(
+    (select id from public.github_webhook_deliveries where provider_delivery_id = 'conn-exclusivity-1'),
+    2, 'processed', null
+  ),
+  true,
+  'the shared finaliser completes connection deliveries'
+);
+select is(
+  public.schedule_github_connection_reconciliation_server(78101),
+  true,
+  'a known installation is prompted for reconciliation'
+);
+select ok(
+  (select next_reconciliation_at from public.github_installations where provider_installation_id = 78101) is not null,
+  'the prompt records a due time on the installation'
+);
+select is(
+  public.schedule_github_connection_reconciliation_server(999999999),
+  false,
+  'an unknown installation schedules nothing'
+);
+select throws_ok(
+  $$ select public.schedule_github_connection_reconciliation_server(0) $$,
+  '22023', null,
+  'an invalid schedule request is rejected'
+);
+reset role;
+
 select * from finish();
 
 begin;
 set local session_replication_role = replica;
+delete from public.github_webhook_deliveries where provider_delivery_id in ('conn-exclusivity-1', 'mon-exclusivity-1');
 delete from public.audit_events where organisation_id in (
   '78000000-0000-0000-0000-000000000101','78000000-0000-0000-0000-000000000102'
 );

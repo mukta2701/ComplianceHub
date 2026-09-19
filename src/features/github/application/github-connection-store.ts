@@ -169,3 +169,40 @@ export async function finalizeReconciliationRun(
   if (!parsed.success) unavailable();
   return parsed.data;
 }
+
+const selectableRepositoryRowSchema = z.object({
+  provider_repository_id: positiveIdSchema,
+  selected: z.boolean(),
+  available: z.boolean(),
+}).passthrough();
+
+export async function scheduleConnectionReconciliation(
+  client: ConnectionStoreClient,
+  providerInstallationId: number,
+): Promise<boolean> {
+  if (!positiveIdSchema.safeParse(providerInstallationId).success) unavailable();
+  const { data, error } = await client.rpc("schedule_github_connection_reconciliation_server", {
+    target_provider_installation_id: providerInstallationId,
+  });
+  if (error || typeof data !== "boolean") unavailable();
+  return data;
+}
+
+export async function listSelectedRepositoryIds(
+  client: ConnectionStoreClient,
+  installationUuid: string,
+): Promise<number[]> {
+  if (!uuidSchema.safeParse(installationUuid).success) unavailable();
+  const { data, error } = await client
+    .from("github_repositories")
+    .select("provider_repository_id,selected,available")
+    .eq("installation_id", installationUuid);
+  if (error) unavailable();
+  const parsed = z.array(selectableRepositoryRowSchema).safeParse(data);
+  if (!parsed.success) unavailable();
+  return parsed.data
+    .filter((row) => row.selected && row.available)
+    .map((row) => row.provider_repository_id)
+    .sort((left, right) => left - right)
+    .slice(0, 100);
+}

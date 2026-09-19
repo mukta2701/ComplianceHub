@@ -17,6 +17,7 @@ function row(overrides: Partial<ClaimedWebhookDelivery> = {}): ClaimedWebhookDel
   return {
     id: "33333333-3333-4333-8333-333333333333",
     providerDeliveryId: "123e4567-e89b-12d3-a456-426614174000",
+    eventName: "workflow_run",
     attemptCount: 1,
     providerInstallationId: 71,
     providerRepositoryId: 91,
@@ -30,6 +31,7 @@ function deps(rows: ClaimedWebhookDelivery[]): WebhookWorkerDependencies & {
   finalise: ReturnType<typeof vi.fn>;
   runCollection: ReturnType<typeof vi.fn>;
   reconcile: ReturnType<typeof vi.fn>;
+  scheduleConnectionReconciliation: ReturnType<typeof vi.fn>;
 } {
   return {
     claim: vi.fn().mockResolvedValue(rows),
@@ -44,6 +46,7 @@ function deps(rows: ClaimedWebhookDelivery[]): WebhookWorkerDependencies & {
       terminalRuns,
     }),
     reconcile: vi.fn().mockResolvedValue({ runsConsidered: 1, materialised: 1, unchanged: 0, awaitingApproval: 0, needsAttention: 0 }),
+    scheduleConnectionReconciliation: vi.fn().mockResolvedValue(true),
   };
 }
 
@@ -163,6 +166,7 @@ describe("drainGitHubWebhookDeliveries", () => {
       {
         id: row().id,
         provider_delivery_id: "has space",
+        event_name: "workflow_run",
         attempt_count: 1,
         provider_installation_id: 71,
         provider_repository_id: 91,
@@ -172,6 +176,7 @@ describe("drainGitHubWebhookDeliveries", () => {
       {
         id: "44444444-4444-4444-8444-444444444444",
         provider_delivery_id: "delivery:retry/v2!",
+        event_name: "workflow_run",
         attempt_count: 1,
         provider_installation_id: 71,
         provider_repository_id: 92,
@@ -264,5 +269,48 @@ describe("drainGitHubWebhookDeliveries", () => {
     expect(input.finalise).toHaveBeenNthCalledWith(1, row(), "failed", "internal_error");
     expect(input.finalise).toHaveBeenNthCalledWith(2, second, "failed", "internal_error");
     expect(result).toEqual({ claimed: 2, processed: 0, ignored: 0, failed: 2, ownershipLost: 0 });
+  });
+});
+
+describe("drainGitHubWebhookDeliveries connection events", () => {
+  function connectionDeps(rows: ClaimedWebhookDelivery[]) {
+    const input = deps(rows);
+    return {
+      ...input,
+      scheduleConnectionReconciliation: vi.fn().mockResolvedValue(true),
+    };
+  }
+
+  it.each(["installation", "installation_repositories", "repository"] as const)(
+    "schedules connection reconciliation for %s without collecting or materialising",
+    async (eventName) => {
+      const delivery = { ...row(), eventName };
+      const input = connectionDeps([delivery]);
+      const result = await drainGitHubWebhookDeliveries(input, { limit: 20 });
+      expect(result).toEqual({ claimed: 1, processed: 1, ignored: 0, failed: 0, ownershipLost: 0 });
+      expect(input.scheduleConnectionReconciliation).toHaveBeenCalledWith(71);
+      expect(input.runCollection).not.toHaveBeenCalled();
+      expect(input.reconcile).not.toHaveBeenCalled();
+      expect(input.finalise).toHaveBeenCalledWith(delivery, "processed", null);
+    },
+  );
+
+  it("fails a connection event no installation can own without collecting", async () => {
+    const input = connectionDeps([{ ...row(), eventName: "installation" }]);
+    input.scheduleConnectionReconciliation.mockResolvedValue(false);
+    const result = await drainGitHubWebhookDeliveries(input, { limit: 20 });
+    expect(result).toEqual({ claimed: 1, processed: 0, ignored: 0, failed: 1, ownershipLost: 0 });
+    expect(input.runCollection).not.toHaveBeenCalled();
+    expect(input.reconcile).not.toHaveBeenCalled();
+    expect(input.finalise).toHaveBeenCalledWith(expect.anything(), "failed", "invalid_response");
+  });
+
+  it("fails closed when connection scheduling throws", async () => {
+    const input = connectionDeps([{ ...row(), eventName: "repository" }]);
+    input.scheduleConnectionReconciliation.mockRejectedValue(new Error("store unavailable"));
+    const result = await drainGitHubWebhookDeliveries(input, { limit: 20 });
+    expect(result).toEqual({ claimed: 1, processed: 0, ignored: 0, failed: 1, ownershipLost: 0 });
+    expect(input.runCollection).not.toHaveBeenCalled();
+    expect(input.finalise).toHaveBeenCalledWith(expect.anything(), "failed", "internal_error");
   });
 });
