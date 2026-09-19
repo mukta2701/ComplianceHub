@@ -301,24 +301,42 @@ export async function getAppInstallation(input: { appJwt: string; installationId
   }
 }
 
+export const MAX_GITHUB_DISCOVERY_PAGES = 100;
+export const MAX_DISCOVERED_REPOSITORIES = 10_000;
+
 export async function collectUserInstallationRepositories(input: { userToken: string; installationId: number; fetchImpl?: FetchLike }): Promise<UserInstallationRepository[]> {
   if (!Number.isSafeInteger(input.installationId) || input.installationId <= 0) throw verificationError();
-  const url = new URL(`/user/installations/${input.installationId}/repositories?per_page=100`, API_ORIGIN);
-  const authorizationValue = input.userToken;
-  const response = await fetchVerifiedGitHubApi(url, authorizationValue, input.fetchImpl ?? fetch);
-  let parsed: z.infer<typeof repositoryListSchema>;
-  try { parsed = repositoryListSchema.parse(await response.json()); } catch { throw verificationError(); }
-  if (parsed.total_count > 100 || nextUrl(response)) throw verificationError();
-  const ids = new Set(parsed.repositories.map((repository) => repository.id));
-  if (ids.size !== parsed.repositories.length || parsed.total_count !== parsed.repositories.length) throw verificationError();
-  return parsed.repositories.map((repository) => ({
-    id: repository.id,
-    owner: repository.owner.login,
-    name: repository.name,
-    fullName: repository.full_name,
-    htmlUrl: repository.html_url,
-    visibility: repository.visibility,
-    archived: repository.archived,
-    defaultBranch: repository.default_branch,
-  }));
+  const fetchImpl = input.fetchImpl ?? fetch;
+  let url = new URL(`/user/installations/${input.installationId}/repositories?per_page=100`, API_ORIGIN);
+  const collected: UserInstallationRepository[] = [];
+  let expectedCount: number | null = null;
+  for (let page = 0; page < MAX_GITHUB_DISCOVERY_PAGES; page += 1) {
+    const response = await fetchVerifiedGitHubApi(url, input.userToken, fetchImpl);
+    let parsed: z.infer<typeof repositoryListSchema>;
+    try { parsed = repositoryListSchema.parse(await response.json()); } catch { throw verificationError(); }
+    if (parsed.total_count > MAX_DISCOVERED_REPOSITORIES) throw verificationError();
+    expectedCount ??= parsed.total_count;
+    if (parsed.total_count !== expectedCount) throw verificationError();
+    collected.push(...parsed.repositories.map((repository) => ({
+      id: repository.id,
+      owner: repository.owner.login,
+      name: repository.name,
+      fullName: repository.full_name,
+      htmlUrl: repository.html_url,
+      visibility: repository.visibility,
+      archived: repository.archived,
+      defaultBranch: repository.default_branch,
+    })));
+    if (collected.length > MAX_DISCOVERED_REPOSITORIES) throw verificationError();
+    const ids = collected.map((repository) => repository.id);
+    if (new Set(ids).size !== ids.length) throw verificationError();
+    const next = nextUrl(response);
+    if (!next) {
+      if (collected.length !== expectedCount) throw verificationError();
+      return collected;
+    }
+    if (page === MAX_GITHUB_DISCOVERY_PAGES - 1) throw verificationError();
+    url = next;
+  }
+  throw verificationError();
 }

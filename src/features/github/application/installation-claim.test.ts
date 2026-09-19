@@ -100,10 +100,39 @@ describe("claimInstallation", () => {
       [{ ...verified.repositories[0], fullName: "adtecher/other" }],
       [{ ...verified.repositories[0], archived: "yes" as unknown as boolean }],
       [verified.repositories[0], { ...verified.repositories[0] }],
-      Array.from({ length: 101 }, (_, index) => ({ ...verified.repositories[0], id: index + 1, name: `repo-${index}`, fullName: `adtecher/repo-${index}` })),
     ]) {
       await expect(claimInstallation({ ...verified, repositories }, { allowedAccountId: 99, persist })).rejects.toThrow("GitHub installation verification failed");
     }
+    expect(persist).not.toHaveBeenCalled();
+  });
+
+  it("accepts 101 unique repositories in canonical provider-ID order", async () => {
+    const persist = vi.fn().mockResolvedValue("installation-uuid");
+    const shuffled = Array.from({ length: 101 }, (_, index) => ({
+      ...verified.repositories[0],
+      id: 201 - index,
+      name: `repo-${201 - index}`,
+      fullName: `adtecher/repo-${201 - index}`,
+    }));
+    await expect(claimInstallation({ ...verified, repositories: shuffled }, { allowedAccountId: 99, persist })).resolves.toBe("installation-uuid");
+    expect(persist).toHaveBeenCalledWith(expect.objectContaining({
+      repositories: expect.arrayContaining([expect.objectContaining({ id: 101 }), expect.objectContaining({ id: 201 })]),
+    }));
+    const stored = persist.mock.calls[0]?.[0] as { repositories: Array<{ id: number }> };
+    expect(stored.repositories.map((repository) => repository.id)).toEqual(
+      Array.from({ length: 101 }, (_, index) => 101 + index),
+    );
+  });
+
+  it("rejects 10,001 repositories before persistence", async () => {
+    const persist = vi.fn();
+    const repositories = Array.from({ length: 10_001 }, (_, index) => ({
+      ...verified.repositories[0],
+      id: index + 1,
+      name: `repo-${index + 1}`,
+      fullName: `adtecher/repo-${index + 1}`,
+    }));
+    await expect(claimInstallation({ ...verified, repositories }, { allowedAccountId: 99, persist })).rejects.toThrow("GitHub installation verification failed");
     expect(persist).not.toHaveBeenCalled();
   });
 
