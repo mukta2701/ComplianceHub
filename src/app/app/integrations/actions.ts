@@ -145,6 +145,38 @@ export async function setGitHubRepositorySelectedAction(formData: FormData): Pro
   }
 }
 
+const disconnectFailure = {
+  ok: false,
+  message: "Could not disconnect the GitHub installation. Please try again.",
+} as const;
+
+const disconnectInstallationSchema = z.object({
+  installationId: z.uuid(),
+}).strict();
+
+export async function disconnectGitHubInstallationAction(formData: FormData): Promise<GitHubMutationResult> {
+  try {
+    const { supabase, user, organisation } = await requireGitHubOwner();
+    const parsed = disconnectInstallationSchema.safeParse(Object.fromEntries(formData));
+    if (!parsed.success) return disconnectFailure;
+    await enforceRateLimit(`github-disconnect:${organisation.id}:${user.id}`, {
+      limit: 5,
+      windowMs: 60_000,
+    });
+    const { data, error } = await supabase.rpc("disconnect_github_installation", {
+      target_installation_id: parsed.data.installationId,
+    });
+    if (error || data !== true) return disconnectFailure;
+    revalidatePath("/app/integrations");
+    return {
+      ok: true,
+      message: "GitHub installation disconnected. Repositories will no longer be checked. The GitHub-side installation is unchanged.",
+    };
+  } catch {
+    return disconnectFailure;
+  }
+}
+
 export async function addConnectionAction(formData: FormData) {
   const { supabase, user, organisation } = await requireConnectionManager();
   await enforceRateLimit(`connection:${user.id}`, { limit: 10, windowMs: 60_000 });
