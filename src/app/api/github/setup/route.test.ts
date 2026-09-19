@@ -27,9 +27,12 @@ import { GET } from "./route";
 describe("GET /api/github/setup", () => {
   beforeEach(() => {
     vi.stubEnv("NEXT_PUBLIC_SITE_URL", "https://compliance.example");
+    vi.stubEnv("GITHUB_APP_ID", "123456");
     vi.stubEnv("GITHUB_APP_SLUG", "compliancehub-app");
     vi.stubEnv("GITHUB_APP_CLIENT_ID", "client-id");
     vi.stubEnv("GITHUB_APP_CLIENT_SECRET", "client-secret");
+    vi.stubEnv("GITHUB_APP_PRIVATE_KEY", "private-key");
+    vi.stubEnv("GITHUB_WEBHOOK_SECRET", "webhook-secret");
     vi.stubEnv("GITHUB_ALLOWED_ACCOUNT_ID", "99");
     hoisted.context = { organisation: { id: ORG_ID }, user: { id: ACTOR_ID }, membership: { role: "owner" } };
     hoisted.cookieSet.mockReset();

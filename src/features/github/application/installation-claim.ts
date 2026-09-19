@@ -3,7 +3,7 @@ import "server-only";
 import { z } from "zod";
 
 import type { GitHubAccountType } from "./github-account-policy";
-import { READ_PERMISSIONS } from "./github-app-auth";
+import { hasExactReadPermissions, READ_PERMISSIONS } from "./github-app-auth";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
 export type VerifiedInstallationClaim = {
@@ -55,12 +55,6 @@ function requiredAllowedAccountId(value: number | undefined): number {
   const parsed = safeId.safeParse(value ?? Number(process.env.GITHUB_ALLOWED_ACCOUNT_ID));
   if (!parsed.success) throw new Error("GitHub installation verification is not configured");
   return parsed.data;
-}
-
-function exactPermissions(value: Record<string, string>): value is typeof READ_PERMISSIONS {
-  const expectedEntries = Object.entries(READ_PERMISSIONS).sort(([a], [b]) => a.localeCompare(b));
-  const actualEntries = Object.entries(value).sort(([a], [b]) => a.localeCompare(b));
-  return JSON.stringify(actualEntries) === JSON.stringify(expectedEntries);
 }
 
 function canonicalizeRepositories(
@@ -133,7 +127,7 @@ export async function claimInstallation(
     if (app.id !== claim.requestedInstallationId) throw failure();
     if (app.repositorySelection !== "selected") throw failure();
     if (app.account.type !== allowedAccountType || app.account.id !== allowedAccountId) throw failure();
-    if (app.suspendedAt !== null || !exactPermissions(app.permissions)) throw failure();
+    if (app.suspendedAt !== null || !hasExactReadPermissions(app.permissions)) throw failure();
     const accountLogin = login.parse(app.account.login);
     const repositories = canonicalizeRepositories(claim.repositories, accountLogin);
     const canonical: CanonicalInstallationClaim = {
