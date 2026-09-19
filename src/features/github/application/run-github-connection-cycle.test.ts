@@ -53,6 +53,7 @@ function deps(overrides: Partial<GitHubConnectionCycleDependencies> = {}) {
       decision: { health: "healthy", retryAt: null, openIncident: false, closeIncident: false, diagnostic: null },
       repositoriesSeen: 2,
     }),
+    notifyTransition: vi.fn().mockResolvedValue({ inAppQueued: 1, slackQueued: 0 }),
     ...overrides,
   };
 }
@@ -199,5 +200,58 @@ describe("runGitHubConnectionCycle", () => {
     expect(summary).toMatchObject({ webhookDeliveriesClaimed: 1, ownershipLost: 1 });
     expect(dependencies.finalizeConnectionDelivery).not.toHaveBeenCalled();
     expect(dependencies.scheduleConnection).not.toHaveBeenCalled();
+  });
+});
+
+describe("runGitHubConnectionCycle transition notices", () => {
+  it("notifies an incident when reconciliation opens one", async () => {
+    const dependencies = deps({
+      claimDueInstallations: vi.fn().mockResolvedValue([dueRun()]),
+      reconcileClaim: vi.fn().mockResolvedValue({
+        decision: { health: "partially_unavailable", retryAt: null, openIncident: true, closeIncident: false, diagnostic: "repository_unavailable" },
+        repositoriesSeen: 1,
+      }),
+    });
+    await runGitHubConnectionCycle(dependencies, INPUT);
+    expect(dependencies.notifyTransition).toHaveBeenCalledTimes(1);
+    expect(dependencies.notifyTransition).toHaveBeenCalledWith({
+      kind: "incident",
+      installationId: INSTALLATION_UUID,
+      organisationId: "55555555-5555-4555-8555-555555555555",
+      accountLogin: "Adtecher",
+      health: "partially_unavailable",
+      diagnostic: "repository_unavailable",
+      occurredAt: expect.any(String),
+    });
+  });
+
+  it("notifies recovery when reconciliation closes an incident", async () => {
+    const dependencies = deps({
+      claimDueInstallations: vi.fn().mockResolvedValue([dueRun()]),
+      reconcileClaim: vi.fn().mockResolvedValue({
+        decision: { health: "healthy", retryAt: null, openIncident: false, closeIncident: true, diagnostic: null },
+        repositoriesSeen: 1,
+      }),
+    });
+    const summary = await runGitHubConnectionCycle(dependencies, INPUT);
+    expect(summary).toMatchObject({ recovered: 1 });
+    expect(dependencies.notifyTransition).toHaveBeenCalledWith(expect.objectContaining({ kind: "recovery", health: "healthy" }));
+  });
+
+  it("stays quiet without a transition and counts a failed notice as lost", async () => {
+    const quiet = deps({ claimDueInstallations: vi.fn().mockResolvedValue([dueRun()]) });
+    await runGitHubConnectionCycle(quiet, INPUT);
+    expect(quiet.notifyTransition).not.toHaveBeenCalled();
+
+    const failing = deps({
+      claimDueInstallations: vi.fn().mockResolvedValue([dueRun()]),
+      reconcileClaim: vi.fn().mockResolvedValue({
+        decision: { health: "owner_action_required", retryAt: null, openIncident: true, closeIncident: false, diagnostic: "permission_mismatch" },
+        repositoriesSeen: 0,
+      }),
+      notifyTransition: vi.fn().mockRejectedValue(new Error("notice store unavailable")),
+    });
+    const summary = await runGitHubConnectionCycle(failing, INPUT);
+    expect(summary).toMatchObject({ actionRequired: 1, ownershipLost: 1 });
   });
 });

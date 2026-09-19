@@ -171,3 +171,103 @@ describe("connection scheduling helpers", () => {
     expect(client.eq).toHaveBeenCalledWith("installation_id", "22222222-2222-4222-8222-222222222222");
   });
 });
+
+describe("connection notice recording", () => {
+  it("records an incident notice through the service RPC", async () => {
+    const client = clientDouble({ data: null, error: null }, {
+      data: { incident_id: "44444444-4444-4444-8444-444444444444", is_new: true, notified_user_ids: ["66666666-6666-4666-8666-666666666666"] },
+      error: null,
+    });
+    const { recordConnectionNotice } = await import("./github-connection-store");
+    const result = await recordConnectionNotice(client as never, {
+      organisationId: "33333333-3333-4333-8333-333333333333",
+      installationId: "22222222-2222-4222-8222-222222222222",
+      kind: "incident",
+      diagnostic: "repository_unavailable",
+      accountLogin: "Adtecher",
+    });
+    expect(client.rpc).toHaveBeenCalledWith("record_github_connection_notice_server", {
+      target_organisation_id: "33333333-3333-4333-8333-333333333333",
+      target_installation_id: "22222222-2222-4222-8222-222222222222",
+      target_kind: "incident",
+      target_diagnostic_code: "repository_unavailable",
+      target_account_login: "Adtecher",
+    });
+    expect(result).toEqual({
+      incidentId: "44444444-4444-4444-8444-444444444444",
+      isNew: true,
+      notifiedUserIds: ["66666666-6666-4666-8666-666666666666"],
+    });
+  });
+
+  it("resolves the Slack channel to the first enabled destination", async () => {
+    const client = clientDouble(
+      { data: [{ id: "55555555-5555-4555-8555-555555555555", type: "slack", enabled: true, revoked_at: null }], error: null },
+      { data: null, error: null },
+    );
+    const { resolveConnectionSlackChannel } = await import("./github-connection-store");
+    await expect(resolveConnectionSlackChannel(client as never, "33333333-3333-4333-8333-333333333333")).resolves.toBe(
+      "55555555-5555-4555-8555-555555555555",
+    );
+    expect(client.from).toHaveBeenCalledWith("alert_channels");
+  });
+
+  it("returns null when no Slack destination is configured", async () => {
+    const client = clientDouble({ data: [], error: null }, { data: null, error: null });
+    const { resolveConnectionSlackChannel } = await import("./github-connection-store");
+    await expect(resolveConnectionSlackChannel(client as never, "33333333-3333-4333-8333-333333333333")).resolves.toBeNull();
+  });
+
+  it("enqueues a connection Slack alert with a validated lease", async () => {
+    const client = clientDouble(
+      { data: null, error: null },
+      { data: [{ delivery_id: "88888888-8888-4888-8888-888888888888", lock_token: "99999999-9999-4999-8999-999999999999" }], error: null },
+    );
+    const { enqueueConnectionSlackAlert } = await import("./github-connection-store");
+    const lease = await enqueueConnectionSlackAlert(client as never, {
+      organisationId: "33333333-3333-4333-8333-333333333333",
+      channelId: "55555555-5555-4555-8555-555555555555",
+      installationId: "22222222-2222-4222-8222-222222222222",
+      kind: "incident",
+      diagnostic: "permission_mismatch",
+      payload: {
+        type: "connection_health",
+        severity: "high",
+        title: "GitHub connection needs attention",
+        controlRef: "GitHub connection",
+        subjectId: "22222222-2222-4222-8222-222222222222",
+        detail: "Access needs an Owner decision.",
+      },
+    });
+    expect(client.rpc).toHaveBeenCalledWith(
+      "enqueue_github_connection_alert_delivery",
+      expect.objectContaining({
+        target_organisation_id: "33333333-3333-4333-8333-333333333333",
+        target_channel_id: "55555555-5555-4555-8555-555555555555",
+        target_installation_id: "22222222-2222-4222-8222-222222222222",
+        target_kind: "incident",
+      }),
+    );
+    expect(lease).toEqual({ deliveryId: "88888888-8888-4888-8888-888888888888", lockToken: "99999999-9999-4999-8999-999999999999" });
+  });
+
+  it("treats an already-queued alert as no new lease", async () => {
+    const client = clientDouble({ data: null, error: null }, { data: [], error: null });
+    const { enqueueConnectionSlackAlert } = await import("./github-connection-store");
+    await expect(enqueueConnectionSlackAlert(client as never, {
+      organisationId: "33333333-3333-4333-8333-333333333333",
+      channelId: "55555555-5555-4555-8555-555555555555",
+      installationId: "22222222-2222-4222-8222-222222222222",
+      kind: "incident",
+      diagnostic: null,
+      payload: {
+        type: "connection_health",
+        severity: "high",
+        title: "GitHub connection needs attention",
+        controlRef: "GitHub connection",
+        subjectId: "22222222-2222-4222-8222-222222222222",
+        detail: "Access needs an Owner decision.",
+      },
+    })).resolves.toBeNull();
+  });
+});
