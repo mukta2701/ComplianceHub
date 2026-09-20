@@ -1,8 +1,10 @@
 # Milestone 1 GitHub integration AWS dev acceptance design
 
-**Status:** Draft for owner review
+**Status:** Approved design
 
 **Decision date:** 20 September 2026
+
+**Approved:** 20 September 2026
 
 **Scope:** Replace the unbuilt company ECS and EventBridge staging acceptance path for Milestone 1. Keep the approved GitHub connection product boundary and complete the pilot in the existing AWS dev environment.
 
