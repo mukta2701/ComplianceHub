@@ -142,7 +142,7 @@ export default async function IntegrationsPage({
   if (!canManageConnections) {
     const [installationResult, repositorySummaryResult] = await Promise.all([
       supabase.from("github_installations")
-        .select("id,account_login,status,repository_selection,permissions_ok")
+        .select("id,account_login,status,repository_selection,permissions_ok,health,health_diagnostic_code,last_successful_reconciliation_at")
         .eq("organisation_id", organisation.id)
         .order("updated_at", { ascending: false }),
       supabase.from("github_repositories")
@@ -170,6 +170,7 @@ export default async function IntegrationsPage({
         })) as GitHubRepositoryConfigurationSummary[]}
         canManageInstallation={false}
         canManageRepositoryScope={false}
+        nowIso={new Date().toISOString()}
       />
     </>;
   }
@@ -189,7 +190,7 @@ export default async function IntegrationsPage({
       .eq("organisation_id", organisation.id)
       .order("created_at", { ascending: false }),
     supabase.from("github_installations")
-      .select("id,account_login,status,repository_selection,permissions_ok")
+      .select("id,account_login,status,repository_selection,permissions_ok,health,health_diagnostic_code,last_successful_reconciliation_at")
       .eq("organisation_id", organisation.id)
       .order("updated_at", { ascending: false }),
     supabase.from("github_repositories")
@@ -271,6 +272,7 @@ export default async function IntegrationsPage({
       })) as GitHubRepositoryConfigurationSummary[]}
       canManageInstallation={connectionsAccess.canManageOperation("manage-github-app")}
       canManageRepositoryScope={connectionsAccess.canManageOperation("manage-github-app")}
+      nowIso={new Date().toISOString()}
     />
     {showDeveloperTools && <DeveloperConnectionTools />}
   </>;

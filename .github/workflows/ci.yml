@@ -41,9 +41,13 @@ jobs:
             image:
               - 'Dockerfile'
               - '.dockerignore'
+              - '.github/workflows/ci.yml'
               - 'package.json'
               - 'package-lock.json'
               - 'next.config.ts'
+              - 'tsconfig.json'
+              - 'scripts/build-runtime-bundles.ts'
+              - 'scripts/github-connection-reconcile.ts'
               - 'src/**'
             db:
               - 'supabase/**'
@@ -95,10 +99,88 @@ jobs:
           test -n "$image_user"
           test "$image_user" != "root"
           test "$image_user" != "0"
-          # The finite runner (dist/github-connection-reconcile.mjs via
-          # build:runtimes) is planned Milestone 1 work and is not implemented
-          # yet, so there is no runner assertion until it lands.
-          ! docker history --no-trunc compliancehub:ci | grep -Eiq '-----BEGIN [A-Z ]*PRIVATE KEY-----[A-Za-z0-9+/=]{40,}'
+
+          fixture_network="compliancehub-runner-ci"
+          fixture_container="compliancehub-runner-store-ci"
+          bundle_container=""
+          runner_log="$RUNNER_TEMP/github-connection-reconcile.log"
+          image_scan="$RUNNER_TEMP/compliancehub-image-inspection.txt"
+          copied_bundle="$RUNNER_TEMP/github-connection-reconcile.mjs"
+          fixture_secret="task8-container-fixture-secret"
+          fixture_encryption_marker="task8-container-encryption-marker"
+          fixture_slack_digest_marker="task8-container-slack-digest-marker"
+          private_key_pem="$(openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 2>/dev/null)"
+          private_key="$(printf '%s\n' "$private_key_pem" | awk '{printf "%s\\n", $0}')"
+          private_key_marker="$(printf '%s\n' "$private_key_pem" | sed -n '2p')"
+          cleanup_runner_smoke() {
+            if [ -n "$bundle_container" ]; then docker rm --force "$bundle_container" >/dev/null 2>&1 || true; fi
+            docker rm --force "$fixture_container" >/dev/null 2>&1 || true
+            docker network rm "$fixture_network" >/dev/null 2>&1 || true
+          }
+          trap 'cleanup_runner_smoke; docker rm --force "$web_container" >/dev/null 2>&1 || true' EXIT
+
+          docker network create "$fixture_network" >/dev/null
+          docker run --detach --name "$fixture_container" --network "$fixture_network" \
+            compliancehub:ci node -e 'require("node:http").createServer((request,response)=>{const body=request.url==="/rest/v1/rpc/claim_github_connection_alert_delivery"?"[]":"[]";response.writeHead(200,{"content-type":"application/json"});response.end(body)}).listen(4400,"0.0.0.0")'
+          for attempt in {1..20}; do
+            if docker exec "$fixture_container" node -e 'fetch("http://127.0.0.1:4400").then(response=>{if(!response.ok)process.exit(1)}).catch(()=>process.exit(1))'; then break; fi
+            sleep 0.25
+          done
+          docker exec "$fixture_container" node -e 'fetch("http://127.0.0.1:4400").then(response=>{if(!response.ok)process.exit(1)}).catch(()=>process.exit(1))'
+
+          set +e
+          timeout 15s docker run --rm --network "$fixture_network" \
+            --env NODE_ENV=development \
+            --env NEXT_PUBLIC_SITE_URL=http://127.0.0.1:3100 \
+            --env NEXT_PUBLIC_SUPABASE_URL=http://compliancehub-runner-store-ci:4400 \
+            --env SUPABASE_SERVICE_ROLE_KEY="$fixture_secret" \
+            --env GITHUB_APP_ID=1 \
+            --env GITHUB_APP_SLUG=fictional-app \
+            --env GITHUB_APP_CLIENT_ID=fictional-client \
+            --env GITHUB_APP_CLIENT_SECRET="$fixture_secret" \
+            --env GITHUB_APP_PRIVATE_KEY="$private_key" \
+            --env GITHUB_WEBHOOK_SECRET="$fixture_secret" \
+            --env GITHUB_ALLOWED_ACCOUNT_ID=99 \
+            --env GITHUB_ALLOWED_ACCOUNT_TYPE=User \
+            --env GITHUB_CONNECTION_MAX_WEBHOOK_DELIVERIES=1 \
+            --env GITHUB_CONNECTION_MAX_INSTALLATIONS=1 \
+            --env GITHUB_CONNECTION_MAX_SLACK_DELIVERIES=1 \
+            --env GITHUB_CONNECTION_TIME_BUDGET_MS=5000 \
+            --env APP_ENCRYPTION_KEY="$fixture_encryption_marker" \
+            --env SLACK_ALLOWED_WEBHOOK_SHA256="$fixture_slack_digest_marker" \
+            compliancehub:ci node dist/github-connection-reconcile.mjs >"$runner_log" 2>&1
+          runner_status=$?
+          set -e
+          cat "$runner_log"
+          test "$runner_status" -eq 0
+          grep -Fq -- 'webhookDeliveriesClaimed=0 installationsClaimed=0' "$runner_log"
+          grep -Fq -- 'slackClaimed=0 slackDelivered=0 slackFailed=0' "$runner_log"
+
+          docker history --no-trunc compliancehub:ci >"$image_scan"
+          docker inspect --format '{{json .Config.Env}}' compliancehub:ci >>"$image_scan"
+          bundle_container="$(docker create compliancehub:ci)"
+          docker cp "$bundle_container:/app/dist/github-connection-reconcile.mjs" "$copied_bundle"
+          docker rm "$bundle_container" >/dev/null
+          bundle_container=""
+
+          assert_pattern_absent() {
+            local mode="$1"
+            local pattern="$2"
+            shift 2
+            set +e
+            if [ "$mode" = fixed ]; then grep -Fq -- "$pattern" "$@"; else grep -Eiq -- "$pattern" "$@"; fi
+            local scan_status=$?
+            set -e
+            case "$scan_status" in
+              0) echo "Sensitive fixture material found in inspected container evidence" >&2; return 1 ;;
+              1) return 0 ;;
+              *) echo "Container evidence scan failed" >&2; return "$scan_status" ;;
+            esac
+          }
+          assert_pattern_absent fixed "$fixture_secret" "$runner_log" "$image_scan" "$copied_bundle"
+          assert_pattern_absent fixed "$fixture_encryption_marker" "$runner_log" "$image_scan" "$copied_bundle"
+          assert_pattern_absent fixed "$fixture_slack_digest_marker" "$runner_log" "$image_scan" "$copied_bundle"
+          assert_pattern_absent fixed "$private_key_marker" "$runner_log" "$image_scan" "$copied_bundle"
 
   application:
     needs: changes
@@ -154,6 +236,16 @@ jobs:
         run: npm run test:integration
       - if: env.HEAVY == 'true'
         run: npm run test:e2e $E2E_ARGS
+      - if: failure() && env.HEAVY == 'true'
+        name: Upload bounded browser failure evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-failure-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            test-results/github-connection-*/test-failed-*.png
+            test-results/github-connection-*/error-context.md
+          if-no-files-found: warn
+          retention-days: 7
 
   secrets:
     runs-on: ubuntu-latest

@@ -8,6 +8,24 @@ import { GITHUB_API_VERSION } from "./github-user-oauth";
 
 type FetchLike = typeof fetch;
 
+type GitHubInstallationTokenErrorKind =
+  | "unauthorized"
+  | "forbidden"
+  | "not_found"
+  | "server"
+  | "network"
+  | "invalid";
+
+class GitHubInstallationTokenError extends Error {
+  readonly kind: GitHubInstallationTokenErrorKind;
+
+  constructor(kind: GitHubInstallationTokenErrorKind, message = "Could not create GitHub installation token") {
+    super(message);
+    this.name = "GitHubInstallationTokenError";
+    this.kind = kind;
+  }
+}
+
 const appConfigSchema = z.object({
   appId: z.string().trim().min(1),
   privateKey: z.string().trim().min(1),
@@ -71,6 +89,7 @@ export async function createInstallationToken(input: {
   repositoryIds: number[];
   appJwt: string;
   fetchImpl?: FetchLike;
+  signal?: AbortSignal;
 }): Promise<{ token: string; expiresAt: string }> {
   const parsed = installationTokenInputSchema.safeParse({
     installationId: input.installationId,
@@ -81,6 +100,9 @@ export async function createInstallationToken(input: {
 
   let response: Response;
   try {
+    input.signal?.throwIfAborted();
+    const timeoutSignal = AbortSignal.timeout(15_000);
+    const signal = input.signal ? AbortSignal.any([input.signal, timeoutSignal]) : timeoutSignal;
     response = await (input.fetchImpl ?? fetch)(
       `https://api.github.com/app/installations/${parsed.data.installationId}/access_tokens`,
       {
@@ -98,20 +120,26 @@ export async function createInstallationToken(input: {
         }),
         cache: "no-store",
         redirect: "error",
-        signal: AbortSignal.timeout(15_000),
+        signal,
       },
     );
+    input.signal?.throwIfAborted();
   } catch {
-    throw new Error("Could not create GitHub installation token");
+    throw new GitHubInstallationTokenError("network");
   }
 
   throwIfGitHubRateLimited(response);
-  if (!response.ok) throw new Error("Could not create GitHub installation token");
+  if (response.status === 401) throw new GitHubInstallationTokenError("unauthorized");
+  if (response.status === 403 || response.status === 422) throw new GitHubInstallationTokenError("forbidden");
+  if (response.status === 404) throw new GitHubInstallationTokenError("not_found");
+  if (response.status >= 500 || !response.ok) throw new GitHubInstallationTokenError("server");
 
   try {
-    const token = installationTokenResponseSchema.parse(await response.json());
+    const body = await response.json();
+    input.signal?.throwIfAborted();
+    const token = installationTokenResponseSchema.parse(body);
     return { token: token.token, expiresAt: token.expires_at };
   } catch {
-    throw new Error("GitHub returned an invalid installation token response");
+    throw new GitHubInstallationTokenError("invalid", "GitHub returned an invalid installation token response");
   }
 }

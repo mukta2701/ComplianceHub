@@ -25,6 +25,40 @@ function clientDouble(selectResult: { data: unknown; error: unknown }, rpcResult
 const INSTALLATION_UUID = "22222222-2222-4222-8222-222222222222";
 
 describe("github-connection-store", () => {
+  it("disables PostgREST retry backoff and binds the shared deadline signal", async () => {
+    const controller = new AbortController();
+    const query = Object.assign(Promise.resolve({
+      data: {
+        provider_installation_id: 77,
+        organisation_id: "33333333-3333-4333-8333-333333333333",
+        health: "healthy",
+        consecutive_reconciliation_failures: 0,
+        account_id: 99,
+        account_login: "Adtecher",
+        account_type: "Organization",
+      },
+      error: null,
+    }), {
+      retry: vi.fn(),
+      abortSignal: vi.fn(),
+    });
+    query.retry.mockImplementation(() => query);
+    query.abortSignal.mockImplementation(() => query);
+    const client = {
+      from: vi.fn().mockReturnValue({
+        select: () => ({
+          eq: () => ({ single: () => query }),
+        }),
+      }),
+      rpc: vi.fn(),
+    };
+    await expect(loadInstallationContext(client as never, INSTALLATION_UUID, controller.signal)).resolves.toMatchObject({
+      providerInstallationId: 77,
+    });
+    expect(query.retry).toHaveBeenCalledWith(false);
+    expect(query.abortSignal).toHaveBeenCalledWith(controller.signal);
+  });
+
   it("claims due runs and validates every returned row", async () => {
     const client = clientDouble(
       { data: null, error: null },
@@ -124,6 +158,39 @@ describe("github-connection-store", () => {
     expect(signal).toBe("opened");
   });
 
+  it("finalises an action-required run without inventing a repository snapshot", async () => {
+    const client = clientDouble({ data: null, error: null }, { data: "opened", error: null });
+    await expect(finalizeReconciliationRun(client as never, {
+      runId: "11111111-1111-4111-8111-111111111111",
+      workerId: "99999999-9999-4999-8999-999999999999",
+      outcome: "action_required",
+      diagnostic: "installation_suspended",
+      nextAttemptAt: null,
+      snapshot: null,
+    })).resolves.toBe("opened");
+    expect(client.rpc).toHaveBeenCalledWith("finalize_github_connection_reconciliation_server", {
+      target_run_id: "11111111-1111-4111-8111-111111111111",
+      target_worker_id: "99999999-9999-4999-8999-999999999999",
+      target_outcome: "action_required",
+      target_diagnostic_code: "installation_suspended",
+      target_next_attempt_at: null,
+      target_repository_snapshot: null,
+    });
+  });
+
+  it.each(["success", "partial"] as const)("rejects a null snapshot for %s outcomes", async (outcome) => {
+    const client = clientDouble({ data: null, error: null }, { data: "none", error: null });
+    await expect(finalizeReconciliationRun(client as never, {
+      runId: "11111111-1111-4111-8111-111111111111",
+      workerId: "99999999-9999-4999-8999-999999999999",
+      outcome,
+      diagnostic: outcome === "partial" ? "repository_unavailable" : null,
+      nextAttemptAt: null,
+      snapshot: null,
+    })).rejects.toThrow("GitHub reconciliation store is unavailable");
+    expect(client.rpc).not.toHaveBeenCalled();
+  });
+
   it("rejects an unknown incident signal from the database", async () => {
     const client = clientDouble({ data: null, error: null }, { data: "exploded", error: null });
     await expect(finalizeReconciliationRun(client as never, {
@@ -173,6 +240,87 @@ describe("connection scheduling helpers", () => {
 });
 
 describe("connection notice recording", () => {
+  it("projects an incident and its Slack outbox through one service RPC", async () => {
+    const client = clientDouble({ data: null, error: null }, {
+      data: {
+        incident_id: "44444444-4444-4444-8444-444444444444",
+        is_new: true,
+        notified_user_ids: ["66666666-6666-4666-8666-666666666666"],
+        slack_queued: true,
+      },
+      error: null,
+    });
+    const { projectConnectionNotice } = await import("./github-connection-store");
+    const payload = {
+      type: "connection_health" as const,
+      severity: "high" as const,
+      title: "GitHub connection needs attention",
+      controlRef: "GitHub connection",
+      subjectId: "22222222-2222-4222-8222-222222222222",
+      detail: "Access needs an Owner decision.",
+    };
+    await expect(projectConnectionNotice(client as never, {
+      organisationId: "33333333-3333-4333-8333-333333333333",
+      installationId: "22222222-2222-4222-8222-222222222222",
+      kind: "incident",
+      diagnostic: "permission_mismatch",
+      accountLogin: "Adtecher",
+      channelId: "55555555-5555-4555-8555-555555555555",
+      payload,
+    })).resolves.toEqual({
+      incidentId: "44444444-4444-4444-8444-444444444444",
+      isNew: true,
+      notifiedUserIds: ["66666666-6666-4666-8666-666666666666"],
+      slackQueued: true,
+    });
+    expect(client.rpc).toHaveBeenCalledWith("project_github_connection_notice_server", {
+      target_organisation_id: "33333333-3333-4333-8333-333333333333",
+      target_installation_id: "22222222-2222-4222-8222-222222222222",
+      target_kind: "incident",
+      target_diagnostic_code: "permission_mismatch",
+      target_account_login: "Adtecher",
+      target_channel_id: "55555555-5555-4555-8555-555555555555",
+      safe_payload: payload,
+    });
+  });
+
+  it("rejects failed or malformed notice projections without exposing database details", async () => {
+    const { projectConnectionNotice } = await import("./github-connection-store");
+    const input = {
+      organisationId: "33333333-3333-4333-8333-333333333333",
+      installationId: "22222222-2222-4222-8222-222222222222",
+      kind: "incident" as const,
+      diagnostic: "permission_mismatch" as const,
+      accountLogin: "Adtecher",
+      channelId: "55555555-5555-4555-8555-555555555555",
+      payload: {
+        type: "connection_health" as const,
+        severity: "high" as const,
+        title: "GitHub connection needs attention",
+        controlRef: "GitHub connection",
+        subjectId: "22222222-2222-4222-8222-222222222222",
+        detail: "Access needs an Owner decision.",
+      },
+    };
+    const databaseError = clientDouble(
+      { data: null, error: null },
+      { data: null, error: { message: "db-private-detail" } },
+    );
+    await expect(projectConnectionNotice(databaseError as never, input)).rejects.toThrow(
+      "GitHub reconciliation store is unavailable",
+    );
+    try {
+      await projectConnectionNotice(databaseError as never, input);
+      expect.unreachable();
+    } catch (error) {
+      expect(String(error)).not.toContain("db-private-detail");
+    }
+    const malformed = clientDouble({ data: null, error: null }, { data: { is_new: true }, error: null });
+    await expect(projectConnectionNotice(malformed as never, input)).rejects.toThrow(
+      "GitHub reconciliation store is unavailable",
+    );
+  });
+
   it("records an incident notice through the service RPC", async () => {
     const client = clientDouble({ data: null, error: null }, {
       data: { incident_id: "44444444-4444-4444-8444-444444444444", is_new: true, notified_user_ids: ["66666666-6666-4666-8666-666666666666"] },
@@ -202,11 +350,11 @@ describe("connection notice recording", () => {
 
   it("resolves the Slack channel to the first enabled destination", async () => {
     const client = clientDouble(
-      { data: [{ id: "55555555-5555-4555-8555-555555555555", type: "slack", enabled: true, revoked_at: null }], error: null },
+      { data: [{ id: "55555555-5555-4555-8555-555555555555", type: "slack", enabled: true, revoked_at: null, min_severity: "medium" }], error: null },
       { data: null, error: null },
     );
     const { resolveConnectionSlackChannel } = await import("./github-connection-store");
-    await expect(resolveConnectionSlackChannel(client as never, "33333333-3333-4333-8333-333333333333")).resolves.toBe(
+    await expect(resolveConnectionSlackChannel(client as never, "33333333-3333-4333-8333-333333333333", "high")).resolves.toBe(
       "55555555-5555-4555-8555-555555555555",
     );
     expect(client.from).toHaveBeenCalledWith("alert_channels");
@@ -215,16 +363,29 @@ describe("connection notice recording", () => {
   it("returns null when no Slack destination is configured", async () => {
     const client = clientDouble({ data: [], error: null }, { data: null, error: null });
     const { resolveConnectionSlackChannel } = await import("./github-connection-store");
-    await expect(resolveConnectionSlackChannel(client as never, "33333333-3333-4333-8333-333333333333")).resolves.toBeNull();
+    await expect(resolveConnectionSlackChannel(client as never, "33333333-3333-4333-8333-333333333333", "high")).resolves.toBeNull();
   });
 
-  it("enqueues a connection Slack alert with a validated lease", async () => {
+  it("does not select a Slack destination whose severity floor suppresses the notice", async () => {
+    const client = clientDouble(
+      { data: [{ id: "55555555-5555-4555-8555-555555555555", type: "slack", enabled: true, revoked_at: null, min_severity: "critical" }], error: null },
+      { data: null, error: null },
+    );
+    const { resolveConnectionSlackChannel } = await import("./github-connection-store");
+    await expect(resolveConnectionSlackChannel(
+      client as never,
+      "33333333-3333-4333-8333-333333333333",
+      "medium",
+    )).resolves.toBeNull();
+  });
+
+  it("queues a connection Slack alert and returns whether it was newly queued", async () => {
     const client = clientDouble(
       { data: null, error: null },
-      { data: [{ delivery_id: "88888888-8888-4888-8888-888888888888", lock_token: "99999999-9999-4999-8999-999999999999" }], error: null },
+      { data: true, error: null },
     );
     const { enqueueConnectionSlackAlert } = await import("./github-connection-store");
-    const lease = await enqueueConnectionSlackAlert(client as never, {
+    const queued = await enqueueConnectionSlackAlert(client as never, {
       organisationId: "33333333-3333-4333-8333-333333333333",
       channelId: "55555555-5555-4555-8555-555555555555",
       installationId: "22222222-2222-4222-8222-222222222222",
@@ -240,19 +401,20 @@ describe("connection notice recording", () => {
       },
     });
     expect(client.rpc).toHaveBeenCalledWith(
-      "enqueue_github_connection_alert_delivery",
+      "queue_github_connection_alert_delivery",
       expect.objectContaining({
         target_organisation_id: "33333333-3333-4333-8333-333333333333",
         target_channel_id: "55555555-5555-4555-8555-555555555555",
         target_installation_id: "22222222-2222-4222-8222-222222222222",
         target_kind: "incident",
+        target_diagnostic_code: "permission_mismatch",
       }),
     );
-    expect(lease).toEqual({ deliveryId: "88888888-8888-4888-8888-888888888888", lockToken: "99999999-9999-4999-8999-999999999999" });
+    expect(queued).toBe(true);
   });
 
-  it("treats an already-queued alert as no new lease", async () => {
-    const client = clientDouble({ data: null, error: null }, { data: [], error: null });
+  it("returns false when an identical alert is already queued", async () => {
+    const client = clientDouble({ data: null, error: null }, { data: false, error: null });
     const { enqueueConnectionSlackAlert } = await import("./github-connection-store");
     await expect(enqueueConnectionSlackAlert(client as never, {
       organisationId: "33333333-3333-4333-8333-333333333333",
@@ -268,6 +430,39 @@ describe("connection notice recording", () => {
         subjectId: "22222222-2222-4222-8222-222222222222",
         detail: "Access needs an Owner decision.",
       },
-    })).resolves.toBeNull();
+    })).resolves.toBe(false);
+  });
+
+  it("redacts connection queue database errors and rejects non-boolean results", async () => {
+    const databaseError = clientDouble({ data: null, error: null }, { data: null, error: { message: "db-internal-secret" } });
+    const { enqueueConnectionSlackAlert } = await import("./github-connection-store");
+    const input = {
+      organisationId: "33333333-3333-4333-8333-333333333333",
+      channelId: "55555555-5555-4555-8555-555555555555",
+      installationId: "22222222-2222-4222-8222-222222222222",
+      kind: "incident" as const,
+      diagnostic: "permission_mismatch" as const,
+      payload: {
+        type: "connection_health" as const,
+        severity: "high" as const,
+        title: "GitHub connection needs attention",
+        controlRef: "GitHub connection",
+        subjectId: "22222222-2222-4222-8222-222222222222",
+        detail: "Access needs an Owner decision.",
+      },
+    };
+    await expect(enqueueConnectionSlackAlert(databaseError as never, input)).rejects.toThrow(
+      "Connection alert delivery queue failed",
+    );
+    try {
+      await enqueueConnectionSlackAlert(databaseError as never, input);
+      expect.unreachable();
+    } catch (error) {
+      expect(String(error)).not.toContain("db-internal-secret");
+    }
+    const malformed = clientDouble({ data: null, error: null }, { data: "true", error: null });
+    await expect(enqueueConnectionSlackAlert(malformed as never, input)).rejects.toThrow(
+      "Connection alert delivery queue failed",
+    );
   });
 });

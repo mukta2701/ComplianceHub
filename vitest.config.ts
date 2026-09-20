@@ -15,7 +15,7 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
-    include: ["src/**/*.test.{ts,tsx}"],
+    include: ["src/**/*.test.{ts,tsx}", "scripts/**/*.test.{ts,tsx}"],
     // Integration tests hit the live local Supabase stack and are NOT hermetic;
     // keep them out of the default `vitest run` so a clean checkout passes
     // without a running DB. Run them via `npm run test:integration`.

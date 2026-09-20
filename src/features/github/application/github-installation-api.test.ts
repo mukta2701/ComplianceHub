@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { createServer } from "node:http";
+
 import { describe, expect, it, vi } from "vitest";
 
 import { READ_PERMISSIONS } from "./github-app-auth";
@@ -29,6 +31,81 @@ function jsonResponse(body: unknown, init: ResponseInit = {}) {
 const SNAPSHOT_INPUT = { installationId: 77, appJwt: "test-app-jwt", installationToken: "test-installation-token" };
 
 describe("readInstallationSnapshot", () => {
+  it("cancels a stalled provider request and closes its loopback socket", async () => {
+    let requestCount = 0;
+    let disconnectedBeforeBody = false;
+    let bodyFinished = false;
+    let disconnectedResolve: () => void = () => undefined;
+    const disconnected = new Promise<void>((resolve) => { disconnectedResolve = resolve; });
+    const server = createServer((request, response) => {
+      request.socket.once("close", () => {
+        disconnectedBeforeBody = !bodyFinished;
+        disconnectedResolve();
+      });
+      if (request.url === "/identity") {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify(installationBody()));
+        return;
+      }
+      response.writeHead(200, { "content-type": "application/json" });
+      response.write('{"total_count":0,"repositories":[');
+      setTimeout(() => {
+        if (!response.destroyed) {
+          bodyFinished = true;
+          response.end("]}");
+        }
+      }, 400);
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", () => resolve());
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Fixture server did not bind a TCP port");
+    const controller = new AbortController();
+    const startedAt = Date.now();
+    try {
+      const error = await readInstallationSnapshot({
+        ...SNAPSHOT_INPUT,
+        signal: controller.signal,
+        fetchImpl: (_url, init) => {
+          requestCount += 1;
+          if (requestCount > 1) setTimeout(() => controller.abort(new Error("provider deadline")), 100);
+          const localTimeout = AbortSignal.timeout(400);
+          const signal = init?.signal ? AbortSignal.any([init.signal, localTimeout]) : localTimeout;
+          return fetch(`http://127.0.0.1:${address.port}/${requestCount === 1 ? "identity" : "provider"}`, { ...init, signal });
+        },
+      }).catch((caught: unknown) => caught);
+      const elapsedMs = Date.now() - startedAt;
+      expect(error).toMatchObject({ kind: "network" });
+      expect(elapsedMs).toBeLessThan(350);
+      await disconnected;
+      expect(disconnectedBeforeBody).toBe(true);
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
+  it("does not start the next repository page after the deadline expires during body parsing", async () => {
+    const controller = new AbortController();
+    let requestCount = 0;
+    const fetchImpl = vi.fn().mockImplementation(async () => {
+      requestCount += 1;
+      if (requestCount === 1) return jsonResponse(installationBody());
+      return {
+        ok: true,
+        status: 200,
+        headers: new Headers({ Link: '<https://api.github.com/installation/repositories?page=2>; rel="next"' }),
+        json: async () => {
+          controller.abort(new Error("provider deadline"));
+          return { total_count: 2, repositories: [repositoryRow(101)] };
+        },
+      } as Response;
+    });
+    await expect(readInstallationSnapshot({ ...SNAPSHOT_INPUT, fetchImpl, signal: controller.signal })).rejects.toMatchObject({ kind: "network" });
+    expect(requestCount).toBe(2);
+  });
+
   it("reads installation identity with the App JWT and repositories with the installation token", async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(jsonResponse(installationBody()))
@@ -74,11 +151,22 @@ describe("readInstallationSnapshot", () => {
   });
 
   it("reports a suspended installation instead of failing", async () => {
-    const fetchImpl = vi.fn()
-      .mockResolvedValueOnce(jsonResponse(installationBody({ suspended_at: "2026-09-01T00:00:00.000Z" })))
-      .mockResolvedValueOnce(jsonResponse({ total_count: 0, repositories: [] }));
-    const snapshot = await readInstallationSnapshot({ ...SNAPSHOT_INPUT, fetchImpl });
-    expect(snapshot.suspendedAt).toBe("2026-09-01T00:00:00.000Z");
+    const fetchImpl = vi.fn().mockResolvedValueOnce(
+      jsonResponse(installationBody({ suspended_at: "2026-09-01T00:00:00.000Z" })),
+    );
+    const provideInstallationToken = vi.fn().mockRejectedValue(new Error("must not mint a token"));
+    const snapshot = await readInstallationSnapshot({
+      installationId: 77,
+      appJwt: "test-app-jwt",
+      provideInstallationToken,
+      fetchImpl,
+    });
+    expect(snapshot).toMatchObject({
+      suspendedAt: "2026-09-01T00:00:00.000Z",
+      repositories: [],
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(provideInstallationToken).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -117,6 +205,13 @@ describe("readInstallationSnapshot", () => {
     const fetchImpl = vi.fn();
     await expect(readInstallationSnapshot({ installationId: 0, appJwt: "test-app-jwt", installationToken: "test-installation-token", fetchImpl })).rejects.toMatchObject({ kind: "invalid" });
     await expect(readInstallationSnapshot({ installationId: 77, appJwt: "", installationToken: "test-installation-token", fetchImpl })).rejects.toMatchObject({ kind: "invalid" });
+    await expect(readInstallationSnapshot({
+      installationId: 77,
+      appJwt: "test-app-jwt",
+      installationToken: "",
+      provideInstallationToken: async () => "test-installation-token",
+      fetchImpl,
+    })).rejects.toMatchObject({ kind: "invalid" });
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 });

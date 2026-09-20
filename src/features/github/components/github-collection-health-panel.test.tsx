@@ -12,7 +12,8 @@ import type { GitHubRepositoryMonitoringSummary } from "./github-collection-heal
 
 const installation: GitHubInstallationSummary = {
   id: "10000000-0000-4000-8000-000000000010", account_login: "Adtecher", status: "active",
-  repository_selection: "selected", permissions_ok: true,
+  repository_selection: "selected", permissions_ok: true, health: "healthy",
+  health_diagnostic_code: null, last_successful_reconciliation_at: "2026-09-01T08:00:00.000Z",
 };
 const repository: GitHubRepositoryMonitoringSummary = {
   repository_id: "10000000-0000-4000-8000-000000000011", installation_id: installation.id,
@@ -60,14 +61,27 @@ describe("GitHubCollectionHealthPanel", () => {
     expect(screen.getByText("GitHub is not connected.")).toBeVisible();
     expect(screen.getByRole("link", { name: "Connect GitHub" })).toHaveAttribute("href", "/app/integrations");
     rerender(<GitHubCollectionHealthPanel installations={[]} repositories={[]} nowIso="2026-09-01T10:00:00Z" role="member" runtimeReadiness={{ available: true, status: "ready" }} />);
-    expect(screen.getByText("GitHub is not connected. Ask a workspace Owner or Admin to manage the connection.")).toBeVisible();
+    expect(screen.getByText("GitHub is not connected. Ask a workspace Owner to connect GitHub.")).toBeVisible();
     expect(screen.queryByRole("link", { name: "Connect GitHub" })).not.toBeInTheDocument();
   });
 
+  it("never implies an Admin can manage the GitHub App", () => {
+    render(<GitHubCollectionHealthPanel installations={[]} repositories={[]} nowIso="2026-09-01T10:00:00Z" role="admin" runtimeReadiness={{ available: true, status: "ready" }} />);
+    expect(screen.getByText("GitHub is not connected. Ask a workspace Owner to connect GitHub.")).toBeVisible();
+    expect(screen.queryByRole("link", { name: "Connect GitHub" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /manage|set up|connect/i })).not.toBeInTheDocument();
+  });
+
   it("shows connected-without-selection guidance and keeps non-Owners read-only", () => {
-    renderPanel({ repositories: [], role: "admin" });
+    renderPanel({ repositories: [], role: "owner" });
     expect(screen.getByText("No repositories are selected for GitHub monitoring.")).toBeVisible();
     expect(screen.getByRole("link", { name: "Choose repositories" })).toHaveAttribute("href", "/app/integrations");
+  });
+
+  it("hides repository scope links from Admins", () => {
+    renderPanel({ repositories: [], role: "admin" });
+    expect(screen.getByText("No repositories are selected for GitHub monitoring.")).toBeVisible();
+    expect(screen.queryByRole("link", { name: "Choose repositories" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Check GitHub now" })).not.toBeInTheDocument();
     expect(screen.getByText("Only workspace Owners can check GitHub from here.")).toBeVisible();
   });

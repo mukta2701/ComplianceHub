@@ -8,6 +8,8 @@
 
 **Tech Stack:** Next.js 16.3 App Router, React 19, TypeScript 5, Node.js 22, Supabase/PostgreSQL with RLS and pgTAP, Zod 4, `jose` 6, Vitest 4, React Testing Library, Playwright 1.61, Docker, Amazon ECR, ECS Fargate, EventBridge Scheduler, Secrets Manager/KMS and CloudWatch.
 
+> **Remaining-work amendment approved 20 September 2026:** Phases 1 through 8 remain the implementation record. The company staging Tasks 9 through 11 and their ECS/EventBridge acceptance gate are historical. The [AWS dev acceptance plan](2026-09-20-github-integration-aws-dev-acceptance.md) replaces only that unfinished work under the approved [AWS dev acceptance design](../specs/2026-09-20-github-integration-aws-dev-acceptance-design.md).
+
 **Spec:** `docs/superpowers/specs/2026-09-14-github-organisation-repository-integration-design.md`
 
 ## Global Constraints

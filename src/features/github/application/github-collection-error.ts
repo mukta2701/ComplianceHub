@@ -8,6 +8,7 @@ export class GitHubCollectionError extends Error {
 }
 
 export class GitHubRateLimitError extends GitHubCollectionError {
+  readonly kind = "rate_limited" as const;
   readonly retryAfterSeconds?: number;
   readonly resetAtEpochSeconds?: number;
 

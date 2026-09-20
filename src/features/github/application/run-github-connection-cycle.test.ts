@@ -141,6 +141,21 @@ describe("runGitHubConnectionCycle", () => {
     );
   });
 
+  it("does not finalise a delivery after the shared deadline expires during scheduling", async () => {
+    const controller = new AbortController();
+    const dependencies = deps({
+      claimConnectionDeliveries: vi.fn().mockResolvedValue([delivery()]),
+      scheduleConnection: vi.fn().mockImplementation(async () => {
+        controller.abort(new Error("deadline expired during scheduling"));
+        return true;
+      }),
+    });
+    await expect(runGitHubConnectionCycle(dependencies, { ...INPUT, signal: controller.signal })).rejects.toThrow(
+      "GitHub connection cycle was aborted",
+    );
+    expect(dependencies.finalizeConnectionDelivery).not.toHaveBeenCalled();
+  });
+
   it("isolates one installation failure without losing the others", async () => {
     const dependencies = deps({
       claimDueInstallations: vi.fn().mockResolvedValue([
@@ -165,6 +180,7 @@ describe("runGitHubConnectionCycle", () => {
       { health: "healthy", closeIncident: true },
       { health: "retrying", closeIncident: false },
       { health: "owner_action_required", closeIncident: false },
+      { health: "partially_unavailable", closeIncident: false },
       { health: "disconnected", closeIncident: false },
     ];
     const dependencies = deps({
@@ -183,12 +199,12 @@ describe("runGitHubConnectionCycle", () => {
     });
     const summary = await runGitHubConnectionCycle(dependencies, INPUT);
     expect(summary).toMatchObject({
-      installationsClaimed: 5,
+      installationsClaimed: 6,
       healthy: 1,
       recovered: 1,
       retrying: 1,
-      actionRequired: 1,
-      ownershipLost: 1,
+      actionRequired: 3,
+      ownershipLost: 0,
     });
   });
 
@@ -238,10 +254,10 @@ describe("runGitHubConnectionCycle transition notices", () => {
     expect(dependencies.notifyTransition).toHaveBeenCalledWith(expect.objectContaining({ kind: "recovery", health: "healthy" }));
   });
 
-  it("stays quiet without a transition and counts a failed notice as lost", async () => {
+  it("projects a no-op recovery after every healthy check and counts a failed notice as lost", async () => {
     const quiet = deps({ claimDueInstallations: vi.fn().mockResolvedValue([dueRun()]) });
     await runGitHubConnectionCycle(quiet, INPUT);
-    expect(quiet.notifyTransition).not.toHaveBeenCalled();
+    expect(quiet.notifyTransition).toHaveBeenCalledWith(expect.objectContaining({ kind: "recovery", health: "healthy" }));
 
     const failing = deps({
       claimDueInstallations: vi.fn().mockResolvedValue([dueRun()]),

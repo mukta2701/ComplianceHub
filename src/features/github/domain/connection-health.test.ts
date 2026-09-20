@@ -44,7 +44,7 @@ describe("decideConnectionReconciliation", () => {
     expect(decide({ previousHealth: "retrying", consecutiveFailures: 4, outcome: "temporary_failure" })).toMatchObject({
       health: "retrying",
       retryAt: "2026-09-18T12:15:00.000Z",
-      openIncident: false,
+      openIncident: true,
     });
   });
 
@@ -89,6 +89,15 @@ describe("decideConnectionReconciliation", () => {
       closeIncident: false,
       diagnostic: "repository_unavailable",
     });
+  });
+
+  it("keeps projecting an unresolved partial incident so failed notice work can retry", () => {
+    expect(decide({
+      previousHealth: "partially_unavailable",
+      consecutiveFailures: 0,
+      outcome: "partial",
+      diagnostic: "repository_unavailable",
+    })).toMatchObject({ openIncident: true, closeIncident: false });
   });
 
   it.each([

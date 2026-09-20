@@ -20,22 +20,24 @@ export type GitHubConnectionNotice = {
 };
 
 export type GitHubConnectionAlertDependencies = {
-  recordNotice(input: {
+  projectNotice(input: {
     organisationId: string;
     installationId: string;
     kind: "incident" | "recovery";
     diagnostic: GitHubConnectionDiagnostic | null;
     accountLogin: string;
-  }): Promise<{ incidentId: string | null; isNew: boolean; notifiedUserIds: string[] }>;
-  resolveSlackChannelId(organisationId: string): Promise<string | null>;
-  enqueueSlackAlert(input: {
-    organisationId: string;
-    channelId: string;
-    installationId: string;
-    kind: "incident" | "recovery";
-    diagnostic: GitHubConnectionDiagnostic | null;
+    channelId: string | null;
     payload: SafeSlackDeliveryPayload;
-  }): Promise<{ deliveryId: string; lockToken: string } | null>;
+  }): Promise<{
+    incidentId: string | null;
+    isNew: boolean;
+    notifiedUserIds: string[];
+    slackQueued: boolean;
+  }>;
+  resolveSlackChannelId(
+    organisationId: string,
+    severity: SafeSlackDeliveryPayload["severity"],
+  ): Promise<string | null>;
 };
 
 const noticeSchema = z.object({
@@ -89,23 +91,19 @@ export async function queueGitHubConnectionNotice(
   notice: GitHubConnectionNotice,
 ): Promise<{ inAppQueued: number; slackQueued: number }> {
   if (!noticeSchema.safeParse(notice).success) invalidNotice();
-  const recorded = await deps.recordNotice({
+  const payload = toGitHubConnectionSlackPayload(notice);
+  const channelId = await deps.resolveSlackChannelId(notice.organisationId, payload.severity);
+  const projected = await deps.projectNotice({
     organisationId: notice.organisationId,
     installationId: notice.installationId,
     kind: notice.kind,
     diagnostic: notice.diagnostic,
     accountLogin: notice.accountLogin,
-  });
-  if (!recorded.isNew) return { inAppQueued: 0, slackQueued: 0 };
-  const channelId = await deps.resolveSlackChannelId(notice.organisationId);
-  if (!channelId) return { inAppQueued: recorded.notifiedUserIds.length, slackQueued: 0 };
-  const lease = await deps.enqueueSlackAlert({
-    organisationId: notice.organisationId,
     channelId,
-    installationId: notice.installationId,
-    kind: notice.kind,
-    diagnostic: notice.diagnostic,
-    payload: toGitHubConnectionSlackPayload(notice),
+    payload,
   });
-  return { inAppQueued: recorded.notifiedUserIds.length, slackQueued: lease ? 1 : 0 };
+  return {
+    inAppQueued: projected.isNew ? projected.notifiedUserIds.length : 0,
+    slackQueued: projected.slackQueued ? 1 : 0,
+  };
 }

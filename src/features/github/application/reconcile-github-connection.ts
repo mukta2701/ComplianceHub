@@ -39,9 +39,14 @@ export type ReconcileGitHubConnectionDependencies = {
   readSnapshot: (input: {
     installationId: number;
     appJwt: string;
-    installationToken: string;
+    installationToken?: string;
+    provideInstallationToken?: () => Promise<string>;
   }) => Promise<InstallationSnapshot>;
-  provideCredentials: () => Promise<{ appJwt: string; installationToken: string }>;
+  provideCredentials: () => Promise<{
+    appJwt: string;
+    installationToken?: string;
+    provideInstallationToken?: () => Promise<string>;
+  }>;
   loadStoredRepositories: (installationUuid: string) => Promise<StoredRepositoryIdentity[]>;
   finalize: (input: FinalizeConnectionInput) => Promise<unknown>;
   now?: Date;
@@ -65,10 +70,21 @@ function apiErrorKind(error: unknown): ApiErrorKind | null {
     : null;
 }
 
-function apiRetryAt(error: unknown): string | null {
+function apiRetryAt(error: unknown, now: Date): string | null {
   const retryAt = (error as { retryAt?: unknown } | null)?.retryAt;
-  if (typeof retryAt !== "string" || !Number.isFinite(new Date(retryAt).getTime())) return null;
-  return retryAt;
+  if (typeof retryAt === "string" && Number.isFinite(new Date(retryAt).getTime())) return retryAt;
+  const resetAtEpochSeconds = (error as { resetAtEpochSeconds?: unknown } | null)?.resetAtEpochSeconds;
+  if (Number.isSafeInteger(resetAtEpochSeconds) && (resetAtEpochSeconds as number) >= 0) {
+    const resetAt = new Date((resetAtEpochSeconds as number) * 1_000);
+    if (Number.isFinite(resetAt.getTime())) return resetAt.toISOString();
+  }
+  const retryAfterSeconds = (error as { retryAfterSeconds?: unknown } | null)?.retryAfterSeconds;
+  if (Number.isSafeInteger(retryAfterSeconds)
+    && (retryAfterSeconds as number) >= 0
+    && (retryAfterSeconds as number) <= 86_400) {
+    return new Date(now.getTime() + (retryAfterSeconds as number) * 1_000).toISOString();
+  }
+  return null;
 }
 
 function decideFromApiError(
@@ -84,7 +100,7 @@ function decideFromApiError(
   if (kind === "rate_limited") {
     const decision = decideConnectionReconciliation({
       previousHealth, consecutiveFailures, outcome: "temporary_failure",
-      diagnostic: "provider_rate_limited", now: now.toISOString(), providerRetryAt: apiRetryAt(error),
+      diagnostic: "provider_rate_limited", now: now.toISOString(), providerRetryAt: apiRetryAt(error, now),
     });
     return { outcome: "temporary_failure", diagnostic: "provider_rate_limited", retryAt: decision.retryAt };
   }
@@ -114,6 +130,7 @@ export async function reconcileGitHubConnection(
       installationId: claim.providerInstallationId,
       appJwt: credentials.appJwt,
       installationToken: credentials.installationToken,
+      provideInstallationToken: credentials.provideInstallationToken,
     });
   } catch (error) {
     const mapped = decideFromApiError(error, claim.previousHealth, claim.consecutiveFailures, now);

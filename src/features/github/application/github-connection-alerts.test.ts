@@ -19,9 +19,13 @@ const INCIDENT: GitHubConnectionNotice = {
 
 function deps(overrides: Record<string, unknown> = {}) {
   return {
-    recordNotice: vi.fn().mockResolvedValue({ incidentId: "44444444-4444-4444-8444-444444444444", isNew: true, notifiedUserIds: ["u1", "u2"] }),
     resolveSlackChannelId: vi.fn().mockResolvedValue("55555555-5555-4555-8555-555555555555"),
-    enqueueSlackAlert: vi.fn().mockResolvedValue({ deliveryId: "d1", lockToken: "t1" }),
+    projectNotice: vi.fn().mockResolvedValue({
+      incidentId: "44444444-4444-4444-8444-444444444444",
+      isNew: true,
+      notifiedUserIds: ["u1", "u2"],
+      slackQueued: true,
+    }),
     ...overrides,
   };
 }
@@ -31,19 +35,16 @@ describe("queueGitHubConnectionNotice", () => {
     const dependencies = deps();
     const result = await queueGitHubConnectionNotice(dependencies, INCIDENT);
     expect(result).toEqual({ inAppQueued: 2, slackQueued: 1 });
-    expect(dependencies.recordNotice).toHaveBeenCalledWith({
+    expect(dependencies.projectNotice).toHaveBeenCalledWith(expect.objectContaining({
       organisationId: INCIDENT.organisationId,
       installationId: INCIDENT.installationId,
       kind: "incident",
       diagnostic: "repository_unavailable",
       accountLogin: "Adtecher",
-    });
-    expect(dependencies.enqueueSlackAlert).toHaveBeenCalledWith(expect.objectContaining({
-      organisationId: INCIDENT.organisationId,
-      installationId: INCIDENT.installationId,
-      kind: "incident",
+      channelId: "55555555-5555-4555-8555-555555555555",
     }));
-    const payload = (dependencies.enqueueSlackAlert as ReturnType<typeof vi.fn>).mock.calls[0]?.[0].payload as Record<string, string>;
+    expect(dependencies.resolveSlackChannelId).toHaveBeenCalledWith(INCIDENT.organisationId, "high");
+    const payload = (dependencies.projectNotice as ReturnType<typeof vi.fn>).mock.calls[0]?.[0].payload as Record<string, string>;
     expect(payload.type).toBe("connection_health");
     expect(JSON.stringify(payload)).not.toContain("secret");
     expect(JSON.stringify(payload)).not.toContain("BEGIN");
@@ -51,41 +52,58 @@ describe("queueGitHubConnectionNotice", () => {
 
   it("sends nothing when the incident is already open", async () => {
     const dependencies = deps({
-      recordNotice: vi.fn().mockResolvedValue({ incidentId: "44444444-4444-4444-8444-444444444444", isNew: false, notifiedUserIds: [] }),
+      projectNotice: vi.fn().mockResolvedValue({ incidentId: "44444444-4444-4444-8444-444444444444", isNew: false, notifiedUserIds: [], slackQueued: false }),
     });
     const result = await queueGitHubConnectionNotice(dependencies, INCIDENT);
     expect(result).toEqual({ inAppQueued: 0, slackQueued: 0 });
-    expect(dependencies.enqueueSlackAlert).not.toHaveBeenCalled();
+    expect(dependencies.projectNotice).toHaveBeenCalledTimes(1);
   });
 
   it("queues a recovery notice only after a genuine resolution", async () => {
     const dependencies = deps({
-      recordNotice: vi.fn().mockResolvedValue({ incidentId: "44444444-4444-4444-8444-444444444444", isNew: true, notifiedUserIds: ["u1"] }),
+      projectNotice: vi.fn().mockResolvedValue({ incidentId: "44444444-4444-4444-8444-444444444444", isNew: true, notifiedUserIds: ["u1"], slackQueued: true }),
     });
     const result = await queueGitHubConnectionNotice(dependencies, { ...INCIDENT, kind: "recovery", health: "healthy", diagnostic: null });
     expect(result).toEqual({ inAppQueued: 1, slackQueued: 1 });
-    expect(dependencies.recordNotice).toHaveBeenCalledWith(expect.objectContaining({ kind: "recovery" }));
+    expect(dependencies.projectNotice).toHaveBeenCalledWith(expect.objectContaining({ kind: "recovery" }));
   });
 
   it("skips an already-resolved recovery without notifying", async () => {
     const dependencies = deps({
-      recordNotice: vi.fn().mockResolvedValue({ incidentId: "44444444-4444-4444-8444-444444444444", isNew: false, notifiedUserIds: [] }),
+      projectNotice: vi.fn().mockResolvedValue({ incidentId: null, isNew: false, notifiedUserIds: [], slackQueued: false }),
     });
     const result = await queueGitHubConnectionNotice(dependencies, { ...INCIDENT, kind: "recovery", health: "healthy", diagnostic: null });
     expect(result).toEqual({ inAppQueued: 0, slackQueued: 0 });
   });
 
-  it("still notifies in-app when no Slack destination is configured", async () => {
-    const dependencies = deps({ resolveSlackChannelId: vi.fn().mockResolvedValue(null) });
+  it("does not count a duplicate Slack queue result as a new delivery", async () => {
+    const dependencies = deps({
+      projectNotice: vi.fn().mockResolvedValue({ incidentId: "44444444-4444-4444-8444-444444444444", isNew: true, notifiedUserIds: ["u1", "u2"], slackQueued: false }),
+    });
     const result = await queueGitHubConnectionNotice(dependencies, INCIDENT);
     expect(result).toEqual({ inAppQueued: 2, slackQueued: 0 });
-    expect(dependencies.enqueueSlackAlert).not.toHaveBeenCalled();
+    expect(dependencies.projectNotice).toHaveBeenCalledTimes(1);
+  });
+
+  it("still notifies in-app when no Slack destination is configured", async () => {
+    const dependencies = deps({
+      resolveSlackChannelId: vi.fn().mockResolvedValue(null),
+      projectNotice: vi.fn().mockResolvedValue({
+        incidentId: "44444444-4444-4444-8444-444444444444",
+        isNew: true,
+        notifiedUserIds: ["u1", "u2"],
+        slackQueued: false,
+      }),
+    });
+    const result = await queueGitHubConnectionNotice(dependencies, INCIDENT);
+    expect(result).toEqual({ inAppQueued: 2, slackQueued: 0 });
+    expect(dependencies.projectNotice).toHaveBeenCalledWith(expect.objectContaining({ channelId: null }));
   });
 
   it("marks a disconnected installation critical and keeps safe boundaries", async () => {
     const dependencies = deps();
     await queueGitHubConnectionNotice(dependencies, { ...INCIDENT, health: "disconnected", diagnostic: "installation_revoked" });
-    const payload = (dependencies.enqueueSlackAlert as ReturnType<typeof vi.fn>).mock.calls[0]?.[0].payload as Record<string, string>;
+    const payload = (dependencies.projectNotice as ReturnType<typeof vi.fn>).mock.calls[0]?.[0].payload as Record<string, string>;
     expect(payload.severity).toBe("critical");
     expect(payload.subjectId).toBe(INCIDENT.installationId);
   });

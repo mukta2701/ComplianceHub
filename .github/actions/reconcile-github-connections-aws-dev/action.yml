@@ -1,0 +1,175 @@
+name: Reconcile GitHub connections (AWS dev)
+description: Resolve, validate and run one bounded connection reconciliation cycle from the current AWS dev image
+
+inputs:
+  expected-release-sha:
+    description: Optional release SHA to verify through the live health endpoint
+    required: false
+    default: ""
+  expected-image-digest:
+    description: Optional immutable image digest that the caller resolved before this job
+    required: false
+    default: ""
+  require-image-binding:
+    description: Require an exact expected image digest and release SHA before pulling
+    required: false
+    default: "false"
+
+outputs:
+  image-digest:
+    description: The validated immutable ECR digest only
+    value: ${{ steps.image.outputs.digest }}
+
+runs:
+  using: composite
+  steps:
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ env.AWS_DEV_DEPLOY_ROLE_ARN }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Resolve current App Runner image
+      id: image
+      shell: bash
+      env:
+        EXPECTED_RELEASE_SHA: ${{ inputs.expected-release-sha }}
+        EXPECTED_IMAGE_DIGEST: ${{ inputs.expected-image-digest }}
+        REQUIRE_IMAGE_BINDING: ${{ inputs.require-image-binding }}
+      run: |
+        set -euo pipefail
+        : "${AWS_DEV_SERVICE_ARN:?AWS_DEV_SERVICE_ARN is required}"
+        : "${AWS_DEV_ECR_REGISTRY:?AWS_DEV_ECR_REGISTRY is required}"
+        : "${ECR_REPOSITORY:?ECR_REPOSITORY is required}"
+        image="$(aws apprunner describe-service \
+          --region "$AWS_REGION" \
+          --service-arn "$AWS_DEV_SERVICE_ARN" \
+          --query 'Service.SourceConfiguration.ImageRepository.ImageIdentifier' \
+          --output text)"
+        expected_prefix="${AWS_DEV_ECR_REGISTRY}/${ECR_REPOSITORY}@sha256:"
+        if [[ "$image" != "$expected_prefix"* ]]; then
+          echo "current App Runner image is not the expected immutable ECR repository" >&2
+          exit 1
+        fi
+        digest="${image#"$expected_prefix"}"
+        if [[ ! "$digest" =~ ^[0-9a-f]{64}$ ]]; then
+          echo "immutable image digest must be 64 lowercase hexadecimal characters" >&2
+          exit 1
+        fi
+        actual_digest="sha256:${digest}"
+
+        case "${REQUIRE_IMAGE_BINDING:-false}" in
+          true)
+            if [[ -z "${EXPECTED_IMAGE_DIGEST:-}" ]]; then
+              echo "expected image digest is required for acceptance" >&2
+              exit 1
+            fi
+            if [[ ! "$EXPECTED_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "expected image digest must be sha256 followed by 64 lowercase hexadecimal characters" >&2
+              exit 1
+            fi
+            if [[ "$EXPECTED_IMAGE_DIGEST" != "$actual_digest" ]]; then
+              echo "expected image digest does not match the current App Runner image" >&2
+              exit 1
+            fi
+            if [[ -z "${EXPECTED_RELEASE_SHA:-}" ]]; then
+              echo "expected release SHA is required for acceptance" >&2
+              exit 1
+            fi
+            ;;
+          false|"")
+            ;;
+          *)
+            echo "require-image-binding must be true or false" >&2
+            exit 1
+            ;;
+        esac
+
+        if [[ -n "${EXPECTED_RELEASE_SHA:-}" ]]; then
+          if [[ ! "$EXPECTED_RELEASE_SHA" =~ ^[0-9a-f]{7,64}$ ]]; then
+            echo "expected release SHA must be lowercase hexadecimal" >&2
+            exit 1
+          fi
+          : "${AWS_DEV_SITE_URL:?AWS_DEV_SITE_URL is required when checking a release}"
+          live="$(curl --fail-with-body --retry 3 --retry-all-errors --retry-delay 2 \
+            --connect-timeout 10 --max-time 60 "$AWS_DEV_SITE_URL/api/health/live")"
+          jq --exit-status --arg release "$EXPECTED_RELEASE_SHA" \
+            '.status == "ok" and .releaseSha == $release' <<< "$live" >/dev/null
+        fi
+
+        printf 'digest=%s\n' "$actual_digest" >> "$GITHUB_OUTPUT"
+
+    - name: Log in to ECR and pull immutable image
+      id: pull
+      shell: bash
+      env:
+        IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+      run: |
+        set -euo pipefail
+        image_uri="${AWS_DEV_ECR_REGISTRY}/${ECR_REPOSITORY}@${IMAGE_DIGEST}"
+        aws ecr get-login-password --region "$AWS_REGION" | \
+          docker login --username AWS --password-stdin "$AWS_DEV_ECR_REGISTRY"
+        docker pull "$image_uri"
+
+    - name: Run bounded connection reconciliation
+      shell: bash
+      env:
+        NODE_ENV: production
+        IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+      run: |
+        set -euo pipefail
+        for secret_name in \
+          SUPABASE_SERVICE_ROLE_KEY \
+          APP_ENCRYPTION_KEY \
+          SLACK_ALLOWED_WEBHOOK_SHA256 \
+          GITHUB_APP_ID \
+          GITHUB_APP_SLUG \
+          GITHUB_APP_CLIENT_ID \
+          GITHUB_APP_CLIENT_SECRET \
+          GITHUB_APP_PRIVATE_KEY \
+          GITHUB_WEBHOOK_SECRET \
+          GITHUB_ALLOWED_ACCOUNT_ID; do
+          value="${!secret_name:-}"
+          if [[ -n "$value" ]]; then
+            printf '::add-mask::%s\n' "$value"
+          fi
+        done
+
+        image_uri="${AWS_DEV_ECR_REGISTRY}/${ECR_REPOSITORY}@${IMAGE_DIGEST}"
+        container_name="compliancehub-github-reconcile-${GITHUB_RUN_ID}"
+        runner_log="${RUNNER_TEMP}/compliancehub-github-reconcile-${GITHUB_RUN_ID}.log"
+        cleanup() {
+          docker rm -f "$container_name" >/dev/null 2>&1 || true
+          rm -f "$runner_log"
+        }
+        trap cleanup EXIT
+
+        set +e
+        timeout 7m docker run \
+          --name "$container_name" \
+          --env NODE_ENV \
+          --env NEXT_PUBLIC_SITE_URL \
+          --env NEXT_PUBLIC_SUPABASE_URL \
+          --env SUPABASE_SERVICE_ROLE_KEY \
+          --env APP_ENCRYPTION_KEY \
+          --env SLACK_ALLOWED_WEBHOOK_SHA256 \
+          --env GITHUB_APP_ID \
+          --env GITHUB_APP_SLUG \
+          --env GITHUB_APP_CLIENT_ID \
+          --env GITHUB_APP_CLIENT_SECRET \
+          --env GITHUB_APP_PRIVATE_KEY \
+          --env GITHUB_WEBHOOK_SECRET \
+          --env GITHUB_ALLOWED_ACCOUNT_ID \
+          --env GITHUB_ALLOWED_ACCOUNT_TYPE \
+          --env GITHUB_CONNECTION_MAX_WEBHOOK_DELIVERIES \
+          --env GITHUB_CONNECTION_MAX_INSTALLATIONS \
+          --env GITHUB_CONNECTION_MAX_SLACK_DELIVERIES \
+          --env GITHUB_CONNECTION_TIME_BUDGET_MS \
+          "$image_uri" \
+          node dist/github-connection-reconcile.mjs >"$runner_log" 2>&1
+        status=$?
+        set -e
+        cat "$runner_log"
+        cleanup
+        trap - EXIT
+        exit "$status"

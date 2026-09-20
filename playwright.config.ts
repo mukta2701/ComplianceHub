@@ -18,6 +18,7 @@ export default defineConfig({
   reporter: isCi ? "github" : "list",
   use: {
     baseURL,
+    screenshot: "only-on-failure",
     trace: "on-first-retry",
   },
   webServer: {
