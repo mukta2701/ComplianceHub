@@ -5,12 +5,11 @@ import { createAppJwt, createInstallationToken } from "@/features/github/applica
 import { getGitHubConnectionConfig } from "@/features/github/application/github-runtime-config";
 import {
   claimDueReconciliations,
-  enqueueConnectionSlackAlert,
   finalizeReconciliationRun,
   listSelectedRepositoryIds,
   listStoredRepositories,
   loadInstallationContext,
-  recordConnectionNotice,
+  projectConnectionNotice,
   resolveConnectionSlackChannel,
   scheduleConnectionReconciliation,
   applyConnectionStoreDeadline,
@@ -102,8 +101,8 @@ export function summariseCycleForLog(
   ].join(" ");
 }
 
-export function exitCodeForCycle(error: unknown, slackFailed = 0): number {
-  return error === null && slackFailed === 0 ? 0 : 1;
+export function exitCodeForCycle(error: unknown, slackFailed = 0, ownershipLost = 0): number {
+  return error === null && slackFailed === 0 && ownershipLost === 0 ? 0 : 1;
 }
 
 type ServiceClient = {
@@ -239,23 +238,17 @@ export async function runGitHubConnectionReconcile(input: {
       }) =>
         queueGitHubConnectionNotice(
           {
-            recordNotice: async (recordInput) => {
+            resolveSlackChannelId: async (organisationId, severity) => {
               deadlineSignal.throwIfAborted();
-              const result = await recordConnectionNotice(client, recordInput, deadlineSignal);
-              deadlineSignal.throwIfAborted();
-              return result;
-            },
-            resolveSlackChannelId: async (organisationId) => {
-              deadlineSignal.throwIfAborted();
-              const channelId = await resolveConnectionSlackChannel(client, organisationId, deadlineSignal);
+              const channelId = await resolveConnectionSlackChannel(client, organisationId, severity, deadlineSignal);
               deadlineSignal.throwIfAborted();
               return channelId;
             },
-            enqueueSlackAlert: async (enqueueInput) => {
+            projectNotice: async (projectInput) => {
               deadlineSignal.throwIfAborted();
-              const queued = await enqueueConnectionSlackAlert(client, enqueueInput, deadlineSignal);
+              const result = await projectConnectionNotice(client, projectInput, deadlineSignal);
               deadlineSignal.throwIfAborted();
-              return queued;
+              return result;
             },
           },
           {
@@ -373,7 +366,7 @@ export async function runGitHubConnectionReconcileCli(input: {
       dependencies: input.dependencies,
     });
     stdout(`${summariseCycleForLog(result.executionId, result.summary)}\n`);
-    return exitCodeForCycle(null, result.summary.slackFailed);
+    return exitCodeForCycle(null, result.summary.slackFailed, result.summary.ownershipLost);
   } catch {
     stderr(`github-connection-reconcile execution=${executionId} failed\n`);
     return 1;

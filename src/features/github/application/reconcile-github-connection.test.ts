@@ -172,6 +172,33 @@ describe("reconcileGitHubConnection", () => {
     expect(dependencies.finalize).toHaveBeenCalledWith(expect.objectContaining({ nextAttemptAt: "2026-09-18T12:30:00.000Z" }));
   });
 
+  it("preserves Retry-After metadata from lazy installation-token failures", async () => {
+    const failure = Object.assign(new Error("GitHub installation token failed"), {
+      kind: "rate_limited",
+      retryAfterSeconds: 3_600,
+    });
+    const dependencies = deps({ provideCredentials: vi.fn().mockRejectedValue(failure) });
+    const result = await reconcileGitHubConnection(dependencies, CLAIM);
+    expect(result.decision.retryAt).toBe("2026-09-18T13:00:00.000Z");
+    expect(dependencies.finalize).toHaveBeenCalledWith(expect.objectContaining({
+      nextAttemptAt: "2026-09-18T13:00:00.000Z",
+    }));
+  });
+
+  it("falls back to Retry-After when the reset timestamp is outside the Date range", async () => {
+    const failure = Object.assign(new Error("GitHub installation token failed"), {
+      kind: "rate_limited",
+      resetAtEpochSeconds: Number.MAX_SAFE_INTEGER,
+      retryAfterSeconds: 120,
+    });
+    const dependencies = deps({ provideCredentials: vi.fn().mockRejectedValue(failure) });
+    const result = await reconcileGitHubConnection(dependencies, CLAIM);
+    expect(result.decision.retryAt).toBe("2026-09-18T12:02:00.000Z");
+    expect(dependencies.finalize).toHaveBeenCalledWith(expect.objectContaining({
+      nextAttemptAt: "2026-09-18T12:02:00.000Z",
+    }));
+  });
+
   it("closes the incident when a partial loss recovers", async () => {
     const dependencies = deps();
     const result = await reconcileGitHubConnection(dependencies, { ...CLAIM, previousHealth: "partially_unavailable" });

@@ -243,6 +243,54 @@ const recordNoticeRowSchema = z.object({
   notified_user_ids: z.array(uuidSchema),
 }).passthrough();
 
+const projectedNoticeRowSchema = recordNoticeRowSchema.extend({
+  slack_queued: z.boolean(),
+});
+
+export async function projectConnectionNotice(
+  client: ConnectionStoreClient,
+  input: {
+    organisationId: string;
+    installationId: string;
+    kind: "incident" | "recovery";
+    diagnostic: (typeof GITHUB_CONNECTION_DIAGNOSTICS)[number] | null;
+    accountLogin: string;
+    channelId: string | null;
+    payload: SafeSlackDeliveryPayload;
+  },
+  signal?: AbortSignal,
+): Promise<{
+  incidentId: string | null;
+  isNew: boolean;
+  notifiedUserIds: string[];
+  slackQueued: boolean;
+}> {
+  if (!uuidSchema.safeParse(input.organisationId).success
+    || !uuidSchema.safeParse(input.installationId).success
+    || (input.kind !== "incident" && input.kind !== "recovery")
+    || input.accountLogin.trim().length < 1
+    || (input.channelId !== null && !uuidSchema.safeParse(input.channelId).success)
+    || input.payload.type !== "connection_health") unavailable();
+  const { data, error } = await applyConnectionStoreDeadline(client.rpc("project_github_connection_notice_server", {
+    target_organisation_id: input.organisationId,
+    target_installation_id: input.installationId,
+    target_kind: input.kind,
+    target_diagnostic_code: input.diagnostic,
+    target_account_login: input.accountLogin,
+    target_channel_id: input.channelId,
+    safe_payload: input.payload,
+  }), signal);
+  if (error) unavailable();
+  const parsed = projectedNoticeRowSchema.safeParse(data);
+  if (!parsed.success) unavailable();
+  return {
+    incidentId: parsed.data.incident_id,
+    isNew: parsed.data.is_new,
+    notifiedUserIds: parsed.data.notified_user_ids,
+    slackQueued: parsed.data.slack_queued,
+  };
+}
+
 export async function recordConnectionNotice(
   client: ConnectionStoreClient,
   input: {
@@ -278,12 +326,14 @@ export async function recordConnectionNotice(
 export async function resolveConnectionSlackChannel(
   client: ConnectionStoreClient,
   organisationId: string,
+  severity: SafeSlackDeliveryPayload["severity"],
   signal?: AbortSignal,
 ): Promise<string | null> {
-  if (!uuidSchema.safeParse(organisationId).success) unavailable();
+  const severityOrder = ["low", "medium", "high", "critical"] as const;
+  if (!uuidSchema.safeParse(organisationId).success || !severityOrder.includes(severity)) unavailable();
   const query = client
     .from("alert_channels")
-    .select("id,type,enabled,revoked_at")
+    .select("id,type,enabled,revoked_at,min_severity")
     .eq("organisation_id", organisationId);
   const { data, error } = await applyConnectionStoreDeadline(query, signal);
   if (error) unavailable();
@@ -292,9 +342,14 @@ export async function resolveConnectionSlackChannel(
     type: z.string(),
     enabled: z.boolean(),
     revoked_at: z.string().nullable(),
+    min_severity: z.enum(severityOrder),
   }).passthrough()).safeParse(data);
   if (!parsed.success) unavailable();
-  const channel = parsed.data.find((row) => row.type === "slack" && row.enabled && row.revoked_at === null);
+  const noticeSeverity = severityOrder.indexOf(severity);
+  const channel = parsed.data.find((row) => row.type === "slack"
+    && row.enabled
+    && row.revoked_at === null
+    && noticeSeverity >= severityOrder.indexOf(row.min_severity));
   return channel ? channel.id : null;
 }
 

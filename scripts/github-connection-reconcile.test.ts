@@ -82,6 +82,7 @@ describe("github-connection-reconcile entry point", () => {
     expect(exitCodeForCycle(new Error("GitHub connection cycle was aborted"))).toBe(1);
     expect(exitCodeForCycle(new Error("anything else"))).toBe(1);
     expect(exitCodeForCycle(null, 1)).toBe(1);
+    expect(exitCodeForCycle(null, 0, 1)).toBe(1);
   });
 
   it("includes only Slack delivery counts in the safe summary", () => {
@@ -343,6 +344,33 @@ describe("github-connection-reconcile entry point", () => {
     });
     expect(exitCode).toBe(1);
     expect(stdout.join("")).toContain("slackClaimed=1 slackDelivered=0 slackFailed=1");
+    expect(stderr).toEqual([]);
+  });
+
+  it("returns CLI failure when reconciliation loses transition ownership", async () => {
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const events: string[] = [];
+    const signalRef: { signal?: AbortSignal; cycleSignal?: AbortSignal; drainSignal?: AbortSignal } = {};
+    const exitCode = await runGitHubConnectionReconcileCli({
+      environment: {},
+      dependencies: runtimeDependencies(events, signalRef, {
+        runCycle: async (_dependencies, input) => ({
+          executionId: input.executionId,
+          webhookDeliveriesClaimed: 0,
+          installationsClaimed: 1,
+          healthy: 0,
+          retrying: 0,
+          actionRequired: 1,
+          recovered: 0,
+          ownershipLost: 1,
+        }),
+      }),
+      stdout: (value) => stdout.push(value),
+      stderr: (value) => stderr.push(value),
+    });
+    expect(exitCode).toBe(1);
+    expect(stdout.join("")).toContain("ownershipLost=1");
     expect(stderr).toEqual([]);
   });
 

@@ -205,11 +205,13 @@ export async function runGitHubConnectionCycle(
       else if (result.decision.health === "healthy") summary.healthy += 1;
       else if (result.decision.health === "retrying") summary.retrying += 1;
       else if (result.decision.health === "owner_action_required") summary.actionRequired += 1;
+      else if (result.decision.health === "partially_unavailable") summary.actionRequired += 1;
+      else if (result.decision.health === "disconnected") summary.actionRequired += 1;
       else summary.ownershipLost += 1;
-      if (result.decision.openIncident || result.decision.closeIncident) {
+      if (result.decision.openIncident || result.decision.health === "healthy") {
         try {
           await deps.notifyTransition({
-            kind: result.decision.closeIncident ? "recovery" : "incident",
+            kind: result.decision.health === "healthy" ? "recovery" : "incident",
             installationId: parsed.data.installationUuid,
             organisationId: context.organisationId,
             accountLogin: context.expectedAccount.login,

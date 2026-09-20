@@ -86,7 +86,7 @@ export function decideConnectionReconciliation(input: {
     return {
       health: "retrying",
       retryAt: retryAtIso(nowMs, consecutive, input.providerRetryAt),
-      openIncident: consecutive === INCIDENT_FAILURE_THRESHOLD,
+      openIncident: consecutive >= INCIDENT_FAILURE_THRESHOLD,
       closeIncident: false,
       diagnostic: input.diagnostic,
     };
@@ -96,7 +96,7 @@ export function decideConnectionReconciliation(input: {
     return {
       health: "partially_unavailable",
       retryAt: null,
-      openIncident: input.previousHealth === "healthy" || input.previousHealth === "retrying",
+      openIncident: true,
       closeIncident: false,
       diagnostic: input.diagnostic,
     };
