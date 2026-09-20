@@ -1,5 +1,7 @@
 // @vitest-environment node
-import { describe, expect, it } from "vitest";
+import { createServer } from "node:http";
+
+import { describe, expect, it, vi } from "vitest";
 
 import {
   exitCodeForCycle,
@@ -7,9 +9,24 @@ import {
   runGitHubConnectionReconcile,
   runGitHubConnectionReconcileCli,
   summariseCycleForLog,
+  type GitHubConnectionReconcileRuntimeDependencies,
 } from "./github-connection-reconcile";
 
 describe("github-connection-reconcile entry point", () => {
+  async function listen(server: ReturnType<typeof createServer>): Promise<number> {
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", () => resolve());
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Fixture server did not bind a TCP port");
+    return address.port;
+  }
+
+  async function close(server: ReturnType<typeof createServer>): Promise<void> {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+
   it("applies bounded defaults for missing cycle configuration", () => {
     expect(parseCycleEnvironment({})).toEqual({
       maximumWebhookDeliveries: 20,
@@ -82,7 +99,11 @@ describe("github-connection-reconcile entry point", () => {
     expect(summary).not.toContain("fixture-secret");
   });
 
-  function runtimeDependencies(events: string[], signalRef: { signal?: AbortSignal; cycleSignal?: AbortSignal; drainSignal?: AbortSignal }, overrides: Record<string, unknown> = {}) {
+  function runtimeDependencies(
+    events: string[],
+    signalRef: { signal?: AbortSignal; cycleSignal?: AbortSignal; drainSignal?: AbortSignal },
+    overrides: Partial<GitHubConnectionReconcileRuntimeDependencies> = {},
+  ) {
     const runCycle = async (_deps: unknown, input: { signal?: AbortSignal }) => {
       events.push("cycle");
       signalRef.signal = input.signal;
@@ -165,6 +186,63 @@ describe("github-connection-reconcile entry point", () => {
         },
       }),
     })).rejects.toThrow("deadline expired during Slack drain");
+  });
+
+  it("cancels a stalled initial Supabase claim at the command deadline", async () => {
+    const requests: string[] = [];
+    let disconnectedBeforeResponse = false;
+    let disconnectedResolve: () => void = () => undefined;
+    const disconnected = new Promise<void>((resolve) => { disconnectedResolve = resolve; });
+    const server = createServer((request, response) => {
+      requests.push(request.url ?? "");
+      request.socket.once("close", () => {
+        disconnectedBeforeResponse = !response.headersSent;
+        disconnectedResolve();
+      });
+      setTimeout(() => {
+        if (!response.destroyed) response.end("[]");
+      }, 400);
+    });
+    const port = await listen(server);
+    const stderr: string[] = [];
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", `http://127.0.0.1:${port}`);
+    vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "fictional-service-role");
+    const startedAt = Date.now();
+    try {
+      const exitCode = await runGitHubConnectionReconcileCli({
+        environment: {
+          GITHUB_CONNECTION_TIME_BUDGET_MS: "100",
+          GITHUB_CONNECTION_MAX_WEBHOOK_DELIVERIES: "1",
+          GITHUB_CONNECTION_MAX_INSTALLATIONS: "1",
+          GITHUB_CONNECTION_MAX_SLACK_DELIVERIES: "1",
+        },
+        dependencies: {
+          getConfig: () => ({
+            appId: "1",
+            appSlug: "fixture",
+            clientId: "client",
+            clientSecret: "secret",
+            privateKey: "private",
+            webhookSecret: "webhook",
+            allowedAccountId: 1,
+            allowedAccountType: "Organization" as const,
+          }),
+          createAppJwt: async () => "jwt",
+        },
+        stderr: (value) => stderr.push(value),
+      });
+      const elapsedMs = Date.now() - startedAt;
+      expect(exitCode).toBe(1);
+      expect(elapsedMs).toBeLessThan(350);
+      expect(requests).toContain("/rest/v1/rpc/claim_github_connection_webhook_deliveries_server");
+      await disconnected;
+      expect(disconnectedBeforeResponse).toBe(true);
+      expect(stderr).toEqual([expect.stringMatching(/^github-connection-reconcile execution=[0-9a-f-]+ failed\n$/)]);
+      expect(stderr.join("")).not.toContain("fictional-service-role");
+    } finally {
+      vi.unstubAllEnvs();
+      await close(server);
+    }
   });
 
   it("returns CLI failure after recording a failed Slack delivery summary", async () => {

@@ -25,6 +25,40 @@ function clientDouble(selectResult: { data: unknown; error: unknown }, rpcResult
 const INSTALLATION_UUID = "22222222-2222-4222-8222-222222222222";
 
 describe("github-connection-store", () => {
+  it("disables PostgREST retry backoff and binds the shared deadline signal", async () => {
+    const controller = new AbortController();
+    const query = Object.assign(Promise.resolve({
+      data: {
+        provider_installation_id: 77,
+        organisation_id: "33333333-3333-4333-8333-333333333333",
+        health: "healthy",
+        consecutive_reconciliation_failures: 0,
+        account_id: 99,
+        account_login: "Adtecher",
+        account_type: "Organization",
+      },
+      error: null,
+    }), {
+      retry: vi.fn(),
+      abortSignal: vi.fn(),
+    });
+    query.retry.mockImplementation(() => query);
+    query.abortSignal.mockImplementation(() => query);
+    const client = {
+      from: vi.fn().mockReturnValue({
+        select: () => ({
+          eq: () => ({ single: () => query }),
+        }),
+      }),
+      rpc: vi.fn(),
+    };
+    await expect(loadInstallationContext(client as never, INSTALLATION_UUID, controller.signal)).resolves.toMatchObject({
+      providerInstallationId: 77,
+    });
+    expect(query.retry).toHaveBeenCalledWith(false);
+    expect(query.abortSignal).toHaveBeenCalledWith(controller.signal);
+  });
+
   it("claims due runs and validates every returned row", async () => {
     const client = clientDouble(
       { data: null, error: null },

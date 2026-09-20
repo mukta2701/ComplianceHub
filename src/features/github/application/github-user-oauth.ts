@@ -182,8 +182,10 @@ export function buildGitHubAuthorizeUrl(input: {
   return url;
 }
 
-function safeFetchInit(token: string): RequestInit {
+function safeFetchInit(token: string, signal?: AbortSignal): RequestInit {
   if (!token || token.length > 2_000) throw verificationError();
+  signal?.throwIfAborted();
+  const timeoutSignal = AbortSignal.timeout(15_000);
   return {
     method: "GET",
     headers: {
@@ -194,16 +196,23 @@ function safeFetchInit(token: string): RequestInit {
     },
     cache: "no-store",
     redirect: "error",
-    signal: AbortSignal.timeout(15_000),
+    signal: signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal,
   };
 }
 
 // This boundary accepts only the allowlisted GitHub API origin checked below;
 // the ephemeral authorization value is never returned, logged, or persisted.
-async function fetchVerifiedGitHubApi(url: URL, authorizationValue: string, fetchImpl: FetchLike): Promise<Response> {
+async function fetchVerifiedGitHubApi(
+  url: URL,
+  authorizationValue: string,
+  fetchImpl: FetchLike,
+  signal?: AbortSignal,
+): Promise<Response> {
   if (url.origin !== API_ORIGIN || url.username || url.password || url.hash) throw verificationError();
   try {
-    const response = await fetchImpl(url.toString(), safeFetchInit(authorizationValue));
+    signal?.throwIfAborted();
+    const response = await fetchImpl(url.toString(), safeFetchInit(authorizationValue, signal));
+    signal?.throwIfAborted();
     if (!response.ok) throw verificationError();
     return response;
   } catch {
@@ -313,6 +322,7 @@ export async function collectPaginatedInstallationRepositories(input: {
   startUrl: string;
   token: string;
   fetchImpl?: FetchLike;
+  signal?: AbortSignal;
 }): Promise<UserInstallationRepository[]> {
   let url: URL;
   try {
@@ -325,9 +335,17 @@ export async function collectPaginatedInstallationRepositories(input: {
   const collected: UserInstallationRepository[] = [];
   let expectedCount: number | null = null;
   for (let page = 0; page < MAX_GITHUB_DISCOVERY_PAGES; page += 1) {
-    const response = await fetchVerifiedGitHubApi(url, input.token, fetchImpl);
+    input.signal?.throwIfAborted();
+    const response = await fetchVerifiedGitHubApi(url, input.token, fetchImpl, input.signal);
     let parsed: z.infer<typeof repositoryListSchema>;
-    try { parsed = repositoryListSchema.parse(await response.json()); } catch { throw verificationError(); }
+    try {
+      input.signal?.throwIfAborted();
+      const body = await response.json();
+      input.signal?.throwIfAborted();
+      parsed = repositoryListSchema.parse(body);
+    } catch {
+      throw verificationError();
+    }
     if (parsed.total_count > MAX_DISCOVERED_REPOSITORIES) throw verificationError();
     expectedCount ??= parsed.total_count;
     if (parsed.total_count !== expectedCount) throw verificationError();

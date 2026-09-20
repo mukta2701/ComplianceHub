@@ -85,6 +85,10 @@ function checkBudget(startedAtMs: number, timeBudgetMs: number): void {
   if (Date.now() - startedAtMs > timeBudgetMs) throw new GitHubConnectionCycleBudgetExceededError();
 }
 
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new GitHubConnectionCycleAbortedError();
+}
+
 export async function runGitHubConnectionCycle(
   deps: GitHubConnectionCycleDependencies,
   input: {
@@ -130,6 +134,7 @@ export async function runGitHubConnectionCycle(
         await deps.finalizeConnectionDelivery(
           { id: parsed.data.id, attemptCount: parsed.data.attemptCount }, "failed", "internal_error",
         );
+        throwIfAborted(input.signal);
       } catch {
         summary.ownershipLost += 1;
       }
@@ -138,18 +143,27 @@ export async function runGitHubConnectionCycle(
     checkBudget(startedAtMs, input.timeBudgetMs);
     try {
       const scheduled = await deps.scheduleConnection(parsed.data.providerInstallationId);
+      throwIfAborted(input.signal);
       if (await deps.finalizeConnectionDelivery(
         { id: parsed.data.id, attemptCount: parsed.data.attemptCount },
         scheduled ? "processed" : "failed",
         scheduled ? null : "invalid_response",
-      )) continue;
+      )) {
+        throwIfAborted(input.signal);
+        continue;
+      }
+      throwIfAborted(input.signal);
       summary.ownershipLost += 1;
     } catch {
+      if (input.signal?.aborted) throw new GitHubConnectionCycleAbortedError();
       try {
-        if (await deps.finalizeConnectionDelivery(
+        const finalised = await deps.finalizeConnectionDelivery(
           { id: parsed.data.id, attemptCount: parsed.data.attemptCount }, "failed", "internal_error",
-        )) continue;
+        );
+        throwIfAborted(input.signal);
+        if (finalised) continue;
       } catch {
+        if (input.signal?.aborted) throw new GitHubConnectionCycleAbortedError();
         // Finalise loss is recorded below.
       }
       summary.ownershipLost += 1;
@@ -157,13 +171,15 @@ export async function runGitHubConnectionCycle(
   }
 
   checkBudget(startedAtMs, input.timeBudgetMs);
+  throwIfAborted(input.signal);
   const due = await deps.claimDueInstallations(input.maximumInstallations);
+  throwIfAborted(input.signal);
   if (due.length > input.maximumInstallations) invalidConfiguration();
   summary.installationsClaimed = due.length;
   const reconciled = new Set<string>();
 
   for (const value of due) {
-    if (input.signal?.aborted) throw new GitHubConnectionCycleAbortedError();
+    throwIfAborted(input.signal);
     checkBudget(startedAtMs, input.timeBudgetMs);
     const parsed = dueRunSchema.safeParse(value);
     if (!parsed.success || reconciled.has(parsed.data.installationUuid)) {
@@ -174,6 +190,7 @@ export async function runGitHubConnectionCycle(
     reconciled.add(parsed.data.installationUuid);
     try {
       const context = await deps.loadInstallationContext(parsed.data.installationUuid);
+      throwIfAborted(input.signal);
       const result = await deps.reconcileClaim({
         runId: parsed.data.runId,
         installationUuid: parsed.data.installationUuid,
@@ -183,6 +200,7 @@ export async function runGitHubConnectionCycle(
         consecutiveFailures: context.consecutiveFailures,
         expectedAccount: context.expectedAccount,
       });
+      throwIfAborted(input.signal);
       if (result.decision.closeIncident) summary.recovered += 1;
       else if (result.decision.health === "healthy") summary.healthy += 1;
       else if (result.decision.health === "retrying") summary.retrying += 1;
@@ -200,13 +218,17 @@ export async function runGitHubConnectionCycle(
             occurredAt: new Date().toISOString(),
           });
         } catch {
+          if (input.signal?.aborted) throw new GitHubConnectionCycleAbortedError();
           summary.ownershipLost += 1;
         }
       }
     } catch {
+      if (input.signal?.aborted) throw new GitHubConnectionCycleAbortedError();
       summary.ownershipLost += 1;
     }
   }
 
+  checkBudget(startedAtMs, input.timeBudgetMs);
+  throwIfAborted(input.signal);
   return summary;
 }

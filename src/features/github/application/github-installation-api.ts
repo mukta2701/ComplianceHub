@@ -61,10 +61,19 @@ function retryAtIso(nowMs: number, error: GitHubRateLimitError): string | null {
   return null;
 }
 
-async function fetchInstallationApi(url: URL, token: string, fetchImpl: FetchLike, timeoutMs: number): Promise<Response> {
+async function fetchInstallationApi(
+  url: URL,
+  token: string,
+  fetchImpl: FetchLike,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<Response> {
   if (url.origin !== GITHUB_API_ORIGIN || url.username || url.password || url.hash) invalid();
   let response: Response;
   try {
+    signal?.throwIfAborted();
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    const requestSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
     response = await fetchImpl(url.toString(), {
       method: "GET",
       headers: {
@@ -75,8 +84,9 @@ async function fetchInstallationApi(url: URL, token: string, fetchImpl: FetchLik
       },
       cache: "no-store",
       redirect: "error",
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: requestSignal,
     });
+    signal?.throwIfAborted();
   } catch {
     throw new GitHubInstallationApiError("network");
   }
@@ -104,6 +114,7 @@ export async function readInstallationSnapshot(input: {
   installationToken: string;
   fetchImpl?: FetchLike;
   timeoutMs?: number;
+  signal?: AbortSignal;
 }): Promise<InstallationSnapshot> {
   if (!Number.isSafeInteger(input.installationId) || input.installationId <= 0) invalid();
   if (!tokenSchema.safeParse(input.appJwt).success || !tokenSchema.safeParse(input.installationToken).success) invalid();
@@ -116,11 +127,16 @@ export async function readInstallationSnapshot(input: {
     input.appJwt,
     fetchImpl,
     timeoutMs,
+    input.signal,
   );
   let identity: z.infer<typeof appInstallationSchema>;
   try {
-    identity = appInstallationSchema.parse(await identityResponse.json());
+    input.signal?.throwIfAborted();
+    const body = await identityResponse.json();
+    input.signal?.throwIfAborted();
+    identity = appInstallationSchema.parse(body);
   } catch {
+    if (input.signal?.aborted) throw new GitHubInstallationApiError("network");
     invalid();
   }
   if (identity.id !== input.installationId) invalid();
@@ -131,8 +147,10 @@ export async function readInstallationSnapshot(input: {
       startUrl: new URL("/installation/repositories?per_page=100", GITHUB_API_ORIGIN).toString(),
       token: input.installationToken,
       fetchImpl,
+      signal: input.signal,
     });
   } catch {
+    if (input.signal?.aborted) throw new GitHubInstallationApiError("network");
     invalid();
   }
 

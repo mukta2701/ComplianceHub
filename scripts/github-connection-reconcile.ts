@@ -13,6 +13,7 @@ import {
   recordConnectionNotice,
   resolveConnectionSlackChannel,
   scheduleConnectionReconciliation,
+  applyConnectionStoreDeadline,
   type ConnectionStoreClient,
   type StoredReconciliationRun,
 } from "@/features/github/application/github-connection-store";
@@ -49,6 +50,14 @@ export type GitHubConnectionReconcileSummary = GitHubConnectionCycleSummary & Sl
 
 function invalidCycleEnvironment(): never {
   throw new Error("GitHub connection cycle configuration is invalid");
+}
+
+function deadlineFetch(signal: AbortSignal): typeof fetch {
+  return (input, init) => {
+    signal.throwIfAborted();
+    const requestSignal = init?.signal ? AbortSignal.any([signal, init.signal]) : signal;
+    return fetch(input, { ...init, signal: requestSignal });
+  };
 }
 
 function boundedInteger(value: string | undefined, fallback: number, minimum: number, maximum: number): number {
@@ -118,7 +127,7 @@ function asStoreClient(service: ServiceClient): ConnectionStoreClient {
 
 export type GitHubConnectionReconcileRuntimeDependencies = {
   getConfig: typeof getGitHubConnectionConfig;
-  createServiceClient: () => ServiceClient;
+  createServiceClient: (signal?: AbortSignal) => ServiceClient;
   createAppJwt: typeof createAppJwt;
   createInstallationToken: typeof createInstallationToken;
   readInstallationSnapshot: typeof readInstallationSnapshot;
@@ -133,7 +142,7 @@ export type GitHubConnectionReconcileRuntimeDependencies = {
 
 const productionDependencies: GitHubConnectionReconcileRuntimeDependencies = {
   getConfig: getGitHubConnectionConfig,
-  createServiceClient: () => createSupabaseServiceClient() as unknown as ServiceClient,
+  createServiceClient: (signal) => createSupabaseServiceClient({ signal }) as unknown as ServiceClient,
   createAppJwt,
   createInstallationToken,
   readInstallationSnapshot,
@@ -156,19 +165,23 @@ export async function runGitHubConnectionReconcile(input: {
   const deadlineSignal = input.signal ? AbortSignal.any([input.signal, timeoutSignal]) : timeoutSignal;
   deadlineSignal.throwIfAborted();
   const config = dependencies.getConfig(input.environment);
-  const service = dependencies.createServiceClient();
+  const service = dependencies.createServiceClient(deadlineSignal);
   const client = asStoreClient(service);
+  deadlineSignal.throwIfAborted();
   const appJwt = await dependencies.createAppJwt(
     { appId: config.appId, privateKey: config.privateKey },
     dependencies.now(),
   );
+  deadlineSignal.throwIfAborted();
 
   const summary = await dependencies.runCycle(
     {
       claimConnectionDeliveries: async (limit) => {
-        const { data, error } = await service.rpc("claim_github_connection_webhook_deliveries_server", {
+        deadlineSignal.throwIfAborted();
+        const { data, error } = await applyConnectionStoreDeadline(service.rpc("claim_github_connection_webhook_deliveries_server", {
           target_limit: limit,
-        });
+        }), deadlineSignal);
+        deadlineSignal.throwIfAborted();
         if (error || !Array.isArray(data)) throw new Error("GitHub connection cycle store is unavailable");
         return data.map((row) => {
           const record = row as Record<string, unknown>;
@@ -182,26 +195,39 @@ export async function runGitHubConnectionReconcile(input: {
         });
       },
       finalizeConnectionDelivery: async (delivery, outcome, diagnosticCode) => {
-        const { data, error } = await service.rpc("finalize_github_webhook_delivery_server", {
+        deadlineSignal.throwIfAborted();
+        const { data, error } = await applyConnectionStoreDeadline(service.rpc("finalize_github_webhook_delivery_server", {
           target_delivery_id: delivery.id,
           target_attempt_count: delivery.attemptCount,
           target_status: outcome,
           target_diagnostic_code: diagnosticCode,
-        });
+        }), deadlineSignal);
+        deadlineSignal.throwIfAborted();
         if (error || typeof data !== "boolean") throw new Error("GitHub connection cycle store is unavailable");
         return data;
       },
-      scheduleConnection: (providerInstallationId) =>
-        scheduleConnectionReconciliation(client, providerInstallationId),
+      scheduleConnection: async (providerInstallationId) => {
+        deadlineSignal.throwIfAborted();
+        const scheduled = await scheduleConnectionReconciliation(client, providerInstallationId, deadlineSignal);
+        deadlineSignal.throwIfAborted();
+        return scheduled;
+      },
       claimDueInstallations: async (limit) => {
+        deadlineSignal.throwIfAborted();
         const runs: StoredReconciliationRun[] = await claimDueReconciliations(client, {
           workerId: executionId,
           limit,
           nowIso: dependencies.now().toISOString(),
-        });
+        }, deadlineSignal);
+        deadlineSignal.throwIfAborted();
         return runs;
       },
-      loadInstallationContext: (installationUuid) => loadInstallationContext(client, installationUuid),
+      loadInstallationContext: async (installationUuid) => {
+        deadlineSignal.throwIfAborted();
+        const context = await loadInstallationContext(client, installationUuid, deadlineSignal);
+        deadlineSignal.throwIfAborted();
+        return context;
+      },
       notifyTransition: (notice: {
         kind: "incident" | "recovery";
         installationId: string;
@@ -213,9 +239,24 @@ export async function runGitHubConnectionReconcile(input: {
       }) =>
         queueGitHubConnectionNotice(
           {
-            recordNotice: (recordInput) => recordConnectionNotice(client, recordInput),
-            resolveSlackChannelId: (organisationId) => resolveConnectionSlackChannel(client, organisationId),
-            enqueueSlackAlert: (enqueueInput) => enqueueConnectionSlackAlert(client, enqueueInput),
+            recordNotice: async (recordInput) => {
+              deadlineSignal.throwIfAborted();
+              const result = await recordConnectionNotice(client, recordInput, deadlineSignal);
+              deadlineSignal.throwIfAborted();
+              return result;
+            },
+            resolveSlackChannelId: async (organisationId) => {
+              deadlineSignal.throwIfAborted();
+              const channelId = await resolveConnectionSlackChannel(client, organisationId, deadlineSignal);
+              deadlineSignal.throwIfAborted();
+              return channelId;
+            },
+            enqueueSlackAlert: async (enqueueInput) => {
+              deadlineSignal.throwIfAborted();
+              const queued = await enqueueConnectionSlackAlert(client, enqueueInput, deadlineSignal);
+              deadlineSignal.throwIfAborted();
+              return queued;
+            },
           },
           {
             kind: notice.kind,
@@ -229,24 +270,53 @@ export async function runGitHubConnectionReconcile(input: {
           },
         ),
       reconcileClaim: async (claim: ClaimedGitHubConnectionReconciliation) => {
-        const repositoryIds = await listSelectedRepositoryIds(client, claim.installationUuid);
+        deadlineSignal.throwIfAborted();
+        const repositoryIds = await listSelectedRepositoryIds(client, claim.installationUuid, deadlineSignal);
+        deadlineSignal.throwIfAborted();
         const installationToken = await dependencies.createInstallationToken({
           installationId: claim.providerInstallationId,
           repositoryIds,
           appJwt,
+          signal: deadlineSignal,
+          fetchImpl: deadlineFetch(deadlineSignal),
         });
-        return reconcileGitHubConnection(
+        deadlineSignal.throwIfAborted();
+        const result = await reconcileGitHubConnection(
           {
-            readSnapshot: (snapshotInput) => dependencies.readInstallationSnapshot(snapshotInput),
-            provideCredentials: async () => ({ appJwt, installationToken: installationToken.token }),
-            loadStoredRepositories: (installationUuid) => listStoredRepositories(client, installationUuid),
-            finalize: (finalizeInput) => finalizeReconciliationRun(client, {
-              ...finalizeInput,
-              workerId: executionId,
-            }),
+            readSnapshot: async (snapshotInput) => {
+              deadlineSignal.throwIfAborted();
+              const snapshot = await dependencies.readInstallationSnapshot({
+                ...snapshotInput,
+                signal: deadlineSignal,
+                fetchImpl: deadlineFetch(deadlineSignal),
+              });
+              deadlineSignal.throwIfAborted();
+              return snapshot;
+            },
+            provideCredentials: async () => {
+              deadlineSignal.throwIfAborted();
+              return { appJwt, installationToken: installationToken.token };
+            },
+            loadStoredRepositories: async (installationUuid) => {
+              deadlineSignal.throwIfAborted();
+              const repositories = await listStoredRepositories(client, installationUuid, deadlineSignal);
+              deadlineSignal.throwIfAborted();
+              return repositories;
+            },
+            finalize: async (finalizeInput) => {
+              deadlineSignal.throwIfAborted();
+              const result = await finalizeReconciliationRun(client, {
+                ...finalizeInput,
+                workerId: executionId,
+              }, deadlineSignal);
+              deadlineSignal.throwIfAborted();
+              return result;
+            },
           },
           claim,
         );
+        deadlineSignal.throwIfAborted();
+        return result;
       },
     },
     {

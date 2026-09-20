@@ -141,6 +141,21 @@ describe("runGitHubConnectionCycle", () => {
     );
   });
 
+  it("does not finalise a delivery after the shared deadline expires during scheduling", async () => {
+    const controller = new AbortController();
+    const dependencies = deps({
+      claimConnectionDeliveries: vi.fn().mockResolvedValue([delivery()]),
+      scheduleConnection: vi.fn().mockImplementation(async () => {
+        controller.abort(new Error("deadline expired during scheduling"));
+        return true;
+      }),
+    });
+    await expect(runGitHubConnectionCycle(dependencies, { ...INPUT, signal: controller.signal })).rejects.toThrow(
+      "GitHub connection cycle was aborted",
+    );
+    expect(dependencies.finalizeConnectionDelivery).not.toHaveBeenCalled();
+  });
+
   it("isolates one installation failure without losing the others", async () => {
     const dependencies = deps({
       claimDueInstallations: vi.fn().mockResolvedValue([
