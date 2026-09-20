@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 
 import { Pill } from "@/components/ui";
 import { setGitHubRepositorySelectedAction, disconnectGitHubInstallationAction } from "@/app/app/integrations/actions";
@@ -97,11 +96,15 @@ const PRESENTATION_TONE: Record<GitHubConnectionPresentation["tone"], string> = 
   neutral: "neutral",
 };
 
-function DisconnectInstallationButton({ installationId }: { installationId: string }) {
-  const router = useRouter();
+function DisconnectInstallationButton({
+  installationId,
+  onMessage,
+}: {
+  installationId: string;
+  onMessage: (message: string) => void;
+}) {
   const [armed, setArmed] = useState(false);
   const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState("");
 
   async function disconnect() {
     if (!armed) {
@@ -109,18 +112,17 @@ function DisconnectInstallationButton({ installationId }: { installationId: stri
       return;
     }
     setPending(true);
-    setMessage("");
+    onMessage("");
     const formData = new FormData();
     formData.set("installationId", installationId);
     try {
       const result = await disconnectGitHubInstallationAction(formData);
-      setMessage(result.message);
+      onMessage(result.message);
       if (result.ok) {
         setArmed(false);
-        router.refresh();
       }
     } catch {
-      setMessage("Could not disconnect the GitHub installation. Please try again.");
+      onMessage("Could not disconnect the GitHub installation. Please try again.");
     } finally {
       setPending(false);
     }
@@ -135,7 +137,6 @@ function DisconnectInstallationButton({ installationId }: { installationId: stri
       onClick={() => void disconnect()}
     >{armed ? "Click again to confirm disconnect" : "Disconnect"}</button>
     {armed && !pending && <span className="field-hint">Disconnecting stops future checks. The GitHub-side installation stays unchanged.</span>}
-    {message && <span className="github-shadow-status" role="status">{message}</span>}
   </span>;
 }
 
@@ -158,7 +159,6 @@ export function GitHubInstallationPanel({
   canManageRepositoryScope: boolean;
   nowIso: string;
 }) {
-  const router = useRouter();
   const serverSelections = selectionSnapshot(repositories);
   const [selectionState, setSelectionState] = useState<SelectionState>(() => ({
     serverSelections,
@@ -196,8 +196,6 @@ export function GitHubInstallationPanel({
           attemptServerSelected,
           previousSelected,
         ));
-      } else {
-        router.refresh();
       }
     } catch {
       setSelectionState((current) => rollbackSelectionState(
@@ -267,7 +265,10 @@ export function GitHubInstallationPanel({
           {installation.permissions_ok ? <div className="github-approved-permissions">
             <p><strong>Approved read-only access:</strong> {APPROVED_READ_PERMISSIONS.join(" · ")}</p>
           </div> : null}
-          {canManageInstallation && installation.health !== "disconnected" && <DisconnectInstallationButton installationId={installation.id} />}
+          {canManageInstallation && installation.health !== "disconnected" && <DisconnectInstallationButton
+            installationId={installation.id}
+            onMessage={setMessage}
+          />}
           {installation.repository_selection === "all" && <p className="github-configuration-note" role="note">
             This GitHub App installation has access to all repositories. Review the installation if you want GitHub to limit access to selected repositories.
           </p>}

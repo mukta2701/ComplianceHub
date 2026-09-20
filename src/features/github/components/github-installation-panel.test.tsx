@@ -3,7 +3,6 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const hoisted = vi.hoisted(() => ({
-  refresh: vi.fn(),
   selectRepository: vi.fn(),
   disconnectInstallation: vi.fn(),
 }));
@@ -12,7 +11,6 @@ vi.mock("@/app/app/integrations/actions", () => ({
   setGitHubRepositorySelectedAction: hoisted.selectRepository,
   disconnectGitHubInstallationAction: hoisted.disconnectInstallation,
 }));
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: hoisted.refresh }) }));
 
 import {
   GitHubInstallationPanel,
@@ -251,7 +249,34 @@ describe("GitHubInstallationPanel connection health", () => {
       installationId: INSTALLATION_ID,
     });
     await waitFor(() => expect(screen.getByText(/GitHub-side installation is unchanged/i)).toBeVisible());
-    expect(hoisted.refresh).toHaveBeenCalled();
+  });
+
+  it("keeps the disconnect result after refreshed server data hides the control", async () => {
+    const user = userEvent.setup();
+    const props = {
+      repositories: [repository()],
+      canManageInstallation: true,
+      canManageRepositoryScope: true,
+      nowIso: NOW_ISO,
+    };
+    const { rerender } = render(<GitHubInstallationPanel
+      {...props}
+      installations={[installation]}
+    />);
+
+    await user.click(screen.getByRole("button", { name: "Disconnect" }));
+    await user.click(screen.getByRole("button", { name: "Click again to confirm disconnect" }));
+    await waitFor(() => expect(hoisted.disconnectInstallation).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/GitHub-side installation is unchanged/i));
+
+    rerender(<GitHubInstallationPanel
+      {...props}
+      installations={[{ ...installation, health: "disconnected" }]}
+    />);
+
+    expect(screen.getByText("Disconnected")).toBeVisible();
+    expect(screen.queryByRole("button", { name: /disconnect/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(/GitHub-side installation is unchanged/i);
   });
 
   it("hides the disconnect control from non-Owners", () => {
