@@ -21,7 +21,7 @@ function deps(overrides: Record<string, unknown> = {}) {
   return {
     recordNotice: vi.fn().mockResolvedValue({ incidentId: "44444444-4444-4444-8444-444444444444", isNew: true, notifiedUserIds: ["u1", "u2"] }),
     resolveSlackChannelId: vi.fn().mockResolvedValue("55555555-5555-4555-8555-555555555555"),
-    enqueueSlackAlert: vi.fn().mockResolvedValue({ deliveryId: "d1", lockToken: "t1" }),
+    enqueueSlackAlert: vi.fn().mockResolvedValue(true),
     ...overrides,
   };
 }
@@ -73,6 +73,13 @@ describe("queueGitHubConnectionNotice", () => {
     });
     const result = await queueGitHubConnectionNotice(dependencies, { ...INCIDENT, kind: "recovery", health: "healthy", diagnostic: null });
     expect(result).toEqual({ inAppQueued: 0, slackQueued: 0 });
+  });
+
+  it("does not count a duplicate Slack queue result as a new delivery", async () => {
+    const dependencies = deps({ enqueueSlackAlert: vi.fn().mockResolvedValue(false) });
+    const result = await queueGitHubConnectionNotice(dependencies, INCIDENT);
+    expect(result).toEqual({ inAppQueued: 2, slackQueued: 0 });
+    expect(dependencies.enqueueSlackAlert).toHaveBeenCalledTimes(1);
   });
 
   it("still notifies in-app when no Slack destination is configured", async () => {

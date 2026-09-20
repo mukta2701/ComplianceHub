@@ -107,6 +107,8 @@ jobs:
           image_scan="$RUNNER_TEMP/compliancehub-image-inspection.txt"
           copied_bundle="$RUNNER_TEMP/github-connection-reconcile.mjs"
           fixture_secret="task8-container-fixture-secret"
+          fixture_encryption_marker="task8-container-encryption-marker"
+          fixture_slack_digest_marker="task8-container-slack-digest-marker"
           private_key_pem="$(openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 2>/dev/null)"
           private_key="$(printf '%s\n' "$private_key_pem" | awk '{printf "%s\\n", $0}')"
           private_key_marker="$(printf '%s\n' "$private_key_pem" | sed -n '2p')"
@@ -119,7 +121,7 @@ jobs:
 
           docker network create "$fixture_network" >/dev/null
           docker run --detach --name "$fixture_container" --network "$fixture_network" \
-            compliancehub:ci node -e 'require("node:http").createServer((_request,response)=>{response.writeHead(200,{"content-type":"application/json"});response.end("[]")}).listen(4400,"0.0.0.0")'
+            compliancehub:ci node -e 'require("node:http").createServer((request,response)=>{const body=request.url==="/rest/v1/rpc/claim_github_connection_alert_delivery"?"[]":"[]";response.writeHead(200,{"content-type":"application/json"});response.end(body)}).listen(4400,"0.0.0.0")'
           for attempt in {1..20}; do
             if docker exec "$fixture_container" node -e 'fetch("http://127.0.0.1:4400").then(response=>{if(!response.ok)process.exit(1)}).catch(()=>process.exit(1))'; then break; fi
             sleep 0.25
@@ -142,13 +144,17 @@ jobs:
             --env GITHUB_ALLOWED_ACCOUNT_TYPE=User \
             --env GITHUB_CONNECTION_MAX_WEBHOOK_DELIVERIES=1 \
             --env GITHUB_CONNECTION_MAX_INSTALLATIONS=1 \
+            --env GITHUB_CONNECTION_MAX_SLACK_DELIVERIES=1 \
             --env GITHUB_CONNECTION_TIME_BUDGET_MS=5000 \
+            --env APP_ENCRYPTION_KEY="$fixture_encryption_marker" \
+            --env SLACK_ALLOWED_WEBHOOK_SHA256="$fixture_slack_digest_marker" \
             compliancehub:ci node dist/github-connection-reconcile.mjs >"$runner_log" 2>&1
           runner_status=$?
           set -e
           cat "$runner_log"
           test "$runner_status" -eq 0
           grep -Fq -- 'webhookDeliveriesClaimed=0 installationsClaimed=0' "$runner_log"
+          grep -Fq -- 'slackClaimed=0 slackDelivered=0 slackFailed=0' "$runner_log"
 
           docker history --no-trunc compliancehub:ci >"$image_scan"
           docker inspect --format '{{json .Config.Env}}' compliancehub:ci >>"$image_scan"
@@ -172,6 +178,8 @@ jobs:
             esac
           }
           assert_pattern_absent fixed "$fixture_secret" "$runner_log" "$image_scan" "$copied_bundle"
+          assert_pattern_absent fixed "$fixture_encryption_marker" "$runner_log" "$image_scan" "$copied_bundle"
+          assert_pattern_absent fixed "$fixture_slack_digest_marker" "$runner_log" "$image_scan" "$copied_bundle"
           assert_pattern_absent fixed "$private_key_marker" "$runner_log" "$image_scan" "$copied_bundle"
 
   application:

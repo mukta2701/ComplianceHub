@@ -214,11 +214,6 @@ const recordNoticeRowSchema = z.object({
   notified_user_ids: z.array(uuidSchema),
 }).passthrough();
 
-const leaseRowSchema = z.object({
-  delivery_id: uuidSchema,
-  lock_token: uuidSchema,
-}).passthrough();
-
 export async function recordConnectionNotice(
   client: ConnectionStoreClient,
   input: {
@@ -281,12 +276,12 @@ export async function enqueueConnectionSlackAlert(
     diagnostic: (typeof GITHUB_CONNECTION_DIAGNOSTICS)[number] | null;
     payload: SafeSlackDeliveryPayload;
   },
-): Promise<{ deliveryId: string; lockToken: string } | null> {
+): Promise<boolean> {
   if (!uuidSchema.safeParse(input.organisationId).success
     || !uuidSchema.safeParse(input.channelId).success
     || !uuidSchema.safeParse(input.installationId).success
     || input.payload.type !== "connection_health") unavailable();
-  const { data, error } = await client.rpc("enqueue_github_connection_alert_delivery", {
+  const { data, error } = await client.rpc("queue_github_connection_alert_delivery", {
     target_organisation_id: input.organisationId,
     target_channel_id: input.channelId,
     target_installation_id: input.installationId,
@@ -294,9 +289,8 @@ export async function enqueueConnectionSlackAlert(
     target_diagnostic_code: input.diagnostic,
     safe_payload: input.payload,
   });
-  if (error) unavailable();
-  const rows = z.array(leaseRowSchema).safeParse(data);
-  if (!rows.success || rows.data.length > 1) unavailable();
-  if (rows.data.length === 0) return null;
-  return { deliveryId: rows.data[0]!.delivery_id, lockToken: rows.data[0]!.lock_token };
+  if (error || typeof data !== "boolean") {
+    throw new Error("Connection alert delivery queue failed");
+  }
+  return data;
 }

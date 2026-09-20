@@ -35,7 +35,7 @@ export type GitHubConnectionAlertDependencies = {
     kind: "incident" | "recovery";
     diagnostic: GitHubConnectionDiagnostic | null;
     payload: SafeSlackDeliveryPayload;
-  }): Promise<{ deliveryId: string; lockToken: string } | null>;
+  }): Promise<boolean>;
 };
 
 const noticeSchema = z.object({
@@ -107,5 +107,5 @@ export async function queueGitHubConnectionNotice(
     diagnostic: notice.diagnostic,
     payload: toGitHubConnectionSlackPayload(notice),
   });
-  return { inAppQueued: recorded.notifiedUserIds.length, slackQueued: lease ? 1 : 0 };
+  return { inAppQueued: recorded.notifiedUserIds.length, slackQueued: lease === true ? 1 : 0 };
 }

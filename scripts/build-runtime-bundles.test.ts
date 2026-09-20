@@ -13,6 +13,8 @@ const execFileAsync = promisify(execFile);
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const runtimePath = resolve(repositoryRoot, "dist/github-connection-reconcile.mjs");
 const fixtureSecret = "task8-fixture-secret-must-not-leak";
+const fixtureEncryptionMarker = "task8-fixture-encryption-marker";
+const fixtureSlackDigestMarker = "task8-fixture-slack-digest-marker";
 const executionId = "81000000-0000-4000-8000-000000000001";
 const runId = "81000000-0000-4000-8000-000000000002";
 const installationId = "81000000-0000-4000-8000-000000000003";
@@ -50,6 +52,11 @@ type BuiltRuntime = {
         recovered: number;
         ownershipLost: number;
       }>;
+      drainSlackDeliveries(
+        service: unknown,
+        batchSize: number,
+        signal: AbortSignal,
+      ): Promise<{ claimed: number; delivered: number; failed: number }>;
       now(): Date;
     };
   }): Promise<{ executionId: string; summary: { installationsClaimed: number; healthy: number } }>;
@@ -74,6 +81,8 @@ async function buildRuntime(): Promise<BuiltRuntime> {
   const source = await readFile(runtimePath, "utf8");
   expect(source).not.toContain("sourceMappingURL");
   expect(source).not.toContain(fixtureSecret);
+  expect(source).not.toContain(fixtureEncryptionMarker);
+  expect(source).not.toContain(fixtureSlackDigestMarker);
   return import(`${pathToFileURL(runtimePath).href}?test=${Date.now()}`) as Promise<BuiltRuntime>;
 }
 
@@ -123,6 +132,7 @@ describe.sequential("production runtime bundles", () => {
       from,
     };
 
+    const drainSlackDeliveries = vi.fn().mockResolvedValue({ claimed: 0, delivered: 0, failed: 0 });
     const result = await runtime.runGitHubConnectionReconcile({
       environment: {},
       executionId,
@@ -167,6 +177,7 @@ describe.sequential("production runtime bundles", () => {
             defaultBranch: "main",
           }],
         }),
+        drainSlackDeliveries,
         now: () => new Date("2026-09-19T12:00:00.000Z"),
       },
     });
@@ -176,6 +187,7 @@ describe.sequential("production runtime bundles", () => {
       summary: expect.objectContaining({ installationsClaimed: 1, healthy: 1 }),
     });
     expect(from).toHaveBeenCalledWith("github_installations");
+    expect(drainSlackDeliveries).toHaveBeenCalledTimes(1);
     expect(service.rpc).toHaveBeenCalledWith(
       "finalize_github_connection_reconciliation_server",
       expect.objectContaining({ target_outcome: "success" }),
@@ -217,7 +229,10 @@ describe.sequential("production runtime bundles", () => {
           GITHUB_ALLOWED_ACCOUNT_TYPE: "User",
           GITHUB_CONNECTION_MAX_WEBHOOK_DELIVERIES: "1",
           GITHUB_CONNECTION_MAX_INSTALLATIONS: "1",
+          GITHUB_CONNECTION_MAX_SLACK_DELIVERIES: "1",
           GITHUB_CONNECTION_TIME_BUDGET_MS: "5000",
+          APP_ENCRYPTION_KEY: "task8-fixture-encryption-marker",
+          SLACK_ALLOWED_WEBHOOK_SHA256: "task8-fixture-slack-digest-marker",
         },
       });
 
@@ -227,6 +242,7 @@ describe.sequential("production runtime bundles", () => {
       expect(requests).toEqual(expect.arrayContaining([
         "/rest/v1/rpc/claim_github_connection_webhook_deliveries_server",
         "/rest/v1/rpc/claim_due_github_connection_reconciliations_server",
+        "/rest/v1/rpc/claim_github_connection_alert_delivery",
       ]));
     } finally {
       await new Promise<void>((resolveClose, rejectClose) => server.close((error) => error ? rejectClose(error) : resolveClose()));

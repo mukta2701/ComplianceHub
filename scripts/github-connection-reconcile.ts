@@ -20,6 +20,7 @@ import {
   queueGitHubConnectionNotice,
   type GitHubConnectionNotice,
 } from "@/features/github/application/github-connection-alerts";
+import { drainSupabaseGitHubConnectionSlackAlertDeliveries } from "@/features/monitoring/application/slack-alert-store";
 import { readInstallationSnapshot } from "@/features/github/application/github-installation-api";
 import {
   reconcileGitHubConnection,
@@ -34,8 +35,17 @@ import { createSupabaseServiceClient } from "@/lib/supabase/service";
 export type CycleEnvironment = {
   maximumWebhookDeliveries: number;
   maximumInstallations: number;
+  maximumSlackDeliveries: number;
   timeBudgetMs: number;
 };
+
+export type SlackDeliverySummary = {
+  slackClaimed: number;
+  slackDelivered: number;
+  slackFailed: number;
+};
+
+export type GitHubConnectionReconcileSummary = GitHubConnectionCycleSummary & SlackDeliverySummary;
 
 function invalidCycleEnvironment(): never {
   throw new Error("GitHub connection cycle configuration is invalid");
@@ -53,11 +63,21 @@ export function parseCycleEnvironment(env: Record<string, string | undefined>): 
   return {
     maximumWebhookDeliveries: boundedInteger(env.GITHUB_CONNECTION_MAX_WEBHOOK_DELIVERIES, 20, 1, 100),
     maximumInstallations: boundedInteger(env.GITHUB_CONNECTION_MAX_INSTALLATIONS, 10, 1, 100),
+    maximumSlackDeliveries: boundedInteger(env.GITHUB_CONNECTION_MAX_SLACK_DELIVERIES, 10, 1, 25),
     timeBudgetMs: boundedInteger(env.GITHUB_CONNECTION_TIME_BUDGET_MS, 240_000, 1, 300_000),
   };
 }
 
-export function summariseCycleForLog(executionId: string, summary: GitHubConnectionCycleSummary): string {
+export function summariseCycleForLog(
+  executionId: string,
+  summary: GitHubConnectionCycleSummary,
+  slack?: { claimed: number; delivered: number; failed: number },
+): string {
+  const safeSlack = slack ?? {
+    claimed: "slackClaimed" in summary && typeof summary.slackClaimed === "number" ? summary.slackClaimed : 0,
+    delivered: "slackDelivered" in summary && typeof summary.slackDelivered === "number" ? summary.slackDelivered : 0,
+    failed: "slackFailed" in summary && typeof summary.slackFailed === "number" ? summary.slackFailed : 0,
+  };
   return [
     `github-connection-reconcile execution=${executionId}`,
     `webhookDeliveriesClaimed=${summary.webhookDeliveriesClaimed}`,
@@ -67,11 +87,14 @@ export function summariseCycleForLog(executionId: string, summary: GitHubConnect
     `actionRequired=${summary.actionRequired}`,
     `recovered=${summary.recovered}`,
     `ownershipLost=${summary.ownershipLost}`,
+    `slackClaimed=${safeSlack.claimed}`,
+    `slackDelivered=${safeSlack.delivered}`,
+    `slackFailed=${safeSlack.failed}`,
   ].join(" ");
 }
 
-export function exitCodeForCycle(error: unknown): number {
-  return error === null ? 0 : 1;
+export function exitCodeForCycle(error: unknown, slackFailed = 0): number {
+  return error === null && slackFailed === 0 ? 0 : 1;
 }
 
 type ServiceClient = {
@@ -100,6 +123,11 @@ export type GitHubConnectionReconcileRuntimeDependencies = {
   createInstallationToken: typeof createInstallationToken;
   readInstallationSnapshot: typeof readInstallationSnapshot;
   runCycle: typeof runGitHubConnectionCycle;
+  drainSlackDeliveries: (
+    service: unknown,
+    batchSize: number,
+    signal: AbortSignal,
+  ) => Promise<{ claimed: number; delivered: number; failed: number }>;
   now: () => Date;
 };
 
@@ -110,6 +138,8 @@ const productionDependencies: GitHubConnectionReconcileRuntimeDependencies = {
   createInstallationToken,
   readInstallationSnapshot,
   runCycle: runGitHubConnectionCycle,
+  drainSlackDeliveries: (service, batchSize, signal) =>
+    drainSupabaseGitHubConnectionSlackAlertDeliveries(service as Parameters<typeof drainSupabaseGitHubConnectionSlackAlertDeliveries>[0], batchSize, signal),
   now: () => new Date(),
 };
 
@@ -118,10 +148,13 @@ export async function runGitHubConnectionReconcile(input: {
   executionId?: string;
   signal?: AbortSignal;
   dependencies?: Partial<GitHubConnectionReconcileRuntimeDependencies>;
-}): Promise<{ executionId: string; summary: GitHubConnectionCycleSummary }> {
+}): Promise<{ executionId: string; summary: GitHubConnectionReconcileSummary }> {
   const executionId = input.executionId ?? randomUUID();
   const dependencies = { ...productionDependencies, ...input.dependencies };
   const environment = parseCycleEnvironment(input.environment);
+  const timeoutSignal = AbortSignal.timeout(environment.timeBudgetMs);
+  const deadlineSignal = input.signal ? AbortSignal.any([input.signal, timeoutSignal]) : timeoutSignal;
+  deadlineSignal.throwIfAborted();
   const config = dependencies.getConfig(input.environment);
   const service = dependencies.createServiceClient();
   const client = asStoreClient(service);
@@ -221,11 +254,24 @@ export async function runGitHubConnectionReconcile(input: {
       maximumWebhookDeliveries: environment.maximumWebhookDeliveries,
       maximumInstallations: environment.maximumInstallations,
       timeBudgetMs: environment.timeBudgetMs,
-      signal: input.signal,
+      signal: deadlineSignal,
     },
   );
 
-  return { executionId, summary };
+  const slack = await dependencies.drainSlackDeliveries(
+    service,
+    environment.maximumSlackDeliveries,
+    deadlineSignal,
+  );
+  return {
+    executionId,
+    summary: {
+      ...summary,
+      slackClaimed: slack.claimed,
+      slackDelivered: slack.delivered,
+      slackFailed: slack.failed,
+    },
+  };
 }
 
 export async function runGitHubConnectionReconcileCli(input: {
@@ -246,7 +292,7 @@ export async function runGitHubConnectionReconcileCli(input: {
       dependencies: input.dependencies,
     });
     stdout(`${summariseCycleForLog(result.executionId, result.summary)}\n`);
-    return 0;
+    return exitCodeForCycle(null, result.summary.slackFailed);
   } catch {
     stderr(`github-connection-reconcile execution=${executionId} failed\n`);
     return 1;

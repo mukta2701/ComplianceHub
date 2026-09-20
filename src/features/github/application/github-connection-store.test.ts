@@ -218,13 +218,13 @@ describe("connection notice recording", () => {
     await expect(resolveConnectionSlackChannel(client as never, "33333333-3333-4333-8333-333333333333")).resolves.toBeNull();
   });
 
-  it("enqueues a connection Slack alert with a validated lease", async () => {
+  it("queues a connection Slack alert and returns whether it was newly queued", async () => {
     const client = clientDouble(
       { data: null, error: null },
-      { data: [{ delivery_id: "88888888-8888-4888-8888-888888888888", lock_token: "99999999-9999-4999-8999-999999999999" }], error: null },
+      { data: true, error: null },
     );
     const { enqueueConnectionSlackAlert } = await import("./github-connection-store");
-    const lease = await enqueueConnectionSlackAlert(client as never, {
+    const queued = await enqueueConnectionSlackAlert(client as never, {
       organisationId: "33333333-3333-4333-8333-333333333333",
       channelId: "55555555-5555-4555-8555-555555555555",
       installationId: "22222222-2222-4222-8222-222222222222",
@@ -240,19 +240,20 @@ describe("connection notice recording", () => {
       },
     });
     expect(client.rpc).toHaveBeenCalledWith(
-      "enqueue_github_connection_alert_delivery",
+      "queue_github_connection_alert_delivery",
       expect.objectContaining({
         target_organisation_id: "33333333-3333-4333-8333-333333333333",
         target_channel_id: "55555555-5555-4555-8555-555555555555",
         target_installation_id: "22222222-2222-4222-8222-222222222222",
         target_kind: "incident",
+        target_diagnostic_code: "permission_mismatch",
       }),
     );
-    expect(lease).toEqual({ deliveryId: "88888888-8888-4888-8888-888888888888", lockToken: "99999999-9999-4999-8999-999999999999" });
+    expect(queued).toBe(true);
   });
 
-  it("treats an already-queued alert as no new lease", async () => {
-    const client = clientDouble({ data: null, error: null }, { data: [], error: null });
+  it("returns false when an identical alert is already queued", async () => {
+    const client = clientDouble({ data: null, error: null }, { data: false, error: null });
     const { enqueueConnectionSlackAlert } = await import("./github-connection-store");
     await expect(enqueueConnectionSlackAlert(client as never, {
       organisationId: "33333333-3333-4333-8333-333333333333",
@@ -268,6 +269,39 @@ describe("connection notice recording", () => {
         subjectId: "22222222-2222-4222-8222-222222222222",
         detail: "Access needs an Owner decision.",
       },
-    })).resolves.toBeNull();
+    })).resolves.toBe(false);
+  });
+
+  it("redacts connection queue database errors and rejects non-boolean results", async () => {
+    const databaseError = clientDouble({ data: null, error: null }, { data: null, error: { message: "db-internal-secret" } });
+    const { enqueueConnectionSlackAlert } = await import("./github-connection-store");
+    const input = {
+      organisationId: "33333333-3333-4333-8333-333333333333",
+      channelId: "55555555-5555-4555-8555-555555555555",
+      installationId: "22222222-2222-4222-8222-222222222222",
+      kind: "incident" as const,
+      diagnostic: "permission_mismatch" as const,
+      payload: {
+        type: "connection_health" as const,
+        severity: "high" as const,
+        title: "GitHub connection needs attention",
+        controlRef: "GitHub connection",
+        subjectId: "22222222-2222-4222-8222-222222222222",
+        detail: "Access needs an Owner decision.",
+      },
+    };
+    await expect(enqueueConnectionSlackAlert(databaseError as never, input)).rejects.toThrow(
+      "Connection alert delivery queue failed",
+    );
+    try {
+      await enqueueConnectionSlackAlert(databaseError as never, input);
+      expect.unreachable();
+    } catch (error) {
+      expect(String(error)).not.toContain("db-internal-secret");
+    }
+    const malformed = clientDouble({ data: null, error: null }, { data: "true", error: null });
+    await expect(enqueueConnectionSlackAlert(malformed as never, input)).rejects.toThrow(
+      "Connection alert delivery queue failed",
+    );
   });
 });
