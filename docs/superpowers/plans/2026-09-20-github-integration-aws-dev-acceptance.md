@@ -317,7 +317,7 @@ git push origin feature/m1-phase7-connections
 **Interfaces:**
 
 - Consumes: App Runner variable `AWS_DEV_SERVICE_ARN`, ECR variable `AWS_DEV_ECR_REGISTRY`, existing OIDC secret `AWS_DEV_DEPLOY_ROLE_ARN`, existing Supabase/GitHub secrets, `APP_ENCRYPTION_KEY` and `SLACK_ALLOWED_WEBHOOK_SHA256` from `aws-dev`.
-- Produces: manual `workflow_dispatch` with optional `expected_release_sha`, reusable `workflow_call` with required release/image inputs, and schedule `23 * * * *`.
+- Produces: manual `workflow_dispatch` with optional `expected_release_sha`, normal `aws-dev` jobs that call the local composite action, and schedule `23 * * * *`.
 - Runs: `node dist/github-connection-reconcile.mjs` from App Runner's current digest.
 
 - [ ] **Step 1: Write the failing workflow-contract test**
@@ -368,7 +368,7 @@ Expected result: the reconciliation workflow file is missing and the deploy work
 
 - [ ] **Step 3: Implement the protected workflow**
 
-Use the pinned checkout action already present in the deployment workflow and the existing AWS credentials action version. The job must:
+Use the pinned checkout action already present in the deployment workflow and the existing AWS credentials action version. The normal job must call a local composite action that owns AWS credential setup, immutable image resolution, health validation, ECR pull, masking, cleanup and the exact finite runner command. The job must:
 
 1. assume `AWS_DEV_DEPLOY_ROLE_ARN` through OpenID Connect;
 2. call `aws apprunner describe-service` for `AWS_DEV_SERVICE_ARN`;
@@ -601,14 +601,17 @@ the deployment and both finite-runner calls on one immutable candidate. Verify:
 
 - [ ] **Step 4: Verify the two finite acceptance calls**
 
-The deploy workflow's first reusable call receives `github.sha` and the exact
-image URI emitted by its `Set image reference` step. Require the first and
-second calls to use the same values, finish within the workflow bounds, and
+The deploy workflow's first ordinary acceptance job receives `github.sha` and
+the exact `sha256:<64 lowercase hex>` digest emitted by its `Set image
+reference` step. The local composite action reconstructs the full ECR image URI
+inside each job, validates the digest and release before Docker runs, and
+receives secrets through the action step environment only. Require the first
+and second jobs to use the same values, finish within the workflow bounds, and
 produce a bounded zero-work or healthy exit with a safe count-only summary.
 
-Require the second call to produce no duplicate connection incident, recovery or
-Slack delivery. The standalone reconciliation workflow remains available for
-direct manual use after it is registered on the default branch.
+Require the second job to produce no duplicate connection incident, recovery or
+Slack delivery. The standalone scheduled/manual workflow remains available for
+direct use after it is registered on the default branch.
 
 - [ ] **Step 5: Record sanitised AWS dev evidence**
 

@@ -62,22 +62,27 @@ runs.
 
 `.github/workflows/reconcile-github-connections-aws-dev.yml` runs on a
 GitHub-hosted worker. It uses the existing `aws-dev` environment and an AWS
-OIDC role with no long-lived AWS access key. It supports manual
-`workflow_dispatch` (including an optional expected release SHA), reusable
-`workflow_call` (requiring the expected release SHA and exact immutable image
-URI), and an hourly schedule at minute 23 UTC (`23 * * * *`). The concurrency
-lock prevents overlapping cycles, and the workflow supplies an outer timeout
-around the runner's own bounded deadline.
+OIDC role with no long-lived AWS access key. Its normal job calls the local
+`.github/actions/reconcile-github-connections-aws-dev` composite action for
+manual `workflow_dispatch` (including an optional expected release SHA) and
+the hourly schedule at minute 23 UTC (`23 * * * *`). The concurrency lock
+prevents overlapping cycles, and the workflow supplies an outer timeout around
+the runner's own bounded deadline. The action validates App Runner's current
+immutable digest, checks an optional release SHA, pulls that same image and
+exits after the exact finite command.
 
 Before this workflow is installed on the default branch, a manual dispatch of
 `Deploy AWS dev` can set
-`run_github_reconciliation_acceptance=true`. The deploy job then passes its
-resolved immutable image URI and `github.sha` to two sequential calls of this
-workflow. The input defaults to `false`, so ordinary pushes and manual deploys
-remain web-only. These caller jobs pass no secrets or environment; the called
-workflow obtains the existing `aws-dev` environment configuration itself. The
-environment currently has no reviewer-protection rule; this is an execution
-path and not a claim of human approval enforcement.
+`run_github_reconciliation_acceptance=true`. The deploy job then exposes only
+the validated `sha256:<64 lowercase hex>` digest and runs two ordinary,
+sequential `ubuntu-24.04` jobs. Each checks out `github.sha`, uses the same
+composite action and passes the digest plus release SHA with strict binding
+enabled. The input defaults to `false`, so ordinary pushes and manual deploys
+remain web-only. The acceptance jobs receive the existing `aws-dev`
+environment's named variables and secrets on the action step; secret values
+are never action inputs or cross-job outputs. The environment currently has no
+reviewer-protection rule; this is an execution path and not a claim of human
+approval enforcement.
 
 GitHub schedules run from the repository's default branch only. A feature branch
 can prove the workflow contract and the opt-in deployment acceptance calls; it

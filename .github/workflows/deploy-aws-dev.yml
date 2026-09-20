@@ -26,7 +26,7 @@ env:
 jobs:
   deploy:
     outputs:
-      image_uri: ${{ steps.image_reference.outputs.image_uri }}
+      image_digest: ${{ steps.image_reference.outputs.image_digest }}
     runs-on: ubuntu-latest
     environment: aws-dev
     timeout-minutes: 30
@@ -83,12 +83,17 @@ jobs:
         id: image_reference
         run: |
           if [ -n "${{ steps.image.outputs.digest }}" ]; then
-            image_uri="${{ vars.AWS_DEV_ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}@${{ steps.image.outputs.digest }}"
+            image_digest="${{ steps.image.outputs.digest }}"
           else
-            image_uri="${{ vars.AWS_DEV_ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}@${{ steps.build.outputs.digest }}"
+            image_digest="${{ steps.build.outputs.digest }}"
           fi
+          if [[ ! "$image_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "resolved image digest is not immutable" >&2
+            exit 1
+          fi
+          image_uri="${{ vars.AWS_DEV_ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}@$image_digest"
           echo "IMAGE_URI=$image_uri" >> "$GITHUB_ENV"
-          echo "image_uri=$image_uri" >> "$GITHUB_OUTPUT"
+          echo "image_digest=$image_digest" >> "$GITHUB_OUTPUT"
 
       - name: Update App Runner service
         env:
@@ -154,23 +159,93 @@ jobs:
   reconcile_acceptance_first:
     if: github.event_name == 'workflow_dispatch' && inputs.run_github_reconciliation_acceptance == true
     needs: deploy
-    uses: ./.github/workflows/reconcile-github-connections-aws-dev.yml
-    with:
-      expected_release_sha: ${{ github.sha }}
-      expected_image_uri: ${{ needs.deploy.outputs.image_uri }}
+    runs-on: ubuntu-24.04
+    environment: aws-dev
+    timeout-minutes: 10
+    concurrency:
+      group: compliancehub-github-reconcile-aws-dev
+      cancel-in-progress: false
     permissions:
       contents: read
       id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Run bounded connection reconciliation
+        uses: ./.github/actions/reconcile-github-connections-aws-dev
+        env:
+          AWS_DEV_DEPLOY_ROLE_ARN: ${{ secrets.AWS_DEV_DEPLOY_ROLE_ARN }}
+          AWS_DEV_SERVICE_ARN: ${{ vars.AWS_DEV_SERVICE_ARN }}
+          AWS_DEV_ECR_REGISTRY: ${{ vars.AWS_DEV_ECR_REGISTRY }}
+          AWS_DEV_SITE_URL: ${{ vars.AWS_DEV_SITE_URL }}
+          NEXT_PUBLIC_SITE_URL: ${{ vars.AWS_DEV_SITE_URL }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          APP_ENCRYPTION_KEY: ${{ secrets.APP_ENCRYPTION_KEY }}
+          SLACK_ALLOWED_WEBHOOK_SHA256: ${{ secrets.SLACK_ALLOWED_WEBHOOK_SHA256 }}
+          GITHUB_APP_ID: ${{ secrets.AWS_DEV_GITHUB_APP_ID }}
+          GITHUB_APP_SLUG: ${{ secrets.AWS_DEV_GITHUB_APP_SLUG }}
+          GITHUB_APP_CLIENT_ID: ${{ secrets.AWS_DEV_GITHUB_APP_CLIENT_ID }}
+          GITHUB_APP_CLIENT_SECRET: ${{ secrets.AWS_DEV_GITHUB_APP_CLIENT_SECRET }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.AWS_DEV_GITHUB_APP_PRIVATE_KEY }}
+          GITHUB_WEBHOOK_SECRET: ${{ secrets.AWS_DEV_GITHUB_WEBHOOK_SECRET }}
+          GITHUB_ALLOWED_ACCOUNT_ID: ${{ secrets.AWS_DEV_GITHUB_ALLOWED_ACCOUNT_ID }}
+          GITHUB_ALLOWED_ACCOUNT_TYPE: Organization
+          GITHUB_CONNECTION_MAX_WEBHOOK_DELIVERIES: "20"
+          GITHUB_CONNECTION_MAX_INSTALLATIONS: "10"
+          GITHUB_CONNECTION_MAX_SLACK_DELIVERIES: "10"
+          GITHUB_CONNECTION_TIME_BUDGET_MS: "240000"
+        with:
+          expected-release-sha: ${{ github.sha }}
+          expected-image-digest: ${{ needs.deploy.outputs.image_digest }}
+          require-image-binding: "true"
 
   reconcile_acceptance_second:
     if: github.event_name == 'workflow_dispatch' && inputs.run_github_reconciliation_acceptance == true
     needs:
       - deploy
       - reconcile_acceptance_first
-    uses: ./.github/workflows/reconcile-github-connections-aws-dev.yml
-    with:
-      expected_release_sha: ${{ github.sha }}
-      expected_image_uri: ${{ needs.deploy.outputs.image_uri }}
+    runs-on: ubuntu-24.04
+    environment: aws-dev
+    timeout-minutes: 10
+    concurrency:
+      group: compliancehub-github-reconcile-aws-dev
+      cancel-in-progress: false
     permissions:
       contents: read
       id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Run bounded connection reconciliation
+        uses: ./.github/actions/reconcile-github-connections-aws-dev
+        env:
+          AWS_DEV_DEPLOY_ROLE_ARN: ${{ secrets.AWS_DEV_DEPLOY_ROLE_ARN }}
+          AWS_DEV_SERVICE_ARN: ${{ vars.AWS_DEV_SERVICE_ARN }}
+          AWS_DEV_ECR_REGISTRY: ${{ vars.AWS_DEV_ECR_REGISTRY }}
+          AWS_DEV_SITE_URL: ${{ vars.AWS_DEV_SITE_URL }}
+          NEXT_PUBLIC_SITE_URL: ${{ vars.AWS_DEV_SITE_URL }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          APP_ENCRYPTION_KEY: ${{ secrets.APP_ENCRYPTION_KEY }}
+          SLACK_ALLOWED_WEBHOOK_SHA256: ${{ secrets.SLACK_ALLOWED_WEBHOOK_SHA256 }}
+          GITHUB_APP_ID: ${{ secrets.AWS_DEV_GITHUB_APP_ID }}
+          GITHUB_APP_SLUG: ${{ secrets.AWS_DEV_GITHUB_APP_SLUG }}
+          GITHUB_APP_CLIENT_ID: ${{ secrets.AWS_DEV_GITHUB_APP_CLIENT_ID }}
+          GITHUB_APP_CLIENT_SECRET: ${{ secrets.AWS_DEV_GITHUB_APP_CLIENT_SECRET }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.AWS_DEV_GITHUB_APP_PRIVATE_KEY }}
+          GITHUB_WEBHOOK_SECRET: ${{ secrets.AWS_DEV_GITHUB_WEBHOOK_SECRET }}
+          GITHUB_ALLOWED_ACCOUNT_ID: ${{ secrets.AWS_DEV_GITHUB_ALLOWED_ACCOUNT_ID }}
+          GITHUB_ALLOWED_ACCOUNT_TYPE: Organization
+          GITHUB_CONNECTION_MAX_WEBHOOK_DELIVERIES: "20"
+          GITHUB_CONNECTION_MAX_INSTALLATIONS: "10"
+          GITHUB_CONNECTION_MAX_SLACK_DELIVERIES: "10"
+          GITHUB_CONNECTION_TIME_BUDGET_MS: "240000"
+        with:
+          expected-release-sha: ${{ github.sha }}
+          expected-image-digest: ${{ needs.deploy.outputs.image_digest }}
+          require-image-binding: "true"

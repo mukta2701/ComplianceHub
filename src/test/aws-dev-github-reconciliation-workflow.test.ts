@@ -1,4 +1,13 @@
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const read = (path: string) =>
@@ -15,11 +24,94 @@ const jobBlock = (workflow: string, jobName: string, nextJobName?: string) => {
   return workflow.slice(start, end);
 };
 
+const action = () => read(".github/actions/reconcile-github-connections-aws-dev/action.yml");
+const reconciliationWorkflow = () =>
+  read(".github/workflows/reconcile-github-connections-aws-dev.yml");
+const deployWorkflow = () => read(".github/workflows/deploy-aws-dev.yml");
+
+const extractActionRun = (stepName: string) => {
+  const source = action();
+  const nameStart = source.indexOf(`    - name: ${stepName}`);
+  const marker = "      run: |\n";
+  const start = source.indexOf(marker, nameStart);
+  const end = source.indexOf("\n    - name:", start + marker.length);
+
+  expect(start).toBeGreaterThanOrEqual(0);
+  expect(end).toBeGreaterThan(start);
+  return source
+    .slice(start + marker.length, end)
+    .split("\n")
+    .map((line) => line.replace(/^          /, ""))
+    .join("\n");
+};
+
+type ResolverFixture = {
+  image?: string;
+  expectedDigest?: string;
+  expectedRelease?: string;
+  healthRelease?: string;
+  requireImageBinding?: boolean;
+};
+
+const runResolver = (fixture: ResolverFixture) => {
+  const directory = mkdtempSync(join(tmpdir(), "compliancehub-resolver-test-"));
+  const outputPath = join(directory, "github-output");
+  const awsPath = join(directory, "aws");
+  const curlPath = join(directory, "curl");
+
+  writeFileSync(
+    awsPath,
+    `#!/usr/bin/env bash\nprintf '%s\\n' '${fixture.image ?? `123456789012.dkr.ecr.eu-west-2.amazonaws.com/compliancehub-dev@sha256:${"a".repeat(64)}`}'\n`,
+    { mode: 0o700 },
+  );
+  writeFileSync(
+    curlPath,
+    `#!/usr/bin/env bash\nprintf '%s\\n' '{"status":"ok","releaseSha":"${fixture.healthRelease ?? "abcdef1"}"}'\n`,
+    { mode: 0o700 },
+  );
+  chmodSync(awsPath, 0o700);
+  chmodSync(curlPath, 0o700);
+  writeFileSync(outputPath, "");
+
+  const result = spawnSync("bash", ["-c", extractActionRun("Resolve current App Runner image")], {
+    env: {
+      ...process.env,
+      PATH: `${directory}:${process.env.PATH ?? ""}`,
+      AWS_REGION: "eu-west-2",
+      AWS_DEV_SERVICE_ARN: "arn:aws:apprunner:eu-west-2:123456789012:service/dev/fixture",
+      AWS_DEV_ECR_REGISTRY: "123456789012.dkr.ecr.eu-west-2.amazonaws.com",
+      ECR_REPOSITORY: "compliancehub-dev",
+      AWS_DEV_SITE_URL: "https://example.invalid",
+      EXPECTED_RELEASE_SHA: fixture.expectedRelease ?? "",
+      EXPECTED_IMAGE_DIGEST: fixture.expectedDigest ?? "",
+      REQUIRE_IMAGE_BINDING: fixture.requireImageBinding === false ? "false" : "true",
+      GITHUB_OUTPUT: outputPath,
+    },
+    encoding: "utf8",
+  });
+
+  const output = readFileSync(outputPath, "utf8");
+  rmSync(directory, { recursive: true, force: true });
+  return { ...result, output };
+};
+
 describe("AWS dev GitHub reconciliation workflow", () => {
+  it("defines a local composite action with non-secret inputs and one digest output", () => {
+    const source = action();
+
+    expect(source).toContain("name: Reconcile GitHub connections (AWS dev)");
+    expect(source).toContain("using: composite");
+    expect(source).toContain("expected-release-sha:");
+    expect(source).toContain("expected-image-digest:");
+    expect(source).toContain("require-image-binding:");
+    expect(source).toMatch(/outputs:\s*\n\s+image-digest:/);
+    expect(source).toContain("value: ${{ steps.image.outputs.digest }}");
+    const inputBlock = source.slice(source.indexOf("inputs:"), source.indexOf("outputs:"));
+    expect(inputBlock).not.toMatch(/SECRET|PRIVATE_KEY|WEBHOOK/i);
+  });
+
   it("defines a protected, immutable, bounded scheduled workflow", () => {
-    const workflow = read(
-      ".github/workflows/reconcile-github-connections-aws-dev.yml",
-    );
+    const workflow = reconciliationWorkflow();
 
     expect(workflow).toContain('cron: "23 * * * *"');
     expect(workflow).toMatch(/workflow_dispatch:\s*\n\s+inputs:/);
@@ -32,50 +124,101 @@ describe("AWS dev GitHub reconciliation workflow", () => {
       /permissions:\s*\n\s+contents: read\s*\n\s+id-token: write/,
     );
     expect(workflow).toContain("timeout-minutes: 10");
-    expect(workflow).toContain("timeout 7m");
-    expect(workflow).toContain("aws apprunner describe-service");
-    expect(workflow).toContain(
-      '${AWS_DEV_ECR_REGISTRY}/compliancehub-dev@sha256:',
-    );
-    expect(workflow).toContain("docker login");
-    expect(workflow).toContain("node dist/github-connection-reconcile.mjs");
-    expect(workflow).toMatch(/NODE_ENV:\s+production/);
-    expect(workflow).toMatch(/GITHUB_ALLOWED_ACCOUNT_TYPE:\s+Organization/);
-    expect(workflow).toContain("GITHUB_CONNECTION_MAX_WEBHOOK_DELIVERIES");
-    expect(workflow).toContain("GITHUB_CONNECTION_MAX_INSTALLATIONS");
-    expect(workflow).toContain("GITHUB_CONNECTION_MAX_SLACK_DELIVERIES");
-    expect(workflow).toContain("GITHUB_CONNECTION_TIME_BUDGET_MS");
-    expect(workflow).toContain("SLACK_ALLOWED_WEBHOOK_SHA256");
-    expect(workflow).toContain("trap cleanup EXIT");
-    expect(workflow).toMatch(/docker run[\s\S]*--env-file|docker run[\s\S]*--env [A-Z_]+/);
-
-    expect(workflow).not.toContain("docker build");
-    expect(workflow).not.toMatch(/\blatest\b/);
-    expect(workflow).not.toContain("upload-artifact");
-    expect(workflow).not.toContain("/api/cron/monitor");
-    expect(workflow).not.toContain("claim_alert_delivery");
-    expect(workflow).not.toMatch(/--env\s+[A-Z_]+=\$\{/);
-    expect(workflow).not.toContain("CRON_SECRET");
-    expect(workflow).not.toContain("GITHUB_PERSONAL_ACCESS_TOKEN");
-    expect(workflow).not.toContain("NEXT_PUBLIC_SUPABASE_ANON_KEY");
-    expect(workflow).not.toContain("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY");
+    expect(workflow).toContain("./.github/actions/reconcile-github-connections-aws-dev");
+    expect(workflow).not.toContain("workflow_call:");
+    expect(workflow).not.toContain("uses: ./.github/workflows/");
   });
 
-  it("supports reusable calls while keeping the direct manual release check optional", () => {
-    const workflow = read(
-      ".github/workflows/reconcile-github-connections-aws-dev.yml",
-    );
+  it("executes the resolver against matching fixtures and emits only the digest", () => {
+    const digest = "sha256:" + "a".repeat(64);
+    const result = runResolver({
+      image: `123456789012.dkr.ecr.eu-west-2.amazonaws.com/compliancehub-dev@${digest}`,
+      expectedDigest: digest,
+      expectedRelease: "abcdef1",
+      healthRelease: "abcdef1",
+    });
 
-    expect(workflow).toMatch(
-      /workflow_dispatch:\s*\n\s+inputs:\s*\n\s+expected_release_sha:[\s\S]*?required:\s*false[\s\S]*?type:\s*string/,
-    );
-    expect(workflow).toMatch(
-      /workflow_call:\s*\n\s+inputs:\s*\n\s+expected_release_sha:[\s\S]*?required:\s*true[\s\S]*?type:\s*string[\s\S]*?expected_image_uri:[\s\S]*?required:\s*true[\s\S]*?type:\s*string/,
-    );
+    expect(result.status).toBe(0);
+    expect(result.output).toBe(`digest=${digest}\n`);
+    expect(result.output).not.toContain("123456789012.dkr.ecr.eu-west-2.amazonaws.com");
   });
 
-  it("publishes one immutable image output and runs two opted-in calls in order", () => {
-    const workflow = read(".github/workflows/deploy-aws-dev.yml");
+  it.each([
+    ["missing image binding", { expectedDigest: "" }],
+    ["malformed image binding", { expectedDigest: "sha256:not-a-digest" }],
+    ["different valid image binding", { expectedDigest: "sha256:" + "b".repeat(64) }],
+    [
+      "wrong registry",
+      {
+        image: "another.example.invalid/compliancehub-dev@sha256:" + "a".repeat(64),
+        expectedDigest: "sha256:" + "a".repeat(64),
+      },
+    ],
+    [
+      "wrong repository",
+      {
+        image:
+          "123456789012.dkr.ecr.eu-west-2.amazonaws.com/other-repository@sha256:" +
+          "a".repeat(64),
+        expectedDigest: "sha256:" + "a".repeat(64),
+      },
+    ],
+    [
+      "malformed deployed digest",
+      {
+        image:
+          "123456789012.dkr.ecr.eu-west-2.amazonaws.com/compliancehub-dev@sha256:not-a-digest",
+        expectedDigest: "sha256:not-a-digest",
+      },
+    ],
+    [
+      "wrong release",
+      {
+        image:
+          "123456789012.dkr.ecr.eu-west-2.amazonaws.com/compliancehub-dev@sha256:" +
+          "a".repeat(64),
+        expectedDigest: "sha256:" + "a".repeat(64),
+        expectedRelease: "abcdef1",
+        healthRelease: "deadbee",
+      },
+    ],
+  ] as const)("fails closed before a pull for %s", (_name, fixture) => {
+    const result = runResolver(fixture);
+
+    expect(result.status).not.toBe(0);
+    expect(result.output).toBe("");
+  });
+
+  it("uses the same action for direct scheduled/manual execution and maps exact environment names", () => {
+    const workflow = reconciliationWorkflow();
+    const actionStep = workflow.slice(workflow.indexOf("uses: ./.github/actions/"));
+    const expectedSecretMappings = [
+      ["AWS_DEV_DEPLOY_ROLE_ARN", "AWS_DEV_DEPLOY_ROLE_ARN"],
+      ["SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SERVICE_ROLE_KEY"],
+      ["APP_ENCRYPTION_KEY", "APP_ENCRYPTION_KEY"],
+      ["SLACK_ALLOWED_WEBHOOK_SHA256", "SLACK_ALLOWED_WEBHOOK_SHA256"],
+      ["GITHUB_APP_ID", "AWS_DEV_GITHUB_APP_ID"],
+      ["GITHUB_APP_SLUG", "AWS_DEV_GITHUB_APP_SLUG"],
+      ["GITHUB_APP_CLIENT_ID", "AWS_DEV_GITHUB_APP_CLIENT_ID"],
+      ["GITHUB_APP_CLIENT_SECRET", "AWS_DEV_GITHUB_APP_CLIENT_SECRET"],
+      ["GITHUB_APP_PRIVATE_KEY", "AWS_DEV_GITHUB_APP_PRIVATE_KEY"],
+      ["GITHUB_WEBHOOK_SECRET", "AWS_DEV_GITHUB_WEBHOOK_SECRET"],
+      ["GITHUB_ALLOWED_ACCOUNT_ID", "AWS_DEV_GITHUB_ALLOWED_ACCOUNT_ID"],
+    ];
+
+    expect(actionStep).toContain("expected-release-sha: ${{ inputs.expected_release_sha }}");
+    expect(actionStep).toContain('expected-image-digest: ""');
+    expect(actionStep).toContain('require-image-binding: "false"');
+    for (const [runtimeName, secretName] of expectedSecretMappings) {
+      expect(actionStep).toContain(`${runtimeName}: \${{ secrets.${secretName} }}`);
+    }
+    expect(actionStep).toContain("GITHUB_ALLOWED_ACCOUNT_TYPE: Organization");
+    expect(actionStep).not.toContain("GITHUB_PERSONAL_ACCESS_TOKEN");
+    expect(actionStep).not.toContain("CRON_SECRET");
+  });
+
+  it("runs two ordinary acceptance jobs with the same immutable digest binding", () => {
+    const workflow = deployWorkflow();
     const first = jobBlock(workflow, "reconcile_acceptance_first", "reconcile_acceptance_second");
     const second = jobBlock(workflow, "reconcile_acceptance_second");
 
@@ -83,91 +226,69 @@ describe("AWS dev GitHub reconciliation workflow", () => {
       /workflow_dispatch:\s*\n\s+inputs:\s*\n\s+run_github_reconciliation_acceptance:[\s\S]*?default:\s*false[\s\S]*?type:\s*boolean/,
     );
     expect(workflow).toMatch(
-      /deploy:\s*\n\s+outputs:\s*\n\s+image_uri:\s+\$\{\{\s*steps\.image_reference\.outputs\.image_uri\s*\}\}/,
+      /deploy:\s*\n\s+outputs:\s*\n\s+image_digest:\s+\$\{\{\s*steps\.image_reference\.outputs\.image_digest\s*\}\}/,
     );
 
-    expect(workflow).toMatch(
-      /name: Set image reference\s*\n\s+id: image_reference[\s\S]*?echo "IMAGE_URI=\$image_uri" >> "\$GITHUB_ENV"[\s\S]*?echo "image_uri=\$image_uri" >> "\$GITHUB_OUTPUT"/,
-    );
     for (const block of [first, second]) {
       expect(block).toContain(
         "if: github.event_name == 'workflow_dispatch' && inputs.run_github_reconciliation_acceptance == true",
       );
-      expect(block).toContain("uses: ./.github/workflows/reconcile-github-connections-aws-dev.yml");
-      expect(block).toContain("expected_release_sha: ${{ github.sha }}");
-      expect(block).toContain(
-        "expected_image_uri: ${{ needs.deploy.outputs.image_uri }}",
-      );
-      expect(block).toMatch(
-        /permissions:\s*\n\s+contents: read\s*\n\s+id-token: write/,
-      );
-      expect(block).not.toMatch(/secrets:\s*inherit|environment:|runs-on:|steps:/);
+      expect(block).toContain("runs-on: ubuntu-24.04");
+      expect(block).toContain("environment: aws-dev");
+      expect(block).toContain("timeout-minutes: 10");
+      expect(block).toContain("group: compliancehub-github-reconcile-aws-dev");
+      expect(block).toMatch(/permissions:\s*\n\s+contents: read\s*\n\s+id-token: write/);
+      expect(block).toContain("ref: ${{ github.sha }}");
+      expect(block).toContain("uses: ./.github/actions/reconcile-github-connections-aws-dev");
+      expect(block).toContain("expected-release-sha: ${{ github.sha }}");
+      expect(block).toContain("expected-image-digest: ${{ needs.deploy.outputs.image_digest }}");
+      expect(block).toContain('require-image-binding: "true"');
+      expect(block).toContain("env:");
+      expect(block).not.toContain("uses: ./.github/workflows/");
     }
     expect(first).toMatch(/needs:\s*deploy/);
-    expect(second).toMatch(
-      /needs:\s*\n\s+- deploy\s*\n\s+- reconcile_acceptance_first/,
-    );
+    expect(second).toMatch(/needs:\s*\n\s+- deploy\s*\n\s+- reconcile_acceptance_first/);
+    expect(workflow).not.toContain("image_uri: ${{ needs.deploy.outputs");
   });
 
-  it("checks the expected immutable image before pull and rejects a digest mismatch", () => {
-    const workflow = read(
-      ".github/workflows/reconcile-github-connections-aws-dev.yml",
-    );
-    const resolveStart = workflow.indexOf("Resolve current App Runner image");
-    const pullStart = workflow.indexOf("Log in to ECR and pull immutable image");
-    const resolve = workflow.slice(resolveStart, pullStart);
+  it("keeps image resolution, health validation, binding failure, and pull in order", () => {
+    const source = action();
+    const resolve = source.indexOf("Resolve current App Runner image");
+    const pull = source.indexOf("Log in to ECR and pull immutable image");
+    const runner = source.indexOf("Run bounded connection reconciliation");
 
-    expect(resolve).toContain("EXPECTED_IMAGE_URI: ${{ inputs.expected_image_uri }}");
-    expect(resolve).not.toMatch(/\$\{\{\s*inputs\.expected_image_uri\s*\}\}[^\n]*run/);
-    expect(resolve).toMatch(
-      /if \[\[ -n "\$EXPECTED_IMAGE_URI" && "\$EXPECTED_IMAGE_URI" != "\$image" \]\]/,
-    );
-    expect(resolve).toMatch(
-      /expected_image_uri[\s\S]*(?:mismatch|does not match)[\s\S]*exit 1/,
-    );
-    const mismatchGuard = workflow.indexOf(
-      'if [[ -n "$EXPECTED_IMAGE_URI" && "$EXPECTED_IMAGE_URI" != "$image" ]]',
-    );
-    expect(mismatchGuard).toBeGreaterThanOrEqual(resolveStart);
-    expect(mismatchGuard).toBeLessThan(pullStart);
-  });
-
-  it("rejects mutable, wrong-registry, and wrong-repository image identifiers", () => {
-    const workflow = read(
-      ".github/workflows/reconcile-github-connections-aws-dev.yml",
-    );
-    const validation = workflow.slice(
-      workflow.indexOf("Resolve current App Runner image"),
-      workflow.indexOf("Log in to ECR"),
-    );
-
-    expect(validation).toContain("tag-only");
-    expect(validation).toContain("wrong registry");
-    expect(validation).toContain("wrong repository");
-    expect(validation).toMatch(/reject|fail|exit 1/);
+    expect(resolve).toBeGreaterThanOrEqual(0);
+    expect(pull).toBeGreaterThan(resolve);
+    expect(runner).toBeGreaterThan(pull);
+    expect(source.slice(resolve, pull)).toContain("aws apprunner describe-service");
+    expect(source.slice(resolve, pull)).toContain("REQUIRE_IMAGE_BINDING");
+    expect(source.slice(resolve, pull)).toContain("EXPECTED_IMAGE_DIGEST");
+    expect(source.slice(resolve, pull)).toContain("expected-image-digest");
+    expect(source.slice(resolve, pull)).toContain("exit 1");
+    expect(source.slice(pull, runner)).toContain("docker login");
+    expect(source.slice(pull, runner)).toContain("docker pull");
+    const runnerBlock = source.slice(runner);
+    expect(runnerBlock).toContain("NODE_ENV: production");
+    expect(runnerBlock).toContain("node dist/github-connection-reconcile.mjs");
+    expect(runnerBlock).toContain("trap cleanup EXIT");
+    expect(runnerBlock).not.toContain("--env-file");
   });
 
   it("maps the approved Slack digest into App Runner without printing it", () => {
-    const workflow = read(".github/workflows/deploy-aws-dev.yml");
+    const workflow = deployWorkflow();
 
     expect(workflow).toContain(
       "SLACK_ALLOWED_WEBHOOK_SHA256: ${{ secrets.SLACK_ALLOWED_WEBHOOK_SHA256 }}",
     );
-    expect(workflow).toMatch(
-      /--arg slackDigest \"\$SLACK_ALLOWED_WEBHOOK_SHA256\"/,
-    );
-    expect(workflow).toMatch(
-      /SLACK_ALLOWED_WEBHOOK_SHA256: \$slackDigest/,
-    );
+    expect(workflow).toMatch(/--arg slackDigest \"\$SLACK_ALLOWED_WEBHOOK_SHA256\"/);
+    expect(workflow).toMatch(/SLACK_ALLOWED_WEBHOOK_SHA256: \$slackDigest/);
     expect(workflow).not.toMatch(/echo[^\n]*SLACK_ALLOWED_WEBHOOK_SHA256/);
   });
 
   it("documents Organization as the hosted account-type requirement", () => {
     const envExample = read(".env.example");
 
-    expect(envExample).toContain(
-      "Hosted AWS dev and production require Organization",
-    );
+    expect(envExample).toContain("Hosted AWS dev and production require Organization");
     expect(envExample).toContain("Set to User only for a local 127.0.0.1");
     expect(envExample).toContain("development/test stack");
     expect(envExample).not.toContain("Staging requires Organization");
