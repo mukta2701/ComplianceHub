@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      run_github_reconciliation_acceptance:
+        description: Run two bounded GitHub reconciliation checks against the deployed immutable image
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -19,6 +25,8 @@ env:
 
 jobs:
   deploy:
+    outputs:
+      image_uri: ${{ steps.image_reference.outputs.image_uri }}
     runs-on: ubuntu-latest
     environment: aws-dev
     timeout-minutes: 30
@@ -72,12 +80,15 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Set image reference
+        id: image_reference
         run: |
           if [ -n "${{ steps.image.outputs.digest }}" ]; then
-            echo "IMAGE_URI=${{ vars.AWS_DEV_ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}@${{ steps.image.outputs.digest }}" >> "$GITHUB_ENV"
+            image_uri="${{ vars.AWS_DEV_ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}@${{ steps.image.outputs.digest }}"
           else
-            echo "IMAGE_URI=${{ vars.AWS_DEV_ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}@${{ steps.build.outputs.digest }}" >> "$GITHUB_ENV"
+            image_uri="${{ vars.AWS_DEV_ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}@${{ steps.build.outputs.digest }}"
           fi
+          echo "IMAGE_URI=$image_uri" >> "$GITHUB_ENV"
+          echo "image_uri=$image_uri" >> "$GITHUB_OUTPUT"
 
       - name: Update App Runner service
         env:
@@ -139,3 +150,27 @@ jobs:
           live="$(curl --fail-with-body --retry 5 --retry-all-errors --retry-delay 5 --retry-max-time 120 --connect-timeout 10 --max-time 120 "$SITE_URL/api/health/live")"
           jq --exit-status --arg release "$DEPLOY_SHA" '.status == "ok" and .releaseSha == $release' <<< "$live" >/dev/null
           curl --fail-with-body --retry 5 --retry-all-errors --retry-delay 5 --retry-max-time 120 --connect-timeout 10 --max-time 120 "$SITE_URL/api/health"
+
+  reconcile_acceptance_first:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_github_reconciliation_acceptance == true
+    needs: deploy
+    uses: ./.github/workflows/reconcile-github-connections-aws-dev.yml
+    with:
+      expected_release_sha: ${{ github.sha }}
+      expected_image_uri: ${{ needs.deploy.outputs.image_uri }}
+    permissions:
+      contents: read
+      id-token: write
+
+  reconcile_acceptance_second:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_github_reconciliation_acceptance == true
+    needs:
+      - deploy
+      - reconcile_acceptance_first
+    uses: ./.github/workflows/reconcile-github-connections-aws-dev.yml
+    with:
+      expected_release_sha: ${{ github.sha }}
+      expected_image_uri: ${{ needs.deploy.outputs.image_uri }}
+    permissions:
+      contents: read
+      id-token: write

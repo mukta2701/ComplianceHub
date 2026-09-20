@@ -45,7 +45,7 @@ App Runner keeps the production image's default command:
 node server.js
 ```
 
-The protected reconciliation workflow overrides that same image with exactly:
+The reconciliation workflow overrides that same image with exactly:
 
 ```text
 node dist/github-connection-reconcile.mjs
@@ -58,27 +58,38 @@ The workflow first reads App Runner's current image identifier and rejects a
 tag, another registry, another repository, or a malformed digest before Docker
 runs.
 
-### Protected workflow and schedule
+### Reconciliation workflow and schedule
 
 `.github/workflows/reconcile-github-connections-aws-dev.yml` runs on a
-GitHub-hosted worker. It uses the protected `aws-dev` environment and an
-AWS OIDC role with no long-lived AWS access key. It supports manual
-`workflow_dispatch` (including an optional expected release SHA) and is reviewed
-to run hourly at minute 23 UTC (`23 * * * *`). The concurrency lock prevents
-overlapping cycles, and the workflow supplies an outer timeout around the
-runner's own bounded deadline.
+GitHub-hosted worker. It uses the existing `aws-dev` environment and an AWS
+OIDC role with no long-lived AWS access key. It supports manual
+`workflow_dispatch` (including an optional expected release SHA), reusable
+`workflow_call` (requiring the expected release SHA and exact immutable image
+URI), and an hourly schedule at minute 23 UTC (`23 * * * *`). The concurrency
+lock prevents overlapping cycles, and the workflow supplies an outer timeout
+around the runner's own bounded deadline.
+
+Before this workflow is installed on the default branch, a manual dispatch of
+`Deploy AWS dev` can set
+`run_github_reconciliation_acceptance=true`. The deploy job then passes its
+resolved immutable image URI and `github.sha` to two sequential calls of this
+workflow. The input defaults to `false`, so ordinary pushes and manual deploys
+remain web-only. These caller jobs pass no secrets or environment; the called
+workflow obtains the existing `aws-dev` environment configuration itself. The
+environment currently has no reviewer-protection rule; this is an execution
+path and not a claim of human approval enforcement.
 
 GitHub schedules run from the repository's default branch only. A feature branch
-can prove the workflow contract and manual dispatch once the protected
-environment is available; it cannot prove scheduled execution. Scheduled runs
+can prove the workflow contract and the opt-in deployment acceptance calls; it
+cannot prove scheduled execution. Scheduled runs
 may start late or be skipped during GitHub service disruption, so a missing
 scheduled run is not evidence that the connection is healthy.
 
 ### Configuration names and secret boundary
 
-Configure only the protected `aws-dev` inputs below; never copy their values
+Configure only the `aws-dev` inputs below; never copy their values
 into this repository, Docker build arguments, workflow arguments or evidence.
-The four protected variable names used by the reconciliation workflow are:
+The four environment variable names used by the reconciliation workflow are:
 
 - `AWS_DEV_ECR_REGISTRY`;
 - `AWS_DEV_SERVICE_ARN`;

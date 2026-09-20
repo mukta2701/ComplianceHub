@@ -4,6 +4,17 @@ import { describe, expect, it } from "vitest";
 const read = (path: string) =>
   readFileSync(`${process.cwd()}/${path}`, "utf8");
 
+const jobBlock = (workflow: string, jobName: string, nextJobName?: string) => {
+  const start = workflow.indexOf(`  ${jobName}:`);
+  const end = nextJobName
+    ? workflow.indexOf(`  ${nextJobName}:`, start)
+    : workflow.length;
+
+  expect(start).toBeGreaterThanOrEqual(0);
+  expect(end).toBeGreaterThan(start);
+  return workflow.slice(start, end);
+};
+
 describe("AWS dev GitHub reconciliation workflow", () => {
   it("defines a protected, immutable, bounded scheduled workflow", () => {
     const workflow = read(
@@ -48,6 +59,77 @@ describe("AWS dev GitHub reconciliation workflow", () => {
     expect(workflow).not.toContain("GITHUB_PERSONAL_ACCESS_TOKEN");
     expect(workflow).not.toContain("NEXT_PUBLIC_SUPABASE_ANON_KEY");
     expect(workflow).not.toContain("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY");
+  });
+
+  it("supports reusable calls while keeping the direct manual release check optional", () => {
+    const workflow = read(
+      ".github/workflows/reconcile-github-connections-aws-dev.yml",
+    );
+
+    expect(workflow).toMatch(
+      /workflow_dispatch:\s*\n\s+inputs:\s*\n\s+expected_release_sha:[\s\S]*?required:\s*false[\s\S]*?type:\s*string/,
+    );
+    expect(workflow).toMatch(
+      /workflow_call:\s*\n\s+inputs:\s*\n\s+expected_release_sha:[\s\S]*?required:\s*true[\s\S]*?type:\s*string[\s\S]*?expected_image_uri:[\s\S]*?required:\s*true[\s\S]*?type:\s*string/,
+    );
+  });
+
+  it("publishes one immutable image output and runs two opted-in calls in order", () => {
+    const workflow = read(".github/workflows/deploy-aws-dev.yml");
+    const first = jobBlock(workflow, "reconcile_acceptance_first", "reconcile_acceptance_second");
+    const second = jobBlock(workflow, "reconcile_acceptance_second");
+
+    expect(workflow).toMatch(
+      /workflow_dispatch:\s*\n\s+inputs:\s*\n\s+run_github_reconciliation_acceptance:[\s\S]*?default:\s*false[\s\S]*?type:\s*boolean/,
+    );
+    expect(workflow).toMatch(
+      /deploy:\s*\n\s+outputs:\s*\n\s+image_uri:\s+\$\{\{\s*steps\.image_reference\.outputs\.image_uri\s*\}\}/,
+    );
+
+    expect(workflow).toMatch(
+      /name: Set image reference\s*\n\s+id: image_reference[\s\S]*?echo "IMAGE_URI=\$image_uri" >> "\$GITHUB_ENV"[\s\S]*?echo "image_uri=\$image_uri" >> "\$GITHUB_OUTPUT"/,
+    );
+    for (const block of [first, second]) {
+      expect(block).toContain(
+        "if: github.event_name == 'workflow_dispatch' && inputs.run_github_reconciliation_acceptance == true",
+      );
+      expect(block).toContain("uses: ./.github/workflows/reconcile-github-connections-aws-dev.yml");
+      expect(block).toContain("expected_release_sha: ${{ github.sha }}");
+      expect(block).toContain(
+        "expected_image_uri: ${{ needs.deploy.outputs.image_uri }}",
+      );
+      expect(block).toMatch(
+        /permissions:\s*\n\s+contents: read\s*\n\s+id-token: write/,
+      );
+      expect(block).not.toMatch(/secrets:\s*inherit|environment:|runs-on:|steps:/);
+    }
+    expect(first).toMatch(/needs:\s*deploy/);
+    expect(second).toMatch(
+      /needs:\s*\n\s+- deploy\s*\n\s+- reconcile_acceptance_first/,
+    );
+  });
+
+  it("checks the expected immutable image before pull and rejects a digest mismatch", () => {
+    const workflow = read(
+      ".github/workflows/reconcile-github-connections-aws-dev.yml",
+    );
+    const resolveStart = workflow.indexOf("Resolve current App Runner image");
+    const pullStart = workflow.indexOf("Log in to ECR and pull immutable image");
+    const resolve = workflow.slice(resolveStart, pullStart);
+
+    expect(resolve).toContain("EXPECTED_IMAGE_URI: ${{ inputs.expected_image_uri }}");
+    expect(resolve).not.toMatch(/\$\{\{\s*inputs\.expected_image_uri\s*\}\}[^\n]*run/);
+    expect(resolve).toMatch(
+      /if \[\[ -n "\$EXPECTED_IMAGE_URI" && "\$EXPECTED_IMAGE_URI" != "\$image" \]\]/,
+    );
+    expect(resolve).toMatch(
+      /expected_image_uri[\s\S]*(?:mismatch|does not match)[\s\S]*exit 1/,
+    );
+    const mismatchGuard = workflow.indexOf(
+      'if [[ -n "$EXPECTED_IMAGE_URI" && "$EXPECTED_IMAGE_URI" != "$image" ]]',
+    );
+    expect(mismatchGuard).toBeGreaterThanOrEqual(resolveStart);
+    expect(mismatchGuard).toBeLessThan(pullStart);
   });
 
   it("rejects mutable, wrong-registry, and wrong-repository image identifiers", () => {

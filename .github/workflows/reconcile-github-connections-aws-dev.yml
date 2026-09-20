@@ -9,6 +9,16 @@ on:
         description: Optional release SHA to verify through the live health endpoint before running
         required: false
         type: string
+  workflow_call:
+    inputs:
+      expected_release_sha:
+        description: Release SHA to verify through the live health endpoint before running
+        required: true
+        type: string
+      expected_image_uri:
+        description: Immutable App Runner image URI resolved by the deployment job
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -45,6 +55,7 @@ jobs:
           AWS_DEV_ECR_REGISTRY: ${{ vars.AWS_DEV_ECR_REGISTRY }}
           AWS_DEV_SITE_URL: ${{ vars.AWS_DEV_SITE_URL }}
           EXPECTED_RELEASE_SHA: ${{ inputs.expected_release_sha }}
+          EXPECTED_IMAGE_URI: ${{ inputs.expected_image_uri }}
         run: |
           set -euo pipefail
           image="$(aws apprunner describe-service \
@@ -68,6 +79,10 @@ jobs:
           digest="${image#"$expected_prefix"}"
           if [[ ! "$digest" =~ ^[0-9a-f]{64}$ ]]; then
             echo "immutable image digest must be 64 lowercase hexadecimal characters" >&2
+            exit 1
+          fi
+          if [[ -n "$EXPECTED_IMAGE_URI" && "$EXPECTED_IMAGE_URI" != "$image" ]]; then
+            echo "expected_image_uri does not match the current immutable App Runner image" >&2
             exit 1
           fi
           printf 'image=%s\n' "$image" >> "$GITHUB_OUTPUT"

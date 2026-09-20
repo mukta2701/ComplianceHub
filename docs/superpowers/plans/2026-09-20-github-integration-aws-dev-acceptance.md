@@ -317,7 +317,7 @@ git push origin feature/m1-phase7-connections
 **Interfaces:**
 
 - Consumes: App Runner variable `AWS_DEV_SERVICE_ARN`, ECR variable `AWS_DEV_ECR_REGISTRY`, existing OIDC secret `AWS_DEV_DEPLOY_ROLE_ARN`, existing Supabase/GitHub secrets, `APP_ENCRYPTION_KEY` and `SLACK_ALLOWED_WEBHOOK_SHA256` from `aws-dev`.
-- Produces: manual `workflow_dispatch` with optional `expected_release_sha` and schedule `23 * * * *`.
+- Produces: manual `workflow_dispatch` with optional `expected_release_sha`, reusable `workflow_call` with required release/image inputs, and schedule `23 * * * *`.
 - Runs: `node dist/github-connection-reconcile.mjs` from App Runner's current digest.
 
 - [ ] **Step 1: Write the failing workflow-contract test**
@@ -461,7 +461,7 @@ Update `docs/deployment.md` with:
 - reconciliation override `node dist/github-connection-reconcile.mjs`;
 - App Runner's current digest as the image source;
 - hourly minute 23 UTC schedule and manual dispatch;
-- GitHub-hosted worker, protected `aws-dev` environment and OIDC boundary;
+- GitHub-hosted worker, existing `aws-dev` environment and OIDC boundary, without assuming reviewer protection;
 - required variables and secrets by name only;
 - connection-only Slack drain and its separation from `/api/cron/monitor`;
 - feature-branch manual proof versus default-branch scheduled proof;
@@ -571,7 +571,7 @@ Wait for both branch and pull-request CI on the exact commit. Every application,
 
 **Interfaces:**
 
-- Consumes: the exact green candidate SHA, migration `20260920110000`, existing `aws-dev` App Runner service and protected GitHub environment.
+- Consumes: the exact green candidate SHA, migration `20260920110000`, existing `aws-dev` App Runner service and GitHub environment.
 - Produces: fresh App Runner web and manual finite-runner evidence for one immutable digest.
 
 - [ ] **Step 1: Confirm the external-change checkpoint**
@@ -588,7 +588,9 @@ Apply the migration, then verify local and remote history match. Record only the
 
 - [ ] **Step 3: Deploy the exact candidate to App Runner**
 
-Dispatch `.github/workflows/deploy-aws-dev.yml` from the candidate branch and wait for completion. Verify:
+Dispatch `.github/workflows/deploy-aws-dev.yml` from the candidate branch with
+`run_github_reconciliation_acceptance=true` and wait for completion. This keeps
+the deployment and both finite-runner calls on one immutable candidate. Verify:
 
 - the workflow used the candidate SHA;
 - App Runner reached `RUNNING`;
@@ -597,11 +599,16 @@ Dispatch `.github/workflows/deploy-aws-dev.yml` from the candidate branch and wa
 - the image identifier is an immutable ECR digest;
 - no secret appears in workflow logs.
 
-- [ ] **Step 4: Run the protected finite command manually**
+- [ ] **Step 4: Verify the two finite acceptance calls**
 
-Dispatch `.github/workflows/reconcile-github-connections-aws-dev.yml` from the candidate branch with `expected_release_sha` set to the deployed candidate. Require a bounded zero-work or healthy exit and a safe count-only summary.
+The deploy workflow's first reusable call receives `github.sha` and the exact
+image URI emitted by its `Set image reference` step. Require the first and
+second calls to use the same values, finish within the workflow bounds, and
+produce a bounded zero-work or healthy exit with a safe count-only summary.
 
-Run it a second time. Require no duplicate connection incident, recovery or Slack delivery.
+Require the second call to produce no duplicate connection incident, recovery or
+Slack delivery. The standalone reconciliation workflow remains available for
+direct manual use after it is registered on the default branch.
 
 - [ ] **Step 5: Record sanitised AWS dev evidence**
 
@@ -659,6 +666,10 @@ Show the exact GitHub App, organisation and pilot repository plus the expected t
 - [ ] **Step 6: Prove fail-closed incident delivery**
 
 Remove only the pilot repository. Run the protected finite workflow or wait for the hourly schedule. Verify:
+
+Before Task 8, use the deploy workflow's opt-in acceptance input for the two
+sequential finite calls; do not treat an unregistered feature-branch standalone
+dispatch as pre-merge evidence.
 
 - Connections reports `Partly unavailable` or the approved Owner-action state;
 - collection for the repository is stopped;
@@ -718,7 +729,7 @@ Wait for the first hourly minute-23 run, or use the workflow's default-branch ma
 
 Verify the scheduled job:
 
-- used the protected `aws-dev` environment;
+- used the existing `aws-dev` environment;
 - resolved the current App Runner digest;
 - ran the exact finite command once;
 - exited within ten minutes;
