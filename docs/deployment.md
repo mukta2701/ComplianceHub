@@ -76,17 +76,14 @@ scheduled run is not evidence that the connection is healthy.
 
 ### Configuration names and secret boundary
 
-Configure names only through the protected `aws-dev` environment; never copy
-values into this repository, Docker build arguments, workflow arguments or
-evidence. The workflow expects these environment variables:
+Configure only the protected `aws-dev` inputs below; never copy their values
+into this repository, Docker build arguments, workflow arguments or evidence.
+The four protected variable names used by the reconciliation workflow are:
 
-- `AWS_DEV_ECR_REGISTRY`, `AWS_DEV_SERVICE_ARN`, `AWS_DEV_SITE_URL`;
-- `NEXT_PUBLIC_SUPABASE_URL` and the runtime `NEXT_PUBLIC_SITE_URL`;
-- `GITHUB_ALLOWED_ACCOUNT_TYPE`, the reconciliation bounds
-  `GITHUB_CONNECTION_MAX_WEBHOOK_DELIVERIES`,
-  `GITHUB_CONNECTION_MAX_INSTALLATIONS`,
-  `GITHUB_CONNECTION_MAX_SLACK_DELIVERIES`, and
-  `GITHUB_CONNECTION_TIME_BUDGET_MS`.
+- `AWS_DEV_ECR_REGISTRY`;
+- `AWS_DEV_SERVICE_ARN`;
+- `AWS_DEV_SITE_URL`;
+- `NEXT_PUBLIC_SUPABASE_URL`.
 
 The protected secret names are:
 
@@ -97,6 +94,17 @@ The protected secret names are:
   `AWS_DEV_GITHUB_APP_CLIENT_ID`, `AWS_DEV_GITHUB_APP_CLIENT_SECRET`,
   `AWS_DEV_GITHUB_APP_PRIVATE_KEY`, `AWS_DEV_GITHUB_WEBHOOK_SECRET`, and
   `AWS_DEV_GITHUB_ALLOWED_ACCOUNT_ID`.
+
+The workflow derives the runtime `NEXT_PUBLIC_SITE_URL` from
+`AWS_DEV_SITE_URL`; do not configure a separate protected value for that
+runtime name. It fixes `GITHUB_ALLOWED_ACCOUNT_TYPE` to `Organization` and the
+following reconciliation bounds in reviewed workflow source, so they are not
+protected-environment inputs:
+
+- `GITHUB_CONNECTION_MAX_WEBHOOK_DELIVERIES=20`;
+- `GITHUB_CONNECTION_MAX_INSTALLATIONS=10`;
+- `GITHUB_CONNECTION_MAX_SLACK_DELIVERIES=10`;
+- `GITHUB_CONNECTION_TIME_BUDGET_MS=240000`.
 
 The deploy workflow maps the `AWS_DEV_GITHUB_*` aliases to the exact runtime
 `GITHUB_*` names. The finite runner does not receive `CRON_SECRET`, browser
