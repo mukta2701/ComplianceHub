@@ -158,6 +158,39 @@ describe("github-connection-store", () => {
     expect(signal).toBe("opened");
   });
 
+  it("finalises an action-required run without inventing a repository snapshot", async () => {
+    const client = clientDouble({ data: null, error: null }, { data: "opened", error: null });
+    await expect(finalizeReconciliationRun(client as never, {
+      runId: "11111111-1111-4111-8111-111111111111",
+      workerId: "99999999-9999-4999-8999-999999999999",
+      outcome: "action_required",
+      diagnostic: "installation_suspended",
+      nextAttemptAt: null,
+      snapshot: null,
+    })).resolves.toBe("opened");
+    expect(client.rpc).toHaveBeenCalledWith("finalize_github_connection_reconciliation_server", {
+      target_run_id: "11111111-1111-4111-8111-111111111111",
+      target_worker_id: "99999999-9999-4999-8999-999999999999",
+      target_outcome: "action_required",
+      target_diagnostic_code: "installation_suspended",
+      target_next_attempt_at: null,
+      target_repository_snapshot: null,
+    });
+  });
+
+  it.each(["success", "partial"] as const)("rejects a null snapshot for %s outcomes", async (outcome) => {
+    const client = clientDouble({ data: null, error: null }, { data: "none", error: null });
+    await expect(finalizeReconciliationRun(client as never, {
+      runId: "11111111-1111-4111-8111-111111111111",
+      workerId: "99999999-9999-4999-8999-999999999999",
+      outcome,
+      diagnostic: outcome === "partial" ? "repository_unavailable" : null,
+      nextAttemptAt: null,
+      snapshot: null,
+    })).rejects.toThrow("GitHub reconciliation store is unavailable");
+    expect(client.rpc).not.toHaveBeenCalled();
+  });
+
   it("rejects an unknown incident signal from the database", async () => {
     const client = clientDouble({ data: null, error: null }, { data: "exploded", error: null });
     await expect(finalizeReconciliationRun(client as never, {

@@ -151,11 +151,22 @@ describe("readInstallationSnapshot", () => {
   });
 
   it("reports a suspended installation instead of failing", async () => {
-    const fetchImpl = vi.fn()
-      .mockResolvedValueOnce(jsonResponse(installationBody({ suspended_at: "2026-09-01T00:00:00.000Z" })))
-      .mockResolvedValueOnce(jsonResponse({ total_count: 0, repositories: [] }));
-    const snapshot = await readInstallationSnapshot({ ...SNAPSHOT_INPUT, fetchImpl });
-    expect(snapshot.suspendedAt).toBe("2026-09-01T00:00:00.000Z");
+    const fetchImpl = vi.fn().mockResolvedValueOnce(
+      jsonResponse(installationBody({ suspended_at: "2026-09-01T00:00:00.000Z" })),
+    );
+    const provideInstallationToken = vi.fn().mockRejectedValue(new Error("must not mint a token"));
+    const snapshot = await readInstallationSnapshot({
+      installationId: 77,
+      appJwt: "test-app-jwt",
+      provideInstallationToken,
+      fetchImpl,
+    });
+    expect(snapshot).toMatchObject({
+      suspendedAt: "2026-09-01T00:00:00.000Z",
+      repositories: [],
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(provideInstallationToken).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -194,6 +205,13 @@ describe("readInstallationSnapshot", () => {
     const fetchImpl = vi.fn();
     await expect(readInstallationSnapshot({ installationId: 0, appJwt: "test-app-jwt", installationToken: "test-installation-token", fetchImpl })).rejects.toMatchObject({ kind: "invalid" });
     await expect(readInstallationSnapshot({ installationId: 77, appJwt: "", installationToken: "test-installation-token", fetchImpl })).rejects.toMatchObject({ kind: "invalid" });
+    await expect(readInstallationSnapshot({
+      installationId: 77,
+      appJwt: "test-app-jwt",
+      installationToken: "",
+      provideInstallationToken: async () => "test-installation-token",
+      fetchImpl,
+    })).rejects.toMatchObject({ kind: "invalid" });
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 });

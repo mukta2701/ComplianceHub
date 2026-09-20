@@ -170,6 +170,89 @@ describe("github-connection-reconcile entry point", () => {
     expect(signalRef.cycleSignal).toBe(signalRef.drainSignal);
   });
 
+  it("finalises a suspended installation before attempting to mint an installation token", async () => {
+    const events: string[] = [];
+    const signalRef: { signal?: AbortSignal; cycleSignal?: AbortSignal; drainSignal?: AbortSignal } = {};
+    const createInstallationToken = vi.fn().mockRejectedValue(new Error("must not mint for suspension"));
+    const readInstallationSnapshot = vi.fn().mockImplementation(async (input: {
+      provideInstallationToken?: () => Promise<string>;
+    }) => {
+      expect(input.provideInstallationToken).toEqual(expect.any(Function));
+      return {
+        installationId: 77,
+        account: { id: 99, login: "Adtecher", type: "Organization" as const },
+        repositorySelection: "selected" as const,
+        permissions: {
+          actions: "read",
+          administration: "read",
+          metadata: "read",
+          secret_scanning_alerts: "read",
+          security_events: "read",
+          vulnerability_alerts: "read",
+        },
+        suspendedAt: "2026-09-20T21:43:00.000Z",
+        repositories: [],
+      };
+    });
+    const rpc = vi.fn().mockResolvedValue({ data: "opened", error: null });
+    const result = await runGitHubConnectionReconcile({
+      environment: {},
+      executionId: "11111111-1111-4111-8111-111111111111",
+      dependencies: runtimeDependencies(events, signalRef, {
+        createInstallationToken,
+        readInstallationSnapshot,
+        createServiceClient: () => ({
+          rpc,
+          from: () => ({
+            select: () => {
+              const single = async () => ({ data: null, error: null });
+              const query = Object.assign(Promise.resolve({ data: [], error: null }), { single });
+              return { eq: () => query, single };
+            },
+          }),
+        }),
+        runCycle: async (cycleDependencies, input) => {
+          const reconciliation = await cycleDependencies.reconcileClaim({
+            runId: "33333333-3333-4333-8333-333333333333",
+            installationUuid: "22222222-2222-4222-8222-222222222222",
+            providerInstallationId: 77,
+            organisationId: "55555555-5555-4555-8555-555555555555",
+            previousHealth: "healthy",
+            consecutiveFailures: 0,
+            expectedAccount: { id: 99, login: "Adtecher", type: "Organization" },
+          });
+          expect(reconciliation.decision).toMatchObject({
+            health: "owner_action_required",
+            diagnostic: "installation_suspended",
+            openIncident: true,
+          });
+          return {
+            executionId: input.executionId,
+            webhookDeliveriesClaimed: 0,
+            installationsClaimed: 1,
+            healthy: 0,
+            retrying: 0,
+            actionRequired: 1,
+            recovered: 0,
+            ownershipLost: 0,
+          };
+        },
+        drainSlackDeliveries: async () => ({ claimed: 0, delivered: 0, failed: 0 }),
+      }),
+    });
+    expect(result.summary).toMatchObject({ actionRequired: 1, ownershipLost: 0 });
+    expect(createInstallationToken).not.toHaveBeenCalled();
+    expect(readInstallationSnapshot).toHaveBeenCalledTimes(1);
+    expect(rpc).toHaveBeenCalledWith("finalize_github_connection_reconciliation_server", {
+      target_run_id: "33333333-3333-4333-8333-333333333333",
+      target_worker_id: "11111111-1111-4111-8111-111111111111",
+      target_outcome: "action_required",
+      target_diagnostic_code: "installation_suspended",
+      target_next_attempt_at: null,
+      target_repository_snapshot: null,
+    });
+  });
+
   it("does not report success when the shared deadline expires during Slack draining", async () => {
     const events: string[] = [];
     const signalRef: { signal?: AbortSignal; cycleSignal?: AbortSignal; drainSignal?: AbortSignal } = {};

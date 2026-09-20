@@ -138,6 +138,23 @@ describe("reconcileGitHubConnection", () => {
     expect(dependencies.finalize).toHaveBeenCalledWith(expect.objectContaining({ diagnostic, snapshot: null }));
   });
 
+  it("maps a credential-provider denial before reading a snapshot", async () => {
+    const failure = Object.assign(new Error("GitHub installation token failed"), { kind: "forbidden" });
+    const dependencies = deps({ provideCredentials: vi.fn().mockRejectedValue(failure) });
+    const result = await reconcileGitHubConnection(dependencies, CLAIM);
+    expect(result.decision).toMatchObject({
+      health: "owner_action_required",
+      diagnostic: "permission_mismatch",
+      openIncident: true,
+    });
+    expect(dependencies.readSnapshot).not.toHaveBeenCalled();
+    expect(dependencies.finalize).toHaveBeenCalledWith(expect.objectContaining({
+      outcome: "action_required",
+      diagnostic: "permission_mismatch",
+      snapshot: null,
+    }));
+  });
+
   it("marks an unshaped failure as internal without provider content", async () => {
     const dependencies = deps({ readSnapshot: vi.fn().mockRejectedValue(new TypeError("bug")) });
     const result = await reconcileGitHubConnection(dependencies, CLAIM);

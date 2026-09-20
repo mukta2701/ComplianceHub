@@ -39,9 +39,14 @@ export type ReconcileGitHubConnectionDependencies = {
   readSnapshot: (input: {
     installationId: number;
     appJwt: string;
-    installationToken: string;
+    installationToken?: string;
+    provideInstallationToken?: () => Promise<string>;
   }) => Promise<InstallationSnapshot>;
-  provideCredentials: () => Promise<{ appJwt: string; installationToken: string }>;
+  provideCredentials: () => Promise<{
+    appJwt: string;
+    installationToken?: string;
+    provideInstallationToken?: () => Promise<string>;
+  }>;
   loadStoredRepositories: (installationUuid: string) => Promise<StoredRepositoryIdentity[]>;
   finalize: (input: FinalizeConnectionInput) => Promise<unknown>;
   now?: Date;
@@ -114,6 +119,7 @@ export async function reconcileGitHubConnection(
       installationId: claim.providerInstallationId,
       appJwt: credentials.appJwt,
       installationToken: credentials.installationToken,
+      provideInstallationToken: credentials.provideInstallationToken,
     });
   } catch (error) {
     const mapped = decideFromApiError(error, claim.previousHealth, claim.consecutiveFailures, now);

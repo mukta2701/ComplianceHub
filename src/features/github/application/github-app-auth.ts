@@ -8,6 +8,24 @@ import { GITHUB_API_VERSION } from "./github-user-oauth";
 
 type FetchLike = typeof fetch;
 
+type GitHubInstallationTokenErrorKind =
+  | "unauthorized"
+  | "forbidden"
+  | "not_found"
+  | "server"
+  | "network"
+  | "invalid";
+
+class GitHubInstallationTokenError extends Error {
+  readonly kind: GitHubInstallationTokenErrorKind;
+
+  constructor(kind: GitHubInstallationTokenErrorKind, message = "Could not create GitHub installation token") {
+    super(message);
+    this.name = "GitHubInstallationTokenError";
+    this.kind = kind;
+  }
+}
+
 const appConfigSchema = z.object({
   appId: z.string().trim().min(1),
   privateKey: z.string().trim().min(1),
@@ -107,11 +125,14 @@ export async function createInstallationToken(input: {
     );
     input.signal?.throwIfAborted();
   } catch {
-    throw new Error("Could not create GitHub installation token");
+    throw new GitHubInstallationTokenError("network");
   }
 
   throwIfGitHubRateLimited(response);
-  if (!response.ok) throw new Error("Could not create GitHub installation token");
+  if (response.status === 401) throw new GitHubInstallationTokenError("unauthorized");
+  if (response.status === 403 || response.status === 422) throw new GitHubInstallationTokenError("forbidden");
+  if (response.status === 404) throw new GitHubInstallationTokenError("not_found");
+  if (response.status >= 500 || !response.ok) throw new GitHubInstallationTokenError("server");
 
   try {
     const body = await response.json();
@@ -119,6 +140,6 @@ export async function createInstallationToken(input: {
     const token = installationTokenResponseSchema.parse(body);
     return { token: token.token, expiresAt: token.expires_at };
   } catch {
-    throw new Error("GitHub returned an invalid installation token response");
+    throw new GitHubInstallationTokenError("invalid", "GitHub returned an invalid installation token response");
   }
 }

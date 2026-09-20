@@ -271,16 +271,6 @@ export async function runGitHubConnectionReconcile(input: {
         ),
       reconcileClaim: async (claim: ClaimedGitHubConnectionReconciliation) => {
         deadlineSignal.throwIfAborted();
-        const repositoryIds = await listSelectedRepositoryIds(client, claim.installationUuid, deadlineSignal);
-        deadlineSignal.throwIfAborted();
-        const installationToken = await dependencies.createInstallationToken({
-          installationId: claim.providerInstallationId,
-          repositoryIds,
-          appJwt,
-          signal: deadlineSignal,
-          fetchImpl: deadlineFetch(deadlineSignal),
-        });
-        deadlineSignal.throwIfAborted();
         const result = await reconcileGitHubConnection(
           {
             readSnapshot: async (snapshotInput) => {
@@ -295,7 +285,27 @@ export async function runGitHubConnectionReconcile(input: {
             },
             provideCredentials: async () => {
               deadlineSignal.throwIfAborted();
-              return { appJwt, installationToken: installationToken.token };
+              return {
+                appJwt,
+                provideInstallationToken: async () => {
+                  deadlineSignal.throwIfAborted();
+                  const repositoryIds = await listSelectedRepositoryIds(
+                    client,
+                    claim.installationUuid,
+                    deadlineSignal,
+                  );
+                  deadlineSignal.throwIfAborted();
+                  const installationToken = await dependencies.createInstallationToken({
+                    installationId: claim.providerInstallationId,
+                    repositoryIds,
+                    appJwt,
+                    signal: deadlineSignal,
+                    fetchImpl: deadlineFetch(deadlineSignal),
+                  });
+                  deadlineSignal.throwIfAborted();
+                  return installationToken.token;
+                },
+              };
             },
             loadStoredRepositories: async (installationUuid) => {
               deadlineSignal.throwIfAborted();

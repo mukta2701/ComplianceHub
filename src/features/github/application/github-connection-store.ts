@@ -178,8 +178,10 @@ export async function finalizeReconciliationRun(
   signal?: AbortSignal,
 ): Promise<string> {
   if (!uuidSchema.safeParse(input.runId).success || !uuidSchema.safeParse(input.workerId).success) unavailable();
-  if (!Array.isArray(input.snapshot)) unavailable();
-  const rows = input.snapshot as unknown[];
+  const requiresSnapshot = input.outcome === "success" || input.outcome === "partial";
+  if (requiresSnapshot && !Array.isArray(input.snapshot)) unavailable();
+  if (input.snapshot !== null && !Array.isArray(input.snapshot)) unavailable();
+  const rows = (input.snapshot ?? []) as unknown[];
   if (!rows.every((row) => snapshotRowSchema.safeParse(row).success)) unavailable();
   const { data, error } = await applyConnectionStoreDeadline(client.rpc("finalize_github_connection_reconciliation_server", {
     target_run_id: input.runId,

@@ -154,6 +154,24 @@ describe("GitHub App authentication", () => {
   });
 
   it.each([
+    [401, "unauthorized"],
+    [403, "forbidden"],
+    [404, "not_found"],
+    [422, "forbidden"],
+    [503, "server"],
+  ] as const)("classifies token exchange status %s without exposing provider content", async (status, kind) => {
+    const providerBody = crypto.randomUUID();
+    const error = await createInstallationToken({
+      installationId: 77,
+      repositoryIds: [101],
+      fetchImpl: vi.fn().mockResolvedValue(new Response(providerBody, { status })),
+      appJwt: "signed-app-jwt",
+    }).catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ kind });
+    expect(String(error)).not.toContain(providerBody);
+  });
+
+  it.each([
     { status: 429, headers: { "retry-after": "60" } },
     { status: 403, headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1786969000" } },
     { status: 403, headers: { "retry-after": "30" } },
@@ -171,6 +189,7 @@ describe("GitHub App authentication", () => {
     }).catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(GitHubRateLimitError);
     expect((error as GitHubRateLimitError).diagnosticCode).toBe("rate_limited");
+    expect((error as GitHubRateLimitError).kind).toBe("rate_limited");
     expect(String(error)).not.toContain(providerBody);
   });
 
