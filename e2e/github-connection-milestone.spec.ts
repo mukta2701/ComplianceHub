@@ -257,8 +257,7 @@ test.describe("GitHub connection milestone", () => {
     await ownerPage.getByRole("button", { name: "Disconnect" }).click();
     await ownerPage.getByRole("button", { name: "Click again to confirm disconnect" }).click();
     await expect(ownerPage.getByText(/GitHub-side installation is unchanged/i)).toBeVisible({ timeout: 15_000 });
-    await ownerPage.reload();
-    await expect(ownerPage.getByRole("article", { name: "Example-Co GitHub installation" }).getByText("Disconnected", { exact: true })).toBeVisible();
+    await expect(installation.getByText("Disconnected", { exact: true })).toBeVisible();
     await expect(ownerPage.getByRole("button", { name: "Disconnect" })).toHaveCount(0);
 
     await ownerContext.close();

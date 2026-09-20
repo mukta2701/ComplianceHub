@@ -228,6 +228,16 @@ jobs:
         run: npm run test:integration
       - if: env.HEAVY == 'true'
         run: npm run test:e2e $E2E_ARGS
+      - if: failure() && env.HEAVY == 'true'
+        name: Upload bounded browser failure evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-failure-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            test-results/github-connection-*/test-failed-*.png
+            test-results/github-connection-*/error-context.md
+          if-no-files-found: warn
+          retention-days: 7
 
   secrets:
     runs-on: ubuntu-latest
