@@ -82,10 +82,11 @@ describe("github-connection-reconcile entry point", () => {
     expect(summary).not.toContain("fixture-secret");
   });
 
-  function runtimeDependencies(events: string[], signalRef: { signal?: AbortSignal }, overrides: Record<string, unknown> = {}) {
+  function runtimeDependencies(events: string[], signalRef: { signal?: AbortSignal; cycleSignal?: AbortSignal; drainSignal?: AbortSignal }, overrides: Record<string, unknown> = {}) {
     const runCycle = async (_deps: unknown, input: { signal?: AbortSignal }) => {
       events.push("cycle");
       signalRef.signal = input.signal;
+      signalRef.cycleSignal = input.signal;
       return {
         executionId: "11111111-1111-4111-8111-111111111111",
         webhookDeliveriesClaimed: 0,
@@ -126,6 +127,7 @@ describe("github-connection-reconcile entry point", () => {
       drainSlackDeliveries: async (_service: unknown, batchSize: number, signal: AbortSignal) => {
         events.push(`slack:${batchSize}`);
         signalRef.signal = signal;
+        signalRef.drainSignal = signal;
         return { claimed: 1, delivered: 1, failed: 0 };
       },
       ...overrides,
@@ -134,7 +136,7 @@ describe("github-connection-reconcile entry point", () => {
 
   it("runs the connection-only Slack drain after reconciliation with one shared deadline signal", async () => {
     const events: string[] = [];
-    const signalRef: { signal?: AbortSignal } = {};
+    const signalRef: { signal?: AbortSignal; cycleSignal?: AbortSignal; drainSignal?: AbortSignal } = {};
     const result = await runGitHubConnectionReconcile({
       environment: { GITHUB_CONNECTION_MAX_SLACK_DELIVERIES: "7" },
       executionId: "11111111-1111-4111-8111-111111111111",
@@ -144,13 +146,32 @@ describe("github-connection-reconcile entry point", () => {
     expect(events).toEqual(["cycle", "slack:7"]);
     expect(result.summary).toEqual(expect.objectContaining({ slackClaimed: 1, slackDelivered: 1, slackFailed: 0 }));
     expect(signalRef.signal).toBeDefined();
+    expect(signalRef.cycleSignal).toBe(signalRef.drainSignal);
+  });
+
+  it("does not report success when the shared deadline expires during Slack draining", async () => {
+    const events: string[] = [];
+    const signalRef: { signal?: AbortSignal; cycleSignal?: AbortSignal; drainSignal?: AbortSignal } = {};
+    const controller = new AbortController();
+    await expect(runGitHubConnectionReconcile({
+      environment: { GITHUB_CONNECTION_MAX_SLACK_DELIVERIES: "1" },
+      executionId: "11111111-1111-4111-8111-111111111111",
+      signal: controller.signal,
+      dependencies: runtimeDependencies(events, signalRef, {
+        drainSlackDeliveries: async (_service, _batchSize, signal) => {
+          signalRef.drainSignal = signal;
+          controller.abort(new Error("deadline expired during Slack drain"));
+          return { claimed: 1, delivered: 1, failed: 0 };
+        },
+      }),
+    })).rejects.toThrow("deadline expired during Slack drain");
   });
 
   it("returns CLI failure after recording a failed Slack delivery summary", async () => {
     const stdout: string[] = [];
     const stderr: string[] = [];
     const events: string[] = [];
-    const signalRef: { signal?: AbortSignal } = {};
+    const signalRef: { signal?: AbortSignal; cycleSignal?: AbortSignal; drainSignal?: AbortSignal } = {};
     const exitCode = await runGitHubConnectionReconcileCli({
       environment: {},
       dependencies: runtimeDependencies(events, signalRef, {
@@ -168,7 +189,7 @@ describe("github-connection-reconcile entry point", () => {
     const stdout: string[] = [];
     const stderr: string[] = [];
     const events: string[] = [];
-    const signalRef: { signal?: AbortSignal } = {};
+    const signalRef: { signal?: AbortSignal; cycleSignal?: AbortSignal; drainSignal?: AbortSignal } = {};
     const exitCode = await runGitHubConnectionReconcileCli({
       environment: {},
       dependencies: runtimeDependencies(events, signalRef, {

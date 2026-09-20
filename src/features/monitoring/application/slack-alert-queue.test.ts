@@ -99,6 +99,7 @@ describe("drainSlackAlertDeliveries", () => {
     expect(deliveryStore.complete).toHaveBeenCalledWith(
       "10000000-0000-4000-8000-000000000001",
       "10000000-0000-4000-8000-000000000002",
+      expect.any(AbortSignal),
     );
   });
 
@@ -117,7 +118,26 @@ describe("drainSlackAlertDeliveries", () => {
     expect(deliveryStore.fail).toHaveBeenCalledWith(
       "10000000-0000-4000-8000-000000000001",
       "10000000-0000-4000-8000-000000000002",
+      expect.any(AbortSignal),
     );
+  });
+
+  it("rejects when the shared signal expires after lease finalisation", async () => {
+    const controller = new AbortController();
+    const deliveryStore = store();
+    vi.mocked(deliveryStore.complete).mockImplementation(async () => {
+      controller.abort(new Error("expired after finalisation"));
+      return true;
+    });
+
+    await expect(drainSlackAlertDeliveries({
+      store: deliveryStore,
+      workerId: "integration-worker",
+      batchSize: 1,
+      signal: controller.signal,
+      resolveWebhookUrl: vi.fn().mockResolvedValue(webhookUrl),
+      postSlack: vi.fn().mockResolvedValue(undefined),
+    })).rejects.toThrow("expired after finalisation");
   });
 
   it("checks the abort signal before claiming work", async () => {
@@ -162,6 +182,7 @@ describe("drainSlackAlertDeliveries", () => {
     expect(deliveryStore.fail).toHaveBeenCalledWith(
       "10000000-0000-4000-8000-000000000001",
       "10000000-0000-4000-8000-000000000002",
+      expect.any(AbortSignal),
     );
   });
 

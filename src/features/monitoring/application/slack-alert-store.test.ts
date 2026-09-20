@@ -114,6 +114,33 @@ describe("connection-only Slack delivery store", () => {
 describe("connection-only Slack delivery drain", () => {
   const webhookUrl = "https://hooks.slack.com/services/T000/B000/fixture";
 
+  type QueryResult = { data: unknown; error: unknown };
+  type AbortableQuery<T extends QueryResult> = Promise<T> & {
+    abortSignal: (signal: AbortSignal) => AbortableQuery<T>;
+  };
+
+  function resolvedQuery<T extends QueryResult>(result: T): AbortableQuery<T> {
+    const query = Promise.resolve(result) as unknown as AbortableQuery<T>;
+    query.abortSignal = vi.fn().mockReturnValue(query);
+    return query;
+  }
+
+  function pendingQuery<T extends QueryResult>(): {
+    query: AbortableQuery<T>;
+    abortSignal: (signal: AbortSignal) => AbortableQuery<T>;
+  } {
+    let rejectQuery: (reason?: unknown) => void = () => undefined;
+    const query = new Promise<T>((_resolve, reject) => {
+      rejectQuery = reject;
+    }) as unknown as AbortableQuery<T>;
+    const abortSignal = vi.fn((signal: AbortSignal): AbortableQuery<T> => {
+      signal.addEventListener("abort", () => rejectQuery(signal.reason), { once: true });
+      return query;
+    });
+    query.abortSignal = abortSignal;
+    return { query, abortSignal };
+  }
+
   function channelClient(row: unknown, finaliseResult: boolean = true) {
     const rpc = vi.fn()
       .mockResolvedValueOnce({ data: [DELIVERY], error: null })
@@ -123,6 +150,7 @@ describe("connection-only Slack delivery drain", () => {
     const chain = {
       eq: vi.fn().mockReturnThis(),
       is: vi.fn().mockReturnThis(),
+      abortSignal: vi.fn().mockReturnThis(),
       maybeSingle,
     };
     const from = vi.fn().mockReturnValue({ select: vi.fn().mockReturnValue(chain) });
@@ -196,5 +224,169 @@ describe("connection-only Slack delivery drain", () => {
       controller.signal,
     )).rejects.toThrow("deadline");
     expect(supabase.rpc).not.toHaveBeenCalled();
+  });
+
+  it("cancels an in-flight connection claim through the shared signal", async () => {
+    const controller = new AbortController();
+    const claim = pendingQuery<{ data: unknown[]; error: null }>();
+    const rpc = vi.fn((name: string) => {
+      if (name === "claim_github_connection_alert_delivery") return claim.query;
+      return resolvedQuery({ data: true, error: null });
+    });
+    const supabase = { rpc, from: vi.fn() };
+    const running = drainSupabaseGitHubConnectionSlackAlertDeliveries(
+      supabase as never,
+      10,
+      controller.signal,
+    );
+
+    await vi.waitFor(() => expect(claim.abortSignal).toHaveBeenCalledWith(controller.signal));
+    controller.abort(new Error("claim cancelled"));
+    await expect(running).rejects.toThrow("claim cancelled");
+    expect(rpc).toHaveBeenCalledWith("claim_github_connection_alert_delivery", expect.anything());
+    expect(rpc).not.toHaveBeenCalledWith("complete_alert_delivery", expect.anything());
+    expect(rpc).not.toHaveBeenCalledWith("fail_alert_delivery", expect.anything());
+  });
+
+  it("cancels an in-flight channel lookup through the shared signal", async () => {
+    vi.stubEnv("APP_ENCRYPTION_KEY", Buffer.alloc(32, 7).toString("base64"));
+    vi.stubEnv("SLACK_ALLOWED_WEBHOOK_SHA256", createHash("sha256").update(webhookUrl, "utf8").digest("hex"));
+    const controller = new AbortController();
+    const lookup = pendingQuery<{ data: unknown; error: null }>();
+    const rpc = vi.fn((name: string) => {
+      if (name === "claim_github_connection_alert_delivery") return resolvedQuery({ data: [DELIVERY], error: null });
+      return resolvedQuery({ data: true, error: null });
+    });
+    const chain = {
+      eq: vi.fn().mockReturnThis(),
+      is: vi.fn().mockReturnThis(),
+      abortSignal: vi.fn((signal: AbortSignal) => {
+        lookup.abortSignal(signal);
+        return chain;
+      }),
+      maybeSingle: vi.fn(() => lookup.query),
+    };
+    const supabase = {
+      rpc,
+      from: vi.fn().mockReturnValue({ select: vi.fn().mockReturnValue(chain) }),
+    };
+    const running = drainSupabaseGitHubConnectionSlackAlertDeliveries(
+      supabase as never,
+      10,
+      controller.signal,
+    );
+
+    await vi.waitFor(() => expect(lookup.abortSignal).toHaveBeenCalledWith(controller.signal));
+    controller.abort(new Error("channel lookup cancelled"));
+    await expect(running).rejects.toThrow("channel lookup cancelled");
+    expect(rpc).not.toHaveBeenCalledWith("complete_alert_delivery", expect.anything());
+    expect(rpc).not.toHaveBeenCalledWith("fail_alert_delivery", expect.anything());
+  });
+
+  it("cancels an in-flight Slack post through the shared signal", async () => {
+    vi.stubEnv("APP_ENCRYPTION_KEY", Buffer.alloc(32, 7).toString("base64"));
+    vi.stubEnv("SLACK_ALLOWED_WEBHOOK_SHA256", createHash("sha256").update(webhookUrl, "utf8").digest("hex"));
+    const controller = new AbortController();
+    let fetchSignal: AbortSignal | undefined;
+    const fetcher = vi.fn((_url: string | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      fetchSignal = init?.signal ?? undefined;
+      init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+    }));
+    vi.stubGlobal("fetch", fetcher);
+    const rpc = vi.fn((name: string) => {
+      if (name === "claim_github_connection_alert_delivery") return resolvedQuery({ data: [DELIVERY], error: null });
+      return resolvedQuery({ data: true, error: null });
+    });
+    const channel = { type: "slack", enabled: true, revoked_at: null, config: approvedConfig() };
+    const maybeSingle = vi.fn().mockReturnValue(resolvedQuery({ data: channel, error: null }));
+    const chain = {
+      eq: vi.fn().mockReturnThis(),
+      is: vi.fn().mockReturnThis(),
+      abortSignal: vi.fn().mockReturnThis(),
+      maybeSingle,
+    };
+    const supabase = {
+      rpc,
+      from: vi.fn().mockReturnValue({ select: vi.fn().mockReturnValue(chain) }),
+    };
+    const running = drainSupabaseGitHubConnectionSlackAlertDeliveries(
+      supabase as never,
+      10,
+      controller.signal,
+    );
+
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalled());
+    controller.abort(new Error("Slack post cancelled"));
+    await expect(running).rejects.toThrow("Slack post cancelled");
+    expect(fetchSignal?.aborted).toBe(true);
+    expect(rpc).not.toHaveBeenCalledWith("complete_alert_delivery", expect.anything());
+    expect(rpc).not.toHaveBeenCalledWith("fail_alert_delivery", expect.anything());
+    vi.unstubAllGlobals();
+  });
+
+  it("cancels completion finalisation through the shared signal", async () => {
+    vi.stubEnv("APP_ENCRYPTION_KEY", Buffer.alloc(32, 7).toString("base64"));
+    vi.stubEnv("SLACK_ALLOWED_WEBHOOK_SHA256", createHash("sha256").update(webhookUrl, "utf8").digest("hex"));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("ok", { status: 200 })));
+    const controller = new AbortController();
+    const completion = pendingQuery<{ data: boolean; error: null }>();
+    const rpc = vi.fn((name: string) => {
+      if (name === "claim_github_connection_alert_delivery") return resolvedQuery({ data: [DELIVERY], error: null });
+      if (name === "complete_alert_delivery") return completion.query;
+      return resolvedQuery({ data: true, error: null });
+    });
+    const chain = {
+      eq: vi.fn().mockReturnThis(),
+      is: vi.fn().mockReturnThis(),
+      abortSignal: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockReturnValue(resolvedQuery({ data: { type: "slack", enabled: true, revoked_at: null, config: approvedConfig() }, error: null })),
+    };
+    const supabase = {
+      rpc,
+      from: vi.fn().mockReturnValue({ select: vi.fn().mockReturnValue(chain) }),
+    };
+    const running = drainSupabaseGitHubConnectionSlackAlertDeliveries(
+      supabase as never,
+      10,
+      controller.signal,
+    );
+
+    await vi.waitFor(() => expect(completion.abortSignal).toHaveBeenCalledWith(controller.signal));
+    controller.abort(new Error("completion cancelled"));
+    await expect(running).rejects.toThrow("completion cancelled");
+    expect(rpc).not.toHaveBeenCalledWith("fail_alert_delivery", expect.anything());
+    vi.unstubAllGlobals();
+  });
+
+  it("cancels failure finalisation through the shared signal", async () => {
+    vi.stubEnv("APP_ENCRYPTION_KEY", Buffer.alloc(32, 7).toString("base64"));
+    vi.stubEnv("SLACK_ALLOWED_WEBHOOK_SHA256", createHash("sha256").update(webhookUrl, "utf8").digest("hex"));
+    const controller = new AbortController();
+    const failure = pendingQuery<{ data: boolean; error: null }>();
+    const rpc = vi.fn((name: string) => {
+      if (name === "claim_github_connection_alert_delivery") return resolvedQuery({ data: [DELIVERY], error: null });
+      if (name === "fail_alert_delivery") return failure.query;
+      return resolvedQuery({ data: true, error: null });
+    });
+    const chain = {
+      eq: vi.fn().mockReturnThis(),
+      is: vi.fn().mockReturnThis(),
+      abortSignal: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockReturnValue(resolvedQuery({ data: { type: "slack", enabled: true, revoked_at: null, config: { ...approvedConfig(), webhookSha256: "0".repeat(64) } }, error: null })),
+    };
+    const supabase = {
+      rpc,
+      from: vi.fn().mockReturnValue({ select: vi.fn().mockReturnValue(chain) }),
+    };
+    const running = drainSupabaseGitHubConnectionSlackAlertDeliveries(
+      supabase as never,
+      10,
+      controller.signal,
+    );
+
+    await vi.waitFor(() => expect(failure.abortSignal).toHaveBeenCalledWith(controller.signal));
+    controller.abort(new Error("failure finalisation cancelled"));
+    await expect(running).rejects.toThrow("failure finalisation cancelled");
+    expect(rpc).not.toHaveBeenCalledWith("complete_alert_delivery", expect.anything());
   });
 });

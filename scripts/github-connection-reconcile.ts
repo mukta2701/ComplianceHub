@@ -263,6 +263,7 @@ export async function runGitHubConnectionReconcile(input: {
     environment.maximumSlackDeliveries,
     deadlineSignal,
   );
+  deadlineSignal.throwIfAborted();
   return {
     executionId,
     summary: {

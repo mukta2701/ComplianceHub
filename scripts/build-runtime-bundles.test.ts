@@ -207,6 +207,7 @@ describe.sequential("production runtime bundles", () => {
     if (!address || typeof address === "string") throw new Error("Fixture server did not bind a TCP port");
     const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
     const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+    const privateKeyMarker = privateKeyPem.split("\n")[1] ?? "";
 
     try {
       const result = await execFileAsync(process.execPath, [runtimePath], {
@@ -231,14 +232,19 @@ describe.sequential("production runtime bundles", () => {
           GITHUB_CONNECTION_MAX_INSTALLATIONS: "1",
           GITHUB_CONNECTION_MAX_SLACK_DELIVERIES: "1",
           GITHUB_CONNECTION_TIME_BUDGET_MS: "5000",
-          APP_ENCRYPTION_KEY: "task8-fixture-encryption-marker",
-          SLACK_ALLOWED_WEBHOOK_SHA256: "task8-fixture-slack-digest-marker",
+          APP_ENCRYPTION_KEY: fixtureEncryptionMarker,
+          SLACK_ALLOWED_WEBHOOK_SHA256: fixtureSlackDigestMarker,
         },
       });
 
       expect(result.stderr).toBe("");
       expect(result.stdout).toContain("webhookDeliveriesClaimed=0 installationsClaimed=0");
-      expect(`${result.stdout}${result.stderr}`).not.toContain(fixtureSecret);
+      expect(result.stdout).toContain("slackClaimed=0 slackDelivered=0 slackFailed=0");
+      const output = `${result.stdout}${result.stderr}`;
+      expect(output).not.toContain(fixtureSecret);
+      expect(output).not.toContain(fixtureEncryptionMarker);
+      expect(output).not.toContain(fixtureSlackDigestMarker);
+      expect(output).not.toContain(privateKeyMarker);
       expect(requests).toEqual(expect.arrayContaining([
         "/rest/v1/rpc/claim_github_connection_webhook_deliveries_server",
         "/rest/v1/rpc/claim_due_github_connection_reconciliations_server",

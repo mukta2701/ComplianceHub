@@ -34,9 +34,9 @@ export type QueueSlackDeliveryInput = {
 
 export type SlackAlertDeliveryStore = {
   enqueueAndClaim(input: QueueSlackDeliveryInput, workerId: string): Promise<SlackDeliveryLeaseIdentity | null>;
-  claim(workerId: string): Promise<ClaimedSlackAlertDelivery | null>;
-  complete(deliveryId: string, lockToken: string): Promise<boolean>;
-  fail(deliveryId: string, lockToken: string): Promise<boolean>;
+  claim(workerId: string, signal?: AbortSignal): Promise<ClaimedSlackAlertDelivery | null>;
+  complete(deliveryId: string, lockToken: string, signal?: AbortSignal): Promise<boolean>;
+  fail(deliveryId: string, lockToken: string, signal?: AbortSignal): Promise<boolean>;
 };
 
 const SEVERITY_EMOJI: Record<CheckSeverity, string> = { low: "🔵", medium: "🟡", high: "🟠", critical: "🔴" };
@@ -101,7 +101,7 @@ export async function drainSlackAlertDeliveries(input: {
   const signal = input.signal ?? new AbortController().signal;
   for (let index = 0; index < batchSize; index += 1) {
     requireActive(signal);
-    const delivery = await input.store.claim(input.workerId);
+    const delivery = await input.store.claim(input.workerId, signal);
     requireActive(signal);
     if (!delivery) break;
     summary.claimed += 1;
@@ -116,15 +116,18 @@ export async function drainSlackAlertDeliveries(input: {
       if (approved.status !== "approved") throw new Error("Slack destination is not approved");
       await input.postSlack(approved.canonicalUrl, buildQueuedSlackPayload(delivery.payload), signal);
       requireActive(signal);
-      if (await input.store.complete(delivery.deliveryId, delivery.lockToken)) {
+      if (await input.store.complete(delivery.deliveryId, delivery.lockToken, signal)) {
         summary.delivered += 1;
       }
+      requireActive(signal);
     } catch {
       requireActive(signal);
-      if (await input.store.fail(delivery.deliveryId, delivery.lockToken)) {
+      if (await input.store.fail(delivery.deliveryId, delivery.lockToken, signal)) {
         summary.failed += 1;
       }
+      requireActive(signal);
     }
   }
+  requireActive(signal);
   return summary;
 }
