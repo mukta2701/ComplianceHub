@@ -5,10 +5,13 @@ import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Icon } from "./icons";
 import { AlertToaster } from "./alert-toaster";
-import { signOutAction } from "@/app/app/actions";
+import { signOutAction, switchWorkspaceAction } from "@/app/app/actions";
 import { roleLabel, type MembershipRole } from "@/features/organisations/domain/access";
 import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import styles from "./app-shell.module.css";
+import { notificationSoundEnabled, playNotificationTone, setNotificationSoundEnabled } from "./notification-sound-preference";
+
+export type WorkspaceChoice = { id: string; name: string; role: MembershipRole };
 
 const operatorLeadershipNavigation = workspaceAccess("owner").section("leadership-report").navigation!;
 const operatorAssessmentNavigation = workspaceAccess("owner").section("assessments").navigation!;
@@ -109,7 +112,7 @@ function isActive(path: string, href: string) {
   return path === href || path.startsWith(`${href}/`);
 }
 
-export function AppShell({ organisationId, orgName, orgInitials, userInitials, unreadCount, role, jobTitle, children }: { organisationId: string | null; orgName: string; orgInitials: string; userInitials: string; unreadCount: number; role: MembershipRole | null; jobTitle: string | null; children: React.ReactNode }) {
+export function AppShell({ organisationId, orgName, orgInitials, userInitials, userName, userEmail, workspaces, unreadCount, role, jobTitle, children }: { organisationId: string | null; orgName: string; orgInitials: string; userInitials: string; userName: string; userEmail: string; workspaces: WorkspaceChoice[]; unreadCount: number; role: MembershipRole | null; jobTitle: string | null; children: React.ReactNode }) {
   const path = usePathname();
   const [open, setOpen] = useState(false);
   const isDrawer = useSyncExternalStore(subscribeToDrawer, drawerSnapshot, () => false);
@@ -117,6 +120,7 @@ export function AppShell({ organisationId, orgName, orgInitials, userInitials, u
   const menuButton = useRef<HTMLButtonElement>(null);
   const firstNav = useRef<HTMLAnchorElement>(null);
   const navigation = useRef<HTMLElement>(null);
+  const [soundEnabled, setSoundEnabled] = useState(notificationSoundEnabled);
   const closeNavigation = useCallback(() => {
     setOpen(false);
     requestAnimationFrame(() => menuButton.current?.focus());
@@ -211,7 +215,22 @@ export function AppShell({ organisationId, orgName, orgInitials, userInitials, u
         <div className="header-actions">
           <span className="pill neutral" aria-label="Portal access">{accessCue}</span>
           <Link href={notificationsMetadata.href} className="notif-bell" aria-label={unreadCount > 0 ? `${notificationsMetadata.label}, ${unreadCount} unread` : notificationsMetadata.label}><Icon name={notificationsMetadata.icon} />{unreadCount > 0 && <span className="notif-count">{unreadCount}</span>}</Link>
-          <span className="user-avatar">{userInitials}</span>
+          <details className={styles.accountMenu}>
+            <summary aria-label="Account menu" role="button"><span className="user-avatar">{userInitials}</span></summary>
+            <div className={styles.accountPanel}>
+              <div className={styles.accountIdentity}><strong>{userName}</strong><small>{userEmail}</small><span>{role ? `${roleLabel(role)} · ${orgName}` : "No active workspace"}</span></div>
+              {workspaces.filter((workspace) => workspace.id !== organisationId).map((workspace) => (
+                <form action={switchWorkspaceAction} key={workspace.id}>
+                  <input type="hidden" name="organisationId" value={workspace.id} />
+                  <button className={styles.accountAction} aria-label={`Switch to ${workspace.name}`}>Switch to {workspace.name}<small>{roleLabel(workspace.role)}</small></button>
+                </form>
+              ))}
+              <label className={styles.soundPreference}><input type="checkbox" checked={soundEnabled} onChange={(event) => { setSoundEnabled(event.target.checked); setNotificationSoundEnabled(event.target.checked); }} />Notification sound</label>
+              <button className={styles.accountAction} type="button" onClick={() => void playNotificationTone()}>Test sound</button>
+              <Link className={styles.accountAction} href="/app/notifications">Open notifications</Link>
+              <form action={signOutAction}><button className={styles.accountAction}>Sign out</button></form>
+            </div>
+          </details>
         </div>
       </header>
       <main className="content" id="main-content" tabIndex={-1}>{children}</main>

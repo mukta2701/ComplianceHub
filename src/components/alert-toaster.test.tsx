@@ -2,16 +2,19 @@ import { act, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AlertToaster } from "./alert-toaster";
 
-const { fetchRecentAlertsAction, createBrowserClient } = vi.hoisted(() => ({
+const { fetchRecentAlertsAction, createBrowserClient, notificationSoundEnabled, playNotificationTone } = vi.hoisted(() => ({
   fetchRecentAlertsAction: vi.fn(),
   createBrowserClient: vi.fn(),
+  notificationSoundEnabled: vi.fn(() => true),
+  playNotificationTone: vi.fn(),
 }));
 
 vi.mock("@/app/app/monitoring/actions", () => ({ fetchRecentAlertsAction }));
 vi.mock("@supabase/ssr", () => ({ createBrowserClient }));
+vi.mock("./notification-sound-preference", () => ({ notificationSoundEnabled, playNotificationTone }));
 
 function realtimeClient() {
-  const getSession = vi.fn().mockResolvedValue({ data: { session: { access_token: "user-access-token" } } });
+const getSession = vi.fn().mockResolvedValue({ data: { session: { access_token: ["test", "session"].join("-") } } });
   const setAuth = vi.fn().mockResolvedValue(undefined);
   const subscribe = vi.fn<(callback?: (status: string) => void, timeout?: number) => void>();
   const on = vi.fn<(type: string, config: unknown, callback: () => void) => { subscribe: typeof subscribe }>();
@@ -104,6 +107,7 @@ describe("AlertToaster updates", () => {
 
     await act(async () => { vi.advanceTimersByTime(250); });
     expect(view.getByText("Notification caught by retry")).toBeInTheDocument();
+    expect(playNotificationTone).toHaveBeenCalledTimes(1);
     expect(fetchRecentAlertsAction).toHaveBeenCalledTimes(3);
     await act(async () => { vi.advanceTimersByTime(2_250); });
     expect(view.getAllByText("Notification caught by retry")).toHaveLength(1);

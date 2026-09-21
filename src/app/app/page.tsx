@@ -110,6 +110,8 @@ export default async function AppHome() {
     liveEvidence,
     policies,
     soaRegisters,
+    assets,
+    tasks,
     members,
     invites,
     openRiskCount,
@@ -139,6 +141,8 @@ export default async function AppHome() {
     supabase.from("evidence").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).in("status", ["current", "expiring", "expired"]).then(requireDashboardCount),
     supabase.from("policies").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).then(requireDashboardCount),
     supabase.from("soa_registers").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).then(requireDashboardCount),
+    supabase.from("assets").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).then(requireDashboardCount),
+    supabase.from("tasks").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).then(requireDashboardCount),
     supabase.from("memberships").select("user_id", { count: "exact", head: true }).eq("organisation_id", organisation.id).then(requireDashboardCount),
     supabase.from("invitations").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).then(requireDashboardCount),
     supabase.from("risks").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).neq("status", "closed").then(requireDashboardCount),
@@ -238,6 +242,8 @@ export default async function AppHome() {
     hasRisk: (allRisks ?? 0) > 0,
     hasEvidence: (liveEvidence ?? 0) > 0,
     hasPolicy: (policies ?? 0) > 0,
+    hasAsset: (assets ?? 0) > 0,
+    hasTask: (tasks ?? 0) > 0,
     hasTeam: (members ?? 0) > 1 || (invites ?? 0) > 0,
   });
 

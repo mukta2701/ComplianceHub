@@ -25,6 +25,8 @@ export type OnboardingInputs = {
   hasRisk: boolean;
   hasSoa: boolean;
   hasEvidence: boolean;
+  hasAsset: boolean;
+  hasTask: boolean;
   hasTeam: boolean;
   // Optional, last, non-blocking-feeling "power" step. Present only when the
   // workspace has an active tracker connection.
@@ -53,7 +55,7 @@ export function buildOnboardingChecklist(inputs: OnboardingInputs): OnboardingCh
     },
     {
       id: "assessment",
-      label: "Run your first readiness assessment",
+      label: "Start your first readiness assessment",
       description: "Answer the gap questions to see where you stand and seed your SoA.",
       href: "/app/assessment",
       cta: "Start assessment",
@@ -68,12 +70,28 @@ export function buildOnboardingChecklist(inputs: OnboardingInputs): OnboardingCh
       done: inputs.hasSoa,
     },
     {
+      id: "asset",
+      label: "Record a critical asset",
+      description: "Capture a system, service or information asset the company depends on.",
+      href: "/app/assets/new",
+      cta: "Add asset",
+      done: inputs.hasAsset,
+    },
+    {
       id: "risk",
       label: "Add your first risk",
       description: "Track inherent and residual exposure on the 5×5 matrix.",
       href: "/app/risks/new",
       cta: "Add risk",
       done: inputs.hasRisk,
+    },
+    {
+      id: "task",
+      label: "Assign the next action",
+      description: "Give compliance work a clear owner and status so it can move forward.",
+      href: "/app/tasks/new",
+      cta: "Add task",
+      done: inputs.hasTask,
     },
     {
       id: "evidence",
@@ -85,8 +103,8 @@ export function buildOnboardingChecklist(inputs: OnboardingInputs): OnboardingCh
     },
     {
       id: "policy",
-      label: "Publish your first policy",
-      description: "Start from a template and have something to approve and circulate.",
+      label: "Create your first policy",
+      description: "Start from a template, then review and publish it when it is ready.",
       href: "/app/policies/new",
       cta: "New policy",
       done: inputs.hasPolicy,

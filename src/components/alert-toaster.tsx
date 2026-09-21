@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { fetchRecentAlertsAction } from "@/app/app/monitoring/actions";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { Icon } from "./icons";
+import { notificationSoundEnabled, playNotificationTone } from "./notification-sound-preference";
 
 type Toast = { id: number; message: string; kind: string };
 
@@ -43,6 +44,7 @@ export function AlertToaster({ organisationId }: { organisationId: string | null
         }
         primed.current = true;
         if (fresh.length > 0) {
+          if (notificationSoundEnabled()) void playNotificationTone();
           setToasts((current) => [...fresh, ...current].slice(0, 4));
           for (const toast of fresh) {
             const timer = setTimeout(() => {
