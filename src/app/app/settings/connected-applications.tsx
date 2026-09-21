@@ -1,5 +1,6 @@
 import { Card } from "@/components/ui";
 import { revokeOAuthGrantAction } from "./oauth-actions";
+import styles from "./connected-applications.module.css";
 
 type Grant = { clientId: string; clientName: string; scopes: string[]; grantedAt: string };
 export function ConnectedApplications({ state }: { state: { status: "loaded" | "error"; grants: Grant[] } }) {
@@ -13,15 +14,15 @@ export function ConnectedApplications({ state }: { state: { status: "loaded" | "
       {state.grants.map((grant) => <div key={grant.clientId}>
         <div style={{ flex: 1 }}>
           <b>{grant.clientName}</b>
-          <small style={{ display: "block" }}>Read-only MCP access · Connected {new Date(grant.grantedAt).toLocaleDateString("en-GB")}</small>
+          <small className={styles.details} style={{ display: "block" }}>Read-only MCP access · Connected {new Date(grant.grantedAt).toLocaleDateString("en-GB")}</small>
           <details>
             <summary>Technical permissions</summary>
-            <small>{grant.scopes.join(", ") || "No OAuth scopes recorded."}</small>
+            <small className={styles.details}>{grant.scopes.join(", ") || "No OAuth scopes recorded."}</small>
           </details>
         </div>
         <form action={revokeOAuthGrantAction}><input type="hidden" name="clientId" value={grant.clientId} /><button className="button secondary">Revoke</button></form>
       </div>)}
-      {state.status === "loaded" && !state.grants.length && <div><span><b>No connected assistants.</b><small>Approved company Codex connections will appear here.</small></span></div>}
+      {state.status === "loaded" && !state.grants.length && <div><span><b>No connected assistants.</b><small className={styles.details}>Approved company Codex connections will appear here.</small></span></div>}
     </div>
   </Card>;
 }
