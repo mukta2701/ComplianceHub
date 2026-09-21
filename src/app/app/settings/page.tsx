@@ -8,7 +8,6 @@ import { inviteMemberAction, changeMemberRoleAction, removeMemberAction, resendI
 import { canInviteRole, canManageMembership, roleLabel, type MembershipRole } from "@/features/organisations/domain/access";
 import { listUserOAuthGrants } from "@/features/auth/application/oauth-grants";
 import { ConnectedApplications } from "./connected-applications";
-import { AiWorkspaceSettings } from "./ai-settings";
 import { SettingsSections } from "./settings-sections";
 import styles from "./settings-sections.module.css";
 
@@ -38,7 +37,6 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const settingsAccess = workspaceAccess(membership.role).section("settings");
   const isOwner = settingsAccess.canManageOperation("change-member-role");
   const canManageTeam = settingsAccess.canManage;
-  const canChangeAiSettings = settingsAccess.canManageOperation("change-ai-settings");
 
   const { data: org } = await supabase.from("organisations").select("slug,created_at").eq("id", organisation.id).maybeSingle();
   const { data: memberRows } = await supabase.from("memberships").select("user_id,role,job_title,created_at,profiles(display_name)").eq("organisation_id", organisation.id).order("created_at", { ascending: true });
@@ -52,7 +50,6 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
     : { data: null };
   const pendingInvites = invites ?? [];
   const oauthGrantState = await listUserOAuthGrants(supabase);
-  const { data: aiSettings } = await supabase.from("ai_workspace_settings").select("enabled").eq("organisation_id", organisation.id).maybeSingle();
   const statusMessage = inviteStatus && inviteStatus in invitationStatusMessage
     ? invitationStatusMessage[inviteStatus as keyof typeof invitationStatusMessage]
     : null;
@@ -179,6 +176,19 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
     </Card>
   );
 
+  const customerTrust = (
+    <Card className={styles.card}>
+      <div className={styles.sectionHeader}>
+        <h2>Customer trust</h2>
+        <p>Share an optional, customer-facing security summary. It stays private until an Owner publishes it.</p>
+      </div>
+      <div className={styles.integratedSection}>
+        <p>Choose exactly what prospects can see. Risks, findings, evidence files and policy contents remain private.</p>
+        <Link className="button secondary" href="/app/trust">Manage Trust Center</Link>
+      </div>
+    </Card>
+  );
+
   return <>
     <PageIntro eyebrow="SETTINGS" title="Organisation settings" body={`Manage ${organisation.name}, your team and workspace security. Your role: ${roleLabel(membership.role)}.`} />
     <SubTabs tabs={[
@@ -190,8 +200,9 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       workspace={workspace}
       team={<>{statusMessage && <div className={styles.statusMessage} role="status"><b>{statusMessage}</b>{inviteId && <p>Invitation reference: {inviteId}</p>}</div>}{team}</>}
       security={security}
-      aiAssistance={<div className={styles.integratedSection}><AiWorkspaceSettings enabled={aiSettings?.enabled === true} isOwner={canChangeAiSettings} /></div>}
+      customerTrust={customerTrust}
       connectedApps={<div className={styles.integratedSection}><ConnectedApplications state={oauthGrantState} /></div>}
     />
   </>;
 }
+import Link from "next/link";

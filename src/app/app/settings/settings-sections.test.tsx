@@ -2,14 +2,14 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { SettingsSections } from "./settings-sections";
 
-function renderSettings(initialSection?: "workspace" | "team" | "security" | "ai-assistance" | "connected-apps") {
+function renderSettings(initialSection?: "workspace" | "team" | "security" | "customer-trust" | "connected-apps") {
   return render(
     <SettingsSections
       initialSection={initialSection}
       workspace={<p>Workspace content</p>}
       team={<p>Team content</p>}
       security={<p>Security content</p>}
-      aiAssistance={<p>AI content</p>}
+      customerTrust={<p>Customer trust content</p>}
       connectedApps={<p>Connected assistants content</p>}
     />,
   );
@@ -57,5 +57,13 @@ describe("SettingsSections", () => {
 
     expect(screen.getByText("Team content")).toBeVisible();
     expect(screen.getByText("Workspace content")).not.toBeVisible();
+  });
+
+  it("keeps assistant connections and customer trust without a separate AI setting", () => {
+    renderSettings();
+
+    expect(screen.queryByRole("link", { name: "AI assistance" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Customer trust" })).toHaveAttribute("href", "/app/settings#customer-trust");
+    expect(screen.getByRole("link", { name: "Connected assistants" })).toBeInTheDocument();
   });
 });

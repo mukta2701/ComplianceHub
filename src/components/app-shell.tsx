@@ -48,7 +48,6 @@ const navGroups = [
   ] },
   { label: operatorLeadershipNavigation.group, items: [
     [operatorLeadershipNavigation.href, operatorLeadershipNavigation.icon, operatorLeadershipNavigation.label],
-    [operatorTrustCenterNavigation.href, operatorTrustCenterNavigation.icon, operatorTrustCenterNavigation.label],
   ] },
   { label: "Admin", items: [
     [operatorSettingsNavigation.href, operatorSettingsNavigation.icon, operatorSettingsNavigation.label],
@@ -86,6 +85,7 @@ const memberNavGroups = [
 
 // Routes not in the sidebar still need a header title.
 const EXTRA_TITLES: Array<[string, string]> = [
+  [operatorTrustCenterNavigation.href, operatorTrustCenterNavigation.label],
   ["/app/assets/import", "Import asset inventory"],
   [operatorAuditActivityMetadata.href, operatorAuditActivityMetadata.title],
   [notificationsMetadata.href, notificationsMetadata.title],

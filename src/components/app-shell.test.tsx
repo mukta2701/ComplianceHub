@@ -98,6 +98,7 @@ describe("AppShell role-specific navigation", () => {
     expect(screen.getByRole("link", { name: "Tasks" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Connections" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute("href", "/app/settings");
+    expect(screen.queryByRole("link", { name: "Trust Center" })).not.toBeInTheDocument();
     expect(screen.getByText(role === "owner" ? "Owner" : "Admin", { selector: "span" })).toBeInTheDocument();
   });
 

@@ -13,7 +13,7 @@ describe("ConnectedApplications", () => {
     render(<ConnectedApplications state={{ status: "loaded", grants: [] }} />);
     expect(screen.getByRole("heading", { name: "MCP & connected assistants" })).toBeVisible();
     expect(screen.getByText("No connected assistants.")).toBeInTheDocument();
-    expect(screen.getByText("Approved Codex or Claude MCP connections will appear here.")).toBeVisible();
+    expect(screen.getByText("Approved company Codex connections will appear here.")).toBeVisible();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
@@ -30,7 +30,7 @@ describe("ConnectedApplications", () => {
 
     const section = screen.getByRole("heading", { name: "MCP & connected assistants" }).closest("section, article, div");
     expect(section).not.toBeNull();
-    expect(section).toHaveTextContent("Codex and Claude can use ComplianceHub’s read-only MCP tools under your workspace permissions.");
+    expect(section).toHaveTextContent("Your company-owned Codex can use ComplianceHub’s read-only MCP tools under your workspace permissions.");
     expect(section).toHaveTextContent("This access is separate from optional Explain & Act drafting.");
     expect(section).toHaveTextContent("Revoking access ends active sessions and refresh access.");
     expect(screen.getByText("Read-only MCP access · Connected 04/09/2026")).toBeVisible();
