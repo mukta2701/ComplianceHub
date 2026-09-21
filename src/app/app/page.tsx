@@ -266,6 +266,18 @@ export default async function AppHome() {
       action={<Link className="button primary" href="/app/reports/readiness"><Icon name="file" />View report</Link>}
     />
 
+    {!checklist.complete && <Card className="onboarding-card">
+      <div className="card-head"><div><h2>Your setup roadmap</h2><p>Start with the first open step. Your progress stays visible as the programme grows.</p></div><Pill tone="blue">{checklist.doneCount} of {checklist.total} done</Pill></div>
+      <div className="onboarding-progress"><Progress value={checklist.percent} tone="green" /></div>
+      <ol className="onboarding-steps">
+        {checklist.steps.map((step, index) => ({ step, index })).filter(({ step }) => !step.done).map(({ step, index }) => <li key={step.id}>
+          <span className="marker">{index + 1}</span>
+          <span className="step-body"><strong>{step.label}</strong><small>{step.description}</small></span>
+          <Link className="button secondary" href={step.href}>{step.cta} <Icon name="arrow" /></Link>
+        </li>)}
+      </ol>
+    </Card>}
+
     <nav aria-label="Programme attention" className={styles.attention}>
       {attention.map((item) => <Link key={item.label} href={item.href} className={styles.metric} data-tone={item.value === 0 ? "neutral" : item.tone}>
         <span className={styles.metricIcon} data-tone={item.value === 0 ? "neutral" : item.tone}><Icon name={item.icon} /></span>
@@ -407,17 +419,6 @@ export default async function AppHome() {
           : <p className="empty-note">Nothing has changed yet. Activity shows here as you and your team make decisions.</p>}
       </Card>
 
-      {!checklist.complete && <Card className="onboarding-card">
-        <div className="card-head"><div><h2>Build your programme</h2><p>Steps disappear as you complete them.</p></div><Pill tone={checklist.percent === 100 ? "green" : "blue"}>{checklist.doneCount} of {checklist.total} done</Pill></div>
-        <div className="onboarding-progress"><Progress value={checklist.percent} tone="green" /></div>
-        <ol className="onboarding-steps">
-          {checklist.steps.filter((step) => !step.done).map((step, index) => <li key={step.id}>
-            <span className="marker">{index + 1}</span>
-            <span className="step-body"><strong>{step.label}</strong><small>{step.description}</small></span>
-            <Link className="button secondary" href={step.href}>{step.cta} <Icon name="arrow" /></Link>
-          </li>)}
-        </ol>
-      </Card>}
       {!checklist.complete && <Card>
         <div className="card-head"><div><h2>Reduce admin later</h2><p>Integrations are optional. Connect your systems when you want to collect evidence and prepare drafts for review.</p></div></div>
         <Link className="button secondary" href="/app/setup">Explore integrations <Icon name="arrow" /></Link>

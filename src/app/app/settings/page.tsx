@@ -6,8 +6,6 @@ import { workspaceAccess } from "@/features/organisations/domain/workspace-acces
 import { one } from "@/lib/supabase/one";
 import { inviteMemberAction, changeMemberRoleAction, removeMemberAction, resendInvitationAction, revokeInvitationAction, updateMemberJobTitleAction } from "../actions";
 import { canInviteRole, canManageMembership, roleLabel, type MembershipRole } from "@/features/organisations/domain/access";
-import { listUserOAuthGrants } from "@/features/auth/application/oauth-grants";
-import { ConnectedApplications } from "./connected-applications";
 import { SettingsSections } from "./settings-sections";
 import styles from "./settings-sections.module.css";
 
@@ -49,7 +47,6 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       .order("created_at", { ascending: false })
     : { data: null };
   const pendingInvites = invites ?? [];
-  const oauthGrantState = await listUserOAuthGrants(supabase);
   const statusMessage = inviteStatus && inviteStatus in invitationStatusMessage
     ? invitationStatusMessage[inviteStatus as keyof typeof invitationStatusMessage]
     : null;
@@ -180,7 +177,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
     <Card className={styles.card}>
       <div className={styles.sectionHeader}>
         <h2>Customer trust</h2>
-        <p>Share an optional, customer-facing security summary. It stays private until an Owner publishes it.</p>
+        <p>Share an optional, customer-facing security summary. It stays private until an Owner or Admin publishes it.</p>
       </div>
       <div className={styles.integratedSection}>
         <p>Choose exactly what prospects can see. Risks, findings, evidence files and policy contents remain private.</p>
@@ -201,7 +198,6 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       team={<>{statusMessage && <div className={styles.statusMessage} role="status"><b>{statusMessage}</b>{inviteId && <p>Invitation reference: {inviteId}</p>}</div>}{team}</>}
       security={security}
       customerTrust={customerTrust}
-      connectedApps={<div className={styles.integratedSection}><ConnectedApplications state={oauthGrantState} /></div>}
     />
   </>;
 }

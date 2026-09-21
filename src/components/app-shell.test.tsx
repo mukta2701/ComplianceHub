@@ -69,6 +69,9 @@ describe("AppShell role-specific navigation", () => {
     expect(screen.getByRole("button", { name: "Switch to Test Workspace" })).toBeVisible();
     expect(screen.getByRole("checkbox", { name: "Notification sound" })).not.toBeChecked();
     expect(screen.getByRole("button", { name: "Test sound" })).toBeVisible();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.getByRole("group")).not.toHaveAttribute("open");
+    expect(screen.getByRole("button", { name: "Account menu" })).toHaveFocus();
   });
 
   it("keeps a closed drawer out of navigation and isolates its open state", () => {

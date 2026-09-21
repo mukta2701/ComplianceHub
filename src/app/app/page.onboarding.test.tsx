@@ -13,10 +13,10 @@ vi.mock("@/lib/app-context", () => ({ requireAppContext: async () => ({
 }) }));
 vi.mock("./tasks/actions", () => ({ acceptCalendarSeedAction: vi.fn() }));
 import AppHome from "./page";
-it("keeps integrations optional outside the seven core onboarding steps", async () => {
+it("keeps integrations optional outside the core onboarding steps", async () => {
   const { container } = render(await AppHome());
   const checklist = within(container.querySelector(".onboarding-card") as HTMLElement);
-  expect(checklist.getByText("1 of 7 done")).toBeInTheDocument();
+  expect(checklist.getByText("1 of 9 done")).toBeInTheDocument();
   expect(checklist.queryByText("Connect a tracker")).not.toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "Reduce admin later" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: /Explore integrations/ })).toHaveAttribute("href", "/app/setup");

@@ -48,7 +48,7 @@ export function buildOnboardingChecklist(inputs: OnboardingInputs): OnboardingCh
     {
       id: "workspace",
       label: "Create your workspace",
-      description: "Your isolated, RLS-protected home for the whole ISMS.",
+      description: "Your private workspace for the compliance programme.",
       href: "/app",
       cta: "Done",
       done: true,
@@ -56,7 +56,7 @@ export function buildOnboardingChecklist(inputs: OnboardingInputs): OnboardingCh
     {
       id: "assessment",
       label: "Start your first readiness assessment",
-      description: "Answer the gap questions to see where you stand and seed your SoA.",
+      description: "Answer the readiness questions to see your gaps and prepare your control plan.",
       href: "/app/assessment",
       cta: "Start assessment",
       done: inputs.hasAssessment,
@@ -80,14 +80,14 @@ export function buildOnboardingChecklist(inputs: OnboardingInputs): OnboardingCh
     {
       id: "risk",
       label: "Add your first risk",
-      description: "Track inherent and residual exposure on the 5×5 matrix.",
+      description: "Record the risk, its impact and what you will do about it.",
       href: "/app/risks/new",
       cta: "Add risk",
       done: inputs.hasRisk,
     },
     {
       id: "task",
-      label: "Assign the next action",
+      label: "Create your first task",
       description: "Give compliance work a clear owner and status so it can move forward.",
       href: "/app/tasks/new",
       cta: "Add task",
@@ -112,7 +112,7 @@ export function buildOnboardingChecklist(inputs: OnboardingInputs): OnboardingCh
     {
       id: "team",
       label: "Invite a teammate",
-      description: "Compliance is a team sport — bring in an owner or contributor.",
+      description: "Bring in the people who own or contribute to compliance work.",
       href: "/app/settings",
       cta: "Invite the team",
       done: inputs.hasTeam,

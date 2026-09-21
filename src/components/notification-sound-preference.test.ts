@@ -20,4 +20,14 @@ describe("notification sound preference", () => {
     setNotificationSoundEnabled(false, storage);
     expect(notificationSoundEnabled(storage)).toBe(false);
   });
+
+  it("keeps notifications usable when browser storage is blocked", () => {
+    const blockedStorage = {
+      getItem: () => { throw new DOMException("Blocked", "SecurityError"); },
+      setItem: () => { throw new DOMException("Full", "QuotaExceededError"); },
+    };
+
+    expect(notificationSoundEnabled(blockedStorage)).toBe(false);
+    expect(() => setNotificationSoundEnabled(true, blockedStorage)).not.toThrow();
+  });
 });

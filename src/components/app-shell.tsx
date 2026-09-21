@@ -120,6 +120,7 @@ export function AppShell({ organisationId, orgName, orgInitials, userInitials, u
   const menuButton = useRef<HTMLButtonElement>(null);
   const firstNav = useRef<HTMLAnchorElement>(null);
   const navigation = useRef<HTMLElement>(null);
+  const accountMenu = useRef<HTMLDetailsElement>(null);
   const [soundEnabled, setSoundEnabled] = useState(notificationSoundEnabled);
   const closeNavigation = useCallback(() => {
     setOpen(false);
@@ -150,6 +151,24 @@ export function AppShell({ organisationId, orgName, orgInitials, userInitials, u
     document.addEventListener("keydown", keydown);
     return () => { cancelAnimationFrame(focusFrame); document.body.style.overflow = previousOverflow; document.removeEventListener("keydown", keydown); };
   }, [drawerOpen, closeNavigation]);
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || !accountMenu.current?.open) return;
+      accountMenu.current.open = false;
+      accountMenu.current.querySelector<HTMLElement>("summary")?.focus();
+    };
+    const closeOutside = (event: PointerEvent) => {
+      if (accountMenu.current?.open && !accountMenu.current.contains(event.target as Node)) {
+        accountMenu.current.open = false;
+      }
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    document.addEventListener("pointerdown", closeOutside);
+    return () => {
+      document.removeEventListener("keydown", closeOnEscape);
+      document.removeEventListener("pointerdown", closeOutside);
+    };
+  }, []);
   const overviewAccess = workspaceAccess(role).section("overview");
   const isMember = overviewAccess.presentation === "member";
   const isOperator = overviewAccess.presentation === "operator";
@@ -215,7 +234,7 @@ export function AppShell({ organisationId, orgName, orgInitials, userInitials, u
         <div className="header-actions">
           <span className="pill neutral" aria-label="Portal access">{accessCue}</span>
           <Link href={notificationsMetadata.href} className="notif-bell" aria-label={unreadCount > 0 ? `${notificationsMetadata.label}, ${unreadCount} unread` : notificationsMetadata.label}><Icon name={notificationsMetadata.icon} />{unreadCount > 0 && <span className="notif-count">{unreadCount}</span>}</Link>
-          <details className={styles.accountMenu}>
+          <details ref={accountMenu} className={styles.accountMenu}>
             <summary aria-label="Account menu" role="button"><span className="user-avatar">{userInitials}</span></summary>
             <div className={styles.accountPanel}>
               <div className={styles.accountIdentity}><strong>{userName}</strong><small>{userEmail}</small><span>{role ? `${roleLabel(role)} · ${orgName}` : "No active workspace"}</span></div>
@@ -225,7 +244,12 @@ export function AppShell({ organisationId, orgName, orgInitials, userInitials, u
                   <button className={styles.accountAction} aria-label={`Switch to ${workspace.name}`}>Switch to {workspace.name}<small>{roleLabel(workspace.role)}</small></button>
                 </form>
               ))}
-              <label className={styles.soundPreference}><input type="checkbox" checked={soundEnabled} onChange={(event) => { setSoundEnabled(event.target.checked); setNotificationSoundEnabled(event.target.checked); }} />Notification sound</label>
+              <label className={styles.soundPreference}><input type="checkbox" checked={soundEnabled} onChange={(event) => {
+                const enabled = event.target.checked;
+                setSoundEnabled(enabled);
+                setNotificationSoundEnabled(enabled);
+                if (enabled) void playNotificationTone();
+              }} />Notification sound</label>
               <button className={styles.accountAction} type="button" onClick={() => void playNotificationTone()}>Test sound</button>
               <Link className={styles.accountAction} href="/app/notifications">Open notifications</Link>
               <form action={signOutAction}><button className={styles.accountAction}>Sign out</button></form>

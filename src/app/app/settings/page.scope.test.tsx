@@ -99,12 +99,13 @@ describe("Settings active organisation scope", () => {
     expect(hoisted.queries).toContainEqual({ table: "memberships", column: "organisation_id", value: ORGANISATION_ID });
   });
 
-  it("links Settings navigation to connected assistants", async () => {
+  it("routes connected services through Connections", async () => {
     const { default: SettingsPage } = await import("./page");
 
     render(await SettingsPage({ searchParams: Promise.resolve({}) }));
 
-    expect(screen.getByRole("link", { name: "Connected assistants" })).toHaveAttribute("href", "/app/settings#connected-apps");
+    expect(screen.getByRole("link", { name: "Connections" })).toHaveAttribute("href", "/app/integrations");
+    expect(screen.queryByRole("link", { name: "Connected assistants" })).not.toBeInTheDocument();
   });
 
   it("keeps member management controls out of view for workspace members", async () => {

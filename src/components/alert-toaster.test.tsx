@@ -14,7 +14,7 @@ vi.mock("@supabase/ssr", () => ({ createBrowserClient }));
 vi.mock("./notification-sound-preference", () => ({ notificationSoundEnabled, playNotificationTone }));
 
 function realtimeClient() {
-const getSession = vi.fn().mockResolvedValue({ data: { session: { access_token: ["test", "session"].join("-") } } });
+  const getSession = vi.fn().mockResolvedValue({ data: { session: { access_token: ["test", "session"].join("-") } } });
   const setAuth = vi.fn().mockResolvedValue(undefined);
   const subscribe = vi.fn<(callback?: (status: string) => void, timeout?: number) => void>();
   const on = vi.fn<(type: string, config: unknown, callback: () => void) => { subscribe: typeof subscribe }>();
@@ -45,7 +45,7 @@ describe("AlertToaster updates", () => {
     await act(async () => undefined);
 
     expect(realtime.getSession).toHaveBeenCalledTimes(1);
-    expect(realtime.setAuth).toHaveBeenCalledWith("user-access-token");
+    expect(realtime.setAuth).toHaveBeenCalledWith("test-session");
     expect(realtime.channel).toHaveBeenCalledWith("monitoring-findings:org-1");
     expect(realtime.on).toHaveBeenCalledWith(
       "postgres_changes",
