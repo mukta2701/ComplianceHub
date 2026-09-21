@@ -10,7 +10,8 @@ import { collectSoaFinalisationBlockers, countSoaFinalisationBlockers, loadSoaFi
 import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 
 export async function createAssessmentAction() {
-  const { supabase, user, organisation } = await requireAppContext();
+  const { supabase, user, organisation, membership } = await requireAppContext();
+  workspaceAccess(membership.role).section("assessments").requireManage();
   const { data: catalogue } = await supabase.from("catalogue_versions").select("id").not("published_at", "is", null).order("published_at", { ascending: false }).limit(1).single();
   if (!catalogue) redirect("/app/assessment?message=No%20published%20catalogue%20is%20available.");
   const { data, error } = await supabase.from("assessment_sessions").insert({ organisation_id: organisation.id, catalogue_version_id: catalogue.id, title: `Readiness assessment ${new Date().toLocaleDateString("en-GB")}`, created_by: user.id }).select("id").single();
@@ -19,7 +20,8 @@ export async function createAssessmentAction() {
 }
 
 export async function createSoaAction(formData: FormData) {
-  const { supabase, organisation } = await requireAppContext();
+  const { supabase, organisation, membership } = await requireAppContext();
+  workspaceAccess(membership.role).section("soa").requireManage();
   const assessmentId = z.uuid().parse(formData.get("assessmentId"));
   const { data: assessment, error: assessmentError } = await supabase
     .from("assessment_sessions")
@@ -38,7 +40,8 @@ export async function createSoaAction(formData: FormData) {
 }
 
 export async function createSoaSuccessorAction(formData: FormData) {
-  const { supabase, organisation } = await requireAppContext();
+  const { supabase, organisation, membership } = await requireAppContext();
+  workspaceAccess(membership.role).section("soa").requireManage();
   const sourceRegisterId = z.uuid().parse(formData.get("registerId"));
   const { data: source, error: sourceError } = await supabase
     .from("soa_registers")
