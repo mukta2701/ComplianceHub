@@ -182,14 +182,20 @@ export async function reconcileGitHubConnection(
     diagnostic,
     now: now.toISOString(),
   });
-  await deps.finalize({
+  const incidentSignal = await deps.finalize({
     runId: claim.runId,
     outcome,
     diagnostic,
     nextAttemptAt: decision.retryAt,
     snapshot: snapshot.repositories,
   });
-  return { decision, repositoriesSeen: snapshot.repositories.length };
+  return {
+    decision: {
+      ...decision,
+      closeIncident: decision.closeIncident || incidentSignal === "recovered",
+    },
+    repositoriesSeen: snapshot.repositories.length,
+  };
 }
 
 async function finalizeAccessDecision(

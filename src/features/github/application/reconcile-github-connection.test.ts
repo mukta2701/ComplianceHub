@@ -204,6 +204,17 @@ describe("reconcileGitHubConnection", () => {
     const result = await reconcileGitHubConnection(dependencies, { ...CLAIM, previousHealth: "partially_unavailable" });
     expect(result.decision).toMatchObject({ health: "healthy", closeIncident: true });
   });
+
+  it("uses the incident ledger recovery signal after a disconnected installation is reconnected", async () => {
+    const dependencies = deps({ finalize: vi.fn().mockResolvedValue("recovered") });
+    const result = await reconcileGitHubConnection(dependencies, {
+      ...CLAIM,
+      previousHealth: "retrying",
+      consecutiveFailures: 0,
+    });
+
+    expect(result.decision).toMatchObject({ health: "healthy", closeIncident: true });
+  });
 });
 
 describe("module boundaries", () => {
