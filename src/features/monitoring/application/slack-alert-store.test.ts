@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -72,7 +72,7 @@ describe("enqueueGitHubConnectionAlertDelivery", () => {
 
 const DELIVERY = {
   delivery_id: "66666666-6666-4666-8666-666666666666",
-  lock_token: "77777777-7777-4777-8777-777777777777",
+  lock_token: randomUUID(),
   organisation_id: INPUT.organisationId,
   channel_id: INPUT.channelId,
   attempt_count: 1,
@@ -166,14 +166,22 @@ describe("connection-only Slack delivery drain", () => {
   it("delivers one approved encrypted destination", async () => {
     vi.stubEnv("APP_ENCRYPTION_KEY", Buffer.alloc(32, 7).toString("base64"));
     vi.stubEnv("SLACK_ALLOWED_WEBHOOK_SHA256", createHash("sha256").update(webhookUrl, "utf8").digest("hex"));
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("ok", { status: 200 })));
+    vi.stubEnv("NEXT_PUBLIC_SITE_URL", "https://compliancehub.example");
+    const fetcher = vi.fn().mockResolvedValue(new Response("ok", { status: 200 }));
+    vi.stubGlobal("fetch", fetcher);
     const supabase = channelClient({ type: "slack", enabled: true, revoked_at: null, config: approvedConfig() });
     await expect(drainSupabaseGitHubConnectionSlackAlertDeliveries(
       supabase as never,
       10,
       AbortSignal.timeout(5_000),
     )).resolves.toEqual({ claimed: 1, delivered: 1, failed: 0 });
+    const sent = JSON.parse((fetcher.mock.calls[0]?.[1] as RequestInit).body as string);
+    expect(sent.blocks).toContainEqual({
+      type: "section",
+      text: { type: "mrkdwn", text: "<https://compliancehub.example/app/integrations|Open ComplianceHub>" },
+    });
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   it.each([

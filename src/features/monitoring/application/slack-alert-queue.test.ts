@@ -62,6 +62,62 @@ describe("Slack alert payload safety", () => {
     expect(JSON.stringify(payload.blocks)).toContain("A workspace Owner must reactivate the App in GitHub.");
   });
 
+  it.each(["paused", "restored"])("links a GitHub monitoring %s alert to Connections", (state) => {
+    const payload = buildQueuedSlackPayload({
+      type: "connection_health",
+      severity: "high",
+      title: `GitHub monitoring ${state} for Adtecher`,
+      controlRef: "GitHub connection",
+      subjectId: "22222222-2222-4222-8222-222222222222",
+      detail: "Open Settings > Connections.",
+    }, "https://compliancehub.example");
+
+    expect(payload.blocks).toContainEqual({
+      type: "section",
+      text: { type: "mrkdwn", text: "<https://compliancehub.example/app/integrations|Open ComplianceHub>" },
+    });
+    expect(JSON.stringify(payload.blocks)).not.toContain("22222222-2222-4222-8222-222222222222");
+    expect(payload.blocks).not.toContainEqual(expect.objectContaining({ type: "actions" }));
+  });
+
+  it("keeps provider copy literal and does not link ordinary findings", () => {
+    const hostileTitle = "<@channel> *urgent*";
+    const connection = buildQueuedSlackPayload({
+      type: "connection_health",
+      severity: "high",
+      title: hostileTitle,
+      controlRef: "GitHub connection",
+      subjectId: "internal-id",
+      detail: "`@everyone` needs review",
+    }, "https://compliancehub.example");
+    const findingPayload = buildQueuedSlackPayload(toSafeSlackDeliveryPayload(finding), "https://compliancehub.example");
+
+    expect(connection.blocks).toContainEqual({
+      type: "section", text: { type: "plain_text", text: expect.stringContaining(hostileTitle) },
+    });
+    expect(connection.blocks).toContainEqual({
+      type: "section", text: { type: "plain_text", text: "`@everyone` needs review" },
+    });
+    expect(JSON.stringify(findingPayload.blocks)).not.toContain("Open ComplianceHub");
+    expect(JSON.stringify(findingPayload.blocks)).not.toContain("mrkdwn");
+  });
+
+  it.each([
+    "javascript:alert(1)",
+    "https://user:password@compliancehub.example",
+    "https://compliancehub.example/other-path",
+    "https://compliancehub.example?redirect=evil",
+  ])("rejects an invalid configured site origin: %s", (origin) => {
+    expect(() => buildQueuedSlackPayload({
+      type: "connection_health",
+      severity: "high",
+      title: "GitHub monitoring paused",
+      controlRef: "GitHub connection",
+      subjectId: "internal-id",
+      detail: "Review the connection.",
+    }, origin)).toThrow("ComplianceHub site origin is invalid");
+  });
+
   it("bounds and removes control characters from persisted finding fields", () => {
     const safe = toSafeSlackDeliveryPayload({
       ...finding,
@@ -97,6 +153,32 @@ describe("Slack alert payload safety", () => {
 describe("drainSlackAlertDeliveries", () => {
   beforeEach(() => vi.stubEnv("SLACK_ALLOWED_WEBHOOK_SHA256", webhookHash));
   afterEach(() => vi.unstubAllEnvs());
+
+  it("posts a GitHub connection alert with the fixed ComplianceHub link", async () => {
+    const postSlack = vi.fn().mockResolvedValue(undefined);
+    const delivery = claimed({ payload: {
+      type: "connection_health",
+      severity: "high",
+      title: "GitHub monitoring paused for Adtecher",
+      controlRef: "GitHub connection",
+      subjectId: "22222222-2222-4222-8222-222222222222",
+      detail: "A workspace Owner must reactivate the App in GitHub.",
+    } });
+
+    await expect(drainSlackAlertDeliveries({
+      store: store(delivery),
+      workerId: "github-connection-worker",
+      siteOrigin: "https://compliancehub.example",
+      resolveWebhookUrl: vi.fn().mockResolvedValue(webhookUrl),
+      postSlack,
+    })).resolves.toEqual({ claimed: 1, delivered: 1, failed: 0 });
+
+    const postedPayload = postSlack.mock.calls[0]?.[1];
+    expect(postedPayload.blocks).toContainEqual({
+      type: "section",
+      text: { type: "mrkdwn", text: "<https://compliancehub.example/app/integrations|Open ComplianceHub>" },
+    });
+  });
 
   it("approves the resolved destination immediately before outbound delivery", async () => {
     const deliveryStore = store();

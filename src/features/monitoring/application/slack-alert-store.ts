@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { decryptSecret } from "@/lib/security/secrets";
 import { approveSlackDestination, approveStoredSlackDestination } from "@/features/mcp/application/slack-destination-policy";
 import { postSlackIncomingWebhook } from "@/lib/integrations/slack-incoming-webhook";
+import { siteUrl } from "@/lib/site-url";
 import { drainSlackAlertDeliveries, type ClaimedSlackAlertDelivery, type QueueSlackDeliveryInput, type SafeSlackDeliveryPayload, type SlackAlertDeliveryStore, type SlackDeliveryLeaseIdentity } from "./slack-alert-queue";
 
 const slackLeaseIdentitySchema = z.object({
@@ -249,6 +250,7 @@ export async function drainSupabaseGitHubConnectionSlackAlertDeliveries(
     store: createSupabaseGitHubConnectionSlackAlertDeliveryStore(supabase),
     workerId: `github-connection-alerts:${randomUUID()}`,
     batchSize,
+    siteOrigin: siteUrl(),
     signal,
     ...createSupabaseSlackDrainCallbacks(supabase),
   });
