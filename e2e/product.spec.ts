@@ -222,8 +222,8 @@ test("a new user creates an isolated workspace and starts an assessment", async 
   // Completed steps disappear from the first-run checklist. Workspace creation
   // is counted as done, while the first actionable assessment step remains.
   const checklist = page.locator(".onboarding-card");
-  await expect(checklist.getByRole("heading", { name: "Your setup roadmap" })).toBeVisible();
-  await expect(checklist.getByText("1 of 9 done")).toBeVisible();
+  await expect(checklist.getByRole("heading", { name: "Build your programme" })).toBeVisible();
+  await expect(checklist.getByText("1 of 7 done")).toBeVisible();
   await expect(checklist.getByText("Connect a tracker", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Reduce admin later" })).toBeVisible();
   await expect(checklist.locator("li", { hasText: "Create your workspace" })).toHaveCount(0);
