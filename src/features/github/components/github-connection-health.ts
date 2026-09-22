@@ -5,7 +5,7 @@ import type {
 import { formatMonitoringTime } from "./format-monitoring-time";
 
 export type GitHubConnectionPresentation = {
-  label: "Healthy" | "Retrying" | "Partly unavailable" | "Owner action required" | "Disconnected";
+  label: "Healthy" | "Pending first check" | "Retrying" | "Partly unavailable" | "Owner action required" | "Disconnected";
   summary: string;
   nextAction: string | null;
   tone: "success" | "warning" | "danger" | "neutral";
@@ -50,6 +50,16 @@ export function presentGitHubConnectionHealth(input: {
     ? relativeCheckText(input.lastSuccessfulReconciliationAt, nowMs)
     : null;
   const cause = input.diagnostic ? DIAGNOSTIC_PHRASE[input.diagnostic] : null;
+
+  if (input.health === "healthy" && !input.lastSuccessfulReconciliationAt) {
+    return {
+      label: "Pending first check",
+      summary: "ComplianceHub has not verified this GitHub connection yet. Its health is unconfirmed.",
+      nextAction: "An Owner must run the first GitHub check before ComplianceHub can confirm this connection.",
+      tone: "neutral",
+      checkedAt,
+    };
+  }
 
   if (input.health === "healthy") {
     return {

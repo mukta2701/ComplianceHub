@@ -5,6 +5,21 @@ import { presentGitHubConnectionHealth } from "./github-connection-health";
 const NOW = "2026-09-18T12:00:00.000Z";
 
 describe("presentGitHubConnectionHealth", () => {
+  it("does not confirm a healthy connection before its first successful check", () => {
+    expect(presentGitHubConnectionHealth({
+      health: "healthy",
+      diagnostic: null,
+      lastSuccessfulReconciliationAt: null,
+      now: NOW,
+    })).toEqual({
+      label: "Pending first check",
+      summary: "ComplianceHub has not verified this GitHub connection yet. Its health is unconfirmed.",
+      nextAction: "An Owner must run the first GitHub check before ComplianceHub can confirm this connection.",
+      tone: "neutral",
+      checkedAt: null,
+    });
+  });
+
   it("reports a healthy connection with a relative check time and no action", () => {
     expect(presentGitHubConnectionHealth({
       health: "healthy",
@@ -100,7 +115,10 @@ describe("presentGitHubConnectionHealth", () => {
     for (const health of healths) {
       for (const diagnostic of diagnostics) {
         const presentation = presentGitHubConnectionHealth({
-          health, diagnostic, lastSuccessfulReconciliationAt: null, now: NOW,
+          health,
+          diagnostic,
+          lastSuccessfulReconciliationAt: health === "healthy" ? "2026-09-18T11:55:00.000Z" : null,
+          now: NOW,
         });
         expect(presentation.label, `${health}/${diagnostic}`).toMatch(/^(Healthy|Retrying|Partly unavailable|Owner action required|Disconnected)$/);
         expect(presentation.tone, `${health}/${diagnostic}`).toMatch(/^(success|warning|danger|neutral)$/);
