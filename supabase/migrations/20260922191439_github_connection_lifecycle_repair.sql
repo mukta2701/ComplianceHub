@@ -484,3 +484,100 @@ revoke all on function public.finalize_github_connection_reconciliation_server(u
 from public, anon, authenticated, service_role;
 grant execute on function public.finalize_github_connection_reconciliation_server(uuid, uuid, text, text, timestamptz, jsonb)
 to service_role;
+
+-- Recheck current installation truth under a row lock before projecting a
+-- transition. A disconnect or newer successful check can win after the
+-- reconciliation finalizer commits but before this separate RPC starts.
+create or replace function public.project_github_connection_notice_server(
+  target_organisation_id uuid,
+  target_installation_id uuid,
+  target_kind text,
+  target_diagnostic_code text,
+  target_account_login text,
+  target_channel_id uuid,
+  safe_payload jsonb
+)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  installation_organisation_id uuid;
+  installation_status text;
+  installation_health text;
+  recorded jsonb;
+  slack_queued boolean := false;
+begin
+  if target_organisation_id is null
+    or target_installation_id is null
+    or target_kind is null
+    or target_kind not in ('incident', 'recovery')
+    or (target_diagnostic_code is not null and target_diagnostic_code not in (
+      'provider_rate_limited', 'provider_temporary_failure', 'installation_suspended',
+      'installation_revoked', 'permission_mismatch', 'account_mismatch',
+      'repository_unavailable', 'invalid_provider_response', 'internal_failure'
+    ))
+    or target_account_login is null
+    or target_account_login !~ '^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38}[A-Za-z0-9])?$'
+  then
+    raise exception 'invalid GitHub connection notice' using errcode = '22023';
+  end if;
+
+  select installation.organisation_id, installation.status, installation.health
+  into installation_organisation_id, installation_status, installation_health
+  from public.github_installations installation
+  where installation.id = target_installation_id
+  for update;
+
+  if not found or installation_organisation_id is distinct from target_organisation_id then
+    raise exception 'GitHub installation belongs to another workspace'
+      using errcode = '42501';
+  end if;
+
+  if (target_kind = 'recovery'
+      and (installation_status <> 'active' or installation_health <> 'healthy'))
+    or (target_kind = 'incident' and installation_health = 'healthy')
+  then
+    return pg_catalog.jsonb_build_object(
+      'incident_id', null,
+      'is_new', false,
+      'notified_user_ids', '[]'::jsonb,
+      'slack_queued', false
+    );
+  end if;
+
+  recorded := public.record_github_connection_notice_server(
+    target_organisation_id,
+    target_installation_id,
+    target_kind,
+    target_diagnostic_code,
+    target_account_login
+  );
+
+  if coalesce((recorded ->> 'is_new')::boolean, false)
+     and target_channel_id is not null then
+    slack_queued := public.queue_github_connection_alert_delivery(
+      target_organisation_id,
+      target_channel_id,
+      target_installation_id,
+      target_kind,
+      target_diagnostic_code,
+      safe_payload
+    );
+  end if;
+
+  return recorded || pg_catalog.jsonb_build_object('slack_queued', slack_queued);
+end;
+$$;
+
+alter function public.project_github_connection_notice_server(
+  uuid, uuid, text, text, text, uuid, jsonb
+) owner to postgres;
+revoke all on function public.project_github_connection_notice_server(
+  uuid, uuid, text, text, text, uuid, jsonb
+) from public, anon, authenticated, service_role;
+grant execute on function public.project_github_connection_notice_server(
+  uuid, uuid, text, text, text, uuid, jsonb
+) to service_role;

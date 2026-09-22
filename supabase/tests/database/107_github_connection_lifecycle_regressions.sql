@@ -1,6 +1,7 @@
 begin;
 set local session_replication_role = replica;
 delete from public.alert_deliveries where organisation_id = '92000000-0000-4000-8000-000000000101';
+delete from public.alert_channels where organisation_id = '92000000-0000-4000-8000-000000000101';
 delete from public.github_connection_incidents where organisation_id = '92000000-0000-4000-8000-000000000101';
 delete from public.github_connection_reconciliation_runs where organisation_id = '92000000-0000-4000-8000-000000000101';
 delete from public.github_repositories where organisation_id = '92000000-0000-4000-8000-000000000101';
@@ -28,6 +29,13 @@ insert into public.organisations(id,name,slug,created_by) values
 insert into public.memberships(organisation_id,user_id,role) values
  ('92000000-0000-4000-8000-000000000101','92000000-0000-4000-8000-000000000001','owner'),
  ('92000000-0000-4000-8000-000000000101','92000000-0000-4000-8000-000000000002','admin');
+
+insert into public.alert_channels(
+  id, organisation_id, type, connected_by, min_severity, enabled
+) values (
+  '92000000-0000-4000-8000-000000000401','92000000-0000-4000-8000-000000000101',
+  'slack','92000000-0000-4000-8000-000000000001','medium',true
+);
 
 insert into public.github_installations(
   id, organisation_id, provider_installation_id, account_id, account_login,
@@ -219,27 +227,47 @@ select public.finalize_github_connection_reconciliation_server(
 reset role;
 select is((select signal from lifecycle_recovery_signal),'recovered','the first genuine success closes the pre-existing incident');
 
+set role authenticated;
+select ok(
+  public.disconnect_github_installation('92000000-0000-4000-8000-000000000201'),
+  'the Owner disconnects after the successful finalizer commits'
+);
+reset role;
+
 set role service_role;
+create temporary table lifecycle_stale_recovery_projection as
 select public.project_github_connection_notice_server(
   '92000000-0000-4000-8000-000000000101','92000000-0000-4000-8000-000000000201',
-  'recovery',null,'Lifecycle-Co',null,
+  'recovery',null,'Lifecycle-Co','92000000-0000-4000-8000-000000000401',
   '{"type":"connection_health","severity":"medium","title":"GitHub recovered","controlRef":"GitHub connection","subjectId":"connection","detail":"GitHub access was verified again."}'::jsonb
-);
+) as result;
 reset role;
 select is(
   (select count(*) from public.github_connection_incidents where installation_id='92000000-0000-4000-8000-000000000201' and status='open'),
-  0::bigint,
-  'the successful provider check resolves the existing incident'
+  1::bigint,
+  'a stale recovery projection after disconnection leaves the incident open'
 );
 select is(
   (select count(*) from public.notifications where organisation_id='92000000-0000-4000-8000-000000000101' and kind='github_connection_recovery'),
-  2::bigint,
-  'one recovery reaches the Owner and Admin after verified success'
+  0::bigint,
+  'a stale recovery projection sends no in-app notices'
+);
+select is(
+  (select count(*) from public.alert_deliveries where installation_id='92000000-0000-4000-8000-000000000201' and kind='github_connection_health'),
+  0::bigint,
+  'a stale recovery projection queues no Slack delivery'
+);
+select is(
+  (select (result ->> 'is_new')::boolean from lifecycle_stale_recovery_projection),
+  false,
+  'a stale recovery projection returns the idempotent no-op result'
+);
+select is(
+  (select (result ->> 'slack_queued')::boolean from lifecycle_stale_recovery_projection),
+  false,
+  'a stale recovery projection reports no queued Slack work'
 );
 
-update public.github_installations
-set health='healthy', next_reconciliation_at=clock_timestamp() + interval '1 day'
-where id='92000000-0000-4000-8000-000000000201';
 update public.github_installations
 set next_reconciliation_at=clock_timestamp() - interval '1 minute'
 where id='92000000-0000-4000-8000-000000000202';
@@ -276,11 +304,71 @@ select is(
   'a rejected same-worker finalisation leaves installation health unchanged'
 );
 
+set role service_role;
+create temporary table lifecycle_stale_incident_projection as
+select public.project_github_connection_notice_server(
+  '92000000-0000-4000-8000-000000000101','92000000-0000-4000-8000-000000000202',
+  'incident','permission_mismatch','Lease-Co','92000000-0000-4000-8000-000000000401',
+  '{"type":"connection_health","severity":"high","title":"GitHub needs attention","controlRef":"GitHub connection","subjectId":"connection","detail":"Review the GitHub connection."}'::jsonb
+) as result;
+reset role;
+select is(
+  (select count(*) from public.github_connection_incidents where installation_id='92000000-0000-4000-8000-000000000202'),
+  0::bigint,
+  'a stale incident projection after recovery records no incident'
+);
+select is(
+  (select (result ->> 'is_new')::boolean from lifecycle_stale_incident_projection),
+  false,
+  'a stale incident projection returns the idempotent no-op result'
+);
+select is(
+  (select count(*) from public.notifications where organisation_id='92000000-0000-4000-8000-000000000101' and kind='github_connection_incident' and subject_id='92000000-0000-4000-8000-000000000202'),
+  0::bigint,
+  'a stale incident projection sends no in-app notices'
+);
+select is(
+  (select count(*) from public.alert_deliveries where installation_id='92000000-0000-4000-8000-000000000202' and kind='github_connection_health'),
+  0::bigint,
+  'a stale incident projection queues no Slack delivery'
+);
+
+set role service_role;
+create temporary table lifecycle_expired_runs as
+select id as run_id, installation_id
+from public.claim_due_github_connection_reconciliations_server(
+  '92000000-0000-4000-8000-000000000905',10,clock_timestamp() + interval '1 hour'
+);
+reset role;
+update public.github_connection_reconciliation_runs
+set locked_until=clock_timestamp() - interval '1 second'
+where id=(select run_id from lifecycle_expired_runs where installation_id='92000000-0000-4000-8000-000000000202');
+update public.github_installations
+set reconciliation_locked_until=clock_timestamp() - interval '1 second'
+where id='92000000-0000-4000-8000-000000000202';
+set role service_role;
+select throws_ok(
+  $$ select public.finalize_github_connection_reconciliation_server(
+       (select run_id from lifecycle_expired_runs where installation_id='92000000-0000-4000-8000-000000000202'),
+       '92000000-0000-4000-8000-000000000905','success',null,null,'[]'::jsonb
+     ) $$,
+  '22023','connection reconciliation lease mismatch',
+  'a finalizer rejects an expired run and installation lease using wall-clock time'
+);
+reset role;
+select is(
+  (select status from public.github_connection_reconciliation_runs
+   where id=(select run_id from lifecycle_expired_runs where installation_id='92000000-0000-4000-8000-000000000202')),
+  'running',
+  'an expired-lease rejection leaves its run uncompleted'
+);
+
 select * from finish();
 
 begin;
 set local session_replication_role = replica;
 delete from public.alert_deliveries where organisation_id = '92000000-0000-4000-8000-000000000101';
+delete from public.alert_channels where organisation_id = '92000000-0000-4000-8000-000000000101';
 delete from public.github_connection_incidents where organisation_id = '92000000-0000-4000-8000-000000000101';
 delete from public.github_connection_reconciliation_runs where organisation_id = '92000000-0000-4000-8000-000000000101';
 delete from public.github_repositories where organisation_id = '92000000-0000-4000-8000-000000000101';
