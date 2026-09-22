@@ -274,15 +274,75 @@ describe("AWS dev GitHub reconciliation workflow", () => {
     expect(runnerBlock).not.toContain("--env-file");
   });
 
-  it("maps the approved Slack digest into App Runner without printing it", () => {
+  it("passes App Runner runtime configuration through a private input file", () => {
     const workflow = deployWorkflow();
+    const updateStart = workflow.indexOf("      - name: Update App Runner service");
+    const verifyStart = workflow.indexOf("      - name: Verify deployed health", updateStart);
+    const updateStep = workflow.slice(updateStart, verifyStart);
+    const runScript = updateStep.slice(updateStep.indexOf("        run: |"));
+    const updateCommand = runScript
+      .split("\n")
+      .find((line) => line.includes("aws apprunner update-service"));
+    const expectedSecretMappings = [
+      ["SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SERVICE_ROLE_KEY"],
+      ["CRON_SECRET", "CRON_SECRET"],
+      ["APP_ENCRYPTION_KEY", "APP_ENCRYPTION_KEY"],
+      ["SLACK_ALLOWED_WEBHOOK_SHA256", "SLACK_ALLOWED_WEBHOOK_SHA256"],
+      ["GITHUB_APP_ID", "AWS_DEV_GITHUB_APP_ID"],
+      ["GITHUB_APP_CLIENT_ID", "AWS_DEV_GITHUB_APP_CLIENT_ID"],
+      ["GITHUB_APP_CLIENT_SECRET", "AWS_DEV_GITHUB_APP_CLIENT_SECRET"],
+      ["GITHUB_APP_PRIVATE_KEY", "AWS_DEV_GITHUB_APP_PRIVATE_KEY"],
+      ["GITHUB_WEBHOOK_SECRET", "AWS_DEV_GITHUB_WEBHOOK_SECRET"],
+      ["GITHUB_APP_SLUG", "AWS_DEV_GITHUB_APP_SLUG"],
+      ["GITHUB_ALLOWED_ACCOUNT_ID", "AWS_DEV_GITHUB_ALLOWED_ACCOUNT_ID"],
+      [
+        "GITHUB_APPROVED_SECURITY_WORKFLOW_IDS",
+        "AWS_DEV_GITHUB_APPROVED_SECURITY_WORKFLOW_IDS",
+      ],
+    ];
+    const runtimeMappings = [
+      "HOSTNAME: \"::\"",
+      "NEXT_PUBLIC_SUPABASE_URL: env.NEXT_PUBLIC_SUPABASE_URL",
+      "NEXT_PUBLIC_SUPABASE_ANON_KEY: env.NEXT_PUBLIC_SUPABASE_ANON_KEY",
+      "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+      "NEXT_PUBLIC_SITE_URL: env.NEXT_PUBLIC_SITE_URL",
+      "SUPABASE_SERVICE_ROLE_KEY: env.SUPABASE_SERVICE_ROLE_KEY",
+      "CRON_SECRET: env.CRON_SECRET",
+      "APP_ENCRYPTION_KEY: env.APP_ENCRYPTION_KEY",
+      "SLACK_ALLOWED_WEBHOOK_SHA256: env.SLACK_ALLOWED_WEBHOOK_SHA256",
+      "COMPLIANCEHUB_RELEASE_SHA: env.DEPLOY_SHA",
+      "GITHUB_APP_ID: env.GITHUB_APP_ID",
+      "GITHUB_APP_CLIENT_ID: env.GITHUB_APP_CLIENT_ID",
+      "GITHUB_APP_CLIENT_SECRET: env.GITHUB_APP_CLIENT_SECRET",
+      "GITHUB_APP_PRIVATE_KEY: env.GITHUB_APP_PRIVATE_KEY",
+      "GITHUB_WEBHOOK_SECRET: env.GITHUB_WEBHOOK_SECRET",
+      "GITHUB_APP_SLUG: env.GITHUB_APP_SLUG",
+      "GITHUB_ALLOWED_ACCOUNT_ID: env.GITHUB_ALLOWED_ACCOUNT_ID",
+      'GITHUB_ALLOWED_ACCOUNT_TYPE: "Organization"',
+      "GITHUB_APPROVED_SECURITY_WORKFLOW_IDS: env.GITHUB_APPROVED_SECURITY_WORKFLOW_IDS",
+    ];
 
-    expect(workflow).toContain(
-      "SLACK_ALLOWED_WEBHOOK_SHA256: ${{ secrets.SLACK_ALLOWED_WEBHOOK_SHA256 }}",
+    expect(updateStart).toBeGreaterThanOrEqual(0);
+    expect(verifyStart).toBeGreaterThan(updateStart);
+    for (const [runtimeName, secretName] of expectedSecretMappings) {
+      expect(updateStep).toContain(`${runtimeName}: \${{ secrets.${secretName} }}`);
+      expect(runScript).toContain(`${runtimeName}: env.${runtimeName}`);
+    }
+    for (const mapping of runtimeMappings) expect(runScript).toContain(mapping);
+
+    expect(runScript).toContain('umask 077');
+    expect(runScript).toContain('request_file="$(mktemp)"');
+    expect(runScript).toContain('chmod 600 "$request_file"');
+    expect(runScript).toContain('trap \'rm -f "$request_file"\' EXIT');
+    expect(runScript).toContain('jq -n');
+    expect(runScript).toContain('> "$request_file"');
+    expect(runScript).toContain('ServiceArn: env.SERVICE_ARN');
+    expect(runScript).toContain('SourceConfiguration:');
+    expect(updateCommand?.trim()).toBe(
+      'aws apprunner update-service --region "$AWS_REGION" --cli-input-json "file://$request_file" --query \'Service.Status\' --output text >/dev/null',
     );
-    expect(workflow).toMatch(/--arg slackDigest \"\$SLACK_ALLOWED_WEBHOOK_SHA256\"/);
-    expect(workflow).toMatch(/SLACK_ALLOWED_WEBHOOK_SHA256: \$slackDigest/);
-    expect(workflow).not.toMatch(/echo[^\n]*SLACK_ALLOWED_WEBHOOK_SHA256/);
+    expect(runScript).not.toMatch(/--arg\b/);
+    expect(runScript).not.toMatch(/echo[^\n]*SUPABASE_SERVICE_ROLE_KEY/);
   });
 
   it("documents Organization as the hosted account-type requirement", () => {
