@@ -4,11 +4,11 @@
 max_ttl_days: 14
 require_github_issue: false
 entries:
-  - id: "d8cd970b1ba4e546"
-    reason: "Deploy workflow passes GitHub secret references by name into the App Runner update call; no credential value, personal data, or unapproved transfer exists in source"
-    privacy_approver: "Repo owner dev-pipeline review"
-    security_approver: "Repo owner dev-pipeline review"
-    created_on: "2026-09-18"
+  - id: "3b8edf8e6e338a8b"
+    reason: "Reviewed deployment configuration maps GitHub secret references and the configured sender into the approved AWS App Runner runtime. Source contains setting names and jq variables, not credential values or recipient data. No configuration is printed."
+    privacy_approver: "Codex Astra invitation deployment review"
+    security_approver: "Codex Astra invitation deployment review"
+    created_on: "2026-09-22"
     expires_on: "2026-10-01"
   - id: "5b860e1541398aff"
     reason: "Assessment detail reads the fixed catalogue question prompt column from the local database for ordinary UI rendering; no model call, external transfer, or personal data occurs on this line"
