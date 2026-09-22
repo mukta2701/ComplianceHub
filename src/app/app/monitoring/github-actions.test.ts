@@ -44,7 +44,7 @@ function installationLookup() {
   lookup.select = vi.fn(() => lookup);
   lookup.eq = vi.fn(() => lookup);
   lookup.maybeSingle = vi.fn().mockResolvedValue({
-    data: { id: INSTALLATION_ID, status: "active", permissions_ok: true, repository_selection: "selected" },
+    data: { id: INSTALLATION_ID, status: "active", permissions_ok: true, repository_selection: "selected", health: "healthy" },
     error: null,
   });
   return lookup;
@@ -149,6 +149,38 @@ describe("official GitHub recheck action", () => {
     expect(hoisted.revalidatePath).not.toHaveBeenCalled();
   });
 
+  it.each(["retrying", "partially_unavailable", "owner_action_required", "disconnected"] as const)(
+    "rejects official collection while GitHub connection health is %s",
+    async (health) => {
+      const lookup = installationLookup();
+      lookup.maybeSingle.mockResolvedValue({
+        data: {
+          id: INSTALLATION_ID,
+          status: "active",
+          permissions_ok: true,
+          repository_selection: "selected",
+          health,
+        },
+        error: null,
+      });
+      hoisted.ctx = {
+        supabase: { from: vi.fn(() => lookup) },
+        user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
+      };
+      const form = new FormData();
+      form.set("installationId", INSTALLATION_ID);
+
+      await expect(recheckGitHubInstallationAction(form)).resolves.toEqual({
+        ok: false,
+        message: "Could not run this official GitHub recheck. Please try again.",
+      });
+      expect(lookup.select).toHaveBeenCalledWith("id,status,permissions_ok,repository_selection,health");
+      expect(hoisted.enforceRateLimit).not.toHaveBeenCalled();
+      expect(hoisted.runGitHubCollection).not.toHaveBeenCalled();
+      expect(hoisted.revalidatePath).not.toHaveBeenCalled();
+    },
+  );
+
   it("fails closed before collection when GitHub grants all-repository access", async () => {
     const lookup = installationLookup();
     lookup.maybeSingle.mockResolvedValue({
@@ -165,7 +197,7 @@ describe("official GitHub recheck action", () => {
       ok: false,
       message: "Could not run this official GitHub recheck. Please try again.",
     });
-    expect(lookup.select).toHaveBeenCalledWith("id,status,permissions_ok,repository_selection");
+    expect(lookup.select).toHaveBeenCalledWith("id,status,permissions_ok,repository_selection,health");
     expect(hoisted.runGitHubCollection).not.toHaveBeenCalled();
     expect(hoisted.revalidatePath).not.toHaveBeenCalled();
   });

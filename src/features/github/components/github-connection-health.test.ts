@@ -14,7 +14,7 @@ describe("presentGitHubConnectionHealth", () => {
     })).toEqual({
       label: "Pending first check",
       summary: "ComplianceHub has not verified this GitHub connection yet. Its health is unconfirmed.",
-      nextAction: "An Owner must run the first GitHub check before ComplianceHub can confirm this connection.",
+      nextAction: "ComplianceHub will check automatically. An Owner can run the first check sooner.",
       tone: "neutral",
       checkedAt: null,
     });

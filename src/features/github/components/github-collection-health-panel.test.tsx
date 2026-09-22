@@ -173,6 +173,19 @@ describe("GitHubCollectionHealthPanel", () => {
     expect(within(repoArticle("SecondOrg/unavailable")).queryByText("Up to date")).not.toBeInTheDocument();
   });
 
+  it.each([
+    ["retrying", "GitHub is retrying"],
+    ["partially_unavailable", "GitHub partly unavailable"],
+    ["owner_action_required", "Owner action required"],
+    ["disconnected", "GitHub disconnected"],
+  ] as const)("does not show current data or allow a manual check while the connection is %s", (health, label) => {
+    renderPanel({ installations: [{ ...installation, health }] });
+
+    expect(within(repoArticle("Adtecher/compliancehub")).getByText(label)).toBeVisible();
+    expect(within(repoArticle("Adtecher/compliancehub")).queryByText("Up to date")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Check GitHub now" })).toBeDisabled();
+  });
+
   it("uses an accessible Owner pending state and refreshes only after success", async () => {
     const user = userEvent.setup();
     let finish!: (value: { ok: true; message: string }) => void;

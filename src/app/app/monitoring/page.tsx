@@ -85,7 +85,11 @@ function unhealthyGitHubRepositoryIds(
     .filter((repository) => {
       const summary = repositories.find((candidate) => candidate.repository_id === repository.id);
       const installation = installations.find((candidate) => candidate.id === summary?.installation_id);
-      return !repository.available || !installation || installation.status !== "active" || installation.permissions_ok !== true;
+      return !repository.available
+        || !installation
+        || installation.status !== "active"
+        || installation.permissions_ok !== true
+        || installation.health !== "healthy";
     })
     .map((repository) => repository.id);
 }
@@ -170,7 +174,7 @@ export default async function MonitoringPage({
     const [data, installationResult, repositorySummaryResult, controlRoom, mappingReview] = await Promise.all([
       loadMemberMonitoring(supabase, organisation.id),
       supabase.from("github_installations")
-        .select("id,account_login,status,repository_selection,permissions_ok")
+        .select("id,account_login,status,repository_selection,permissions_ok,health,health_diagnostic_code,last_successful_reconciliation_at")
         .eq("organisation_id", organisation.id)
         .order("updated_at", { ascending: false }),
       supabase.from("github_repository_monitoring_summaries")
@@ -227,7 +231,7 @@ export default async function MonitoringPage({
       .order("created_at", { ascending: false })
       .limit(100),
     supabase.from("github_installations")
-      .select("id,account_login,status,repository_selection,permissions_ok")
+      .select("id,account_login,status,repository_selection,permissions_ok,health,health_diagnostic_code,last_successful_reconciliation_at")
       .eq("organisation_id", organisation.id)
       .order("updated_at", { ascending: false }),
     supabase.from("github_repository_monitoring_summaries")

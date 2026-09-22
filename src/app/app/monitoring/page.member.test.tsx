@@ -4,21 +4,25 @@ import { describe, expect, it, vi } from "vitest";
 const hoisted = vi.hoisted(() => ({
   loadMemberMonitoring: vi.fn(),
   tables: [] as string[],
+  selections: {} as Record<string, string>,
+  monitoringInstallations: [] as unknown[],
+  unhealthyRepositoryIds: [] as string[],
   loadControlRoom: vi.fn(),
   loadMappingReview: vi.fn(),
   rows: {} as Record<string, unknown[]>,
 }));
 
-function query(rows: unknown[]) {
+function query(table: string, rows: unknown[]) {
   const chain: Record<string, unknown> = {};
   for (const method of ["select", "eq", "order"]) chain[method] = vi.fn(() => chain);
+  chain.select = vi.fn((columns: string) => { hoisted.selections[table] = columns; return chain; });
   chain.then = (resolve: (value: { data: unknown[]; error: null }) => unknown) => Promise.resolve({ data: rows, error: null }).then(resolve);
   return chain;
 }
 
 vi.mock("@/lib/app-context", () => ({
   requireAppContext: () => Promise.resolve({
-    supabase: { from: (table: string) => { hoisted.tables.push(table); return query(hoisted.rows[table] ?? []); } },
+    supabase: { from: (table: string) => { hoisted.tables.push(table); return query(table, hoisted.rows[table] ?? []); } },
     organisation: { id: "org-1", name: "Example Ltd" },
     membership: { role: "member" },
   }),
@@ -36,11 +40,16 @@ vi.mock("@/features/github/application/github-mapping-review", () => ({
   loadGitHubMappingReview: hoisted.loadMappingReview,
 }));
 vi.mock("@/features/github/components/github-compliance-control-room", () => ({
-  GitHubComplianceControlRoomPanel: ({ role }: { role: string }) => <section aria-label="Technical GitHub review">Read-only technical review · {role}</section>,
+  GitHubComplianceControlRoomPanel: ({ role, unhealthyRepositoryIds }: { role: string; unhealthyRepositoryIds: string[] }) => {
+    hoisted.unhealthyRepositoryIds = unhealthyRepositoryIds;
+    return <section aria-label="Technical GitHub review">Read-only technical review · {role}</section>;
+  },
 }));
 vi.mock("@/features/github/components/github-collection-health-panel", () => ({
-  GitHubCollectionHealthPanel: ({ role }: { role: string }) =>
-    <section aria-label="GitHub monitoring">{role === "owner" ? "Owner check" : "Read-only monitoring"}</section>,
+  GitHubCollectionHealthPanel: ({ role, installations }: { role: string; installations: unknown[] }) => {
+    hoisted.monitoringInstallations = installations;
+    return <section aria-label="GitHub monitoring">{role === "owner" ? "Owner check" : "Read-only monitoring"}</section>;
+  },
 }));
 
 import MonitoringPage from "./page";
@@ -86,5 +95,39 @@ describe("Member monitoring page branch", () => {
     const banner = screen.getByText("No recorded active findings").closest(".monitor-banner");
     expect(banner).toHaveTextContent("1 system monitored");
     expect(screen.queryByText("Legacy GitHub")).not.toBeInTheDocument();
+  });
+
+  it("loads and applies the GitHub connection health for Members too", async () => {
+    hoisted.tables = [];
+    hoisted.selections = {};
+    hoisted.monitoringInstallations = [];
+    hoisted.unhealthyRepositoryIds = [];
+    hoisted.rows = {
+      github_installations: [{
+        id: "43000000-0000-4000-8000-000000000001", account_login: "ExampleOrg", status: "active",
+        repository_selection: "selected", permissions_ok: true,
+        health: "disconnected", health_diagnostic_code: null, last_successful_reconciliation_at: null,
+      }],
+      github_repository_monitoring_summaries: [{
+        repository_id: "43000000-0000-4000-8000-000000000002",
+        installation_id: "43000000-0000-4000-8000-000000000001", full_name: "ExampleOrg/compliance",
+        html_url: "https://github.com/ExampleOrg/compliance", selected: true, available: true,
+        latest_run_id: null, latest_status: null, latest_failed_count: null, last_completed_collection_at: null,
+      }],
+    };
+    hoisted.loadMemberMonitoring.mockResolvedValue({ connectedSystems: [], findings: [], officialGitHubFindings: [] });
+    hoisted.loadControlRoom.mockResolvedValue({
+      repositories: [{ id: "43000000-0000-4000-8000-000000000002", officialResults: [] }],
+      pagination: { offset: 0, limit: 20, total: 1, truncated: false },
+    });
+    hoisted.loadMappingReview.mockResolvedValue({ pack: {}, entries: [], approvalHistory: [], limitations: [] });
+
+    render(await MonitoringPage());
+
+    expect(hoisted.selections.github_installations).toContain("health");
+    expect(hoisted.selections.github_installations).toContain("health_diagnostic_code");
+    expect(hoisted.selections.github_installations).toContain("last_successful_reconciliation_at");
+    expect((hoisted.monitoringInstallations[0] as { health: string }).health).toBe("disconnected");
+    expect(hoisted.unhealthyRepositoryIds).toContain("43000000-0000-4000-8000-000000000002");
   });
 });

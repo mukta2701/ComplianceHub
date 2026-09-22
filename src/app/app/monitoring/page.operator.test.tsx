@@ -6,6 +6,9 @@ const hoisted = vi.hoisted(() => ({
   controlRoomLoads: [] as unknown[][],
   mappingReviewLoads: [] as unknown[][],
   tables: [] as string[],
+  selections: {} as Record<string, string>,
+  monitoringInstallations: [] as unknown[],
+  unhealthyRepositoryIds: [] as string[],
   officialOutcomes: [
     "pass", "pass", "pass", "pass", "pass", "pass", "pass", "pass",
     "fail", "fail", "fail", "fail", "fail",
@@ -82,23 +85,29 @@ vi.mock("@/features/github/application/github-mapping-review", () => ({
   },
 }));
 vi.mock("@/features/github/components/github-compliance-control-room", () => ({
-  GitHubComplianceControlRoomPanel: ({ role }: { role: string }) => <section aria-label="Technical GitHub review">Raw check ID · {role}</section>,
+  GitHubComplianceControlRoomPanel: ({ role, unhealthyRepositoryIds }: { role: string; unhealthyRepositoryIds: string[] }) => {
+    hoisted.unhealthyRepositoryIds = unhealthyRepositoryIds;
+    return <section aria-label="Technical GitHub review">Raw check ID · {role}</section>;
+  },
 }));
 vi.mock("@/features/github/components/github-collection-health-panel", () => ({
-  GitHubCollectionHealthPanel: ({ role }: { role: string }) =>
-    <section aria-label="GitHub monitoring"><h2>GitHub monitoring</h2>{role === "owner" ? "Owner check" : "Read-only monitoring"}</section>,
+  GitHubCollectionHealthPanel: ({ role, installations }: { role: string; installations: unknown[] }) => {
+    hoisted.monitoringInstallations = installations;
+    return <section aria-label="GitHub monitoring"><h2>GitHub monitoring</h2>{role === "owner" ? "Owner check" : "Read-only monitoring"}</section>;
+  },
 }));
 
-function query(rows: unknown[]) {
+function query(table: string, rows: unknown[]) {
   const chain: Record<string, unknown> = {};
   for (const method of ["select", "eq", "in", "is", "order", "limit"]) chain[method] = vi.fn(() => chain);
+  chain.select = vi.fn((columns: string) => { hoisted.selections[table] = columns; return chain; });
   chain.then = (resolve: (value: { data: unknown[]; error: null }) => unknown) => Promise.resolve({ data: rows, error: null }).then(resolve);
   return chain;
 }
 
 vi.mock("@/lib/app-context", () => ({
   requireAppContext: () => Promise.resolve({
-    supabase: { from: (table: string) => { hoisted.tables.push(table); return query(hoisted.rows[table] ?? []); } },
+    supabase: { from: (table: string) => { hoisted.tables.push(table); return query(table, hoisted.rows[table] ?? []); } },
     organisation: { id: "org-1", name: "Example Ltd" },
     membership: { role: "admin" },
   }),
@@ -116,6 +125,9 @@ describe("operator monitoring page", () => {
     hoisted.controlRoomLoads = [];
     hoisted.mappingReviewLoads = [];
     hoisted.tables = [];
+    hoisted.selections = {};
+    hoisted.monitoringInstallations = [];
+    hoisted.unhealthyRepositoryIds = [];
     hoisted.officialOutcomes = [
       "pass", "pass", "pass", "pass", "pass", "pass", "pass", "pass",
       "fail", "fail", "fail", "fail", "fail",
@@ -219,6 +231,27 @@ describe("operator monitoring page", () => {
     try {
       render(await MonitoringPage());
       expect(screen.getByText("4 active findings").closest(".monitor-banner")).toHaveTextContent("1 system monitored");
+    } finally {
+      hoisted.rows.github_installations = current;
+    }
+  });
+
+  it("loads and applies the GitHub connection health to monitoring and official results", async () => {
+    const current = hoisted.rows.github_installations;
+    hoisted.rows.github_installations = [{
+      ...(current[0] as Record<string, unknown>),
+      health: "retrying",
+      health_diagnostic_code: "provider_temporary_failure",
+      last_successful_reconciliation_at: "2026-09-01T08:00:00.000Z",
+    }];
+    try {
+      render(await MonitoringPage());
+
+      expect(hoisted.selections.github_installations).toContain("health");
+      expect(hoisted.selections.github_installations).toContain("health_diagnostic_code");
+      expect(hoisted.selections.github_installations).toContain("last_successful_reconciliation_at");
+      expect((hoisted.monitoringInstallations[0] as { health: string }).health).toBe("retrying");
+      expect(hoisted.unhealthyRepositoryIds).toContain("43000000-0000-4000-8000-000000000002");
     } finally {
       hoisted.rows.github_installations = current;
     }

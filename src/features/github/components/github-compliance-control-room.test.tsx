@@ -152,6 +152,21 @@ describe("GitHubComplianceControlRoomPanel", () => {
     expect(repository).not.toHaveTextContent(/compliant|certified|secure|readiness improved/i);
   });
 
+  it("marks official records for review when the GitHub connection is unhealthy", () => {
+    render(<GitHubComplianceControlRoomPanel
+      room={room()}
+      review={review()}
+      role="member"
+      unhealthyRepositoryIds={[REPOSITORY]}
+    />);
+
+    const repository = screen.getByRole("article", { name: "Mukta2701/ComplianceHub official compliance" });
+    expect(within(repository).getByText("Needs attention")).toBeVisible();
+    expect(within(repository).queryByText("Official records current")).not.toBeInTheDocument();
+    expect(within(repository).getByText("GitHub access or collection processing needs attention. Review the statuses and recovery options below."))
+      .toBeVisible();
+  });
+
   it("never labels an official-mode collection without materialised results as shadow", () => {
     const collectedRoom = room();
     collectedRoom.repositories[0] = {

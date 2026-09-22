@@ -25,7 +25,7 @@ const STATE_PRESENTATION: Record<GitHubRepositoryComplianceState, { label: strin
   needs_attention: {
     label: "Needs attention",
     tone: "red",
-    detail: "Collection or processing is incomplete. Review the safe recovery options below.",
+    detail: "GitHub access or collection processing needs attention. Review the statuses and recovery options below.",
   },
   awaiting_approval: {
     label: "Awaiting approval",
