@@ -134,6 +134,7 @@ ComplianceHub performs due internal and provider work automatically through one 
 - adapters for Monitoring, Evidence, Policies, Findings, Tasks, ticket synchronisation and notifications;
 - contextual in-app status instead of an Automation workspace;
 - private compliance and restricted engineering/operations Slack destinations;
+- channel-only Slack alerts that point employees to the relevant ComplianceHub record, with no employee direct messages or actions in Slack;
 - an audited, restricted emergency suspension;
 - a cloud-neutral `runDueAutomation` interface usable locally and from AWS.
 

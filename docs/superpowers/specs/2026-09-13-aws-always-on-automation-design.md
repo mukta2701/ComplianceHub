@@ -221,6 +221,8 @@ A separate restricted engineering/operations channel receives missed scheduler i
 
 Slack messages contain safe summaries and authenticated ComplianceHub links. Raw evidence contents, provider credentials and sensitive diagnostics remain inside authorised systems.
 
+Slack is a channel-only notice path. ComplianceHub does not send employee direct messages or let a Slack reply approve, edit, resolve or complete a record. Employees follow the link and act in ComplianceHub, where their normal role permissions and audit history apply.
+
 ## 12. Independent watchdog and emergency control
 
 Every runner Execution records a heartbeat and terminal summary. CloudWatch and EventBridge independently detect failed task startup, task crash or timeout, missing heartbeat, repeated failure and dead-letter accumulation. This infrastructure path must not depend on the failed ComplianceHub runner to report its own outage.
