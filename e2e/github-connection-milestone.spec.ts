@@ -130,7 +130,7 @@ test.describe("GitHub connection milestone", () => {
 
     // The Admin empty-state message before any installation exists must not imply management.
     await adminPage.goto("/app/monitoring");
-    await expect(adminPage.getByText("GitHub is not connected. Ask a workspace Owner to connect GitHub.")).toBeVisible();
+    await expect(adminPage.getByText("GitHub is not connected. Ask a workspace Owner to manage the connection.")).toBeVisible();
     await expect(adminPage.getByRole("link", { name: "Connect GitHub" })).toHaveCount(0);
 
     const repositoryPayload = (providerId: number, name: string) => ({
