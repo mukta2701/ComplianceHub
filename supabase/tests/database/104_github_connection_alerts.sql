@@ -100,20 +100,20 @@ select is(
   2::bigint,
   'the incident notice reaches Owners and Admins only'
 );
-select like(
+select ok(
   (select message from public.notifications
    where organisation_id='79000000-0000-4111-8111-000000000101'
      and user_id='79000000-0000-4111-8111-000000000001'
-     and kind='github_connection_incident'),
-  '%The GitHub App is suspended%Owner%Settings > Connections%',
+     and kind='github_connection_incident')
+    like '%The GitHub App is suspended%Owner%Settings > Connections%',
   'the Owner notice explains the suspension and next action'
 );
-select unlike(
+select ok(
   (select message from public.notifications
    where organisation_id='79000000-0000-4111-8111-000000000101'
      and user_id='79000000-0000-4111-8111-000000000001'
-     and kind='github_connection_incident'),
-  '%installation_suspended%',
+     and kind='github_connection_incident')
+    not like '%installation_suspended%',
   'the Owner notice hides the internal diagnostic code'
 );
 select is(
@@ -158,12 +158,12 @@ select is(
   'a verified recovery resolves with new notification work'
 );
 reset role;
-select like(
+select ok(
   (select message from public.notifications
    where organisation_id='79000000-0000-4111-8111-000000000101'
      and user_id='79000000-0000-4111-8111-000000000001'
-     and kind='github_connection_recovery'),
-  '%GitHub monitoring restored%Checks can resume%No action is needed%',
+     and kind='github_connection_recovery')
+    like '%GitHub monitoring restored%Checks can resume%No action is needed%',
   'the recovery notice explains that verified checks can resume'
 );
 select is(
