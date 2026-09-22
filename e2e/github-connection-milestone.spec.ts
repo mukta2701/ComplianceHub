@@ -165,10 +165,13 @@ test.describe("GitHub connection milestone", () => {
     expect(claimError).toBeNull();
     expect(typeof claimedInstallationId).toBe("string");
 
+    // A claimed installation stays unverified until its first reconciliation succeeds.
     // Owner: plain-language status, exact permissions, scope totals, management controls.
     await ownerPage.goto("/app/integrations");
     const installation = ownerPage.getByRole("article", { name: "Example-Co GitHub installation" });
-    await expect(installation.getByText("Healthy")).toBeVisible();
+    await expect(installation.getByText("Pending first check")).toBeVisible();
+    await expect(installation.getByText("ComplianceHub has not verified this GitHub connection yet. Its health is unconfirmed.")).toBeVisible();
+    await expect(installation.getByText("ComplianceHub will check automatically. An Owner can run the first check sooner.")).toBeVisible();
     await expect(installation.getByText(/Approved read-only access:/)).toBeVisible();
     await expect(installation.getByText("2 repositories · 0 selected · 2 available")).toBeVisible();
     await expect(ownerPage.getByRole("link", { name: "Manage repository access" })).toHaveAttribute("href", "/api/github/setup");
