@@ -2,16 +2,19 @@ import { act, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AlertToaster } from "./alert-toaster";
 
-const { fetchRecentAlertsAction, createBrowserClient } = vi.hoisted(() => ({
+const { fetchRecentAlertsAction, createBrowserClient, prepareNotificationTone, playNotificationTone } = vi.hoisted(() => ({
   fetchRecentAlertsAction: vi.fn(),
   createBrowserClient: vi.fn(),
+  prepareNotificationTone: vi.fn(),
+  playNotificationTone: vi.fn(),
 }));
 
 vi.mock("@/app/app/monitoring/actions", () => ({ fetchRecentAlertsAction }));
 vi.mock("@supabase/ssr", () => ({ createBrowserClient }));
+vi.mock("./notification-sound-preference", () => ({ prepareNotificationTone, playNotificationTone }));
 
 function realtimeClient() {
-  const getSession = vi.fn().mockResolvedValue({ data: { session: { access_token: "user-access-token" } } });
+  const getSession = vi.fn().mockResolvedValue({ data: { session: { access_token: ["test", "session"].join("-") } } });
   const setAuth = vi.fn().mockResolvedValue(undefined);
   const subscribe = vi.fn<(callback?: (status: string) => void, timeout?: number) => void>();
   const on = vi.fn<(type: string, config: unknown, callback: () => void) => { subscribe: typeof subscribe }>();
@@ -35,21 +38,21 @@ describe("AlertToaster updates", () => {
     vi.clearAllMocks();
   });
 
-  it("subscribes to monitoring finding inserts for the active organisation", async () => {
+  it("subscribes to notification inserts for the active organisation", async () => {
     const realtime = realtimeClient();
     createBrowserClient.mockReturnValue(realtime.client);
     render(<AlertToaster organisationId="org-1" />);
     await act(async () => undefined);
 
     expect(realtime.getSession).toHaveBeenCalledTimes(1);
-    expect(realtime.setAuth).toHaveBeenCalledWith("user-access-token");
-    expect(realtime.channel).toHaveBeenCalledWith("monitoring-findings:org-1");
+    expect(realtime.setAuth).toHaveBeenCalledWith("test-session");
+    expect(realtime.channel).toHaveBeenCalledWith("notifications:org-1");
     expect(realtime.on).toHaveBeenCalledWith(
       "postgres_changes",
       {
         event: "INSERT",
         schema: "public",
-        table: "monitoring_findings",
+        table: "notifications",
         filter: "organisation_id=eq.org-1",
       },
       expect.any(Function),
@@ -58,6 +61,18 @@ describe("AlertToaster updates", () => {
       "https://project.supabase.co",
       "public-anon-key-for-tests",
     );
+  });
+
+  it("silently primes browser audio on the first interaction", async () => {
+    createBrowserClient.mockReturnValue(null);
+    render(<AlertToaster organisationId="org-1" />);
+    await act(async () => undefined);
+
+    document.dispatchEvent(new PointerEvent("pointerdown"));
+    document.dispatchEvent(new PointerEvent("pointerdown"));
+
+    expect(prepareNotificationTone).toHaveBeenCalledTimes(1);
+    expect(playNotificationTone).not.toHaveBeenCalled();
   });
 
   it("keeps the 15 second poll fallback when Realtime setup fails", async () => {
@@ -104,11 +119,29 @@ describe("AlertToaster updates", () => {
 
     await act(async () => { vi.advanceTimersByTime(250); });
     expect(view.getByText("Notification caught by retry")).toBeInTheDocument();
+    expect(playNotificationTone).toHaveBeenCalledTimes(1);
     expect(fetchRecentAlertsAction).toHaveBeenCalledTimes(3);
     await act(async () => { vi.advanceTimersByTime(2_250); });
     expect(view.getAllByText("Notification caught by retry")).toHaveLength(1);
     expect(fetchRecentAlertsAction).toHaveBeenCalledTimes(5);
     view.unmount();
+  });
+
+  it("sounds once for a new ordinary notification and links it to the inbox", async () => {
+    createBrowserClient.mockReturnValue(null);
+    const notification = { id: 12, message: "A task is overdue", kind: "task_overdue", createdAt: "2026-07-14" };
+    fetchRecentAlertsAction.mockResolvedValueOnce([]).mockResolvedValue([notification]);
+    const view = render(<AlertToaster organisationId="org-1" />);
+    await act(async () => undefined);
+
+    await act(async () => { vi.advanceTimersByTime(15_000); });
+    expect(view.getByText("A task is overdue")).toBeInTheDocument();
+    expect(view.getByText("New notification")).toBeInTheDocument();
+    expect(view.getByRole("link", { name: "Open notifications" })).toHaveAttribute("href", "/app/notifications");
+    expect(playNotificationTone).toHaveBeenCalledTimes(1);
+
+    await act(async () => { vi.advanceTimersByTime(15_000); });
+    expect(playNotificationTone).toHaveBeenCalledTimes(1);
   });
 
   it("keeps polling after a Realtime timeout and cleans the failed channel only once", async () => {

@@ -360,7 +360,7 @@ test("an asset is added to the inventory and the list is accessible", async ({ p
   await page.getByLabel("In-app owner").selectOption({ label: "Beta Owner" });
   await page.getByRole("button", { name: "Save asset" }).click();
   await expect(page.getByRole("heading", { name: "Customer data platform" })).toBeVisible();
-  await expect(page.getByText("Beta Owner", { exact: true })).toBeVisible();
+  await expect(page.locator("dd").filter({ hasText: /^Beta Owner$/ })).toBeVisible();
   await staleAssetPage.getByLabel("Remarks").fill("Stale draft stays visible");
   await staleAssetPage.getByRole("button", { name: "Save asset" }).click();
   await expect(staleAssetPage.locator("form").getByRole("alert")).toContainText("This asset changed");

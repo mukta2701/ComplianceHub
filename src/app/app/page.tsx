@@ -110,6 +110,8 @@ export default async function AppHome() {
     liveEvidence,
     policies,
     soaRegisters,
+    assets,
+    tasks,
     members,
     invites,
     openRiskCount,
@@ -139,6 +141,8 @@ export default async function AppHome() {
     supabase.from("evidence").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).in("status", ["current", "expiring", "expired"]).then(requireDashboardCount),
     supabase.from("policies").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).then(requireDashboardCount),
     supabase.from("soa_registers").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).then(requireDashboardCount),
+    supabase.from("assets").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).then(requireDashboardCount),
+    supabase.from("tasks").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).then(requireDashboardCount),
     supabase.from("memberships").select("user_id", { count: "exact", head: true }).eq("organisation_id", organisation.id).then(requireDashboardCount),
     supabase.from("invitations").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).then(requireDashboardCount),
     supabase.from("risks").select("id", { count: "exact", head: true }).eq("organisation_id", organisation.id).neq("status", "closed").then(requireDashboardCount),
@@ -232,15 +236,31 @@ export default async function AppHome() {
     }
   }
 
-  const checklist = buildOnboardingChecklist({
+  const fullChecklist = buildOnboardingChecklist({
     hasAssessment: (assessments ?? 0) > 0,
     hasSoa: (soaRegisters ?? 0) > 0 || (snapshots ?? 0) > 0,
     hasRisk: (allRisks ?? 0) > 0,
     hasEvidence: (liveEvidence ?? 0) > 0,
     hasPolicy: (policies ?? 0) > 0,
+    hasAsset: (assets ?? 0) > 0,
+    hasTask: (tasks ?? 0) > 0,
     hasTeam: (members ?? 0) > 1 || (invites ?? 0) > 0,
   });
-
+  const programmeSteps = fullChecklist.steps
+    .filter((step) => step.id !== "asset" && step.id !== "task")
+    .map((step) => step.id === "assessment"
+      ? { ...step, label: "Run your first readiness assessment", description: "Answer the gap questions to see where you stand and seed your SoA." }
+      : step.id === "policy"
+        ? { ...step, label: "Publish your first policy", description: "Start from a template and have something to approve and circulate." }
+        : step);
+  const programmeDoneCount = programmeSteps.filter((step) => step.done).length;
+  const checklist = {
+    steps: programmeSteps,
+    doneCount: programmeDoneCount,
+    total: programmeSteps.length,
+    percent: Math.round((programmeDoneCount / programmeSteps.length) * 100),
+    complete: programmeDoneCount === programmeSteps.length,
+  };
 
   const unscoredRisks = (risksForHeat ?? []).length - riskTotal;
   const upcomingTasks = (dueTasks ?? []).filter((task) => task.due_on && task.due_on >= today).slice(0, 4);

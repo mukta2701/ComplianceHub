@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getAuthUser, getMembership } from "@/lib/app-context";
-import { AppShell } from "@/components/app-shell";
+import { AppShell, type WorkspaceChoice } from "@/components/app-shell";
 import { WorkspaceSessionSync } from "@/components/workspace-session-sync";
 import { one } from "@/lib/supabase/one";
 
@@ -25,12 +25,17 @@ export default async function ProtectedLayout({ children }: { children: React.Re
         .eq("organisation_id", membership.organisation_id)
         .is("read_at", null)
     : Promise.resolve({ count: 0 });
-  const [{ count: unread }, { data: profile }] = await Promise.all([
+  const [{ count: unread }, { data: profile }, { data: membershipRows }] = await Promise.all([
     unreadQuery,
     supabase.from("profiles").select("display_name").eq("id", user.id).maybeSingle(),
+    supabase.from("memberships").select("organisation_id,role,organisations(id,name)").eq("user_id", user.id).order("created_at"),
   ]);
   const organisation = membership ? one(membership.organisations) : null;
   const orgName = organisation?.name ?? "Your workspace";
   const displayName = profile?.display_name ?? user.email ?? "Member";
-  return <><WorkspaceSessionSync userId={user.id} /><AppShell organisationId={organisation?.id ?? null} orgName={orgName} orgInitials={initials(orgName)} userInitials={initials(displayName)} unreadCount={unread ?? 0} role={membership?.role ?? null} jobTitle={membership?.job_title ?? null}>{children}</AppShell></>;
+  const workspaces = (membershipRows ?? []).flatMap((row): WorkspaceChoice[] => {
+    const workspace = one(row.organisations);
+    return workspace ? [{ id: workspace.id, name: workspace.name, role: row.role }] : [];
+  });
+  return <><WorkspaceSessionSync userId={user.id} /><AppShell organisationId={organisation?.id ?? null} orgName={orgName} orgInitials={initials(orgName)} userInitials={initials(displayName)} userName={displayName} userEmail={user.email ?? ""} workspaces={workspaces} unreadCount={unread ?? 0} role={membership?.role ?? null} jobTitle={membership?.job_title ?? null}>{children}</AppShell></>;
 }

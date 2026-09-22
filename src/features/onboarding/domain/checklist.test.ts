@@ -10,10 +10,12 @@ describe("buildOnboardingChecklist", () => {
       hasSoa: false,
       hasEvidence: false,
       hasTeam: false,
+      hasAsset: false,
+      hasTask: false,
     });
-    expect(checklist.total).toBe(7);
+    expect(checklist.total).toBe(9);
     expect(checklist.doneCount).toBe(1);
-    expect(checklist.percent).toBe(14); // round(1/7 * 100)
+    expect(checklist.percent).toBe(11);
     expect(checklist.complete).toBe(false);
     // The workspace step is first and always done; the rest are actionable.
     expect(checklist.steps[0]).toMatchObject({ id: "workspace", done: true });
@@ -33,11 +35,13 @@ describe("buildOnboardingChecklist", () => {
       hasSoa: false,
       hasEvidence: false,
       hasTeam: false,
+      hasAsset: false,
+      hasTask: false,
     });
-    // workspace + assessment + policy = 3 of 7.
+    // workspace + assessment + policy = 3 of 9.
     expect(checklist.doneCount).toBe(3);
-    expect(checklist.total).toBe(7);
-    expect(checklist.percent).toBe(43); // round(3/7 * 100)
+    expect(checklist.total).toBe(9);
+    expect(checklist.percent).toBe(33);
     expect(checklist.complete).toBe(false);
   });
 
@@ -49,9 +53,11 @@ describe("buildOnboardingChecklist", () => {
       hasSoa: true,
       hasEvidence: true,
       hasTeam: true,
+      hasAsset: true,
+      hasTask: true,
     });
-    expect(checklist.doneCount).toBe(7);
-    expect(checklist.total).toBe(7);
+    expect(checklist.doneCount).toBe(9);
+    expect(checklist.total).toBe(9);
     expect(checklist.percent).toBe(100);
     expect(checklist.complete).toBe(true);
   });
@@ -64,6 +70,8 @@ describe("buildOnboardingChecklist", () => {
       hasSoa: true,
       hasEvidence: true,
       hasTeam: true,
+      hasAsset: true,
+      hasTask: true,
     });
     expect(without.steps.some((s) => s.id === "integration")).toBe(false);
 
@@ -74,13 +82,15 @@ describe("buildOnboardingChecklist", () => {
       hasSoa: true,
       hasEvidence: true,
       hasTeam: true,
+      hasAsset: true,
+      hasTask: true,
       hasIntegration: false,
     });
     // The tracker step lands last and is still outstanding, so the all-else-done
     // workspace is NOT complete and the card stays visible.
-    expect(withStep.total).toBe(8);
-    expect(withStep.doneCount).toBe(7);
-    expect(withStep.percent).toBe(88); // round(7/8 * 100)
+    expect(withStep.total).toBe(10);
+    expect(withStep.doneCount).toBe(9);
+    expect(withStep.percent).toBe(90);
     expect(withStep.complete).toBe(false);
     expect(withStep.steps[withStep.steps.length - 1]).toMatchObject({ id: "integration", done: false });
 
@@ -91,22 +101,26 @@ describe("buildOnboardingChecklist", () => {
       hasSoa: true,
       hasEvidence: true,
       hasTeam: true,
+      hasAsset: true,
+      hasTask: true,
       hasIntegration: true,
     });
-    expect(allDone.total).toBe(8);
-    expect(allDone.doneCount).toBe(8);
+    expect(allDone.total).toBe(10);
+    expect(allDone.doneCount).toBe(10);
     expect(allDone.percent).toBe(100);
     expect(allDone.complete).toBe(true);
   });
 });
 
 describe("buildOnboardingChecklist order", () => {
-  it("orders steps by real data dependency: assessment, soa, risk, evidence, policy, team", () => {
+  it("orders steps by the first useful compliance journey", () => {
     const { steps } = buildOnboardingChecklist({
-      hasAssessment: false, hasSoa: false, hasRisk: false, hasEvidence: false, hasPolicy: false, hasTeam: false,
+      hasAssessment: false, hasSoa: false, hasAsset: false, hasRisk: false, hasTask: false, hasEvidence: false, hasPolicy: false, hasTeam: false,
     });
     expect(steps.map((s) => s.id)).toEqual([
-      "workspace", "assessment", "soa", "risk", "evidence", "policy", "team",
+      "workspace", "assessment", "soa", "asset", "risk", "task", "evidence", "policy", "team",
     ]);
+    expect(steps.find((step) => step.id === "assessment")?.label).toBe("Start your first readiness assessment");
+    expect(steps.find((step) => step.id === "policy")?.label).toBe("Create your first policy");
   });
 });

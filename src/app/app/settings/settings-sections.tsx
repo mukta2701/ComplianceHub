@@ -3,14 +3,13 @@
 import { useEffect, useState, type ReactNode } from "react";
 import styles from "./settings-sections.module.css";
 
-export type SettingsSectionKey = "workspace" | "team" | "security" | "ai-assistance" | "connected-apps";
+export type SettingsSectionKey = "workspace" | "team" | "security" | "customer-trust";
 
 const sectionLinks: Array<{ key: SettingsSectionKey; label: string }> = [
   { key: "workspace", label: "Workspace" },
   { key: "team", label: "Team members" },
   { key: "security", label: "Security" },
-  { key: "ai-assistance", label: "AI assistance" },
-  { key: "connected-apps", label: "Connected assistants" },
+  { key: "customer-trust", label: "Customer trust" },
 ];
 
 function sectionFromHash(): SettingsSectionKey | undefined {
@@ -24,15 +23,13 @@ export function SettingsSections({
   workspace,
   team,
   security,
-  aiAssistance,
-  connectedApps,
+  customerTrust,
 }: {
   initialSection?: SettingsSectionKey;
   workspace: ReactNode;
   team: ReactNode;
   security: ReactNode;
-  aiAssistance: ReactNode;
-  connectedApps: ReactNode;
+  customerTrust: ReactNode;
 }) {
   const [activeSection, setActiveSection] = useState<SettingsSectionKey>(initialSection ?? "workspace");
 
@@ -51,8 +48,7 @@ export function SettingsSections({
     workspace,
     team,
     security,
-    "ai-assistance": aiAssistance,
-    "connected-apps": connectedApps,
+    "customer-trust": customerTrust,
   };
 
   return (
@@ -80,7 +76,7 @@ export function SettingsSections({
       <div className={styles.content}>
         {sectionLinks.map((section) => (
           <div
-            id={section.key === "ai-assistance" || section.key === "connected-apps" ? undefined : section.key}
+            id={section.key}
             key={section.key}
             hidden={activeSection !== section.key}
           >

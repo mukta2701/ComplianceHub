@@ -4,12 +4,10 @@ import { Icon } from "@/components/icons";
 import { SubTabs } from "@/components/sub-tabs";
 import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import { one } from "@/lib/supabase/one";
-import { inviteMemberAction, changeMemberRoleAction, removeMemberAction, resendInvitationAction, revokeInvitationAction, updateMemberJobTitleAction } from "../actions";
+import { changeMemberRoleAction, removeMemberAction, revokeInvitationAction, updateMemberJobTitleAction } from "../actions";
 import { canInviteRole, canManageMembership, roleLabel, type MembershipRole } from "@/features/organisations/domain/access";
-import { listUserOAuthGrants } from "@/features/auth/application/oauth-grants";
-import { ConnectedApplications } from "./connected-applications";
-import { AiWorkspaceSettings } from "./ai-settings";
 import { SettingsSections } from "./settings-sections";
+import { InvitationForm } from "./invitation-form";
 import styles from "./settings-sections.module.css";
 
 const connectionsMetadata = workspaceAccess("owner").section("connections");
@@ -20,25 +18,11 @@ function initials(name: string): string {
   return (parts[0][0] + (parts[1]?.[0] ?? "")).toUpperCase();
 }
 
-const invitationStatusMessage = {
-  sent: "Invitation email sent.",
-  failed: "Invitation saved, but email delivery failed. You can retry it below.",
-  not_configured: "Invitation saved, but email delivery is not configured. Configure Resend, then retry it below.",
-  pending: "Invitation saved and is waiting for delivery.",
-} as const;
-
-function deliveryLabel(status: string) {
-  if (status === "not_configured") return "Not configured";
-  return status.charAt(0).toUpperCase() + status.slice(1);
-}
-
-export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ inviteStatus?: string; inviteId?: string }> }) {
+export default async function SettingsPage() {
   const { supabase, user, membership, organisation } = await requireAppContext();
-  const { inviteStatus, inviteId } = await searchParams;
   const settingsAccess = workspaceAccess(membership.role).section("settings");
   const isOwner = settingsAccess.canManageOperation("change-member-role");
   const canManageTeam = settingsAccess.canManage;
-  const canChangeAiSettings = settingsAccess.canManageOperation("change-ai-settings");
 
   const { data: org } = await supabase.from("organisations").select("slug,created_at").eq("id", organisation.id).maybeSingle();
   const { data: memberRows } = await supabase.from("memberships").select("user_id,role,job_title,created_at,profiles(display_name)").eq("organisation_id", organisation.id).order("created_at", { ascending: true });
@@ -51,11 +35,6 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       .order("created_at", { ascending: false })
     : { data: null };
   const pendingInvites = invites ?? [];
-  const oauthGrantState = await listUserOAuthGrants(supabase);
-  const { data: aiSettings } = await supabase.from("ai_workspace_settings").select("enabled").eq("organisation_id", organisation.id).maybeSingle();
-  const statusMessage = inviteStatus && inviteStatus in invitationStatusMessage
-    ? invitationStatusMessage[inviteStatus as keyof typeof invitationStatusMessage]
-    : null;
   const created = org?.created_at ? new Date(org.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }) : "—";
 
   const workspace = (
@@ -138,7 +117,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         <section className={styles.invitationArea} id="invites">
           <div className={styles.invitationHeader}>
             <h3>Pending invitations</h3>
-            <p className={styles.sectionNote}>Active invitations stay here until accepted or revoked. Failed delivery can be retried.</p>
+            <p className={styles.sectionNote}>Links are shown only when created. Create another invitation for the same email to replace a lost or expired link.</p>
           </div>
           <div className={styles.invitationList}>
             {pendingInvites.map((invitation) => (
@@ -149,9 +128,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
                   <small>{invitation.job_title ? `${invitation.job_title} · ` : ""}Expires {new Date(invitation.expires_at).toLocaleDateString("en-GB")}</small>
                 </span>
                 <Pill tone={invitation.role === "admin" ? "green" : "neutral"}>{roleLabel(invitation.role as MembershipRole)}</Pill>
-                <Pill tone={invitation.delivery_status === "sent" ? "green" : "amber"}>{deliveryLabel(invitation.delivery_status)}</Pill>
+                <Pill tone="amber">Awaiting acceptance</Pill>
                 {canInviteRole(membership.role, invitation.role as MembershipRole) && <>
-                  <form action={resendInvitationAction}><input type="hidden" name="invitationId" value={invitation.id} /><button className={`button secondary ${styles.smallButton}`}>{invitation.delivery_status === "sent" ? "Resend" : "Retry"}</button></form>
                   <form action={revokeInvitationAction}><input type="hidden" name="invitationId" value={invitation.id} /><button className={`button secondary ${styles.smallButton}`}>Revoke</button></form>
                 </>}
               </div>
@@ -161,12 +139,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       )}
 
       {canManageTeam && (
-        <form action={inviteMemberAction} className={styles.inviteForm}>
-          <label>Invite by email<input type="email" name="email" required placeholder="member@example.com" /></label>
-          <label>Job title<input name="jobTitle" maxLength={120} placeholder="Developer, CTO, Employee…" /></label>
-          <label>Role<select name="role"><option value="member">Member</option>{isOwner && <option value="admin">Admin</option>}</select></label>
-          <button className="button primary"><Icon name="plus" />Create invite</button>
-        </form>
+        <InvitationForm key={organisation.id} canInviteAdmin={isOwner} />
       )}
     </Card>
   );
@@ -179,6 +152,19 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
     </Card>
   );
 
+  const customerTrust = (
+    <Card className={styles.card}>
+      <div className={styles.sectionHeader}>
+        <h2>Customer trust</h2>
+        <p>Share an optional, customer-facing security summary. It stays private until an Owner or Admin publishes it.</p>
+      </div>
+      <div className={styles.integratedSection}>
+        <p>Choose exactly what prospects can see. Risks, findings, evidence files and policy contents remain private.</p>
+        <Link className="button secondary" href="/app/trust">Manage Trust Center</Link>
+      </div>
+    </Card>
+  );
+
   return <>
     <PageIntro eyebrow="SETTINGS" title="Organisation settings" body={`Manage ${organisation.name}, your team and workspace security. Your role: ${roleLabel(membership.role)}.`} />
     <SubTabs tabs={[
@@ -186,12 +172,12 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       { href: connectionsMetadata.href, label: connectionsMetadata.label },
     ]} />
     <SettingsSections
-      initialSection={statusMessage ? "team" : undefined}
+      initialSection="team"
       workspace={workspace}
-      team={<>{statusMessage && <div className={styles.statusMessage} role="status"><b>{statusMessage}</b>{inviteId && <p>Invitation reference: {inviteId}</p>}</div>}{team}</>}
+      team={team}
       security={security}
-      aiAssistance={<div className={styles.integratedSection}><AiWorkspaceSettings enabled={aiSettings?.enabled === true} isOwner={canChangeAiSettings} /></div>}
-      connectedApps={<div className={styles.integratedSection}><ConnectedApplications state={oauthGrantState} /></div>}
+      customerTrust={customerTrust}
     />
   </>;
 }
+import Link from "next/link";

@@ -30,6 +30,17 @@ vi.mock("@/lib/supabase/server", () => ({
         chain.maybeSingle = vi.fn(() => Promise.resolve({ data: { display_name: "Preview Member" } }));
         return chain;
       }
+      if (table === "memberships") {
+        const chain: Record<string, unknown> = {};
+        chain.select = vi.fn(() => chain);
+        chain.eq = vi.fn(() => chain);
+        chain.order = vi.fn(() => Promise.resolve({ data: [{
+          organisation_id: "org-1",
+          role: "member",
+          organisations: { id: "org-1", name: "Example Ltd" },
+        }] }));
+        return chain;
+      }
       throw new Error(`Unexpected table ${table}`);
     },
   }),

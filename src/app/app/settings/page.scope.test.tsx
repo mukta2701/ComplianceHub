@@ -23,8 +23,9 @@ vi.mock("../actions", () => ({
 }));
 vi.mock("./connected-applications", () => ({ ConnectedApplications: () => null }));
 vi.mock("./ai-settings", () => ({ AiWorkspaceSettings: () => null }));
+vi.mock("./invitation-form", () => ({ InvitationForm: () => <button>Create invite</button> }));
 
-function activeContext(role: "owner" | "member" = "owner") {
+function activeContext(role: "owner" | "member" = "owner", invitations: Array<Record<string, unknown>> = []) {
   const rows: Record<string, Array<Record<string, unknown>>> = {
     organisations: [{ slug: "active-organisation", created_at: "2026-08-18T00:00:00Z" }],
     memberships: [
@@ -45,7 +46,7 @@ function activeContext(role: "owner" | "member" = "owner") {
         profiles: { display_name: "Sibling-only member" },
       },
     ],
-    invitations: [],
+    invitations,
     ai_workspace_settings: [],
   };
   const supabase = {
@@ -93,25 +94,26 @@ describe("Settings active organisation scope", () => {
   it("does not list a member from a sibling organisation", async () => {
     const { default: SettingsPage } = await import("./page");
 
-    render(await SettingsPage({ searchParams: Promise.resolve({}) }));
+    render(await SettingsPage());
 
     expect(screen.queryAllByText("Sibling-only member")).toHaveLength(0);
     expect(hoisted.queries).toContainEqual({ table: "memberships", column: "organisation_id", value: ORGANISATION_ID });
   });
 
-  it("links Settings navigation to connected assistants", async () => {
+  it("routes connected services through Connections", async () => {
     const { default: SettingsPage } = await import("./page");
 
-    render(await SettingsPage({ searchParams: Promise.resolve({}) }));
+    render(await SettingsPage());
 
-    expect(screen.getByRole("link", { name: "Connected assistants" })).toHaveAttribute("href", "/app/settings#connected-apps");
+    expect(screen.getByRole("link", { name: "Connections" })).toHaveAttribute("href", "/app/integrations");
+    expect(screen.queryByRole("link", { name: "Connected assistants" })).not.toBeInTheDocument();
   });
 
   it("keeps member management controls out of view for workspace members", async () => {
     hoisted.requireContext.mockResolvedValue(activeContext("member"));
     const { default: SettingsPage } = await import("./page");
 
-    render(await SettingsPage({ searchParams: Promise.resolve({}) }));
+    render(await SettingsPage());
 
     expect(screen.getByText("Active member")).toBeVisible();
     expect(screen.getByText("Member")).toBeVisible();
@@ -122,19 +124,43 @@ describe("Settings active organisation scope", () => {
   it("offers authorised workspace owners a compact member-details disclosure", async () => {
     const { default: SettingsPage } = await import("./page");
 
-    render(await SettingsPage({ searchParams: Promise.resolve({}) }));
+    render(await SettingsPage());
 
     expect(screen.getByText("Active member")).toBeVisible();
     expect(screen.getByText("Edit details")).toBeVisible();
   });
 
-  it("opens team members after an invitation result returns without a hash", async () => {
-    window.history.replaceState({}, "", "/app/settings");
+  it("shows the invitation form to an authorised workspace owner", async () => {
     const { default: SettingsPage } = await import("./page");
 
-    render(await SettingsPage({ searchParams: Promise.resolve({ inviteStatus: "sent", inviteId: "invite-1" }) }));
+    render(await SettingsPage());
 
-    expect(screen.getByRole("status")).toHaveTextContent("Invitation email sent.");
-    expect(screen.getByText("Active member")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Create invite" })).toBeVisible();
+  });
+
+  it("presents pending invitations as provider-free links awaiting acceptance", async () => {
+    hoisted.requireContext.mockResolvedValue(activeContext("owner", [{
+      id: "30000000-0000-4000-8000-000000000003",
+      organisation_id: ORGANISATION_ID,
+      email: "member@example.com",
+      role: "member",
+      job_title: "Developer",
+      expires_at: "2026-09-29T00:00:00Z",
+      accepted_at: null,
+      revoked_at: null,
+      delivery_status: "not_configured",
+      last_delivery_attempt_at: "2026-09-22T00:00:00Z",
+      delivery_attempt_count: 1,
+      created_at: "2026-09-22T00:00:00Z",
+    }]));
+    const { default: SettingsPage } = await import("./page");
+
+    render(await SettingsPage());
+
+    expect(screen.getByText(/Links are shown only when created/)).toBeVisible();
+    expect(screen.getByText("Awaiting acceptance")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Revoke" })).toBeVisible();
+    expect(screen.queryByText(/email delivery is not configured/i)).not.toBeInTheDocument();
   });
 });
