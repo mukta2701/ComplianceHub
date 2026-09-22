@@ -86,8 +86,13 @@ export async function inviteMemberAction(formData: FormData) {
     },
   );
   if (!issued || !issuedTokenHash) throw new Error("Could not create the invitation");
-  const outcome = await deliverInvitation(supabase, organisation.name, issued, result.token, issuedTokenHash);
-  redirectToInvitationStatus(outcome, issued.id);
+  revalidatePath("/app/settings");
+  return {
+    invitationId: issued.id,
+    email: issued.email,
+    expiresAt: issued.expiresAt,
+    invitationPath: `/invite/${result.token}`,
+  };
 }
 
 export async function revokeInvitationAction(formData: FormData) {

@@ -4,10 +4,10 @@ import { Icon } from "@/components/icons";
 import { SubTabs } from "@/components/sub-tabs";
 import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import { one } from "@/lib/supabase/one";
-import { inviteMemberAction, changeMemberRoleAction, removeMemberAction, resendInvitationAction, revokeInvitationAction, updateMemberJobTitleAction } from "../actions";
+import { changeMemberRoleAction, removeMemberAction, revokeInvitationAction, updateMemberJobTitleAction } from "../actions";
 import { canInviteRole, canManageMembership, roleLabel, type MembershipRole } from "@/features/organisations/domain/access";
-import { invitationEmailDeliveryConfigured } from "@/features/organisations/infrastructure/invitation-mail";
 import { SettingsSections } from "./settings-sections";
+import { InvitationForm } from "./invitation-form";
 import styles from "./settings-sections.module.css";
 
 const connectionsMetadata = workspaceAccess("owner").section("connections");
@@ -18,23 +18,9 @@ function initials(name: string): string {
   return (parts[0][0] + (parts[1]?.[0] ?? "")).toUpperCase();
 }
 
-const invitationStatusMessage = {
-  sent: "Invitation email sent.",
-  failed: "Invitation saved, but email delivery failed. You can retry it below.",
-  not_configured: "Invitation saved, but email delivery is not configured. Configure the invitation email service before sending it.",
-  pending: "Invitation saved and is waiting for delivery.",
-} as const;
-
-function deliveryLabel(status: string, emailDeliveryConfigured: boolean) {
-  if (status === "not_configured") return emailDeliveryConfigured ? "Ready to retry" : "Not configured";
-  return status.charAt(0).toUpperCase() + status.slice(1);
-}
-
-export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ inviteStatus?: string; inviteId?: string }> }) {
+export default async function SettingsPage() {
   const { supabase, user, membership, organisation } = await requireAppContext();
-  const { inviteStatus, inviteId } = await searchParams;
   const settingsAccess = workspaceAccess(membership.role).section("settings");
-  const emailDeliveryConfigured = invitationEmailDeliveryConfigured();
   const isOwner = settingsAccess.canManageOperation("change-member-role");
   const canManageTeam = settingsAccess.canManage;
 
@@ -49,9 +35,6 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       .order("created_at", { ascending: false })
     : { data: null };
   const pendingInvites = invites ?? [];
-  const statusMessage = inviteStatus && inviteStatus in invitationStatusMessage
-    ? invitationStatusMessage[inviteStatus as keyof typeof invitationStatusMessage]
-    : null;
   const created = org?.created_at ? new Date(org.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }) : "—";
 
   const workspace = (
@@ -134,9 +117,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         <section className={styles.invitationArea} id="invites">
           <div className={styles.invitationHeader}>
             <h3>Pending invitations</h3>
-            <p className={styles.sectionNote}>{emailDeliveryConfigured
-              ? "Active invitations stay here until accepted or revoked. Failed delivery can be retried."
-              : "Email delivery is unavailable, so pending invitations can only be revoked until it is configured."}</p>
+            <p className={styles.sectionNote}>Links are shown only when created. Create another invitation for the same email to replace a lost or expired link.</p>
           </div>
           <div className={styles.invitationList}>
             {pendingInvites.map((invitation) => (
@@ -147,9 +128,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
                   <small>{invitation.job_title ? `${invitation.job_title} · ` : ""}Expires {new Date(invitation.expires_at).toLocaleDateString("en-GB")}</small>
                 </span>
                 <Pill tone={invitation.role === "admin" ? "green" : "neutral"}>{roleLabel(invitation.role as MembershipRole)}</Pill>
-                <Pill tone={invitation.delivery_status === "sent" ? "green" : "amber"}>{deliveryLabel(invitation.delivery_status, emailDeliveryConfigured)}</Pill>
+                <Pill tone="amber">Awaiting acceptance</Pill>
                 {canInviteRole(membership.role, invitation.role as MembershipRole) && <>
-                  {emailDeliveryConfigured && <form action={resendInvitationAction}><input type="hidden" name="invitationId" value={invitation.id} /><button className={`button secondary ${styles.smallButton}`}>{invitation.delivery_status === "sent" ? "Resend" : "Retry"}</button></form>}
                   <form action={revokeInvitationAction}><input type="hidden" name="invitationId" value={invitation.id} /><button className={`button secondary ${styles.smallButton}`}>Revoke</button></form>
                 </>}
               </div>
@@ -159,18 +139,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       )}
 
       {canManageTeam && (
-        <>
-        {!emailDeliveryConfigured && <div className={styles.statusMessage} role="note">
-          <b>Email delivery is not configured.</b>
-          <p>New invitations will be saved as pending but will not be emailed. Configure the invitation email service before sending or retrying them.</p>
-        </div>}
-        <form action={inviteMemberAction} className={styles.inviteForm}>
-          <label>Invite by email<input type="email" name="email" required placeholder="member@example.com" /></label>
-          <label>Job title<input name="jobTitle" maxLength={120} placeholder="Developer, CTO, Employee…" /></label>
-          <label>Role<select name="role"><option value="member">Member</option>{isOwner && <option value="admin">Admin</option>}</select></label>
-          <button className="button primary"><Icon name="plus" />Create invite</button>
-        </form>
-        </>
+        <InvitationForm key={organisation.id} canInviteAdmin={isOwner} />
       )}
     </Card>
   );
@@ -203,9 +172,9 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       { href: connectionsMetadata.href, label: connectionsMetadata.label },
     ]} />
     <SettingsSections
-      initialSection={statusMessage ? "team" : undefined}
+      initialSection="team"
       workspace={workspace}
-      team={<>{statusMessage && <div className={styles.statusMessage} role="status"><b>{statusMessage}</b>{inviteId && <p>Invitation reference: {inviteId}</p>}</div>}{team}</>}
+      team={team}
       security={security}
       customerTrust={customerTrust}
     />

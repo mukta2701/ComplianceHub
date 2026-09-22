@@ -61,6 +61,54 @@
   font-size: 12px;
 }
 
+.invitationResult {
+  display: grid;
+  gap: 12px;
+  padding: 18px 22px;
+  border-top: 1px solid #bdd7c7;
+  background: #f0f8f3;
+}
+
+.invitationResult p {
+  margin: 4px 0 0;
+  color: #4f6257;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.invitationResult label {
+  display: grid;
+  gap: 5px;
+  color: #31483a;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.invitationResult input {
+  width: 100%;
+  border: 1px solid #a9c7b5;
+  border-radius: 8px;
+  background: #fff;
+  padding: 9px 10px;
+  color: #1d2b22;
+  font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.invitationResultActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.formError {
+  margin: 0;
+  padding: 12px 22px;
+  border-top: 1px solid #efc7c7;
+  background: #fff4f4;
+  color: #8e2424;
+  font-size: 13px;
+}
+
 .card {
   min-width: 0;
   overflow: hidden;

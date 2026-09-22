@@ -90,13 +90,11 @@ describe("invitation delivery actions", () => {
     hoisted.revalidatePath.mockReset();
   });
 
-  it("issues atomically, sends the email, records delivery, and never redirects with the raw token", async () => {
+  it("issues atomically and returns a one-time link without contacting an email provider", async () => {
     const supabase = invitationClient();
     hoisted.ctx = { supabase, user: { id: USER_ID }, membership: { role: "owner" }, organisation: { id: ORG_ID, name: "Acme" } };
-    hoisted.sendInvitationEmail.mockResolvedValue({ status: "sent", providerMessageId: "email_123" });
 
-    const action = inviteMemberAction(form({ email: " MEMBER@example.com ", role: "member", jobTitle: "Developer" }));
-    await expect(action).rejects.toThrow(`REDIRECT:/app/settings?inviteStatus=sent&inviteId=${INVITE_ID}`);
+    const result = await inviteMemberAction(form({ email: " MEMBER@example.com ", role: "member", jobTitle: "Developer" }));
 
     expect(hoisted.enforceRateLimit).toHaveBeenCalledWith(`invite:${USER_ID}`, { limit: 10, windowMs: 60 * 60_000 });
     const issue = supabase.rpc.mock.calls.find(([name]) => name === "issue_invitation");
@@ -108,35 +106,13 @@ describe("invitation delivery actions", () => {
       new_token_hash: expect.stringMatching(/^[a-f0-9]{64}$/),
       new_expires_at: expect.any(String),
     });
-    const mail = hoisted.sendInvitationEmail.mock.calls[0][0];
-    expect(mail).toMatchObject({ invitationId: INVITE_ID, recipientEmail: "member@example.com", organisationName: "Acme" });
-    expect(mail.invitationUrl).toMatch(/^https:\/\/app\.example\.com\/invite\/[A-Za-z0-9_-]{43}$/);
-    const rawToken = mail.invitationUrl.split("/").at(-1);
-    expect(createHash("sha256").update(rawToken).digest("hex")).toBe(mail.tokenHash);
-    expect(String(await action.catch((error) => error.message))).not.toContain(rawToken);
-    expect(supabase.rpc).toHaveBeenCalledWith("record_invitation_delivery", {
-      target_invitation_id: INVITE_ID,
-      issued_token_hash: mail.tokenHash,
-      new_delivery_status: "sent",
-      new_provider_message_id: "email_123",
-      new_delivery_error: null,
-    });
-  });
-
-  it("retains a failed invitation and records a safe delivery failure for retry", async () => {
-    const supabase = invitationClient();
-    hoisted.ctx = { supabase, user: { id: USER_ID }, membership: { role: "admin" }, organisation: { id: ORG_ID, name: "Acme" } };
-    hoisted.sendInvitationEmail.mockResolvedValue({ status: "failed", error: "Invitation email provider could not be reached." });
-
-    await expect(inviteMemberAction(form({ email: "member@example.com", role: "member" })))
-      .rejects.toThrow(`REDIRECT:/app/settings?inviteStatus=failed&inviteId=${INVITE_ID}`);
-
-    expect(supabase.rpc.mock.calls.map(([name]) => name)).toEqual(["issue_invitation", "record_invitation_delivery"]);
-    expect(supabase.rpc).toHaveBeenLastCalledWith("record_invitation_delivery", expect.objectContaining({
-      target_invitation_id: INVITE_ID,
-      new_delivery_status: "failed",
-      new_delivery_error: "Invitation email provider could not be reached.",
-    }));
+    expect(result).toMatchObject({ invitationId: INVITE_ID, email: "member@example.com", expiresAt: expect.any(String) });
+    expect(result.invitationPath).toMatch(/^\/invite\/[A-Za-z0-9_-]{43}$/);
+    const rawToken = result.invitationPath.split("/").at(-1)!;
+    expect(createHash("sha256").update(rawToken).digest("hex")).toBe(issue?.[1].new_token_hash);
+    expect(supabase.rpc.mock.calls.map(([name]) => name)).toEqual(["issue_invitation"]);
+    expect(hoisted.sendInvitationEmail).not.toHaveBeenCalled();
+    expect(hoisted.revalidatePath).toHaveBeenCalledWith("/app/settings");
   });
 
   it("rotates the token through the resend RPC before retrying delivery", async () => {
