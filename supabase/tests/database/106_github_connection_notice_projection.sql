@@ -38,12 +38,12 @@ insert into public.memberships(organisation_id, user_id, role) values
 
 insert into public.github_installations(
   id, organisation_id, provider_installation_id, account_id, account_login,
-  account_type, repository_selection, status
+  account_type, repository_selection, status, health, health_diagnostic_code
 ) values
   ('91000000-0000-4111-8111-000000000201', '91000000-0000-4111-8111-000000000101',
-   91101, 91201, 'Projection-Co', 'Organization', 'selected', 'active'),
+   91101, 91201, 'Projection-Co', 'Organization', 'selected', 'active', 'owner_action_required', 'installation_suspended'),
   ('91000000-0000-4111-8111-000000000202', '91000000-0000-4111-8111-000000000101',
-   91102, 91202, 'Rollback-Co', 'Organization', 'selected', 'active');
+   91102, 91202, 'Rollback-Co', 'Organization', 'selected', 'active', 'owner_action_required', 'permission_mismatch');
 
 insert into public.alert_channels(
   id, organisation_id, type, connected_by, min_severity, enabled
@@ -132,6 +132,10 @@ select is(
   'a later projection retries successfully'
 );
 reset role;
+
+update public.github_installations
+set health = 'healthy', health_diagnostic_code = null
+where id = '91000000-0000-4111-8111-000000000201';
 
 set role service_role;
 select throws_ok(

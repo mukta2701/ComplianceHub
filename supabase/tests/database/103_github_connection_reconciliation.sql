@@ -297,6 +297,17 @@ select is(
   1,
   'the partial run records its unavailable count'
 );
+set role service_role;
+select is(
+  (public.record_github_connection_notice_server(
+    '78000000-0000-0000-0000-000000000101',
+    '78000000-0000-0000-0000-000000000201',
+    'incident', 'repository_unavailable', 'Owner-Co'
+  ) ->> 'is_new')::boolean,
+  true,
+  'the partial run projects an open incident before recovery'
+);
+reset role;
 update public.github_installations
 set reconciliation_locked_until = now() - interval '1 minute'
 where id = '78000000-0000-0000-0000-000000000201';
