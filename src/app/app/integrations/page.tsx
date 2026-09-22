@@ -5,6 +5,8 @@ import { workspaceAccess } from "@/features/organisations/domain/workspace-acces
 import { requireAppContext } from "@/lib/app-context";
 import { canShowDeveloperTools } from "@/lib/security/developer-tools";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
+import { listUserOAuthGrants } from "@/features/auth/application/oauth-grants";
+import { ConnectedApplications } from "../settings/connected-applications";
 import { createJiraOAuthGateway } from "@/features/integrations/application/jira-oauth";
 import { createSupabaseJiraConnectionStore, getFreshJiraAccessToken, type JiraPersistenceDatabase } from "@/features/integrations/application/jira-token-store";
 import { getJiraProviderConfig } from "@/features/integrations/application/provider-config";
@@ -239,6 +241,7 @@ export default async function IntegrationsPage({
     : jira === "select-project" && connectionId
       ? await loadJiraSetupData({ step: "project", id: connectionId, organisationId: organisation.id, userId: user.id })
       : null;
+  const oauthGrantState = await listUserOAuthGrants(supabase);
 
   return <>
     {(jira === "projects-saved" || jira === "setup-required" || jira === "connection-failed") && <Card role="status" style={{ padding: "16px", margin: "0 auto 16px", maxWidth: "1100px" }}>
@@ -264,6 +267,9 @@ export default async function IntegrationsPage({
         { href: connectionsAccess.href, label: connectionsAccess.label },
       ]} />}
     />
+    <div style={{ maxWidth: "1100px", margin: "16px auto" }}>
+      <ConnectedApplications state={oauthGrantState} />
+    </div>
     <GitHubInstallationPanel
       installations={(installationResult.data ?? []) as GitHubInstallationSummary[]}
       repositories={(repositorySummaryResult.data ?? []).map((repository) => ({

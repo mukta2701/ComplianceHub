@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { fetchRecentAlertsAction } from "@/app/app/monitoring/actions";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { Icon } from "./icons";
+import { playNotificationTone, prepareNotificationTone } from "./notification-sound-preference";
 
 type Toast = { id: number; message: string; kind: string };
 
@@ -29,6 +30,13 @@ export function AlertToaster({ organisationId }: { organisationId: string | null
     const dismissTimers = new Set<ReturnType<typeof setTimeout>>();
     const realtimeRetryTimers = new Set<ReturnType<typeof setTimeout>>();
     let removeRealtime: (() => void) | null = null;
+    const prepareAudio = () => {
+      void prepareNotificationTone();
+      document.removeEventListener("pointerdown", prepareAudio);
+      document.removeEventListener("keydown", prepareAudio);
+    };
+    document.addEventListener("pointerdown", prepareAudio, { once: true });
+    document.addEventListener("keydown", prepareAudio, { once: true });
     async function poll() {
       try {
         const alerts = await fetchRecentAlertsAction();
@@ -43,6 +51,7 @@ export function AlertToaster({ organisationId }: { organisationId: string | null
         }
         primed.current = true;
         if (fresh.length > 0) {
+          void playNotificationTone();
           setToasts((current) => [...fresh, ...current].slice(0, 4));
           for (const toast of fresh) {
             const timer = setTimeout(() => {
@@ -81,11 +90,11 @@ export function AlertToaster({ organisationId }: { organisationId: string | null
         if (!active) return;
 
         const channel = client
-          .channel(`monitoring-findings:${organisationId}`)
+          .channel(`notifications:${organisationId}`)
           .on("postgres_changes", {
             event: "INSERT",
             schema: "public",
-            table: "monitoring_findings",
+            table: "notifications",
             filter: `organisation_id=eq.${organisationId}`,
           }, refreshAfterRealtimeInsert);
         let channelRemoved = false;
@@ -114,6 +123,8 @@ export function AlertToaster({ organisationId }: { organisationId: string | null
       dismissTimers.clear();
       for (const timer of realtimeRetryTimers) clearTimeout(timer);
       realtimeRetryTimers.clear();
+      document.removeEventListener("pointerdown", prepareAudio);
+      document.removeEventListener("keydown", prepareAudio);
       removeRealtime?.();
     };
   }, [organisationId]);
@@ -127,9 +138,11 @@ export function AlertToaster({ organisationId }: { organisationId: string | null
         <div key={toast.id} className={`alert-toast ${toast.kind === "policy_violation" ? "sev-high" : "sev-med"}`} role="alert">
           <span className="alert-toast-icon"><Icon name="alert" /></span>
           <div className="alert-toast-body">
-            <strong>{toast.kind === "policy_violation" ? "Policy violation detected" : "Control drift detected"}</strong>
+            <strong>{toast.kind === "policy_violation" ? "Policy violation detected" : toast.kind === "control_drift" ? "Control drift detected" : "New notification"}</strong>
             <p>{toast.message}</p>
-            <a href="/app/monitoring">View in Monitoring →</a>
+            {toast.kind === "policy_violation" || toast.kind === "control_drift"
+              ? <a href="/app/monitoring">View in Monitoring →</a>
+              : <a href="/app/notifications">Open notifications</a>}
           </div>
           <button className="alert-toast-close" onClick={() => dismiss(toast.id)} aria-label="Dismiss alert">×</button>
         </div>

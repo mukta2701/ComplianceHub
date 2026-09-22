@@ -104,6 +104,9 @@ vi.mock("@/features/github/application/github-mapping-review", () => ({
     });
   },
 }));
+vi.mock("@/features/auth/application/oauth-grants", () => ({
+  listUserOAuthGrants: vi.fn(() => Promise.resolve({ status: "loaded", grants: [] })),
+}));
 vi.mock("next/navigation", () => ({ usePathname: () => "/app/integrations", useRouter: () => ({ refresh: vi.fn() }) }));
 
 import IntegrationsPage from "./page";
@@ -122,6 +125,7 @@ describe("Settings Connections page", () => {
     render(await IntegrationsPage({ searchParams: Promise.resolve({}) }));
 
     expect(screen.getByRole("heading", { name: "Connections" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "MCP & connected assistants" })).toBeInTheDocument();
     expect(screen.getByRole("article", { name: "GitHub Issues connection" })).toHaveTextContent("Connected");
     expect(screen.getByRole("article", { name: "Jira connection" })).toHaveTextContent("Not connected");
     expect(screen.getByRole("article", { name: "Slack connection" })).toHaveTextContent("Connected");

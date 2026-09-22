@@ -14,7 +14,7 @@ export async function loadReadinessInput(supabase: SupabaseClient, organisationI
   const register = registerResult.data;
   const [soa, risks, evidence, audits, findings, openTasks, overdueTasks, cfg] = await Promise.all([
     register ? supabase.from("soa_items").select("status").eq("organisation_id", organisationId).eq("soa_register_id", register.id) : Promise.resolve({ data: [] as { status: string }[], error: null }),
-    supabase.from("risks").select("likelihood,impact").eq("organisation_id", organisationId),
+    supabase.from("risks").select("status,residual_likelihood,residual_impact").eq("organisation_id", organisationId),
     supabase.from("evidence").select("status").eq("organisation_id", organisationId),
     supabase.from("audits").select("status").eq("organisation_id", organisationId),
     supabase.from("audit_findings").select("id").eq("organisation_id", organisationId).neq("status", "closed").neq("severity", "observation"),
@@ -30,7 +30,9 @@ export async function loadReadinessInput(supabase: SupabaseClient, organisationI
     : DEFAULT_RISK_MATRIX_CONFIG;
   return {
     soa: (soa.data ?? []).map((s) => ({ status: s.status as SoaStatus })),
-    risks: (risks.data ?? []).map((r) => ({ likelihood: r.likelihood, impact: r.impact })),
+    risks: (risks.data ?? [])
+      .filter((r) => r.status !== "closed")
+      .map((r) => ({ likelihood: r.residual_likelihood, impact: r.residual_impact })),
     evidence: (evidence.data ?? []).map((e) => ({ status: e.status as EvidenceStatus })),
     audits: (audits.data ?? []).map((a) => ({ status: a.status as string })),
     openNonConformities: (findings.data ?? []).length,

@@ -2,15 +2,14 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { SettingsSections } from "./settings-sections";
 
-function renderSettings(initialSection?: "workspace" | "team" | "security" | "ai-assistance" | "connected-apps") {
+function renderSettings(initialSection?: "workspace" | "team" | "security" | "customer-trust") {
   return render(
     <SettingsSections
       initialSection={initialSection}
       workspace={<p>Workspace content</p>}
       team={<p>Team content</p>}
       security={<p>Security content</p>}
-      aiAssistance={<p>AI content</p>}
-      connectedApps={<p>Connected assistants content</p>}
+      customerTrust={<p>Customer trust content</p>}
     />,
   );
 }
@@ -46,10 +45,10 @@ describe("SettingsSections", () => {
     expect(screen.getByText("Security content")).toBeVisible();
     expect(screen.getByText("Workspace content")).not.toBeVisible();
 
-    window.location.hash = "connected-apps";
+    window.location.hash = "customer-trust";
     fireEvent(window, new Event("hashchange"));
-    expect(screen.getByText("Connected assistants content")).toBeVisible();
-    expect(screen.getByRole("link", { name: "Connected assistants" })).toHaveAttribute("aria-current", "location");
+    expect(screen.getByText("Customer trust content")).toBeVisible();
+    expect(screen.getByRole("link", { name: "Customer trust" })).toHaveAttribute("aria-current", "location");
   });
 
   it("opens the team section when an invitation result returns without a hash", () => {
@@ -57,5 +56,13 @@ describe("SettingsSections", () => {
 
     expect(screen.getByText("Team content")).toBeVisible();
     expect(screen.getByText("Workspace content")).not.toBeVisible();
+  });
+
+  it("keeps customer trust without separate AI or assistant settings", () => {
+    renderSettings();
+
+    expect(screen.queryByRole("link", { name: "AI assistance" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Customer trust" })).toHaveAttribute("href", "/app/settings#customer-trust");
+    expect(screen.queryByRole("link", { name: "Connected assistants" })).not.toBeInTheDocument();
   });
 });

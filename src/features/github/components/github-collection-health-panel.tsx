@@ -90,7 +90,7 @@ export function GitHubCollectionHealthPanel({
   const selectedRepositories = repositories.filter((repository) => repository.selected);
   const monitoringAccess = workspaceAccess(role).section("monitoring");
   const canRecheckGitHub = monitoringAccess.canManageOperation("recheck-github-installation");
-  const canManageGitHubApp = workspaceAccess(role).section("connections").canManageOperation("manage-github-app");
+  const canManageGitHub = workspaceAccess(role).section("connections").canManageOperation("manage-github-app");
 
   async function recheckInstallation(installation: GitHubInstallationSummary) {
     if (pendingInstallations.has(installation.id)) return;
@@ -140,10 +140,10 @@ export function GitHubCollectionHealthPanel({
     </div>
 
     {installations.length === 0 ? <div className="github-repositories-empty">
-      <p>{canManageGitHubApp
+      <p>{canManageGitHub
         ? "GitHub is not connected."
-        : "GitHub is not connected. Ask a workspace Owner to connect GitHub."}</p>
-      {canManageGitHubApp && <Link className="button secondary" href="/app/integrations">Connect GitHub</Link>}
+        : "GitHub is not connected. Ask a workspace Owner to manage the connection."}</p>
+      {canManageGitHub && <Link className="button secondary" href="/app/integrations">Connect GitHub</Link>}
     </div> : <div className="github-installation-list">
       {installations.map((installation) => {
         const installationRepositories = selectedRepositories.filter(
@@ -195,7 +195,7 @@ export function GitHubCollectionHealthPanel({
 
           {installationRepositories.length === 0 ? <div className="github-repositories-empty">
             <p>No repositories are selected for GitHub monitoring.</p>
-            {canManageGitHubApp && <Link className="button secondary" href="/app/integrations">Choose repositories</Link>}
+            {canManageGitHub && <Link className="button secondary" href="/app/integrations">Choose repositories</Link>}
           </div> : <div className="github-repository-list">
             {installationRepositories.map((repository) => {
               const health = monitoringHealth(repository, installation, nowIso);

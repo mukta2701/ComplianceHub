@@ -63,4 +63,42 @@ describe("loadReadinessInput active workspace scope", () => {
 
     await expect(loadReadinessInput({ from } as never, ORGANISATION_ID)).rejects.toThrow("Could not load the readiness report");
   });
+
+  it("loads residual ratings for the current risk posture", async () => {
+    const from = vi.fn((table: string) => {
+      const result = table === "risks"
+        ? { data: [{ likelihood: 5, impact: 5, residual_likelihood: 1, residual_impact: 3, status: "treating" }], count: null, error: null }
+        : table === "soa_registers"
+          ? { data: null, count: null, error: null }
+          : { data: [], count: 0, error: null };
+      const chain: Record<string, unknown> = {};
+      for (const method of ["select", "eq", "order", "limit", "in", "neq", "not", "lt"]) chain[method] = vi.fn(() => chain);
+      chain.maybeSingle = vi.fn().mockResolvedValue(result);
+      chain.then = (resolve: (value: typeof result) => unknown) => Promise.resolve(result).then(resolve);
+      return chain;
+    });
+
+    const input = await loadReadinessInput({ from } as never, ORGANISATION_ID);
+
+    expect(input.risks).toEqual([{ likelihood: 1, impact: 3 }]);
+  });
+
+  it("does not include closed risks in the current risk posture", async () => {
+    const from = vi.fn((table: string) => {
+      const result = table === "risks"
+        ? { data: [{ residual_likelihood: 5, residual_impact: 5, status: "closed" }], count: null, error: null }
+        : table === "soa_registers"
+          ? { data: null, count: null, error: null }
+          : { data: [], count: 0, error: null };
+      const chain: Record<string, unknown> = {};
+      for (const method of ["select", "eq", "order", "limit", "in", "neq", "not", "lt"]) chain[method] = vi.fn(() => chain);
+      chain.maybeSingle = vi.fn().mockResolvedValue(result);
+      chain.then = (resolve: (value: typeof result) => unknown) => Promise.resolve(result).then(resolve);
+      return chain;
+    });
+
+    const input = await loadReadinessInput({ from } as never, ORGANISATION_ID);
+
+    expect(input.risks).toEqual([]);
+  });
 });

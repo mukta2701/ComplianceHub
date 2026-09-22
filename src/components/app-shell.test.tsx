@@ -4,7 +4,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 const hoisted = vi.hoisted(() => ({ pathname: "/app" }));
 
 vi.mock("next/navigation", () => ({ usePathname: () => hoisted.pathname }));
-vi.mock("@/app/app/actions", () => ({ signOutAction: vi.fn() }));
+vi.mock("@/app/app/actions", () => ({ signOutAction: vi.fn(), switchWorkspaceAction: vi.fn() }));
 vi.mock("./alert-toaster", () => ({ AlertToaster: () => <a href="/app/monitoring">New monitoring alert</a> }));
 
 import { AppShell } from "./app-shell";
@@ -16,6 +16,12 @@ function renderShell(role: "owner" | "admin" | "member" | null, jobTitle: string
       orgName="Example Ltd"
       orgInitials="EL"
       userInitials="PV"
+      userName="Priya Verma"
+      userEmail="priya@example.test"
+      workspaces={[
+        { id: "71000000-0000-4000-8000-000000000001", name: "Example Ltd", role: role ?? "member" },
+        { id: "71000000-0000-4000-8000-000000000002", name: "Test Workspace", role: "admin" },
+      ]}
       unreadCount={2}
       role={role}
       jobTitle={jobTitle}
@@ -51,6 +57,23 @@ describe("AppShell role-specific navigation", () => {
     expect(within(breadcrumb).getByRole("link", { name: "Example Ltd" })).toHaveAttribute("href", "/app");
     expect(within(breadcrumb).getByRole("heading", { name: "Policies", level: 1 })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("link", { name: "Policies" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("makes the signed-in identity, role and workspace choices understandable", () => {
+    renderShell("owner");
+
+    fireEvent.click(screen.getByRole("button", { name: "Account menu" }));
+    expect(screen.getByText("Priya Verma")).toBeVisible();
+    expect(screen.getByText("priya@example.test")).toBeVisible();
+    expect(screen.getByText("Owner · Example Ltd")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Switch to Test Workspace" })).toBeVisible();
+    expect(screen.queryByRole("checkbox", { name: "Notification sound" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Test sound" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Open notifications" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Notifications, 2 unread" })).toHaveAttribute("href", "/app/notifications");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.getByRole("group")).not.toHaveAttribute("open");
+    expect(screen.getByRole("button", { name: "Account menu" })).toHaveFocus();
   });
 
   it("keeps a closed drawer out of navigation and isolates its open state", () => {
@@ -98,6 +121,7 @@ describe("AppShell role-specific navigation", () => {
     expect(screen.getByRole("link", { name: "Tasks" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Connections" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute("href", "/app/settings");
+    expect(screen.queryByRole("link", { name: "Trust Center" })).not.toBeInTheDocument();
     expect(screen.getByText(role === "owner" ? "Owner" : "Admin", { selector: "span" })).toBeInTheDocument();
   });
 
