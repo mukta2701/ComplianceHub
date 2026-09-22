@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { sendInvitationEmail } from "./invitation-mail";
+import { invitationEmailDeliveryConfigured, sendInvitationEmail } from "./invitation-mail";
 
 const input = {
   invitationId: "10000000-0000-4000-8000-000000000001",
@@ -22,8 +22,16 @@ describe("Resend invitation mail adapter", () => {
   });
 
   it("returns not_configured without making a network request", async () => {
+    expect(invitationEmailDeliveryConfigured()).toBe(false);
     await expect(sendInvitationEmail(input)).resolves.toEqual({ status: "not_configured" });
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("reports delivery as configured only when both provider settings are present", () => {
+    vi.stubEnv("RESEND_API_KEY", "secret-api-key");
+    expect(invitationEmailDeliveryConfigured()).toBe(false);
+    vi.stubEnv("INVITATION_FROM_EMAIL", "ComplianceHub <invites@example.com>");
+    expect(invitationEmailDeliveryConfigured()).toBe(true);
   });
 
   it("sends one plain transactional email with safe Resend headers", async () => {

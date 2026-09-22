@@ -15,13 +15,17 @@ type InvitationQuery = {
 const hoisted = vi.hoisted(() => ({
   ctx: null as unknown,
   enforceRateLimit: vi.fn(),
+  invitationEmailDeliveryConfigured: vi.fn(),
   sendInvitationEmail: vi.fn(),
   revalidatePath: vi.fn(),
 }));
 
 vi.mock("@/lib/app-context", () => ({ requireAppContext: () => Promise.resolve(hoisted.ctx) }));
 vi.mock("@/lib/security/rate-limit", () => ({ enforceRateLimit: hoisted.enforceRateLimit }));
-vi.mock("@/features/organisations/infrastructure/invitation-mail", () => ({ sendInvitationEmail: hoisted.sendInvitationEmail }));
+vi.mock("@/features/organisations/infrastructure/invitation-mail", () => ({
+  invitationEmailDeliveryConfigured: hoisted.invitationEmailDeliveryConfigured,
+  sendInvitationEmail: hoisted.sendInvitationEmail,
+}));
 vi.mock("@/lib/site-url", () => ({ siteUrl: () => "https://app.example.com" }));
 vi.mock("next/cache", () => ({ revalidatePath: hoisted.revalidatePath }));
 vi.mock("next/navigation", () => ({
@@ -81,6 +85,7 @@ describe("invitation delivery actions", () => {
 
   beforeEach(() => {
     hoisted.enforceRateLimit.mockReset().mockResolvedValue(undefined);
+    hoisted.invitationEmailDeliveryConfigured.mockReset().mockReturnValue(true);
     hoisted.sendInvitationEmail.mockReset();
     hoisted.revalidatePath.mockReset();
   });
@@ -157,6 +162,18 @@ describe("invitation delivery actions", () => {
       new_delivery_status: "not_configured",
       new_delivery_error: "Invitation email delivery is not configured.",
     }));
+  });
+
+  it("does not rotate an invitation token when email delivery is not configured", async () => {
+    const supabase = invitationClient();
+    hoisted.ctx = { supabase, user: { id: USER_ID }, membership: { role: "owner" }, organisation: { id: ORG_ID, name: "Acme" } };
+    hoisted.invitationEmailDeliveryConfigured.mockReturnValue(false);
+
+    await expect(resendInvitationAction(form({ invitationId: INVITE_ID })))
+      .rejects.toThrow("Invitation email delivery is not configured");
+
+    expect(supabase.rpc).not.toHaveBeenCalled();
+    expect(hoisted.sendInvitationEmail).not.toHaveBeenCalled();
   });
 
   it("revokes by immutable invitation id through the lifecycle RPC", async () => {

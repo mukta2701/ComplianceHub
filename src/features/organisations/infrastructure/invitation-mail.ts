@@ -20,10 +20,14 @@ function safeOrganisationName(value: string): string {
   return value.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 160) || "your workspace";
 }
 
+export function invitationEmailDeliveryConfigured(): boolean {
+  return Boolean(process.env.RESEND_API_KEY?.trim() && process.env.INVITATION_FROM_EMAIL?.trim());
+}
+
 export async function sendInvitationEmail(input: InvitationEmailInput): Promise<InvitationDeliveryOutcome> {
   const apiKey = process.env.RESEND_API_KEY?.trim();
   const from = process.env.INVITATION_FROM_EMAIL?.trim();
-  if (!apiKey || !from) return { status: "not_configured" };
+  if (!invitationEmailDeliveryConfigured() || !apiKey || !from) return { status: "not_configured" };
 
   const organisationName = safeOrganisationName(input.organisationName);
   let response: Response;

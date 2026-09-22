@@ -9,7 +9,6 @@ import { signOutAction, switchWorkspaceAction } from "@/app/app/actions";
 import { roleLabel, type MembershipRole } from "@/features/organisations/domain/access";
 import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import styles from "./app-shell.module.css";
-import { notificationSoundEnabled, playNotificationTone, setNotificationSoundEnabled } from "./notification-sound-preference";
 
 export type WorkspaceChoice = { id: string; name: string; role: MembershipRole };
 
@@ -121,7 +120,6 @@ export function AppShell({ organisationId, orgName, orgInitials, userInitials, u
   const firstNav = useRef<HTMLAnchorElement>(null);
   const navigation = useRef<HTMLElement>(null);
   const accountMenu = useRef<HTMLDetailsElement>(null);
-  const [soundEnabled, setSoundEnabled] = useState(notificationSoundEnabled);
   const closeNavigation = useCallback(() => {
     setOpen(false);
     requestAnimationFrame(() => menuButton.current?.focus());
@@ -244,14 +242,6 @@ export function AppShell({ organisationId, orgName, orgInitials, userInitials, u
                   <button className={styles.accountAction} aria-label={`Switch to ${workspace.name}`}>Switch to {workspace.name}<small>{roleLabel(workspace.role)}</small></button>
                 </form>
               ))}
-              <label className={styles.soundPreference}><input type="checkbox" checked={soundEnabled} onChange={(event) => {
-                const enabled = event.target.checked;
-                setSoundEnabled(enabled);
-                setNotificationSoundEnabled(enabled);
-                if (enabled) void playNotificationTone();
-              }} />Notification sound</label>
-              <button className={styles.accountAction} type="button" onClick={() => void playNotificationTone()}>Test sound</button>
-              <Link className={styles.accountAction} href="/app/notifications">Open notifications</Link>
               <form action={signOutAction}><button className={styles.accountAction}>Sign out</button></form>
             </div>
           </details>

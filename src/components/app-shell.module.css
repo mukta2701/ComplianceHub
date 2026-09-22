@@ -56,7 +56,6 @@
 .accountAction { width: 100%; min-height: 44px; padding: 8px; display: flex; justify-content: space-between; align-items: center; gap: 8px; border: 0; border-radius: 7px; background: transparent; color: var(--ch-text); font: inherit; text-decoration: none; text-align: left; cursor: pointer; }
 .accountAction:hover { background: #edf3ff; color: #214dce; }
 .accountAction small { color: var(--ch-text-muted); }
-.soundPreference { min-height: 44px; padding: 8px; display: flex; align-items: center; gap: 9px; color: var(--ch-text); cursor: pointer; }
 .shell :global(.content) { width: 100%; max-width: 1600px; padding: 36px; min-width: 0; }
 .shell :global(.content:focus) { outline: none; }
 .shell :global(.legal) { padding: 24px 36px; text-align: left; font-size: 12px; color: #677181; }

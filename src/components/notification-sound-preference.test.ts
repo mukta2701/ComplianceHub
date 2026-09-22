@@ -1,33 +1,43 @@
-import { beforeEach, describe, expect, it } from "vitest";
-import { notificationSoundEnabled, setNotificationSoundEnabled } from "./notification-sound-preference";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { playNotificationTone, prepareNotificationTone } from "./notification-sound-preference";
 
-describe("notification sound preference", () => {
-  const values = new Map<string, string>();
-  const storage = {
-    getItem: (key: string) => values.get(key) ?? null,
-    setItem: (key: string, value: string) => values.set(key, value),
+describe("automatic notification sound", () => {
+  const resume = vi.fn();
+  const start = vi.fn();
+  const stop = vi.fn();
+  const connect = vi.fn();
+  const setValueAtTime = vi.fn();
+  const exponentialRampToValueAtTime = vi.fn();
+  const context = {
+    state: "suspended",
+    currentTime: 10,
+    destination: {},
+    resume,
+    createOscillator: vi.fn(() => ({ frequency: { value: 0 }, connect, start, stop })),
+    createGain: vi.fn(() => ({ gain: { setValueAtTime, exponentialRampToValueAtTime }, connect })),
   };
 
-  beforeEach(() => values.clear());
-
-  it("is off until the person opts in", () => {
-    expect(notificationSoundEnabled(storage)).toBe(false);
+  beforeEach(() => {
+    vi.clearAllMocks();
+    class TestAudioContext {
+      constructor() { return context; }
+    }
+    vi.stubGlobal("AudioContext", TestAudioContext);
   });
 
-  it("persists the explicit browser preference", () => {
-    setNotificationSoundEnabled(true, storage);
-    expect(notificationSoundEnabled(storage)).toBe(true);
-    setNotificationSoundEnabled(false, storage);
-    expect(notificationSoundEnabled(storage)).toBe(false);
+  it("prepares browser audio without making a sound", async () => {
+    await prepareNotificationTone();
+
+    expect(resume).toHaveBeenCalledOnce();
+    expect(context.createOscillator).not.toHaveBeenCalled();
   });
 
-  it("keeps notifications usable when browser storage is blocked", () => {
-    const blockedStorage = {
-      getItem: () => { throw new DOMException("Blocked", "SecurityError"); },
-      setItem: () => { throw new DOMException("Full", "QuotaExceededError"); },
-    };
+  it("plays the built-in tone after preparation", async () => {
+    await prepareNotificationTone();
+    context.state = "running";
+    await playNotificationTone();
 
-    expect(notificationSoundEnabled(blockedStorage)).toBe(false);
-    expect(() => setNotificationSoundEnabled(true, blockedStorage)).not.toThrow();
+    expect(start).toHaveBeenCalledOnce();
+    expect(stop).toHaveBeenCalledWith(10.2);
   });
 });

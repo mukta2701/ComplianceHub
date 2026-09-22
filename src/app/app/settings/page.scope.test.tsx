@@ -6,11 +6,15 @@ const OTHER_ORGANISATION_ID = "22222222-2222-4222-8222-222222222222";
 
 const hoisted = vi.hoisted(() => ({
   requireContext: vi.fn(),
+  invitationEmailDeliveryConfigured: vi.fn(),
   listUserOAuthGrants: vi.fn(),
   queries: [] as Array<{ table: string; column: string; value: unknown }>,
 }));
 
 vi.mock("@/lib/app-context", () => ({ requireAppContext: hoisted.requireContext }));
+vi.mock("@/features/organisations/infrastructure/invitation-mail", () => ({
+  invitationEmailDeliveryConfigured: hoisted.invitationEmailDeliveryConfigured,
+}));
 vi.mock("next/navigation", () => ({ usePathname: () => "/app/settings" }));
 vi.mock("@/features/auth/application/oauth-grants", () => ({ listUserOAuthGrants: hoisted.listUserOAuthGrants }));
 vi.mock("../actions", () => ({
@@ -24,7 +28,7 @@ vi.mock("../actions", () => ({
 vi.mock("./connected-applications", () => ({ ConnectedApplications: () => null }));
 vi.mock("./ai-settings", () => ({ AiWorkspaceSettings: () => null }));
 
-function activeContext(role: "owner" | "member" = "owner") {
+function activeContext(role: "owner" | "member" = "owner", invitations: Array<Record<string, unknown>> = []) {
   const rows: Record<string, Array<Record<string, unknown>>> = {
     organisations: [{ slug: "active-organisation", created_at: "2026-08-18T00:00:00Z" }],
     memberships: [
@@ -45,7 +49,7 @@ function activeContext(role: "owner" | "member" = "owner") {
         profiles: { display_name: "Sibling-only member" },
       },
     ],
-    invitations: [],
+    invitations,
     ai_workspace_settings: [],
   };
   const supabase = {
@@ -85,6 +89,7 @@ function activeContext(role: "owner" | "member" = "owner") {
 beforeEach(() => {
   window.history.replaceState({}, "", "/app/settings#team");
   hoisted.queries.length = 0;
+  hoisted.invitationEmailDeliveryConfigured.mockReset().mockReturnValue(true);
   hoisted.requireContext.mockResolvedValue(activeContext());
   hoisted.listUserOAuthGrants.mockResolvedValue({ status: "loaded", grants: [] });
 });
@@ -137,5 +142,52 @@ describe("Settings active organisation scope", () => {
 
     expect(screen.getByRole("status")).toHaveTextContent("Invitation email sent.");
     expect(screen.getByText("Active member")).toBeVisible();
+  });
+
+  it("explains unavailable email delivery and hides the unusable retry action", async () => {
+    hoisted.invitationEmailDeliveryConfigured.mockReturnValue(false);
+    hoisted.requireContext.mockResolvedValue(activeContext("owner", [{
+      id: "30000000-0000-4000-8000-000000000003",
+      organisation_id: ORGANISATION_ID,
+      email: "member@example.com",
+      role: "member",
+      job_title: "Developer",
+      expires_at: "2026-09-29T00:00:00Z",
+      accepted_at: null,
+      revoked_at: null,
+      delivery_status: "not_configured",
+      last_delivery_attempt_at: "2026-09-22T00:00:00Z",
+      delivery_attempt_count: 1,
+      created_at: "2026-09-22T00:00:00Z",
+    }]));
+    const { default: SettingsPage } = await import("./page");
+
+    render(await SettingsPage({ searchParams: Promise.resolve({}) }));
+
+    expect(screen.getByRole("note")).toHaveTextContent("Email delivery is not configured");
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Revoke" })).toBeVisible();
+  });
+
+  it("restores retry when email delivery becomes available", async () => {
+    hoisted.requireContext.mockResolvedValue(activeContext("owner", [{
+      id: "30000000-0000-4000-8000-000000000003",
+      organisation_id: ORGANISATION_ID,
+      email: "member@example.com",
+      role: "member",
+      job_title: "Developer",
+      expires_at: "2026-09-29T00:00:00Z",
+      accepted_at: null,
+      revoked_at: null,
+      delivery_status: "not_configured",
+      last_delivery_attempt_at: "2026-09-22T00:00:00Z",
+      delivery_attempt_count: 1,
+      created_at: "2026-09-22T00:00:00Z",
+    }]));
+    const { default: SettingsPage } = await import("./page");
+
+    render(await SettingsPage({ searchParams: Promise.resolve({}) }));
+
+    expect(screen.getByRole("button", { name: "Retry" })).toBeVisible();
   });
 });

@@ -6,7 +6,7 @@ import { z } from "zod";
 import { createInvitationCredential, inviteMember } from "@/features/organisations/application/organisation";
 import { membershipRoles } from "@/features/organisations/domain/access";
 import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
-import { sendInvitationEmail, type InvitationDeliveryOutcome } from "@/features/organisations/infrastructure/invitation-mail";
+import { invitationEmailDeliveryConfigured, sendInvitationEmail, type InvitationDeliveryOutcome } from "@/features/organisations/infrastructure/invitation-mail";
 import { requireAppContext } from "@/lib/app-context";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { siteUrl } from "@/lib/site-url";
@@ -112,6 +112,7 @@ export async function resendInvitationAction(formData: FormData) {
   const { data: invitation, error: invitationError } = await supabase.from("invitations").select("id")
     .eq("id", invitationId.data).eq("organisation_id", organisation.id).maybeSingle();
   if (invitationError || !invitation) throw new Error("Invitation not found");
+  if (!invitationEmailDeliveryConfigured()) throw new Error("Invitation email delivery is not configured");
 
   const credential = createInvitationCredential();
   const { data, error } = await supabase.rpc("resend_invitation", {

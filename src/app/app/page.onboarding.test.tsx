@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 vi.mock("@/lib/app-context", () => ({ requireAppContext: async () => ({
   organisation: { id: "org-1", name: "Manual workspace" }, membership: { role: "owner" },
@@ -13,11 +13,12 @@ vi.mock("@/lib/app-context", () => ({ requireAppContext: async () => ({
 }) }));
 vi.mock("./tasks/actions", () => ({ acceptCalendarSeedAction: vi.fn() }));
 import AppHome from "./page";
-it("keeps integrations optional outside the core onboarding steps", async () => {
-  const { container } = render(await AppHome());
-  const checklist = within(container.querySelector(".onboarding-card") as HTMLElement);
-  expect(checklist.getByText("1 of 9 done")).toBeInTheDocument();
-  expect(checklist.queryByText("Connect a tracker")).not.toBeInTheDocument();
+it("keeps the original programme builder beside recent activity", async () => {
+  render(await AppHome());
+  expect(screen.getByRole("heading", { name: "Build your programme" })).toBeInTheDocument();
+  expect(screen.getByText("1 of 7 done")).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: /setup roadmap|continue your programme/i })).not.toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "What changed" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "Reduce admin later" })).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: /Explore integrations/ })).toHaveAttribute("href", "/app/setup");
+  expect(screen.getByRole("link", { name: /Open risks/ })).toHaveAttribute("href", "/app/risks");
 });

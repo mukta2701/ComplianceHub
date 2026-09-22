@@ -236,7 +236,7 @@ export default async function AppHome() {
     }
   }
 
-  const checklist = buildOnboardingChecklist({
+  const fullChecklist = buildOnboardingChecklist({
     hasAssessment: (assessments ?? 0) > 0,
     hasSoa: (soaRegisters ?? 0) > 0 || (snapshots ?? 0) > 0,
     hasRisk: (allRisks ?? 0) > 0,
@@ -246,7 +246,21 @@ export default async function AppHome() {
     hasTask: (tasks ?? 0) > 0,
     hasTeam: (members ?? 0) > 1 || (invites ?? 0) > 0,
   });
-
+  const programmeSteps = fullChecklist.steps
+    .filter((step) => step.id !== "asset" && step.id !== "task")
+    .map((step) => step.id === "assessment"
+      ? { ...step, label: "Run your first readiness assessment", description: "Answer the gap questions to see where you stand and seed your SoA." }
+      : step.id === "policy"
+        ? { ...step, label: "Publish your first policy", description: "Start from a template and have something to approve and circulate." }
+        : step);
+  const programmeDoneCount = programmeSteps.filter((step) => step.done).length;
+  const checklist = {
+    steps: programmeSteps,
+    doneCount: programmeDoneCount,
+    total: programmeSteps.length,
+    percent: Math.round((programmeDoneCount / programmeSteps.length) * 100),
+    complete: programmeDoneCount === programmeSteps.length,
+  };
 
   const unscoredRisks = (risksForHeat ?? []).length - riskTotal;
   const upcomingTasks = (dueTasks ?? []).filter((task) => task.due_on && task.due_on >= today).slice(0, 4);
@@ -265,18 +279,6 @@ export default async function AppHome() {
       body="What needs attention, where your programme stands, and what comes next."
       action={<Link className="button primary" href="/app/reports/readiness"><Icon name="file" />View report</Link>}
     />
-
-    {!checklist.complete && <Card className="onboarding-card">
-      <div className="card-head"><div><h2>Your setup roadmap</h2><p>Start with the first open step. Your progress stays visible as the programme grows.</p></div><Pill tone="blue">{checklist.doneCount} of {checklist.total} done</Pill></div>
-      <div className="onboarding-progress"><Progress value={checklist.percent} tone="green" /></div>
-      <ol className="onboarding-steps">
-        {checklist.steps.map((step, index) => ({ step, index })).filter(({ step }) => !step.done).map(({ step, index }) => <li key={step.id}>
-          <span className="marker">{index + 1}</span>
-          <span className="step-body"><strong>{step.label}</strong><small>{step.description}</small></span>
-          <Link className="button secondary" href={step.href}>{step.cta} <Icon name="arrow" /></Link>
-        </li>)}
-      </ol>
-    </Card>}
 
     <nav aria-label="Programme attention" className={styles.attention}>
       {attention.map((item) => <Link key={item.label} href={item.href} className={styles.metric} data-tone={item.value === 0 ? "neutral" : item.tone}>
@@ -419,6 +421,17 @@ export default async function AppHome() {
           : <p className="empty-note">Nothing has changed yet. Activity shows here as you and your team make decisions.</p>}
       </Card>
 
+      {!checklist.complete && <Card className="onboarding-card">
+        <div className="card-head"><div><h2>Build your programme</h2><p>Steps disappear as you complete them.</p></div><Pill tone={checklist.percent === 100 ? "green" : "blue"}>{checklist.doneCount} of {checklist.total} done</Pill></div>
+        <div className="onboarding-progress"><Progress value={checklist.percent} tone="green" /></div>
+        <ol className="onboarding-steps">
+          {checklist.steps.filter((step) => !step.done).map((step, index) => <li key={step.id}>
+            <span className="marker">{index + 1}</span>
+            <span className="step-body"><strong>{step.label}</strong><small>{step.description}</small></span>
+            <Link className="button secondary" href={step.href}>{step.cta} <Icon name="arrow" /></Link>
+          </li>)}
+        </ol>
+      </Card>}
       {!checklist.complete && <Card>
         <div className="card-head"><div><h2>Reduce admin later</h2><p>Integrations are optional. Connect your systems when you want to collect evidence and prepare drafts for review.</p></div></div>
         <Link className="button secondary" href="/app/setup">Explore integrations <Icon name="arrow" /></Link>

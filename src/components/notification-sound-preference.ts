@@ -1,39 +1,27 @@
-export const NOTIFICATION_SOUND_STORAGE_KEY = "compliancehub.notification-sound";
 let sharedAudioContext: AudioContext | undefined;
 
-function browserStorage(): Storage | undefined {
+function audioContext(): AudioContext | undefined {
   try {
-    const storage = typeof window === "undefined" ? undefined : window.localStorage;
-    return storage && typeof storage.getItem === "function" ? storage : undefined;
+    if (typeof window === "undefined" || !window.AudioContext) return undefined;
+    return sharedAudioContext ??= new window.AudioContext();
   } catch {
     return undefined;
   }
 }
 
-export function notificationSoundEnabled(storage: Pick<Storage, "getItem"> | undefined = browserStorage()): boolean {
+export async function prepareNotificationTone(): Promise<void> {
   try {
-    return storage?.getItem(NOTIFICATION_SOUND_STORAGE_KEY) === "on";
+    const context = audioContext();
+    if (context?.state === "suspended") await context.resume();
   } catch {
-    return false;
-  }
-}
-
-export function setNotificationSoundEnabled(
-  enabled: boolean,
-  storage: Pick<Storage, "setItem"> | undefined = browserStorage(),
-): void {
-  try {
-    storage?.setItem(NOTIFICATION_SOUND_STORAGE_KEY, enabled ? "on" : "off");
-  } catch {
-    // Sound stays off when the browser blocks local storage.
+    // Browser audio policy can still block preparation; notifications remain usable.
   }
 }
 
 export async function playNotificationTone(): Promise<void> {
   try {
-    const AudioContextClass = window.AudioContext;
-    if (!AudioContextClass) return;
-    const context = sharedAudioContext ??= new AudioContextClass();
+    const context = audioContext();
+    if (!context) return;
     if (context.state === "suspended") await context.resume();
     const oscillator = context.createOscillator();
     const gain = context.createGain();
