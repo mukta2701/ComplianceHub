@@ -9,6 +9,7 @@ import {
 
 const webhookUrl = "https://hooks.slack.com/services/T_TEST/B_TEST/S_TEST";
 const webhookHash = "36b243d5b0e2304cbdf6f5bf362061b4f0e5cdc842c7f407af9253d0207cce52";
+const leaseToken = crypto.randomUUID();
 
 const finding: AlertFinding = {
   organisationId: "org1",
@@ -29,7 +30,7 @@ function claimed(overrides: Partial<ClaimedSlackAlertDelivery> = {}): ClaimedSla
     deliveryId: "10000000-0000-4000-8000-000000000001",
     organisationId: "org1",
     channelId: "10000000-0000-4000-8000-000000000003",
-    lockToken: "10000000-0000-4000-8000-000000000002",
+    lockToken: leaseToken,
     attemptCount: 1,
     payload: toSafeSlackDeliveryPayload(finding),
     ...overrides,
@@ -46,6 +47,21 @@ function store(delivery: ClaimedSlackAlertDelivery | null = claimed()): SlackAle
 }
 
 describe("Slack alert payload safety", () => {
+  it("does not display an internal installation ID in a GitHub connection alert", () => {
+    const payload = buildQueuedSlackPayload({
+      type: "connection_health",
+      severity: "high",
+      title: "GitHub monitoring paused for Adtecher",
+      controlRef: "GitHub connection",
+      subjectId: "22222222-2222-4222-8222-222222222222",
+      detail: "A workspace Owner must reactivate the App in GitHub.",
+    });
+
+    expect(JSON.stringify(payload.blocks)).not.toContain("22222222-2222-4222-8222-222222222222");
+    expect(JSON.stringify(payload.blocks)).not.toContain("Subject:");
+    expect(JSON.stringify(payload.blocks)).toContain("A workspace Owner must reactivate the App in GitHub.");
+  });
+
   it("bounds and removes control characters from persisted finding fields", () => {
     const safe = toSafeSlackDeliveryPayload({
       ...finding,
@@ -98,7 +114,7 @@ describe("drainSlackAlertDeliveries", () => {
     expect(postSlack).toHaveBeenCalledWith(webhookUrl, expect.any(Object), expect.any(AbortSignal));
     expect(deliveryStore.complete).toHaveBeenCalledWith(
       "10000000-0000-4000-8000-000000000001",
-      "10000000-0000-4000-8000-000000000002",
+      leaseToken,
       expect.any(AbortSignal),
     );
   });
@@ -117,7 +133,7 @@ describe("drainSlackAlertDeliveries", () => {
     expect(postSlack).not.toHaveBeenCalled();
     expect(deliveryStore.fail).toHaveBeenCalledWith(
       "10000000-0000-4000-8000-000000000001",
-      "10000000-0000-4000-8000-000000000002",
+      leaseToken,
       expect.any(AbortSignal),
     );
   });
@@ -181,7 +197,7 @@ describe("drainSlackAlertDeliveries", () => {
     expect(deliveryStore.complete).not.toHaveBeenCalled();
     expect(deliveryStore.fail).toHaveBeenCalledWith(
       "10000000-0000-4000-8000-000000000001",
-      "10000000-0000-4000-8000-000000000002",
+      leaseToken,
       expect.any(AbortSignal),
     );
   });

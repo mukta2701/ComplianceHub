@@ -89,7 +89,7 @@ commit;
 select is(
   (public.record_github_connection_notice_server(
     '79000000-0000-4111-8111-000000000101','79000000-0000-4111-8111-000000000201',
-    'incident','permission_mismatch','Owner-Co'
+    'incident','installation_suspended','Owner-Co'
   ) ->> 'is_new')::boolean,
   true,
   'a first incident notice opens new notification work'
@@ -99,6 +99,22 @@ select is(
    where organisation_id='79000000-0000-4111-8111-000000000101' and kind='github_connection_incident'),
   2::bigint,
   'the incident notice reaches Owners and Admins only'
+);
+select like(
+  (select message from public.notifications
+   where organisation_id='79000000-0000-4111-8111-000000000101'
+     and user_id='79000000-0000-4111-8111-000000000001'
+     and kind='github_connection_incident'),
+  '%The GitHub App is suspended%Owner%Settings > Connections%',
+  'the Owner notice explains the suspension and next action'
+);
+select unlike(
+  (select message from public.notifications
+   where organisation_id='79000000-0000-4111-8111-000000000101'
+     and user_id='79000000-0000-4111-8111-000000000001'
+     and kind='github_connection_incident'),
+  '%installation_suspended%',
+  'the Owner notice hides the internal diagnostic code'
 );
 select is(
   (select pg_catalog.count(*) from public.notifications
@@ -110,7 +126,7 @@ set role service_role;
 select is(
   (public.record_github_connection_notice_server(
     '79000000-0000-4111-8111-000000000101','79000000-0000-4111-8111-000000000201',
-    'incident','permission_mismatch','Owner-Co'
+    'incident','installation_suspended','Owner-Co'
   ) ->> 'is_new')::boolean,
   false,
   'a repeated incident observation creates no new work'
@@ -126,7 +142,7 @@ set role service_role;
 select is(
   (public.record_github_connection_notice_server(
     '79000000-0000-4111-8111-000000000101','79000000-0000-4111-8111-000000000201',
-    'incident','installation_suspended','Owner-Co'
+    'incident','permission_mismatch','Owner-Co'
   ) ->> 'is_new')::boolean,
   true,
   'a different diagnostic opens its own incident'
@@ -142,6 +158,14 @@ select is(
   'a verified recovery resolves with new notification work'
 );
 reset role;
+select like(
+  (select message from public.notifications
+   where organisation_id='79000000-0000-4111-8111-000000000101'
+     and user_id='79000000-0000-4111-8111-000000000001'
+     and kind='github_connection_recovery'),
+  '%GitHub monitoring restored%Checks can resume%No action is needed%',
+  'the recovery notice explains that verified checks can resume'
+);
 select is(
   (select pg_catalog.count(*) from public.github_connection_incidents
    where installation_id='79000000-0000-4111-8111-000000000201' and status='open'),

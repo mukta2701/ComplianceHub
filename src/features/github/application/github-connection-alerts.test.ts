@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   queueGitHubConnectionNotice,
+  toGitHubConnectionSlackPayload,
   type GitHubConnectionNotice,
 } from "./github-connection-alerts";
 
@@ -31,6 +32,37 @@ function deps(overrides: Record<string, unknown> = {}) {
 }
 
 describe("queueGitHubConnectionNotice", () => {
+  it("explains a suspended connection and the Owner action without exposing a diagnostic code", () => {
+    const payload = toGitHubConnectionSlackPayload({
+      ...INCIDENT,
+      health: "owner_action_required",
+      diagnostic: "installation_suspended",
+    });
+
+    expect(payload.title).toBe("GitHub monitoring paused for Adtecher");
+    expect(payload.detail).toContain("The GitHub App is suspended");
+    expect(payload.detail).toContain("cannot check the selected repositories");
+    expect(payload.detail).toContain("A workspace Owner must reactivate the App in GitHub");
+    expect(payload.detail).toContain("Settings > Connections");
+    expect(payload.detail).not.toContain("installation_suspended");
+    expect(payload.detail).not.toContain("/app/integrations");
+  });
+
+  it("says that verified access can resume after recovery", () => {
+    const payload = toGitHubConnectionSlackPayload({
+      ...INCIDENT,
+      kind: "recovery",
+      health: "healthy",
+      diagnostic: null,
+    });
+
+    expect(payload.title).toBe("GitHub monitoring restored for Adtecher");
+    expect(payload.detail).toContain("GitHub access was verified again");
+    expect(payload.detail).toContain("Checks can resume");
+    expect(payload.detail).toContain("No action is needed");
+    expect(payload.detail).not.toContain("Signal:");
+  });
+
   it("records one incident and queues in-app plus Slack exactly once", async () => {
     const dependencies = deps();
     const result = await queueGitHubConnectionNotice(dependencies, INCIDENT);
