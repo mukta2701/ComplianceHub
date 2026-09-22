@@ -341,10 +341,10 @@ from public.claim_due_github_connection_reconciliations_server(
 );
 reset role;
 update public.github_connection_reconciliation_runs
-set locked_until=clock_timestamp() - interval '1 second'
+set locked_until='2026-09-20 00:00:00+00'::timestamptz
 where id=(select run_id from lifecycle_expired_runs where installation_id='92000000-0000-4000-8000-000000000202');
 update public.github_installations
-set reconciliation_locked_until=clock_timestamp() - interval '1 second'
+set reconciliation_locked_until='2026-09-20 00:00:00+00'::timestamptz
 where id='92000000-0000-4000-8000-000000000202';
 set role service_role;
 select throws_ok(
