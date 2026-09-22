@@ -63,6 +63,32 @@ describe("queueGitHubConnectionNotice", () => {
     expect(payload.detail).not.toContain("Signal:");
   });
 
+  it("explains a temporary GitHub limit as an automatic retry", () => {
+    const payload = toGitHubConnectionSlackPayload({
+      ...INCIDENT,
+      health: "retrying",
+      diagnostic: "provider_rate_limited",
+    });
+
+    expect(payload.title).toBe("GitHub monitoring delayed for Adtecher");
+    expect(payload.detail).toContain("GitHub is temporarily limiting requests");
+    expect(payload.detail).toContain("ComplianceHub will try again");
+    expect(payload.detail).not.toContain("provider_rate_limited");
+    expect(payload.detail).not.toContain("must reactivate");
+  });
+
+  it("asks an Owner to reconnect when GitHub access was removed", () => {
+    const payload = toGitHubConnectionSlackPayload({
+      ...INCIDENT,
+      health: "disconnected",
+      diagnostic: "installation_revoked",
+    });
+
+    expect(payload.detail).toContain("GitHub access was removed");
+    expect(payload.detail).toContain("A workspace Owner must reconnect the App");
+    expect(payload.detail).not.toContain("installation_revoked");
+  });
+
   it("records one incident and queues in-app plus Slack exactly once", async () => {
     const dependencies = deps();
     const result = await queueGitHubConnectionNotice(dependencies, INCIDENT);

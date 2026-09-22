@@ -59,23 +59,34 @@ function invalidNotice(): never {
   throw new Error("GitHub connection notice is invalid");
 }
 
-const HEALTH_PHRASE: Record<GitHubConnectionNotice["health"], string> = {
-  partially_unavailable: "some repositories are no longer visible",
-  owner_action_required: "access needs an Owner decision",
-  disconnected: "access was removed",
-  healthy: "access was verified again",
-  retrying: "temporary failures continue while automatic retry is scheduled",
+const INCIDENT_EXPLANATION: Record<GitHubConnectionDiagnostic, string> = {
+  provider_rate_limited: "GitHub is temporarily limiting requests. ComplianceHub will try again. No action is needed now.",
+  provider_temporary_failure: "ComplianceHub could not reach GitHub. It will try again.",
+  installation_suspended: "The GitHub App is suspended. ComplianceHub cannot check the selected repositories. A workspace Owner must reactivate the App in GitHub.",
+  installation_revoked: "GitHub access was removed. A workspace Owner must reconnect the App.",
+  permission_mismatch: "The GitHub App is missing the required read-only permissions. A workspace Owner must review the App permissions in GitHub.",
+  account_mismatch: "The App is connected to a different GitHub organisation. A workspace Owner must review the Connection.",
+  repository_unavailable: "A selected repository is not available to the GitHub App. A workspace Owner must review repository access.",
+  invalid_provider_response: "ComplianceHub could not read GitHub's response. It will try again.",
+  internal_failure: "ComplianceHub could not complete the GitHub check. A workspace Owner must review the Connection.",
 };
 
 export function toGitHubConnectionSlackPayload(notice: GitHubConnectionNotice): SafeSlackDeliveryPayload {
   const parsed = noticeSchema.safeParse(notice);
   if (!parsed.success) invalidNotice();
   const title = notice.kind === "recovery"
-    ? `GitHub connection recovered — ${notice.accountLogin}`
-    : `GitHub connection needs attention — ${notice.accountLogin}`;
-  const detail = `GitHub access for ${notice.accountLogin}: ${HEALTH_PHRASE[notice.health]}.`
-    + (notice.diagnostic ? ` Signal: ${notice.diagnostic}.` : "")
-    + ` Observed ${notice.occurredAt}. Review the connection: ${notice.connectionHref}.`;
+    ? `GitHub monitoring restored for ${notice.accountLogin}`
+    : notice.health === "retrying"
+      ? `GitHub monitoring delayed for ${notice.accountLogin}`
+      : notice.health === "partially_unavailable"
+        ? `GitHub monitoring is incomplete for ${notice.accountLogin}`
+        : `GitHub monitoring paused for ${notice.accountLogin}`;
+  const explanation = notice.kind === "recovery"
+    ? "GitHub access was verified again. Checks can resume. No action is needed."
+    : notice.diagnostic
+      ? INCIDENT_EXPLANATION[notice.diagnostic]
+      : "ComplianceHub cannot verify GitHub access. A workspace Owner must review the Connection.";
+  const detail = `${explanation} Open Settings > Connections.`;
   return {
     type: "connection_health",
     severity: notice.kind === "recovery" ? "medium" : notice.health === "disconnected" ? "critical" : "high",

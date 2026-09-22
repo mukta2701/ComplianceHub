@@ -62,20 +62,25 @@ export function buildQueuedSlackPayload(payload: SafeSlackDeliveryPayload): {
   blocks: unknown[];
 } {
   const heading = `${SEVERITY_EMOJI[payload.severity]} ComplianceHub alert — ${payload.severity.toUpperCase()}`;
+  const blocks: unknown[] = [
+    { type: "section", text: { type: "plain_text", text: `${heading}\n${payload.title}` } },
+  ];
+  if (payload.type === "monitoring_finding") {
+    blocks.push({
+      type: "section",
+      fields: [
+        { type: "plain_text", text: `Control: ${payload.controlRef}` },
+        { type: "plain_text", text: `Subject: ${payload.subjectId}` },
+      ],
+    });
+  }
+  blocks.push(
+    { type: "section", text: { type: "plain_text", text: payload.detail } },
+    { type: "context", elements: [{ type: "plain_text", text: "Detected by ComplianceHub continuous monitoring" }] },
+  );
   return {
     text: heading,
-    blocks: [
-      { type: "section", text: { type: "plain_text", text: `${heading}\n${payload.title}` } },
-      {
-        type: "section",
-        fields: [
-          { type: "plain_text", text: `Control: ${payload.controlRef}` },
-          { type: "plain_text", text: `Subject: ${payload.subjectId}` },
-        ],
-      },
-      { type: "section", text: { type: "plain_text", text: payload.detail } },
-      { type: "context", elements: [{ type: "plain_text", text: "Detected by ComplianceHub continuous monitoring" }] },
-    ],
+    blocks,
   };
 }
 
