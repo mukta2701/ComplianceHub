@@ -49,6 +49,7 @@ describe("Member monitoring page branch", () => {
   it("returns the Member-safe view before loading source config or alert channels", async () => {
     hoisted.tables = [];
     hoisted.rows = {};
+    hoisted.loadMappingReview.mockClear();
     hoisted.loadMemberMonitoring.mockResolvedValue({ connectedSystems: [], findings: [], officialGitHubFindings: [] });
     hoisted.loadControlRoom.mockResolvedValue({ repositories: [], pagination: { offset: 0, limit: 20, total: 0, truncated: false } });
     hoisted.loadMappingReview.mockResolvedValue({ pack: {}, entries: [], approvalHistory: [], limitations: [] });
@@ -59,9 +60,9 @@ describe("Member monitoring page branch", () => {
     expect(hoisted.loadMemberMonitoring).toHaveBeenCalledWith(expect.anything(), "org-1");
     expect(hoisted.tables).toEqual(["github_installations", "github_repository_monitoring_summaries"]);
     expect(screen.getByRole("region", { name: "GitHub monitoring" })).toHaveTextContent("Read-only monitoring");
-    const technical = screen.getByText("Technical review and recovery").closest("details");
-    expect(technical).not.toHaveAttribute("open");
-    expect(technical).toContainElement(screen.getByRole("region", { name: "Technical GitHub review" }));
+    expect(hoisted.loadMappingReview).not.toHaveBeenCalled();
+    expect(screen.queryByText("Technical review and recovery")).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Technical GitHub review" })).not.toBeInTheDocument();
   });
 
   it("counts active GitHub as connected for Members even when permissions need attention", async () => {

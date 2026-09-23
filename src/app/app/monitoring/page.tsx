@@ -167,7 +167,7 @@ export default async function MonitoringPage({
   const parsedPage = requestedPage && /^[1-9][0-9]{0,2}$/.test(requestedPage) ? Number(requestedPage) : 1;
   const repositoryOffset = Math.min((parsedPage - 1) * 20, 10_000);
   if (monitoringAccess.presentation === "member") {
-    const [data, installationResult, repositorySummaryResult, controlRoom, mappingReview] = await Promise.all([
+    const [data, installationResult, repositorySummaryResult, controlRoom] = await Promise.all([
       loadMemberMonitoring(supabase, organisation.id),
       supabase.from("github_installations")
         .select("id,account_login,status,repository_selection,permissions_ok")
@@ -178,7 +178,6 @@ export default async function MonitoringPage({
         .eq("organisation_id", organisation.id)
         .order("full_name", { ascending: true }),
       loadGitHubComplianceControlRoom(supabase, { organisationId: organisation.id, offset: repositoryOffset, limit: 20 }),
-      loadGitHubMappingReview(supabase, organisation.id),
     ]);
     if (installationResult.error || repositorySummaryResult.error) throw new Error("Could not load monitoring");
     const selectedFinding = requestedFinding && data.officialGitHubFindings.some((record) => record.findingId === requestedFinding)
@@ -200,12 +199,6 @@ export default async function MonitoringPage({
         nowIso={new Date().toISOString()}
         room={controlRoom}
         runtimeReadiness={runtimeReadiness}
-      />}
-      githubTechnicalReview={<GitHubTechnicalReview
-        room={controlRoom}
-        review={mappingReview}
-        role={membership.role}
-        unhealthyRepositoryIds={unhealthyGitHubRepositoryIds(controlRoom, installations, repositories)}
       />}
     />;
   }

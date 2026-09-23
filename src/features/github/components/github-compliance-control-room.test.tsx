@@ -38,6 +38,17 @@ function review(): GitHubMappingReview {
     entries: STANDARD_GITHUB_ISO_MAPPING_PACK.mappings.map((entry, index) => ({
       id: `91000000-0000-4000-8000-${String(index + 101).padStart(12, "0")}`,
       ...entry,
+      review: {
+        entryDigest: "a".repeat(64),
+        status: "approved" as const,
+        source: "legacy_pack" as const,
+        decisionId: null,
+        legacyApprovalId: APPROVAL,
+        reviewerId: "a1000000-0000-4000-8000-000000000001",
+        reviewedAt: "2026-08-25T07:00:00.000Z",
+        revision: 0,
+        changeReason: null,
+      },
     })).sort((left, right) => left.checkId.localeCompare(right.checkId)),
     approvalHistory: [{ id: APPROVAL, mappingPackId: PACK, approvedAt: "2026-08-25T07:00:00.000Z", revokedAt: null }],
     limitations: [
