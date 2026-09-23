@@ -27,6 +27,14 @@ Fresh lead-run checks on 23 September 2026:
 
 A fresh independent code review found an older Failure arriving after a newer Pass and a run-level audit that named the wrong Owner. The implementer wrote failing tests, fixed both, and the reviewer rechecked the changed code. The reviewer also found that the service can still call the old result route. No local test or source review closes that release blocker.
 
+## Member-safe official-read checkpoint
+
+A later local-only migration narrows direct whole-pack approval-row reads to Owners and Admins. The existing v1, v2, control-room and digest readers still return scoped official results to Members through membership-checked status logic. An old result tied to approval A remains historical after A is revoked, even if approval B later accepts the same pack. New entry-receipt results fail closed as historical; exact per-entry decision/digest currentness has not yet been implemented.
+
+Fresh guarded pgTAP results on the same disposable local database, 23 September 2026: `116_github_entry_official_reads.sql` 4/4; `072_github_official_results_mcp.sql` 78/78; `073_mcp_github_digest_v2.sql` 62/62; `078_github_official_monitoring_reads.sql` 17/17; `079_mcp_github_official_results_v2.sql` 62/62; `110_github_mapping_entry_decisions.sql` 39/39; `115_github_entry_materialisation.sql` 45/45. All seven exited 0, 307 assertions total. The original Member-direct-approval test failed before the migration; the final suites passed after the permission and reader changes. Whitespace checks passed. This is local database evidence, not a browser demonstration or hosted release.
+
+The Monitoring screen still totals official outcomes without checking whether their approval is current or their observation is fresh. Historical records remain visible but must not contribute to a reassuring current-pass count. The job wake/finalisation patch is separate and not yet database-verified. Neither patch has been deployed.
+
 ## Still required before Phase 2 ends
 
-Secure and test the old callable route. Finish Member-safe official reads and result currentness, job wake and finalisation, and the Owner/Admin/Member Monitoring journey. Demonstrate that journey in a local browser before requesting approval for any AWS dev deployment. Milestone 1 acceptance remains a separate gate for the hosted pilot.
+Secure and test the old callable route. Finish exact entry-level result currentness and snapshot history, job wake and finalisation, and the Owner/Admin/Member Monitoring journey. Make current versus historical/stale counts truthful and demonstrate that journey in a local browser before requesting approval for any AWS dev deployment. Milestone 1 acceptance remains a separate gate for the hosted pilot.
