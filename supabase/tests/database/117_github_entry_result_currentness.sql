@@ -28,6 +28,26 @@ values ('83000000-0000-4000-8000-000000000001', 'Currentness Workspace',
 insert into public.memberships(organisation_id, user_id, role) values
   ('83000000-0000-4000-8000-000000000001', '83000000-0000-4000-8000-000000000011', 'owner'),
   ('83000000-0000-4000-8000-000000000001', '83000000-0000-4000-8000-000000000012', 'member');
+insert into public.alert_channels(
+  organisation_id, type, label, config, min_severity, connected_by,
+  enabled, daily_digest_enabled
+) values (
+  '83000000-0000-4000-8000-000000000001', 'slack', 'Fixture', '{}', 'high',
+  '83000000-0000-4000-8000-000000000011', true, true
+);
+insert into public.daily_digest_deliveries(
+  organisation_id, digest_on, channel_id, fact_hash, message, attempted_by,
+  status, delivered_at
+)
+select '83000000-0000-4000-8000-000000000001', current_date - 1, channel.id,
+  repeat('a', 64), '{"text":"prior","blocks":[]}',
+  '83000000-0000-4000-8000-000000000011', 'delivered',
+  pg_catalog.now() - interval '1 hour'
+from public.alert_channels channel
+where channel.organisation_id = '83000000-0000-4000-8000-000000000001';
+insert into private.mcp_oauth_config(config_key, audience)
+values ('resource', 'https://compliance.example/mcp')
+on conflict (config_key) do update set audience = excluded.audience;
 
 select set_config('m2.currentness.before_selection', pg_catalog.clock_timestamp()::text, true);
 select set_config('m2.currentness.decision_id', public.record_github_mapping_entry_decision_server(
@@ -67,13 +87,13 @@ insert into public.github_repositories(
 insert into public.github_collection_runs(
   id, organisation_id, installation_id, repository_id, provider_repository_id,
   trigger_type, request_key, status, started_at, completed_at,
-  observation_count, passed_count, lease_token, lease_expires_at, attempt
+  observation_count, passed_count, failed_count, lease_token, lease_expires_at, attempt
 ) values (
   '83000000-0000-4000-8000-000000000201',
   '83000000-0000-4000-8000-000000000001',
   '83000000-0000-4000-8000-000000000101',
   '83000000-0000-4000-8000-000000000102', 83003,
-  'manual', 'currentness-run', 'succeeded', now() - interval '2 minutes', now(), 15, 15,
+  'manual', 'currentness-run', 'succeeded', now() - interval '2 minutes', now(), 15, 14, 1,
   extensions.gen_random_uuid(), now() - interval '1 minute', 1
 );
 insert into public.github_observations(
@@ -88,7 +108,10 @@ select '83000000-0000-4000-8000-000000000001',
   '83000000-0000-4000-8000-000000000201',
   'CurrentnessFixture/repo/' || entry.check_id || '/' || entry.rule_version,
   entry.check_id, entry.rule_version, 'github_repository', 'CurrentnessFixture/repo',
-  'pass', 'Currentness fixture check', 'A bounded fictional observation.',
+  case when entry.check_id = 'github.repository.visibility'
+    then 'fail'::public.github_observation_result
+    else 'pass'::public.github_observation_result end,
+  'Currentness fixture check', 'A bounded fictional observation.',
   now() - interval '1 minute', now() - interval '1 second',
   'https://github.com/CurrentnessFixture/repo',
   pg_catalog.encode(extensions.digest(
@@ -107,7 +130,7 @@ select lives_ok($sql$
      where pack.version = 'github-iso-27001-v1'),
     (select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
       'observation_id', observation.id,
-      'treatment_kind', entry.treatments #>> array['pass','kind'],
+      'treatment_kind', entry.treatments #>> array[observation.result::text,'kind'],
       'iso_control_references', pg_catalog.to_jsonb(entry.iso_control_references),
       'failure_severity', entry.failure_severity,
       'remediation', entry.remediation
@@ -152,6 +175,24 @@ select is((public.get_mcp_github_compliance_results_v1(
     '83000000-0000-4000-8000-000000000001', null, null, null, null, null, 20
   ) #>> '{results,0,mappingStatus}'),
   'active', 'the Member result reader shares exact snapshot consent status');
+select set_config('request.jwt.claims',
+  '{"sub":"83000000-0000-4000-8000-000000000012","role":"authenticated","client_id":"codex-test","aud":"https://compliance.example/mcp"}', true);
+select is(public.get_mcp_github_compliance_results_v2(
+    '83000000-0000-4000-8000-000000000001',
+    '83000000-0000-4000-8000-000000000102',
+    null, null, 'active', null, 20, null
+  ) #>> '{results,0,mappingStatus}',
+  'active', 'the MCP v2 reader includes the exact approved entry as active');
+select set_config('request.jwt.claims',
+  '{"sub":"83000000-0000-4000-8000-000000000012","role":"authenticated"}', true);
+select is(public.get_mcp_compliance_bundle_v2(
+    '83000000-0000-4000-8000-000000000001', current_date, 20, 20, 20
+  ) #>> '{github,partition,activeStale}',
+  '1', 'the digest counts an exact approved entry separately from stale freshness');
+select is(public.get_mcp_compliance_bundle_v2(
+    '83000000-0000-4000-8000-000000000001', current_date, 20, 20, 20
+  ) #>> '{github,changes,counts,newFailure}',
+  '1', 'the digest joins an exact entry receipt to its new-failure transition');
 select is((select pg_catalog.count(*) from public.github_mapping_entry_decisions
   where organisation_id = '83000000-0000-4000-8000-000000000001'),
   0::bigint, 'Members cannot read raw entry decisions');

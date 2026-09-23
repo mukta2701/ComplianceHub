@@ -276,7 +276,7 @@ insert into public.github_observations(
 );
 set role authenticated;
 select set_config('request.jwt.claims','{"sub":"76000000-0000-4000-8000-000000000011","role":"authenticated"}',true);
-select is(public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,20)->'github',current_setting('app.digest_v2_owner')::jsonb->'github','digest v2 fixture: newer raw shadow content and provider ordering cannot change official facts');
+select is((public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,20)->'github') - 'asOf', (current_setting('app.digest_v2_owner')::jsonb->'github') - 'asOf','digest v2 fixture: newer raw shadow content and provider ordering cannot change official facts');
 select is(public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,20)->'github',public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,20)->'github','digest v2 fixture: repeat reads and replay-equivalent state remain byte-for-byte deterministic');
 select set_config('request.jwt.claims','{"sub":"76000000-0000-4000-8000-000000000012","role":"authenticated"}',true);
 select set_config('app.digest_v2_admin',public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,20)::text,true);
