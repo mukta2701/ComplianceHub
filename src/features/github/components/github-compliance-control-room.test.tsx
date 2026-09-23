@@ -18,6 +18,7 @@ vi.mock("@/app/app/monitoring/github-control-room-actions", () => ({
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: hoisted.refresh }) }));
 
 import { GitHubComplianceControlRoomPanel } from "./github-compliance-control-room";
+import { GitHubOfficialResultSummary } from "./github-official-result-summary";
 
 const ORG = "a1000000-0000-4000-8000-000000000001";
 const REPOSITORY = "a1000000-0000-4000-8000-000000000002";
@@ -98,6 +99,8 @@ function room(overrides: Partial<GitHubComplianceControlRoom> = {}): GitHubCompl
         mappingPackId: PACK,
         mappingVersion: STANDARD_GITHUB_ISO_MAPPING_PACK.version,
         mappingChecksum: STANDARD_GITHUB_ISO_MAPPING_PACK.checksum,
+        mappingStatus: "active",
+        freshness: "current",
         evidenceId: index % 4 === 0 ? `a3000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}` : null,
         findingId: index % 4 === 1 ? `a4000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}` : null,
       })),
@@ -142,8 +145,8 @@ describe("GitHubComplianceControlRoomPanel", () => {
     render(<GitHubComplianceControlRoomPanel room={room()} review={review()} role="member" unhealthyRepositoryIds={[]} />);
     const repository = screen.getByRole("article", { name: "Mukta2701/ComplianceHub official compliance" });
     expect(within(repository).getByText("Official records current")).toBeVisible();
-    expect(within(repository).getByText("4 verified technical pass")).toBeVisible();
-    expect(within(repository).getByText("4 verified issue")).toBeVisible();
+    expect(within(repository).getByText("4 passed")).toBeVisible();
+    expect(within(repository).getByText("4 need action")).toBeVisible();
     expect(within(repository).getByText("4 could not verify")).toBeVisible();
     expect(within(repository).getByText("3 not applicable")).toBeVisible();
     expect(within(repository).getByRole("link", { name: "Open Mukta2701/ComplianceHub on GitHub" })).toHaveAttribute(
@@ -161,6 +164,93 @@ describe("GitHubComplianceControlRoomPanel", () => {
     expect(within(repository).getByRole("heading", { name: "Branch protection" })).toBeInTheDocument();
     expect(within(repository).getByText("Force-push protection")).toBeInTheDocument();
     expect(repository).not.toHaveTextContent(/compliant|certified|secure|readiness improved/i);
+  });
+
+  it("uses singular grammar for one current result needing action", () => {
+    const partialRoom = room();
+    const failedResult = partialRoom.repositories[0]!.officialResults.find((result) => result.outcome === "fail")!;
+    partialRoom.repositories[0]!.officialResults = [failedResult];
+
+    render(<>
+      <GitHubComplianceControlRoomPanel room={partialRoom} review={review()} role="member" unhealthyRepositoryIds={[]} />
+      <GitHubOfficialResultSummary results={[failedResult]} />
+    </>);
+
+    const repository = screen.getByRole("article", { name: "Mukta2701/ComplianceHub official compliance" });
+    expect(within(repository).getByText("1 needs action")).toBeVisible();
+    expect(screen.getByRole("note", { name: "Current GitHub results summary" }))
+      .toHaveTextContent("1 current GitHub result across repositories shown here · 0 passed · 1 needs action · 0 could not be verified");
+  });
+
+  it("excludes historical and stale outcomes from current counts but keeps them inspectable", async () => {
+    const user = userEvent.setup();
+    const roomWithOlderResults = room();
+    const results = roomWithOlderResults.repositories[0]!.officialResults;
+    results[0] = { ...results[0]!, mappingStatus: "historical" };
+    results[1] = { ...results[1]!, freshness: "stale" };
+
+    render(<GitHubComplianceControlRoomPanel room={roomWithOlderResults} review={review()} role="member" unhealthyRepositoryIds={[]} />);
+
+    const repository = screen.getByRole("article", { name: "Mukta2701/ComplianceHub official compliance" });
+    expect(within(repository).getByText("3 passed")).toBeVisible();
+    expect(within(repository).getByText("3 need action")).toBeVisible();
+    expect(within(repository).getByText("1 historical result · 1 stale result (excluded from current counts; details remain below)")).toBeVisible();
+
+    await user.click(within(repository).getByText("Inspect 15 latest results"));
+    expect(within(repository).getByText("Historical mapping")).toBeVisible();
+    expect(within(repository).getByText("Stale · recheck needed")).toBeVisible();
+    expect(within(repository).getByText("Passed when recorded")).toBeVisible();
+    expect(within(repository).getByText("Issue when recorded")).toBeVisible();
+  });
+
+  it("shows a partial review when only some exact checks have current results", () => {
+    const partialRoom = room();
+    partialRoom.repositories[0]!.officialResults = partialRoom.repositories[0]!.officialResults.slice(0, 1);
+
+    render(<GitHubComplianceControlRoomPanel room={partialRoom} review={review()} role="member" unhealthyRepositoryIds={[]} />);
+
+    const repository = screen.getByRole("article", { name: "Mukta2701/ComplianceHub official compliance" });
+    expect(within(repository).getByText("Partial review")).toBeVisible();
+    expect(within(repository).getByText(/Some checks have a current official result/)).toBeVisible();
+    expect(within(repository).getByText("1 passed")).toBeVisible();
+    expect(within(repository).queryByText("Needs attention")).not.toBeInTheDocument();
+  });
+
+  it("uses exact current result status when no legacy pack approval row exists", () => {
+    render(<GitHubComplianceControlRoomPanel room={room({ approval: null })} review={review()} role="member" unhealthyRepositoryIds={[]} />);
+
+    const repository = screen.getByRole("article", { name: "Mukta2701/ComplianceHub official compliance" });
+    expect(within(repository).getByText("Official records current")).toBeVisible();
+  });
+
+  it("keeps existing full current coverage visible while stating that a newer collection is processing", () => {
+    const processingRoom = room();
+    processingRoom.repositories[0]!.latestMaterialisationJob = {
+      ...processingRoom.repositories[0]!.latestMaterialisationJob!,
+      status: "pending",
+    };
+
+    render(<GitHubComplianceControlRoomPanel room={processingRoom} review={review()} role="member" unhealthyRepositoryIds={[]} />);
+
+    const repository = screen.getByRole("article", { name: "Mukta2701/ComplianceHub official compliance" });
+    expect(within(repository).getByText("Official records current")).toBeVisible();
+    expect(within(repository).getByText("A newer collection is still processing. The counts below reflect current official results already recorded.")).toBeVisible();
+  });
+
+  it("labels the page headline as current and puts old results outside its outcome totals", () => {
+    const resultRoom = room();
+    const results = resultRoom.repositories[0]!.officialResults;
+    results[0] = { ...results[0]!, mappingStatus: "historical" };
+    results[1] = { ...results[1]!, freshness: "stale" };
+
+    render(<GitHubOfficialResultSummary results={results} />);
+
+    expect(screen.getByRole("note", { name: "Current GitHub results summary" })).toHaveTextContent(
+      "13 current GitHub results across repositories shown here · 3 passed · 3 need action · 4 could not be verified · 3 not applicable",
+    );
+    expect(screen.getByRole("note", { name: "Current GitHub results summary" })).toHaveTextContent(
+      "1 historical result · 1 stale result (excluded from current totals; details remain below)",
+    );
   });
 
   it("never labels an official-mode collection without materialised results as shadow", () => {
@@ -270,8 +360,8 @@ describe("GitHubComplianceControlRoomPanel", () => {
     emptyRoom.repositories[0]!.latestMaterialisationJob = null;
     emptyRoom.repositories[0]!.officialResults = [];
     render(<GitHubComplianceControlRoomPanel room={emptyRoom} review={review()} role="member" unhealthyRepositoryIds={[]} />);
-    expect(screen.getByText("Awaiting approval")).toBeVisible();
-    expect(screen.getByText("No collection has completed yet. An Owner must also approve the reviewed mapping before official processing."))
+    expect(screen.getByText("No official results")).toBeVisible();
+    expect(screen.getByText("No collection has completed, so there are no official results to show yet."))
       .toBeVisible();
   });
 

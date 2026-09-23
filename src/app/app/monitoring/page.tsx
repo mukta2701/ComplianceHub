@@ -29,6 +29,7 @@ import {
 } from "@/features/github/application/github-compliance-control-room";
 import { loadGitHubMappingReview, type GitHubMappingReview } from "@/features/github/application/github-mapping-review";
 import { GitHubComplianceControlRoomPanel } from "@/features/github/components/github-compliance-control-room";
+import { GitHubOfficialResultSummary } from "@/features/github/components/github-official-result-summary";
 import type {
   GitHubInstallationSummary,
 } from "@/features/github/components/github-installation-panel";
@@ -106,10 +107,6 @@ function GitHubMonitoringSection({
   runtimeReadiness: GitHubRuntimeReadiness;
 }) {
   const officialResults = room.repositories.flatMap((repository) => repository.officialResults);
-  const passed = officialResults.filter((result) => result.outcome === "pass").length;
-  const needAction = officialResults.filter((result) => result.outcome === "fail").length;
-  const unknown = officialResults.filter((result) => result.outcome === "unknown").length;
-  const notApplicable = officialResults.filter((result) => result.outcome === "not_applicable").length;
   return <section className="monitor-github-section" aria-label="GitHub repository monitoring">
     <GitHubCollectionHealthPanel
       installations={installations}
@@ -118,15 +115,7 @@ function GitHubMonitoringSection({
       role={role}
       runtimeReadiness={runtimeReadiness}
     />
-    {officialResults.length > 0 && <Card
-      className="github-check-summary"
-      role="note"
-      aria-label="GitHub check summary"
-      style={{ marginTop: "12px", padding: "14px 18px", fontSize: "13px", fontWeight: 700 }}
-    >
-      {officialResults.length} {officialResults.length === 1 ? "check" : "checks"} · {passed} passed · <Link href="#active-findings">{needAction} {needAction === 1 ? "needs" : "need"} action</Link> · {unknown} could not be verified
-      {notApplicable > 0 && <> · {notApplicable} not applicable</>}
-    </Card>}
+    <GitHubOfficialResultSummary results={officialResults} />
   </section>;
 }
 

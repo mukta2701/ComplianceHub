@@ -71,6 +71,8 @@ function validPayload() {
         mappingPackId: PACK,
         mappingVersion: "github-iso-27001-v1",
         mappingChecksum: CHECKSUM,
+        mappingStatus: "active",
+        freshness: "current",
         evidenceId: null,
         findingId: FINDING,
       }],
@@ -205,6 +207,8 @@ describe("GitHub compliance control-room contract", () => {
     expect(parsed.repositories[0]?.officialResults[0]).toMatchObject({
       checkId: "github.repository.visibility",
       outcome: "fail",
+      mappingStatus: "active",
+      freshness: "current",
       findingId: FINDING,
     });
     expect(parsed.exhaustedAttention).toEqual(validPayload().exhaustedAttention);
@@ -230,6 +234,8 @@ describe("GitHub compliance control-room contract", () => {
       severity: null,
       summary: "A passing repository visibility observation is historical.",
       freshUntil: "2026-08-25T07:00:00.000Z",
+      freshness: "stale",
+      mappingStatus: "historical",
       evidenceId: null,
       findingId: null,
     });
@@ -252,6 +258,7 @@ describe("GitHub compliance control-room contract", () => {
 
     staleResult.findingId = null;
     staleResult.freshUntil = "2026-08-26T07:00:00.000Z";
+    staleResult.freshness = "current";
     expect(() => parseGitHubComplianceControlRoom(payload, {
       organisationId: ORG,
       offset: 0,

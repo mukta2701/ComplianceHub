@@ -16,7 +16,9 @@ import type { GitHubComplianceControlRoom } from "../application/github-complian
 import type { GitHubMappingReview } from "../application/github-mapping-review";
 import {
   classifyGitHubRepositoryCompliance,
+  classifyGitHubOfficialResult,
   countGitHubOfficialOutcomes,
+  type GitHubOfficialResultCurrentness,
   type GitHubRepositoryComplianceState,
 } from "../domain/compliance-control-room-state";
 import { githubEvidenceTitle, groupChecksByArea } from "./github-check-presentation";
@@ -28,9 +30,9 @@ const STATE_PRESENTATION: Record<GitHubRepositoryComplianceState, { label: strin
     detail: "Collection or processing is incomplete. Review the safe recovery options below.",
   },
   awaiting_approval: {
-    label: "Awaiting approval",
+    label: "Awaiting mapping review",
     tone: "amber",
-    detail: "Collected checks are stored, but an Owner has not approved the reviewed mapping.",
+    detail: "The latest processing job is waiting for a mapping review before it can produce official results.",
   },
   shadow: {
     label: "Collected, not official",
@@ -38,14 +40,19 @@ const STATE_PRESENTATION: Record<GitHubRepositoryComplianceState, { label: strin
     detail: "Collected checks exist, but no official evidence or findings have been produced yet.",
   },
   official_stale: {
-    label: "Official records stale",
+    label: "Records need review",
     tone: "amber",
-    detail: "Official records exist, but their mapping identity or freshness no longer matches the active review.",
+    detail: "Some results use an older mapping or are past their freshness window. Check each result label before relying on it as current.",
+  },
+  official_partial: {
+    label: "Partial review",
+    tone: "amber",
+    detail: "Some checks have a current official result. Other checks have no current result yet and are excluded from these counts.",
   },
   official_current: {
     label: "Official records current",
     tone: "green",
-    detail: "All 15 latest results match the active mapping and remain within their verified freshness window.",
+    detail: "All 15 expected checks have a current result.",
   },
 };
 
@@ -55,7 +62,18 @@ const RETRY_REASONS = [
   { value: "owner_reviewed", label: "Owner reviewed" },
 ] as const;
 
-function outcomeLabel(outcome: "pass" | "fail" | "unknown" | "not_applicable"): string {
+function currentnessLabel(currentness: GitHubOfficialResultCurrentness): string {
+  if (currentness === "historical") return "Historical mapping";
+  return currentness === "stale" ? "Stale · recheck needed" : "Current";
+}
+
+function outcomeLabel(outcome: "pass" | "fail" | "unknown" | "not_applicable", current: boolean): string {
+  if (!current) {
+    if (outcome === "pass") return "Passed when recorded";
+    if (outcome === "fail") return "Issue when recorded";
+    if (outcome === "unknown") return "Could not verify then";
+    return "Not applicable when recorded";
+  }
   if (outcome === "pass") return "Verified technical pass";
   if (outcome === "fail") return "Verified issue";
   if (outcome === "unknown") return "Could not verify";
@@ -211,20 +229,27 @@ function RepositoryOfficialCard({
   const state = classifyGitHubRepositoryCompliance({
     asOf: room.asOf,
     installationHealthy,
-    approval: room.approval,
     latestCollection: repository.latestCollection,
     latestMaterialisationJob: repository.latestMaterialisationJob,
     officialResults: repository.officialResults,
   });
   const presentation = STATE_PRESENTATION[state];
+  const presentationLabel = state === "shadow" && !repository.latestCollection
+    ? "No official results"
+    : presentation.label;
   const counts = countGitHubOfficialOutcomes(repository.officialResults);
   const job = repository.latestMaterialisationJob;
   const run = repository.latestCollection;
   const stateDetail = !run && state === "awaiting_approval"
-    ? "No collection has completed yet. An Owner must also approve the reviewed mapping before official processing."
+    ? "No collection has completed yet; the latest processing job is waiting for mapping review."
     : !run && state === "shadow"
-      ? "No collection has completed yet, so no official records exist."
+      ? "No collection has completed, so there are no official results to show yet."
       : presentation.detail;
+  const processingDetail = job?.status === "pending"
+    ? "A newer collection is still processing. The counts below reflect current official results already recorded."
+    : job?.status === "awaiting_approval"
+      ? "A newer collection is waiting for mapping review before it can become official."
+      : null;
   const canProcessResults = workspaceAccess(role).section("monitoring").canManageOperation("process-github-results");
 
   function targetForm() {
@@ -247,25 +272,38 @@ function RepositoryOfficialCard({
         </a>
         <p>{repository.visibility} · default {repository.defaultBranch}{repository.archived ? " · archived" : ""}</p>
       </div>
-      <Pill tone={presentation.tone}>{presentation.label}</Pill>
+      <Pill tone={presentation.tone}>{presentationLabel}</Pill>
     </header>
     <p className="github-state-detail">{stateDetail}</p>
+    {processingDetail && <p className="github-processing-detail">{processingDetail}</p>}
+    <h4 className="github-current-results-heading">Current results</h4>
     <dl className="github-outcome-counts">
-      <div><dt>Verified technical pass</dt><dd>{counts.pass} verified technical pass</dd></div>
-      <div><dt>Verified issue</dt><dd>{counts.fail} verified issue</dd></div>
-      <div><dt>Could not verify</dt><dd>{counts.unknown} could not verify</dd></div>
-      <div><dt>Not applicable</dt><dd>{counts.notApplicable} not applicable</dd></div>
+      <div><dt>Passed</dt><dd>{counts.current.pass} passed</dd></div>
+      <div><dt>Need action</dt><dd>{counts.current.fail} {counts.current.fail === 1 ? "needs" : "need"} action</dd></div>
+      <div><dt>Could not verify</dt><dd>{counts.current.unknown} could not verify</dd></div>
+      <div><dt>Not applicable</dt><dd>{counts.current.notApplicable} not applicable</dd></div>
     </dl>
+    {(counts.historical > 0 || counts.stale > 0) && <p className="github-excluded-results-note">
+      {counts.historical > 0 && <>{counts.historical} historical {counts.historical === 1 ? "result" : "results"}</>}
+      {counts.historical > 0 && counts.stale > 0 && " · "}
+      {counts.stale > 0 && <>{counts.stale} stale {counts.stale === 1 ? "result" : "results"}</>}
+      {" (excluded from current counts; details remain below)"}
+    </p>}
 
     {repository.officialResults.length > 0 && <details className="github-official-results">
       <summary>Inspect {repository.officialResults.length} latest results</summary>
       {groupChecksByArea(repository.officialResults).map((section) => <section key={section.group.id} aria-label={`${section.group.title} results`}>
         <h4 className="github-results-group">{section.group.title}</h4>
-        <ul>{section.items.map((result) => <li key={result.id}>
+        <ul>{section.items.map((result) => {
+          const currentness = classifyGitHubOfficialResult(result);
+          const isCurrent = currentness === "current";
+          const resultTone = isCurrent ? outcomeTone(result.outcome) : currentness === "stale" ? "amber" : "neutral";
+          return <li key={result.id}>
         <div>
           <strong>{githubEvidenceTitle(result.checkId)}</strong>
           <code>{result.checkId}</code>
-          <Pill tone={outcomeTone(result.outcome)}>{outcomeLabel(result.outcome)}</Pill>
+          <Pill tone={resultTone}>{outcomeLabel(result.outcome, isCurrent)}</Pill>
+          <Pill tone={currentness === "current" ? "green" : currentness === "stale" ? "amber" : "neutral"}>{currentnessLabel(currentness)}</Pill>
         </div>
         <p>{result.summary}</p>
         <small>Rule {result.ruleVersion} · Mapping {result.mappingVersion}</small>
@@ -274,7 +312,8 @@ function RepositoryOfficialCard({
           {result.evidenceId && <a href={`/app/evidence?evidence=${result.evidenceId}#evidence-${result.evidenceId}`} aria-label={`View evidence for ${result.checkId}`}>View evidence</a>}
           {result.findingId && <a href={`/app/monitoring?finding=${result.findingId}#finding-${result.findingId}`} aria-label={`View finding for ${result.checkId}`}>View finding</a>}
         </span>
-        </li>)}</ul>
+          </li>;
+        })}</ul>
       </section>)}
     </details>}
 

@@ -78,6 +78,8 @@ const officialResultSchema = z.object({
   mappingPackId: uuid,
   mappingVersion: z.string().min(1).max(80).regex(/^[A-Za-z0-9._-]+$/),
   mappingChecksum: checksum,
+  mappingStatus: z.enum(["active", "historical"]),
+  freshness: z.enum(["current", "stale"]),
   evidenceId: uuid.nullable(),
   findingId: uuid.nullable(),
 }).strict().superRefine((result, ctx) => {
