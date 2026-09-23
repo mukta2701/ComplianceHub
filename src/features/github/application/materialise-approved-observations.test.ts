@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { STANDARD_GITHUB_ISO_MAPPING_PACK } from "../domain/mapping";
+import { buildMappingPackChecksum, STANDARD_GITHUB_ISO_MAPPING_PACK } from "../domain/mapping";
 import {
   buildMaterialisationDependencies,
   materialiseApprovedGitHubObservations,
@@ -12,7 +12,6 @@ import {
 
 const ORGANISATION_ID = "10000000-0000-4000-8000-000000000001";
 const RUN_ID = "20000000-0000-4000-8000-000000000001";
-const APPROVAL_ID = "30000000-0000-4000-8000-000000000001";
 const PACK_ID = "40000000-0000-4000-8000-000000000001";
 const INSTALLATION_ID = "60000000-0000-4000-8000-000000000001";
 const REPOSITORY_ID = "70000000-0000-4000-8000-000000000001";
@@ -117,12 +116,13 @@ function dependencies(overrides: Partial<MaterialisationDependencies> = {}) {
     finaliseJob: vi.fn().mockResolvedValue(true),
     inspectJobs: vi.fn().mockResolvedValue([]),
     loadTerminalRun: vi.fn().mockResolvedValue(terminalRun()),
-    loadActiveApproval: vi.fn().mockResolvedValue({
-      approvalId: APPROVAL_ID,
+    loadEffectiveMapping: vi.fn().mockResolvedValue({
       mappingPackId: PACK_ID,
       version: STANDARD_GITHUB_ISO_MAPPING_PACK.version,
       checksum: STANDARD_GITHUB_ISO_MAPPING_PACK.checksum,
       publishedAt: "2026-08-24T09:00:00.000Z",
+      pack: STANDARD_GITHUB_ISO_MAPPING_PACK,
+      entries: ALL_CHECK_IDS.map((checkId) => ({ checkId, status: "approved" })),
     }),
     loadObservations: vi.fn().mockResolvedValue(completeObservations()),
     materialise: vi.fn().mockResolvedValue({
@@ -144,15 +144,101 @@ function dependencies(overrides: Partial<MaterialisationDependencies> = {}) {
     finaliseJob: ReturnType<typeof vi.fn>;
     inspectJobs: ReturnType<typeof vi.fn>;
     loadTerminalRun: ReturnType<typeof vi.fn>;
-    loadActiveApproval: ReturnType<typeof vi.fn>;
+    loadEffectiveMapping: ReturnType<typeof vi.fn>;
     loadObservations: ReturnType<typeof vi.fn>;
     materialise: ReturnType<typeof vi.fn>;
   };
 }
 
 describe("materialiseApprovedGitHubObservations", () => {
+  it("materialises only exact approved entries from a mixed review", async () => {
+    const effectiveEntries = ALL_CHECK_IDS.map((checkId) => ({
+      checkId,
+      status: checkId === "github.branch.force_pushes" ? "approved"
+        : checkId === "github.branch.status_checks" ? "rejected" : "pending",
+    }));
+    const deps = Object.assign(dependencies(), {
+      loadEffectiveMapping: vi.fn().mockResolvedValue({
+        mappingPackId: PACK_ID,
+        version: STANDARD_GITHUB_ISO_MAPPING_PACK.version,
+        checksum: STANDARD_GITHUB_ISO_MAPPING_PACK.checksum,
+        publishedAt: "2026-08-24T09:00:00.000Z",
+        pack: STANDARD_GITHUB_ISO_MAPPING_PACK,
+        entries: effectiveEntries,
+      }),
+    });
+
+    await materialiseApprovedGitHubObservations(deps, {
+      organisationId: ORGANISATION_ID,
+      collectionRunId: RUN_ID,
+    });
+
+    expect(deps.loadEffectiveMapping).toHaveBeenCalledWith(ORGANISATION_ID);
+    expect(deps.materialise).toHaveBeenCalledOnce();
+    expect(deps.materialise.mock.calls[0]![0].target_decisions.map(
+      (decision: { observation_id: string }) => decision.observation_id,
+    )).toEqual(["50000000-0000-4000-8000-000000000003"]);
+  });
+
+  it("does not invoke the materialiser when the selected pack has zero approved entries", async () => {
+    const deps = Object.assign(dependencies(), {
+      loadEffectiveMapping: vi.fn().mockResolvedValue({
+        mappingPackId: PACK_ID,
+        version: STANDARD_GITHUB_ISO_MAPPING_PACK.version,
+        checksum: STANDARD_GITHUB_ISO_MAPPING_PACK.checksum,
+        publishedAt: "2026-08-24T09:00:00.000Z",
+        pack: STANDARD_GITHUB_ISO_MAPPING_PACK,
+        entries: ALL_CHECK_IDS.map((checkId) => ({ checkId, status: "pending" })),
+      }),
+    });
+
+    await expect(materialiseApprovedGitHubObservations(deps, {
+      organisationId: ORGANISATION_ID,
+      collectionRunId: RUN_ID,
+    })).resolves.toEqual({ status: "awaiting_approval", collectionRunId: RUN_ID });
+
+    expect(deps.materialise).not.toHaveBeenCalled();
+  });
+
+  it("uses a selected v2 treatment only for exact approved entries", async () => {
+    const mappings = STANDARD_GITHUB_ISO_MAPPING_PACK.mappings.map((mapping) =>
+      mapping.checkId === "github.branch.force_pushes"
+        ? { ...mapping, remediation: "Review force-push exceptions under the new policy." }
+        : mapping);
+    const draft = { version: "github-iso-27001-v2", title: "Reviewed v2", mappings };
+    const selectedPack = { ...draft, checksum: buildMappingPackChecksum(draft) };
+    const deps = Object.assign(dependencies(), {
+      loadEffectiveMapping: vi.fn().mockResolvedValue({
+        mappingPackId: PACK_ID,
+        version: selectedPack.version,
+        checksum: selectedPack.checksum,
+        publishedAt: "2026-08-24T09:00:00.000Z",
+        pack: selectedPack,
+        entries: ALL_CHECK_IDS.map((checkId) => ({
+          checkId,
+          status: checkId === "github.branch.force_pushes" ? "approved" : "pending",
+        })),
+      }),
+    });
+
+    await materialiseApprovedGitHubObservations(deps, {
+      organisationId: ORGANISATION_ID,
+      collectionRunId: RUN_ID,
+    });
+
+    expect(deps.materialise).toHaveBeenCalledOnce();
+    expect(deps.materialise.mock.calls[0]![0]).toMatchObject({
+      target_mapping_version: "github-iso-27001-v2",
+      target_mapping_checksum: selectedPack.checksum,
+      target_decisions: [{
+        observation_id: "50000000-0000-4000-8000-000000000003",
+        remediation: "Review force-push exceptions under the new policy.",
+      }],
+    });
+  });
+
   it("returns awaiting_approval without loading observations or invoking the RPC", async () => {
-    const deps = dependencies({ loadActiveApproval: vi.fn().mockResolvedValue(null) });
+    const deps = dependencies({ loadEffectiveMapping: vi.fn().mockResolvedValue(null) });
 
     await expect(materialiseApprovedGitHubObservations(deps, {
       organisationId: ORGANISATION_ID,
@@ -171,19 +257,20 @@ describe("materialiseApprovedGitHubObservations", () => {
       collectionRunId: RUN_ID,
     })).resolves.toEqual({ status: "not_terminal", collectionRunId: RUN_ID });
 
-    expect(deps.loadActiveApproval).not.toHaveBeenCalled();
+    expect(deps.loadEffectiveMapping).not.toHaveBeenCalled();
     expect(deps.loadObservations).not.toHaveBeenCalled();
     expect(deps.materialise).not.toHaveBeenCalled();
   });
 
-  it("rejects an active approval for a stale or unsealed pack before observations are loaded", async () => {
+  it("rejects a stale or unsealed selected pack before observations are loaded", async () => {
     const deps = dependencies({
-      loadActiveApproval: vi.fn().mockResolvedValue({
-        approvalId: APPROVAL_ID,
+      loadEffectiveMapping: vi.fn().mockResolvedValue({
         mappingPackId: PACK_ID,
         version: "github-iso-27001-v0",
         checksum: "b".repeat(64),
         publishedAt: null,
+        pack: STANDARD_GITHUB_ISO_MAPPING_PACK,
+        entries: ALL_CHECK_IDS.map((checkId) => ({ checkId, status: "approved" })),
       }),
     });
 
@@ -569,7 +656,7 @@ describe("reconcileApprovedGitHubObservations", () => {
   });
 
   it("parks a claimed job as awaiting approval without treating it as unhealthy", async () => {
-    const deps = dependencies({ loadActiveApproval: vi.fn().mockResolvedValue(null) });
+    const deps = dependencies({ loadEffectiveMapping: vi.fn().mockResolvedValue(null) });
 
     const result = await reconcileApprovedGitHubObservations(deps, { limit: 20 });
 
@@ -705,7 +792,7 @@ describe("buildMaterialisationDependencies", () => {
     });
   });
 
-  it("loads a terminal run, its active sealed approval, and only bounded observation fields", async () => {
+  it("loads a terminal run, selected entry states, and only bounded observation fields", async () => {
     const run = query({
       data: {
         id: RUN_ID,
@@ -723,23 +810,35 @@ describe("buildMaterialisationDependencies", () => {
       },
       error: null,
     });
-    const approval = query({
-      data: {
-        id: APPROVAL_ID,
+    const effectiveEntries = query({
+      data: ALL_CHECK_IDS.map((checkId) => ({ mapping_pack_id: PACK_ID, check_id: checkId, status: "approved" })),
+      error: null,
+    });
+    const pack = query({ data: {
+      id: PACK_ID,
+      version: STANDARD_GITHUB_ISO_MAPPING_PACK.version,
+      title: STANDARD_GITHUB_ISO_MAPPING_PACK.title,
+      checksum: STANDARD_GITHUB_ISO_MAPPING_PACK.checksum,
+      published_at: "2026-08-24T09:00:00.000Z",
+    }, error: null });
+    const mappingRows = query({
+      data: STANDARD_GITHUB_ISO_MAPPING_PACK.mappings.map((mapping) => ({
         mapping_pack_id: PACK_ID,
-        github_mapping_packs: {
-          id: PACK_ID,
-          version: STANDARD_GITHUB_ISO_MAPPING_PACK.version,
-          checksum: STANDARD_GITHUB_ISO_MAPPING_PACK.checksum,
-          published_at: "2026-08-24T09:00:00.000Z",
-        },
-      },
+        check_id: mapping.checkId,
+        rule_version: mapping.ruleVersion,
+        iso_control_references: mapping.isoControlReferences,
+        failure_severity: mapping.failureSeverity,
+        remediation: mapping.remediation,
+        treatments: mapping.treatments,
+      })),
       error: null,
     });
     const observations = query({ data: [observation(1, "github.repository.visibility", "pass")], error: null });
     const service = {
       from: vi.fn((table: string) => {
-        if (table === "github_mapping_approvals") return approval;
+        if (table === "github_effective_mapping_entry_decisions") return effectiveEntries;
+        if (table === "github_mapping_packs") return pack;
+        if (table === "github_mapping_entries") return mappingRows;
         if (table === "github_observations") return observations;
         return run;
       }),
@@ -759,12 +858,13 @@ describe("buildMaterialisationDependencies", () => {
       repositoryName: REPOSITORY,
       repositorySourceUrl: SOURCE_URL,
     });
-    await expect(deps.loadActiveApproval(ORGANISATION_ID)).resolves.toEqual({
-      approvalId: APPROVAL_ID,
+    await expect(deps.loadEffectiveMapping(ORGANISATION_ID)).resolves.toEqual({
       mappingPackId: PACK_ID,
       version: STANDARD_GITHUB_ISO_MAPPING_PACK.version,
       checksum: STANDARD_GITHUB_ISO_MAPPING_PACK.checksum,
       publishedAt: "2026-08-24T09:00:00.000Z",
+      pack: STANDARD_GITHUB_ISO_MAPPING_PACK,
+      entries: ALL_CHECK_IDS.map((checkId) => ({ checkId, status: "approved" })),
     });
     await expect(deps.loadObservations({ organisationId: ORGANISATION_ID, collectionRunId: RUN_ID })).resolves.toHaveLength(1);
 
@@ -772,8 +872,10 @@ describe("buildMaterialisationDependencies", () => {
       "id,organisation_id,installation_id,repository_id,status,observation_count,github_repositories!github_collection_runs_provider_repository_tenant_fk(provider_repository_id,owner_login,name,html_url)",
     );
     expect(run.in).toHaveBeenCalledWith("status", ["succeeded", "partial"]);
-    expect(approval.is).toHaveBeenCalledWith("revoked_at", null);
-    expect(approval.not).toHaveBeenCalledWith("github_mapping_packs.published_at", "is", null);
+    expect(effectiveEntries.select).toHaveBeenCalledWith("mapping_pack_id,check_id,status");
+    expect(effectiveEntries.eq).toHaveBeenCalledWith("organisation_id", ORGANISATION_ID);
+    expect(pack.eq).toHaveBeenCalledWith("id", PACK_ID);
+    expect(mappingRows.eq).toHaveBeenCalledWith("mapping_pack_id", PACK_ID);
     expect(observations.select).toHaveBeenCalledWith(
       "id,organisation_id,installation_id,repository_id,collection_run_id,provider_repository_id,observation_key,check_id,rule_version,subject_type,subject_id,result,severity,title,explanation,remediation,observed_at,fresh_until,source_url,fingerprint,diagnostic_code",
     );

@@ -32,9 +32,9 @@ select ok(not has_function_privilege('service_role','public.materialise_github_o
 select ok(not has_function_privilege('authenticated','public.materialise_github_observations_task2_server(uuid,uuid,text,text,jsonb)','EXECUTE'),'official fixture: authenticated callers cannot execute inner materialiser');
 select ok(not has_table_privilege('service_role','public.github_official_compliance_results','INSERT,UPDATE,DELETE'),'official fixture: service clients cannot write ledger directly');
 select ok(not has_table_privilege('authenticated','public.github_official_compliance_results','INSERT,UPDATE,DELETE'),'official fixture: authenticated clients cannot write ledger directly');
-select ok((select pg_catalog.pg_get_functiondef('public.materialise_github_observations_server(uuid,uuid,text,text,jsonb)'::regprocedure) ~* 'on conflict \(observation_id\) do nothing'),'official fixture: wrapper contains the observation replay conflict prerequisite');
-select ok((select pg_catalog.pg_get_functiondef('public.materialise_github_observations_server(uuid,uuid,text,text,jsonb)'::regprocedure) ~ 'inserted_count not in \(0, expected_count\)'),'official fixture: wrapper rejects partial ledger insertion counts');
-select ok((select pg_catalog.pg_get_functiondef('public.materialise_github_observations_server(uuid,uuid,text,text,jsonb)'::regprocedure) ~ 'ledger_count <> expected_count'),'official fixture: wrapper verifies complete run ledger');
+select ok((select pg_catalog.pg_get_functiondef('public.materialise_github_observations_legacy_unchecked(uuid,uuid,text,text,jsonb)'::regprocedure) ~* 'on conflict \(observation_id\) do nothing'),'official fixture: retained legacy ledger contains the observation replay conflict prerequisite');
+select ok((select pg_catalog.pg_get_functiondef('public.materialise_github_observations_legacy_unchecked(uuid,uuid,text,text,jsonb)'::regprocedure) ~ 'inserted_count not in \(0, expected_count\)'),'official fixture: retained legacy ledger rejects partial insertion counts');
+select ok((select pg_catalog.pg_get_functiondef('public.materialise_github_observations_legacy_unchecked(uuid,uuid,text,text,jsonb)'::regprocedure) ~ 'ledger_count <> expected_count'),'official fixture: retained legacy ledger verifies complete run insertion');
 
 create or replace function pg_temp.official_decision(target_observation_id uuid, target_kind text)
 returns jsonb language sql immutable as $$
