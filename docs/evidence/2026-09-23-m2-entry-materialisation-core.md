@@ -33,7 +33,7 @@ A later local-only migration narrows direct whole-pack approval-row reads to Own
 
 Fresh guarded pgTAP results on the same disposable local database, 23 September 2026: `116_github_entry_official_reads.sql` 4/4; `072_github_official_results_mcp.sql` 78/78; `073_mcp_github_digest_v2.sql` 62/62; `078_github_official_monitoring_reads.sql` 17/17; `079_mcp_github_official_results_v2.sql` 62/62; `110_github_mapping_entry_decisions.sql` 39/39; `115_github_entry_materialisation.sql` 45/45. All seven exited 0, 307 assertions total. The original Member-direct-approval test failed before the migration; the final suites passed after the permission and reader changes. Whitespace checks passed. This is local database evidence, not a browser demonstration or hosted release.
 
-The Monitoring screen still totals official outcomes without checking whether their approval is current or their observation is fresh. Historical records remain visible but must not contribute to a reassuring current-pass count. The job wake/finalisation patch is separate and not yet database-verified. Neither patch has been deployed.
+The Monitoring screen still totals official outcomes without checking whether their approval is current or their observation is fresh. Historical records remain visible but must not contribute to a reassuring current-pass count. A separate job wake/finalisation patch passed focused local database and unit tests in an isolated worktree, but an approval-during-final-lease race remains under review; that patch is not merged into this feature branch. Neither patch has been deployed.
 
 ## Still required before Phase 2 ends
 
