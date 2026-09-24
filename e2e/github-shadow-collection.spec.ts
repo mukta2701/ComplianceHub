@@ -563,7 +563,7 @@ test("selects repository scope in Connections and shows official collection heal
 
   await page.goto("/app/monitoring");
   await expect(page.getByRole("heading", { name: "GitHub monitoring" })).toBeVisible();
-  await expect(repositoryCard(page, `${accountLogin}/fresh`).getByText("Up to date", { exact: true })).toBeVisible();
+  await expect(repositoryCard(page, `${accountLogin}/fresh`).getByText("Last check completed", { exact: true })).toBeVisible();
   await expect(repositoryCard(page, `${accountLogin}/fresh`)).toContainText("1 check needs attention");
   await expect(repositoryCard(page, `${accountLogin}/fresh`)).toContainText("Last checked");
   await expect(repositoryCard(page, `${accountLogin}/partial`).getByText("Some checks could not be completed", { exact: true })).toBeVisible();
@@ -575,7 +575,7 @@ test("selects repository scope in Connections and shows official collection heal
   await expect(page.getByRole("heading", { name: "From repository facts to reviewed records" })).not.toBeVisible();
   await technicalReview.locator(":scope > summary").click();
   await expect(page.getByRole("heading", { name: "From repository facts to reviewed records" })).toBeVisible();
-  await expect(page.getByText("Review all 15 mapped checks").locator("xpath=.." )).not.toHaveAttribute("open", "");
+  await expect(page.getByText("Check definitions (15)").locator("xpath=.." )).not.toHaveAttribute("open", "");
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 
   const { error: legacyFindingError } = await service.from("monitoring_findings").insert({
