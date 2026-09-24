@@ -124,7 +124,7 @@ jobs:
 
           docker network create "$fixture_network" >/dev/null
           docker run --detach --name "$fixture_container" --network "$fixture_network" \
-            compliancehub:ci node -e 'require("node:http").createServer((request,response)=>{const body=request.url==="/rest/v1/rpc/claim_github_connection_alert_delivery"?"[]":"[]";response.writeHead(200,{"content-type":"application/json"});response.end(body)}).listen(4400,"0.0.0.0")'
+            compliancehub:ci node -e 'require("node:http").createServer((request,response)=>{const body=request.url==="/rest/v1/rpc/load_github_compliance_result_alert_candidates"?"{\"candidates\":[],\"hasMore\":false}":"[]";response.writeHead(200,{"content-type":"application/json"});response.end(body)}).listen(4400,"0.0.0.0")'
           for attempt in {1..20}; do
             if docker exec "$fixture_container" node -e 'fetch("http://127.0.0.1:4400").then(response=>{if(!response.ok)process.exit(1)}).catch(()=>process.exit(1))'; then break; fi
             sleep 0.25
