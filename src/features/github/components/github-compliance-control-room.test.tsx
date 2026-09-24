@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -108,11 +108,15 @@ describe("GitHubComplianceControlRoomPanel", () => {
   it("explains the four phases and shows exact mapping identity, all 15 checks, ISO references, treatments, limitations, and identity-free history", () => {
     render(<GitHubComplianceControlRoomPanel room={room()} review={review()} role="member" unhealthyRepositoryIds={[]} />);
 
-    const workflow = screen.getByRole("list", { name: "How GitHub compliance becomes official" });
-    expect(within(workflow).getAllByRole("listitem")).toHaveLength(4);
+    const workflowDetails = screen.getByText("How results become records").closest("details") as HTMLElement;
+    expect(workflowDetails).not.toHaveAttribute("open");
+    expect(within(workflowDetails).getByText("1. Connect")).not.toBeVisible();
     expect(screen.getByText("Check definitions (15)").closest("details")).not.toHaveAttribute("open");
-    expect(screen.getAllByText(STANDARD_GITHUB_ISO_MAPPING_PACK.version)[0]).toBeVisible();
-    expect(screen.getByText(STANDARD_GITHUB_ISO_MAPPING_PACK.checksum)).toBeVisible();
+    const mappingIdentity = screen.getByText("Internal mapping details").closest("details") as HTMLElement;
+    expect(mappingIdentity).not.toHaveAttribute("open");
+    expect(within(mappingIdentity).getByText(STANDARD_GITHUB_ISO_MAPPING_PACK.checksum)).not.toBeVisible();
+    fireEvent.click(within(mappingIdentity).getByText("Internal mapping details"));
+    expect(within(mappingIdentity).getByText(STANDARD_GITHUB_ISO_MAPPING_PACK.checksum)).toBeVisible();
     expect(screen.getAllByRole("article", { name: /mapping check$/ })).toHaveLength(15);
     const mapping = screen.getByText("Check definitions (15)").closest("details") as HTMLElement;
     for (const group of ["Repository basics", "Branch protection", "Dependency and code alerts", "Secret protection", "Workflows and access"]) {

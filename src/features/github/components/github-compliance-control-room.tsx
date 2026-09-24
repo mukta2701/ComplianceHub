@@ -151,11 +151,14 @@ function MappingReviewSection({
       <Pill tone={exactApprovalActive ? "green" : "amber"}>{approvalLabel}</Pill>
     </div>
 
-    <dl className="github-mapping-identity">
-      <div><dt>Version</dt><dd>{review.pack.version}</dd></div>
-      <div><dt>Checksum</dt><dd><code>{review.pack.checksum}</code></dd></div>
-      <div><dt>Published</dt><dd><time dateTime={review.pack.publishedAt}>{review.pack.publishedAt}</time></dd></div>
-    </dl>
+    <details className="github-mapping-details">
+      <summary>Internal mapping details</summary>
+      <dl className="github-mapping-identity">
+        <div><dt>Version</dt><dd>{review.pack.version}</dd></div>
+        <div><dt>Checksum</dt><dd><code>{review.pack.checksum}</code></dd></div>
+        <div><dt>Published</dt><dd><time dateTime={review.pack.publishedAt}>{review.pack.publishedAt}</time></dd></div>
+      </dl>
+    </details>
 
     <div className="github-limitations" role="note" aria-label="Mapping limitations">
       <strong>What this mapping does not prove</strong>
@@ -423,12 +426,15 @@ export function GitHubComplianceControlRoomPanel({
       <p>GitHub supplies technical facts. ComplianceHub preserves the review boundary and shows exactly what was verified.</p>
     </header>
 
-    <ol className="github-control-room-steps" aria-label="How GitHub compliance becomes official">
-      <li><strong>1. Connect</strong><span>Install the private read-only GitHub App.</span></li>
-      <li><strong>2. Select</strong><span>Choose repositories separately from mapping approval.</span></li>
-      <li><strong>3. Review</strong><span>An Owner reviews the exact ISO mapping and limitations.</span></li>
-      <li><strong>4. Process</strong><span>Approved fresh results create traceable evidence or findings.</span></li>
-    </ol>
+    <details className="github-mapping-details">
+      <summary>How results become records</summary>
+      <ol className="github-control-room-steps" aria-label="How GitHub compliance becomes official">
+        <li><strong>1. Connect</strong><span>Install the private read-only GitHub App.</span></li>
+        <li><strong>2. Select</strong><span>Choose repositories separately from mapping approval.</span></li>
+        <li><strong>3. Review</strong><span>An Owner reviews the exact ISO mapping and limitations.</span></li>
+        <li><strong>4. Process</strong><span>Approved fresh results create traceable evidence or findings.</span></li>
+      </ol>
+    </details>
 
     <MappingReviewSection room={room} review={review} role={role} runAction={runAction} pending={pending} />
 
