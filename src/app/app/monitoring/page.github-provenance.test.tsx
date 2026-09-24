@@ -102,4 +102,20 @@ describe("MonitoringPage official GitHub findings", () => {
     await expect(MonitoringPage({ searchParams: Promise.resolve({}) }))
       .rejects.toThrow("Could not load monitoring");
   });
+
+  it("labels expired GitHub results as saved history rather than current passes", async () => {
+    hoisted.loadControlRoom.mockResolvedValue({
+      asOf: "2026-09-24T12:00:00.000Z",
+      repositories: [{ officialResults: [{
+        outcome: "pass", freshUntil: "2026-09-22T12:00:00.000Z", observedAt: "2026-09-21T12:00:00.000Z",
+      }] }],
+      pagination: { offset: 0, limit: 20, total: 1, truncated: false },
+    });
+
+    render(await MonitoringPage({ searchParams: Promise.resolve({}) }));
+
+    expect(screen.getByText("Saved GitHub results need a new check")).toBeVisible();
+    expect(screen.getByText(/1 previously passed/)).toBeVisible();
+    expect(screen.queryByText(/1 passed ·/)).not.toBeInTheDocument();
+  });
 });

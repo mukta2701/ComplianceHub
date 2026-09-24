@@ -19,7 +19,8 @@ import {
   countGitHubOfficialOutcomes,
   type GitHubRepositoryComplianceState,
 } from "../domain/compliance-control-room-state";
-import { githubEvidenceTitle, groupChecksByArea } from "./github-check-presentation";
+import { githubEvidenceTitle, githubFindingPresentation, groupChecksByArea } from "./github-check-presentation";
+import { formatMonitoringTime } from "./format-monitoring-time";
 
 const STATE_PRESENTATION: Record<GitHubRepositoryComplianceState, { label: string; tone: string; detail: string }> = {
   needs_attention: {
@@ -38,9 +39,9 @@ const STATE_PRESENTATION: Record<GitHubRepositoryComplianceState, { label: strin
     detail: "Collected checks exist, but no official evidence or findings have been produced yet.",
   },
   official_stale: {
-    label: "Official records stale",
+    label: "Results need rechecking",
     tone: "amber",
-    detail: "Official records exist, but their mapping identity or freshness no longer matches the active review.",
+    detail: "Saved results are out of date or no longer match the approved mapping. Review the mapping or run a new check before relying on them.",
   },
   official_current: {
     label: "Official records current",
@@ -55,17 +56,33 @@ const RETRY_REASONS = [
   { value: "owner_reviewed", label: "Owner reviewed" },
 ] as const;
 
-function outcomeLabel(outcome: "pass" | "fail" | "unknown" | "not_applicable"): string {
-  if (outcome === "pass") return "Verified technical pass";
-  if (outcome === "fail") return "Verified issue";
-  if (outcome === "unknown") return "Could not verify";
-  return "Not applicable";
-}
-
-function outcomeTone(outcome: "pass" | "fail" | "unknown" | "not_applicable"): string {
-  if (outcome === "pass") return "green";
-  if (outcome === "fail") return "red";
-  return outcome === "unknown" ? "amber" : "neutral";
+function resultPresentation(
+  result: GitHubComplianceControlRoom["repositories"][number]["officialResults"][number],
+  asOf: string,
+): { label: string; tone: string; description: string } {
+  const outOfDate = !Number.isFinite(Date.parse(result.freshUntil))
+    || !Number.isFinite(Date.parse(asOf))
+    || Date.parse(asOf) >= Date.parse(result.freshUntil);
+  if (result.outcome === "pass") return {
+    label: outOfDate ? "Previously passed; needs recheck" : "Passed at last check",
+    tone: outOfDate ? "amber" : "green",
+    description: "No issue was found when GitHub was last checked.",
+  };
+  if (result.outcome === "fail") return {
+    label: outOfDate ? "Previous issue; needs recheck" : "Issue found",
+    tone: outOfDate ? "amber" : "red",
+    description: githubFindingPresentation(result.checkId).explanation,
+  };
+  if (result.outcome === "unknown") return {
+    label: outOfDate ? "Could not verify; needs recheck" : "Could not verify",
+    tone: "amber",
+    description: "GitHub could not confirm this setting at the last check.",
+  };
+  return {
+    label: outOfDate ? "Previously not applicable; needs recheck" : "Not applicable",
+    tone: outOfDate ? "amber" : "neutral",
+    description: "This check did not apply when GitHub was last checked.",
+  };
 }
 
 function MappingReviewSection({
@@ -251,30 +268,36 @@ function RepositoryOfficialCard({
     </header>
     <p className="github-state-detail">{stateDetail}</p>
     <dl className="github-outcome-counts">
-      <div><dt>Verified technical pass</dt><dd>{counts.pass} verified technical pass</dd></div>
-      <div><dt>Verified issue</dt><dd>{counts.fail} verified issue</dd></div>
-      <div><dt>Could not verify</dt><dd>{counts.unknown} could not verify</dd></div>
+      <div><dt>Saved passes</dt><dd>{counts.pass} passed</dd></div>
+      <div><dt>Saved issues</dt><dd>{counts.fail} found</dd></div>
+      <div><dt>Could not verify</dt><dd>{counts.unknown} unverified</dd></div>
       <div><dt>Not applicable</dt><dd>{counts.notApplicable} not applicable</dd></div>
     </dl>
 
     {repository.officialResults.length > 0 && <details className="github-official-results">
-      <summary>Inspect {repository.officialResults.length} latest results</summary>
+      <summary>Saved check results ({repository.officialResults.length})</summary>
       {groupChecksByArea(repository.officialResults).map((section) => <section key={section.group.id} aria-label={`${section.group.title} results`}>
         <h4 className="github-results-group">{section.group.title}</h4>
-        <ul>{section.items.map((result) => <li key={result.id}>
+        <ul>{section.items.map((result) => {
+          const display = resultPresentation(result, room.asOf);
+          return <li key={result.id}>
         <div>
           <strong>{githubEvidenceTitle(result.checkId)}</strong>
-          <code>{result.checkId}</code>
-          <Pill tone={outcomeTone(result.outcome)}>{outcomeLabel(result.outcome)}</Pill>
+          <Pill tone={display.tone}>{display.label}</Pill>
         </div>
-        <p>{result.summary}</p>
-        <small>Rule {result.ruleVersion} · Mapping {result.mappingVersion}</small>
-        <small>Observed <time dateTime={result.observedAt}>{result.observedAt}</time> · fresh until <time dateTime={result.freshUntil}>{result.freshUntil}</time></small>
+        <p>{display.description}</p>
+        <small>Last checked <time dateTime={result.observedAt}>{formatMonitoringTime(result.observedAt) ?? "Date unavailable"}</time></small>
         <span className="github-result-links">
           {result.evidenceId && <a href={`/app/evidence?evidence=${result.evidenceId}#evidence-${result.evidenceId}`} aria-label={`View evidence for ${result.checkId}`}>View evidence</a>}
           {result.findingId && <a href={`/app/monitoring?finding=${result.findingId}#finding-${result.findingId}`} aria-label={`View finding for ${result.checkId}`}>View finding</a>}
         </span>
-        </li>)}</ul>
+        <details className="github-result-audit">
+          <summary>Audit identifiers</summary>
+          <p>Check <code>{result.checkId}</code> · Rule <code>{result.ruleVersion}</code> · Mapping <code>{result.mappingVersion}</code></p>
+          <p>Saved result: {result.summary}</p>
+          <p>Result valid until <time dateTime={result.freshUntil}>{formatMonitoringTime(result.freshUntil) ?? "Date unavailable"}</time></p>
+        </details>
+        </li>})}</ul>
       </section>)}
     </details>}
 

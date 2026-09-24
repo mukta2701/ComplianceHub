@@ -37,6 +37,7 @@ import {
   type GitHubRepositoryMonitoringSummary,
 } from "@/features/github/components/github-collection-health-panel";
 import { getGitHubRuntimeReadiness, type GitHubRuntimeReadiness } from "@/features/github/application/github-runtime-config";
+import { formatMonitoringTime } from "@/features/github/components/format-monitoring-time";
 
 const SEVERITY_TONE: Record<CheckSeverity, StatusTone> = { critical: "risk", high: "risk", medium: "attention", low: "neutral" };
 const SEVERITY_PILL: Record<CheckSeverity, string> = { critical: "red", high: "red", medium: "amber", low: "blue" };
@@ -110,10 +111,20 @@ function GitHubMonitoringSection({
   runtimeReadiness: GitHubRuntimeReadiness;
 }) {
   const officialResults = room.repositories.flatMap((repository) => repository.officialResults);
-  const passed = officialResults.filter((result) => result.outcome === "pass").length;
-  const needAction = officialResults.filter((result) => result.outcome === "fail").length;
+  const isOutOfDate = (freshUntil: string) => !Number.isFinite(Date.parse(freshUntil))
+    || !Number.isFinite(Date.parse(room.asOf))
+    || Date.parse(room.asOf) >= Date.parse(freshUntil);
+  const currentPasses = officialResults.filter((result) => result.outcome === "pass" && !isOutOfDate(result.freshUntil)).length;
+  const previousPasses = officialResults.filter((result) => result.outcome === "pass" && isOutOfDate(result.freshUntil)).length;
+  const currentIssues = officialResults.filter((result) => result.outcome === "fail" && !isOutOfDate(result.freshUntil)).length;
+  const previousIssues = officialResults.filter((result) => result.outcome === "fail" && isOutOfDate(result.freshUntil)).length;
   const unknown = officialResults.filter((result) => result.outcome === "unknown").length;
   const notApplicable = officialResults.filter((result) => result.outcome === "not_applicable").length;
+  const outOfDate = officialResults.filter((result) => isOutOfDate(result.freshUntil)).length;
+  const lastObserved = officialResults
+    .map((result) => result.observedAt)
+    .filter((date) => Number.isFinite(Date.parse(date)))
+    .sort((left, right) => Date.parse(right) - Date.parse(left))[0];
   return <section className="monitor-github-section" aria-label="GitHub repository monitoring">
     <GitHubCollectionHealthPanel
       installations={installations}
@@ -126,10 +137,20 @@ function GitHubMonitoringSection({
       className="github-check-summary"
       role="note"
       aria-label="GitHub check summary"
-      style={{ marginTop: "12px", padding: "14px 18px", fontSize: "13px", fontWeight: 700 }}
     >
-      {officialResults.length} {officialResults.length === 1 ? "check" : "checks"} · {passed} passed · <Link href="#active-findings">{needAction} {needAction === 1 ? "needs" : "need"} action</Link> · {unknown} could not be verified
-      {notApplicable > 0 && <> · {notApplicable} not applicable</>}
+      <strong>{outOfDate > 0 ? "Saved GitHub results need a new check" : "GitHub results from the last check"}</strong>
+      <p>{officialResults.length} saved {officialResults.length === 1 ? "check" : "checks"}
+        {lastObserved && <> · Last checked <time dateTime={lastObserved}>{formatMonitoringTime(lastObserved)}</time></>}
+        {outOfDate > 0 && <> · {outOfDate} {outOfDate === 1 ? "result is" : "results are"} out of date</>}
+      </p>
+      <div className="github-check-summary-counts">
+        {currentPasses > 0 && <span>{currentPasses} passed at last check</span>}
+        {previousPasses > 0 && <span>{previousPasses} previously passed</span>}
+        {currentIssues > 0 && <Link href="#active-findings">{currentIssues} {currentIssues === 1 ? "issue" : "issues"} found</Link>}
+        {previousIssues > 0 && <Link href="#active-findings">{previousIssues} previous {previousIssues === 1 ? "issue" : "issues"} still open</Link>}
+        {unknown > 0 && <span>{unknown} could not be verified</span>}
+        {notApplicable > 0 && <span>{notApplicable} not applicable</span>}
+      </div>
     </Card>}
   </section>;
 }
@@ -302,7 +323,7 @@ export default async function MonitoringPage({
     />
 
     <Card className="monitor-findings-card" id="active-findings">
-      <div className="card-head"><div><h3>Active findings</h3><p>Current violations and drift, newest first</p></div></div>
+      <div className="card-head"><div><h3>Findings to review</h3><p>Recorded issues that remain open. Check the observation date before treating a GitHub result as current.</p></div></div>
       {findings.length > 0 ? <ul className="finding-list">
         {findings.map((finding) => {
           const official = officialByFinding.get(finding.id);
