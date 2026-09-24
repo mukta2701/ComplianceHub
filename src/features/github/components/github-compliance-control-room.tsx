@@ -207,7 +207,7 @@ function MappingReviewSection({
             <div><dt>When the check does not apply</dt><dd>{entry.treatments.not_applicable.summary}</dd></div>
             <div><dt>Suggested remediation</dt><dd>{entry.remediation}</dd></div>
           </dl>
-          {canManageMapping && <div className="github-mapping-decision-controls" aria-label={`Owner decision for ${entry.checkId}`}>
+          {canManageMapping && <div className="github-mapping-decision-controls" role="group" aria-label={`Owner decision for ${entry.checkId}`}>
             {canApproveEntry && <button
               className="button primary"
               type="button"

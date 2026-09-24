@@ -334,6 +334,7 @@ describe("GitHubComplianceControlRoomPanel", () => {
       unhealthyRepositoryIds={[]}
     />);
     const entryCard = screen.getByRole("article", { name: `${entry.checkId} mapping check` });
+    expect(within(entryCard).getByRole("group", { name: `Owner decision for ${entry.checkId}` })).toBeVisible();
     await user.click(within(entryCard).getByRole("button", { name: buttonName }));
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("GitHub mapping entry updated"));
     expect(Object.fromEntries(hoisted.recordDecision.mock.calls[0][0] as FormData)).toEqual({
