@@ -188,6 +188,12 @@ function MappingReviewSection({
             </div>
           </div>
           {entry.review.source === "legacy_pack" && <p className="github-mapping-source">Effective status comes from an earlier pack-wide approval.</p>}
+          {entry.review.source === "entry_decision" && entry.review.reviewedAt && <p className="github-mapping-source">
+            Owner {entry.review.status} on <time dateTime={entry.review.reviewedAt}>{entry.review.reviewedAt}</time>
+          </p>}
+          {entry.review.source === "legacy_pack" && entry.review.reviewedAt && <p className="github-mapping-source">
+            Earlier pack approved on <time dateTime={entry.review.reviewedAt}>{entry.review.reviewedAt}</time>
+          </p>}
           {entry.review.changeReason === "changed" ? <p className="github-mapping-change-note" role="note">
             Mapping changed since its last review. This version needs a fresh Owner decision.
           </p> : entry.review.changeReason === "not_reviewed" ? <p className="github-mapping-change-note" role="note">
@@ -223,8 +229,8 @@ function MappingReviewSection({
     </div>
 
     <div className="github-approval-history">
-      <h4>Approval history</h4>
-      {review.approvalHistory.length === 0 ? <p>No mapping approval has been recorded.</p> : <ol>
+      <h4>Earlier pack-wide approval history</h4>
+      {review.approvalHistory.length === 0 ? <p>No earlier pack-wide approval has been recorded. Individual decisions are shown above.</p> : <ol>
         {review.approvalHistory.map((approval) => <li key={approval.id}>
           <span>Mapping pack <code>{approval.mappingPackId}</code></span>
           <span>Approved <time dateTime={approval.approvedAt}>{approval.approvedAt}</time></span>
@@ -241,7 +247,7 @@ function RepositoryOfficialCard({
   repository,
   room,
   installationHealthy,
-  exactReviewedApprovalActive,
+  hasApprovedMappingEntry,
   role,
   runAction,
   pending,
@@ -249,7 +255,7 @@ function RepositoryOfficialCard({
   repository: GitHubComplianceControlRoom["repositories"][number];
   room: GitHubComplianceControlRoom;
   installationHealthy: boolean;
-  exactReviewedApprovalActive: boolean;
+  hasApprovedMappingEntry: boolean;
   role: MembershipRole;
   runAction: (action: (formData: FormData) => Promise<{ ok: boolean; message: string }>, form: FormData) => Promise<void>;
   pending: boolean;
@@ -345,7 +351,7 @@ function RepositoryOfficialCard({
       </section>)}
     </details>}
 
-    {canProcessResults && exactReviewedApprovalActive && run && job && ["pending", "awaiting_approval", "retryable"].includes(job.status)
+    {canProcessResults && hasApprovedMappingEntry && run && job && ["pending", "awaiting_approval", "retryable"].includes(job.status)
       && <div className="github-recovery-actions">
         <button className="button primary" type="button" disabled={pending} onClick={() => void process()}>
           Process approved results
@@ -432,10 +438,7 @@ export function GitHubComplianceControlRoomPanel({
   const currentPage = Math.floor(room.pagination.offset / room.pagination.limit) + 1;
   const hasPreviousPage = room.pagination.offset > 0;
   const hasNextPage = room.pagination.truncated;
-  const exactReviewedApprovalActive = room.approval !== null
-    && room.approval.mappingPackId === review.pack.id
-    && room.approval.version === review.pack.version
-    && room.approval.checksum === review.pack.checksum;
+  const hasApprovedMappingEntry = review.entries.some((entry) => entry.review.status === "approved");
 
   return <section className="github-control-room" aria-labelledby="github-control-room-title">
     <header className="github-control-room-hero">
@@ -488,7 +491,7 @@ export function GitHubComplianceControlRoomPanel({
           repository={repository}
           room={room}
           installationHealthy={!unhealthyRepositoryIds.includes(repository.id)}
-          exactReviewedApprovalActive={exactReviewedApprovalActive}
+          hasApprovedMappingEntry={hasApprovedMappingEntry}
           role={role}
           runAction={runAction}
           pending={pending}

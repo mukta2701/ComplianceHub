@@ -171,7 +171,7 @@ describe("GitHubComplianceControlRoomPanel", () => {
     expect(within(mapping).getByText("Force-push protection")).toBeVisible();
     expect(within(mapping).getByText("github.branch.force_pushes")).toBeVisible();
     expect(screen.getByText(/do not certify ISO\/IEC 27001 compliance/)).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Approval history" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Earlier pack-wide approval history" })).toBeVisible();
     expect(screen.queryByText(/approved_by|actor|email/i)).not.toBeInTheDocument();
   });
 
@@ -347,6 +347,39 @@ describe("GitHubComplianceControlRoomPanel", () => {
     expect(screen.getAllByRole("status")).toHaveLength(1);
   });
 
+  it("lets an Owner process an approved individual check without an earlier pack-wide approval", async () => {
+    const user = userEvent.setup();
+    const mappingReview = reviewWithEntryDecisions(review().entries.map((_, index) => ({
+      status: index === 0 ? "approved" as const : "pending" as const,
+      source: index === 0 ? "entry_decision" as const : "none" as const,
+      decisionId: index === 0 ? APPROVAL : null,
+      legacyApprovalId: null,
+      reviewerId: index === 0 ? ORG : null,
+      reviewedAt: index === 0 ? "2026-08-25T08:00:00.000Z" : null,
+      revision: index === 0 ? 1 : 0,
+      changeReason: index === 0 ? null : "not_reviewed" as const,
+    })));
+    mappingReview.approvalHistory = [];
+    const awaitingRoom = room({ approval: null });
+    awaitingRoom.repositories[0]!.latestMaterialisationJob = {
+      ...awaitingRoom.repositories[0]!.latestMaterialisationJob!, status: "awaiting_approval",
+    };
+
+    render(<GitHubComplianceControlRoomPanel room={awaitingRoom} review={mappingReview} role="owner" unhealthyRepositoryIds={[]} />);
+    const approvedCard = screen.getByRole("article", { name: `${mappingReview.entries[0]!.checkId} mapping check` });
+    expect(approvedCard).toHaveTextContent("Owner approved on 2026-08-25T08:00:00.000Z");
+    expect(screen.getByRole("heading", { name: "Earlier pack-wide approval history" })).toBeVisible();
+    expect(screen.getByText("No earlier pack-wide approval has been recorded. Individual decisions are shown above.")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Process approved results" }));
+    await waitFor(() => expect(hoisted.process).toHaveBeenCalledOnce());
+    expect(Object.fromEntries(hoisted.process.mock.calls[0][0] as FormData)).toEqual({
+      repositoryId: REPOSITORY,
+      collectionRunId: RUN,
+      jobId: JOB,
+    });
+  });
+
   it("keeps a historical pack approval separate from the individual mapping decisions", () => {
     const historicalRoom = room();
     historicalRoom.approval = {
@@ -356,6 +389,14 @@ describe("GitHubComplianceControlRoomPanel", () => {
       checksum: "a".repeat(64),
     };
     const historicalReview = review();
+    historicalReview.entries = historicalReview.entries.map((entry) => ({
+      ...entry,
+      review: {
+        ...entry.review,
+        status: "pending", source: "none", legacyApprovalId: null,
+        reviewerId: null, reviewedAt: null, changeReason: "not_reviewed",
+      },
+    }));
     historicalReview.approvalHistory = [{
       id: APPROVAL,
       mappingPackId: historicalRoom.approval.mappingPackId,
@@ -377,7 +418,7 @@ describe("GitHubComplianceControlRoomPanel", () => {
     expect(screen.getByText(/An earlier pack-wide approval is still active/)).toBeVisible();
     expect(screen.getByText(/Revoking it removes only approvals inherited from that pack; individual check decisions remain in effect/)).toBeVisible();
     const legacyEntry = screen.getByRole("article", { name: "github.branch.force_pushes mapping check" });
-    expect(within(legacyEntry).getByText("Effective status comes from an earlier pack-wide approval.")).toBeVisible();
+    expect(within(legacyEntry).getByText("This check has not been reviewed by an Owner yet.")).toBeVisible();
     expect(within(legacyEntry).getByRole("button", { name: "Approve mapping for github.branch.force_pushes" })).toBeVisible();
     expect(within(legacyEntry).getByRole("button", { name: "Reject mapping for github.branch.force_pushes" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Revoke historical mapping" })).toBeVisible();
@@ -396,7 +437,7 @@ describe("GitHubComplianceControlRoomPanel", () => {
     }];
     render(<GitHubComplianceControlRoomPanel room={room({ approval: null })} review={historicalReview} role="member" unhealthyRepositoryIds={[]} />);
 
-    const history = screen.getByRole("heading", { name: "Approval history" }).parentElement!;
+    const history = screen.getByRole("heading", { name: "Earlier pack-wide approval history" }).parentElement!;
     expect(history).toHaveTextContent(`Mapping pack ${PACK}`);
     expect(history).toHaveTextContent("Approved 2026-08-24T09:00:00.000Z");
     expect(history).toHaveTextContent("Revoked 2026-08-25T09:30:00.000Z");
