@@ -234,6 +234,7 @@ describe("operator monitoring page", () => {
       expect(banner).toHaveTextContent("2 GitHub checks await Owner review");
       expect(within(banner!).getByRole("link", { name: "View 2 pending checks" }))
         .toHaveAttribute("href", "#github-check-review");
+      expect(within(banner!).getByRole("link", { name: "View 2 pending checks" })).toHaveClass("primary");
       expect(screen.getByText("Technical review and recovery").closest("details"))
         .toHaveAttribute("id", "github-check-review");
       expect(screen.getByText("Technical review and recovery").closest("details")).toHaveAttribute("open");

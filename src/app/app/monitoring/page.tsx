@@ -267,7 +267,7 @@ export default async function MonitoringPage({
         {pendingGitHubCheckReviews > 0 && <p>{pendingGitHubCheckReviews} GitHub check{pendingGitHubCheckReviews === 1 ? "" : "s"} await Owner review</p>}
       </div>
       <span className="monitor-banner-actions">
-        {pendingGitHubCheckReviews > 0 && <a className="button" href="#github-check-review">View {pendingGitHubCheckReviews} pending check{pendingGitHubCheckReviews === 1 ? "" : "s"}</a>}
+        {pendingGitHubCheckReviews > 0 && <a className="button primary" href="#github-check-review">View {pendingGitHubCheckReviews} pending check{pendingGitHubCheckReviews === 1 ? "" : "s"}</a>}
         {shouldShowRunMonitoring(membership.role, otherSources.length) && <form action={runMonitoringNowAction}><button className="button">Run checks now</button></form>}
         <Link className="button secondary" href="/app/integrations">Manage connections and alerts</Link>
       </span>
