@@ -65,7 +65,7 @@ describe("buildComplianceResultAlertEvent", () => {
     expect(readyEvent(buildComplianceResultAlertEvent(value)).kind).toBe("failure");
   });
 
-  it("waits 36 hours for actionable Unknown and blocks it when no exact record exists", () => {
+  it("waits 36 hours for actionable Unknown and links its exact recorded result", () => {
     const current = {
       id: "10000000-0000-4000-8000-000000000006",
       outcome: "unknown" as const,
@@ -89,7 +89,10 @@ describe("buildComplianceResultAlertEvent", () => {
     }));
 
     expect(beforeDeadline.status).toBe("suppressed");
-    expect(atDeadline).toMatchObject({ status: "blocked", kind: "sustained_unknown", reason: "missing_record" });
+    expect(readyEvent(atDeadline)).toMatchObject({
+      kind: "sustained_unknown",
+      recordUrl: `${appOrigin}/app/monitoring/github-results/${current.id}`,
+    });
   });
 
   it("alerts stale saved results from the clock even when no newer successful collection arrived", () => {
@@ -157,7 +160,7 @@ describe("buildComplianceResultAlertEvent", () => {
     expect(future).toMatchObject({ status: "blocked", reason: "invalid_input" });
   });
 
-  it("chooses stale over a simultaneous sustained Unknown when the record is not addressable", () => {
+  it("chooses stale over a simultaneous sustained Unknown and links its recorded result", () => {
     const result = buildComplianceResultAlertEvent(input({
       current: {
         id: "10000000-0000-4000-8000-000000000007",
@@ -172,7 +175,10 @@ describe("buildComplianceResultAlertEvent", () => {
       evaluatedAt: "2026-09-24T22:00:00.001Z",
     }));
 
-    expect(result).toMatchObject({ status: "blocked", kind: "stale", reason: "missing_record" });
+    expect(readyEvent(result)).toMatchObject({
+      kind: "stale",
+      recordUrl: `${appOrigin}/app/monitoring/github-results/10000000-0000-4000-8000-000000000007`,
+    });
   });
 
   it("sends one verified recovery and gives a later same-day Failure a new incident identity", () => {

@@ -168,7 +168,11 @@ function exactRecordUrl(input: ComplianceResultAlertInput, appOrigin: string): s
     if (!recordId) return null;
     path = `/app/evidence?evidence=${encodeURIComponent(recordId)}#evidence-${encodeURIComponent(recordId)}`;
   } else {
-    return null;
+    path = `/app/monitoring/github-results/${input.current.id}`;
+    const target = new URL(path, `${appOrigin}/`);
+    return target.origin === appOrigin && target.pathname === path && !target.search && !target.hash
+      ? target.href
+      : null;
   }
 
   const target = new URL(path, `${appOrigin}/`);
