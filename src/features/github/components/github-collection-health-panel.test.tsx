@@ -115,7 +115,8 @@ describe("GitHubCollectionHealthPanel", () => {
     />);
     expect(screen.getByRole("button", { name: "Check GitHub now" })).toBeDisabled();
     expect(screen.getByText("Saved GitHub results remain visible, but fresh GitHub verification is unavailable in this app runtime.")).toBeVisible();
-    expect(screen.getByText("Up to date")).toBeVisible();
+    expect(screen.getByText("Last check completed")).toBeVisible();
+    expect(screen.queryByText("Up to date")).not.toBeInTheDocument();
   });
 
   it("fails closed when readiness is omitted", () => {
@@ -138,7 +139,8 @@ describe("GitHubCollectionHealthPanel", () => {
     renderPanel({ repositories: variants });
     expect(within(repoArticle("Adtecher/compliancehub")).getByText("Ready for first check")).toBeVisible();
     expect(within(repoArticle("Adtecher/running")).getByText("Checking now")).toBeVisible();
-    expect(within(repoArticle("Adtecher/current")).getByText("Up to date")).toBeVisible();
+    expect(within(repoArticle("Adtecher/current")).getByText("Last check completed")).toBeVisible();
+    expect(within(repoArticle("Adtecher/current")).queryByText("Up to date")).not.toBeInTheDocument();
     expect(repoArticle("Adtecher/current")).toHaveTextContent(/Last checked 01 Sep 2026, 09:00/);
     expect(within(repoArticle("Adtecher/issue")).getByText("1 check needs attention")).toBeVisible();
     expect(within(repoArticle("Adtecher/partial")).getByText("Some checks could not be completed")).toBeVisible();
@@ -147,6 +149,25 @@ describe("GitHubCollectionHealthPanel", () => {
     expect(within(repoArticle("Adtecher/rate-limited")).getByText("GitHub rate limit reached")).toBeVisible();
     expect(within(repoArticle("Adtecher/stale")).getByText("Needs a new check")).toBeVisible();
     expect(repoArticle("Adtecher/stale")).toHaveTextContent(/Last checked 30 Aug 2026/);
+  });
+
+  it("describes a successful recent collection without claiming it is up to date", () => {
+    renderPanel({ repositories: [{ ...repository, latest_failed_count: 0 }] });
+    const article = repoArticle("Adtecher/compliancehub");
+    expect(within(article).queryByText("Up to date")).not.toBeInTheDocument();
+    const badge = within(article).getByText("Last check completed");
+    expect(badge).toBeVisible();
+    expect(badge).toHaveClass("neutral");
+    expect(badge).not.toHaveClass("green");
+    expect(article).toHaveTextContent(/Last checked 01 Sep 2026/);
+  });
+
+  it("still asks for a new check when the last successful collection is stale", () => {
+    renderPanel({ repositories: [{ ...repository, latest_failed_count: 0, last_completed_collection_at: "2026-08-30T22:00:00Z" }] });
+    const article = repoArticle("Adtecher/compliancehub");
+    expect(within(article).getByText("Needs a new check")).toBeVisible();
+    expect(within(article).queryByText("Up to date")).not.toBeInTheDocument();
+    expect(within(article).queryByText("Last check completed")).not.toBeInTheDocument();
   });
 
   it("shows installation access attention and disables unsafe Owner checks", () => {
@@ -169,8 +190,10 @@ describe("GitHubCollectionHealthPanel", () => {
 
     expect(within(repoArticle("Adtecher/compliancehub")).getByText("GitHub connection needs attention")).toBeVisible();
     expect(within(repoArticle("Adtecher/compliancehub")).queryByText("Up to date")).not.toBeInTheDocument();
+    expect(within(repoArticle("Adtecher/compliancehub")).queryByText("Last check completed")).not.toBeInTheDocument();
     expect(within(repoArticle("SecondOrg/unavailable")).getByText("Repository access needs attention")).toBeVisible();
     expect(within(repoArticle("SecondOrg/unavailable")).queryByText("Up to date")).not.toBeInTheDocument();
+    expect(within(repoArticle("SecondOrg/unavailable")).queryByText("Last check completed")).not.toBeInTheDocument();
   });
 
   it.each([
@@ -183,6 +206,7 @@ describe("GitHubCollectionHealthPanel", () => {
 
     expect(within(repoArticle("Adtecher/compliancehub")).getByText(label)).toBeVisible();
     expect(within(repoArticle("Adtecher/compliancehub")).queryByText("Up to date")).not.toBeInTheDocument();
+    expect(within(repoArticle("Adtecher/compliancehub")).queryByText("Last check completed")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Check GitHub now" })).toBeDisabled();
   });
 

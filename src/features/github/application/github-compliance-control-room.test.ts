@@ -210,6 +210,68 @@ describe("GitHub compliance control-room contract", () => {
     expect(parsed.exhaustedAttention).toEqual(validPayload().exhaustedAttention);
   });
 
+  it("accepts additive result freshness and mapping status while keeping strict unknown-field rejection", () => {
+    const payload = validPayload();
+    Object.assign(payload.repositories[0].officialResults[0] as Record<string, unknown>, {
+      freshness: "stale",
+      mappingStatus: "historical",
+    });
+
+    expect(parseGitHubComplianceControlRoom(payload, {
+      organisationId: ORG,
+      offset: 0,
+      limit: 10,
+    }).repositories[0]?.officialResults[0]).toMatchObject({
+      freshness: "stale",
+      mappingStatus: "historical",
+    });
+
+    const currentPayload = validPayload();
+    Object.assign(currentPayload.repositories[0].officialResults[0] as Record<string, unknown>, {
+      freshness: "current",
+      mappingStatus: "active",
+    });
+    expect(parseGitHubComplianceControlRoom(currentPayload, {
+      organisationId: ORG,
+      offset: 0,
+      limit: 10,
+    }).repositories[0]?.officialResults[0]).toMatchObject({
+      freshness: "current",
+      mappingStatus: "active",
+    });
+
+    const unknownPayload = validPayload();
+    Object.assign(unknownPayload.repositories[0].officialResults[0] as Record<string, unknown>, {
+      freshness: "current",
+      mappingStatus: "active",
+      unexpectedField: "nope",
+    });
+    expect(() => parseGitHubComplianceControlRoom(unknownPayload, {
+      organisationId: ORG,
+      offset: 0,
+      limit: 10,
+    })).toThrow("Could not load GitHub compliance control room");
+  });
+
+  it.each([
+    ["bad freshness string", { freshness: "fresh", mappingStatus: "active" }],
+    ["uppercase freshness", { freshness: "CURRENT", mappingStatus: "active" }],
+    ["numeric freshness", { freshness: 123, mappingStatus: "active" }],
+    ["null freshness", { freshness: null, mappingStatus: "active" }],
+    ["bad mapping status string", { freshness: "current", mappingStatus: "archived" }],
+    ["uppercase mapping status", { freshness: "current", mappingStatus: "ACTIVE" }],
+    ["numeric mapping status", { freshness: "current", mappingStatus: 123 }],
+    ["null mapping status", { freshness: "current", mappingStatus: null }],
+  ])("rejects malformed additive result field %s", (_label, additive) => {
+    const payload = validPayload();
+    Object.assign(payload.repositories[0].officialResults[0] as Record<string, unknown>, additive);
+    expect(() => parseGitHubComplianceControlRoom(payload, {
+      organisationId: ORG,
+      offset: 0,
+      limit: 10,
+    })).toThrow("Could not load GitHub compliance control room");
+  });
+
   it("rejects a materialisation job that is not anchored to the displayed official collection", () => {
     const payload = validPayload();
     payload.repositories[0].latestMaterialisationJob.collectionRunId =
