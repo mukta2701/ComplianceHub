@@ -72,7 +72,11 @@ vi.mock("@/features/github/application/github-compliance-control-room", () => ({
       repositories: [{
         id: "43000000-0000-4000-8000-000000000002",
         available: true,
-        officialResults: hoisted.officialOutcomes.map((outcome, index) => ({ id: `result-${index}`, outcome })),
+        officialResults: hoisted.officialOutcomes.map((outcome, index) => ({
+          id: `result-${index}`, outcome,
+          observedAt: "2026-08-23T12:00:00.000Z",
+          freshUntil: "2026-08-24T12:00:00.000Z",
+        })),
       }],
       exhaustedAttention: { total: 0, truncated: false, items: [] },
     });
@@ -167,7 +171,7 @@ describe("operator monitoring page", () => {
 
     const summary = screen.getByText("4 active findings").closest(".monitor-banner");
     const github = screen.getByRole("region", { name: "GitHub monitoring" });
-    const findings = screen.getByRole("heading", { name: "Active findings" }).closest("section, article, div");
+    const findings = screen.getByRole("heading", { name: "Findings to review" }).closest("section, article, div");
     const technicalSummary = screen.getByText("Technical review and recovery");
     const technicalDetails = technicalSummary.closest("details");
     expect(summary).not.toBeNull();
@@ -180,13 +184,15 @@ describe("operator monitoring page", () => {
     expect(findings!.compareDocumentPosition(technicalDetails!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("summarises official GitHub checks and links only failed outcomes to Active findings", async () => {
+  it("summarises saved GitHub checks and links only failed outcomes to findings", async () => {
     render(await MonitoringPage());
 
     const summary = screen.getByRole("note", { name: "GitHub check summary" });
-    expect(summary).toHaveTextContent("15 checks · 8 passed · 5 need action · 2 could not be verified");
-    expect(within(summary).getByRole("link", { name: "5 need action" })).toHaveAttribute("href", "#active-findings");
-    expect(screen.getByRole("heading", { name: "Active findings" }).closest(".monitor-findings-card"))
+    expect(summary).toHaveTextContent("15 saved checks on this page");
+    expect(summary).toHaveTextContent("8 previously passed");
+    expect(summary).toHaveTextContent("2 could not be verified");
+    expect(within(summary).getByRole("link", { name: "5 previous issues still open" })).toHaveAttribute("href", "#active-findings");
+    expect(screen.getByRole("heading", { name: "Findings to review" }).closest(".monitor-findings-card"))
       .toHaveAttribute("id", "active-findings");
     expect(summary).not.toHaveTextContent(/some checks could not be completed/i);
   });
@@ -196,7 +202,15 @@ describe("operator monitoring page", () => {
     render(await MonitoringPage());
 
     expect(screen.getByRole("note", { name: "GitHub check summary" }))
-      .toHaveTextContent("4 checks · 1 passed · 1 needs action · 1 could not be verified · 1 not applicable");
+      .toHaveTextContent("4 saved checks on this page");
+    expect(screen.getByRole("note", { name: "GitHub check summary" }))
+      .toHaveTextContent("1 previously passed");
+    expect(screen.getByRole("note", { name: "GitHub check summary" }))
+      .toHaveTextContent("1 previous issue still open");
+    expect(screen.getByRole("note", { name: "GitHub check summary" }))
+      .toHaveTextContent("1 could not be verified");
+    expect(screen.getByRole("note", { name: "GitHub check summary" }))
+      .toHaveTextContent("1 not applicable");
   });
 
   it("uses singular grammar for one failed GitHub check", async () => {
@@ -204,8 +218,8 @@ describe("operator monitoring page", () => {
     render(await MonitoringPage());
 
     const summary = screen.getByRole("note", { name: "GitHub check summary" });
-    expect(summary).toHaveTextContent("1 check · 0 passed · 1 needs action · 0 could not be verified");
-    expect(within(summary).getByRole("link", { name: "1 needs action" })).toHaveAttribute("href", "#active-findings");
+    expect(summary).toHaveTextContent("1 saved check on this page");
+    expect(within(summary).getByRole("link", { name: "1 previous issue still open" })).toHaveAttribute("href", "#active-findings");
   });
 
   it("uses neutral zero-findings wording even when GitHub is connected", async () => {
@@ -265,7 +279,7 @@ describe("operator monitoring page", () => {
     }];
     try {
       render(await MonitoringPage());
-      const findings = screen.getByRole("heading", { name: "Active findings" });
+      const findings = screen.getByRole("heading", { name: "Findings to review" });
       const otherSystems = screen.getByRole("heading", { name: "Other monitored systems" });
       const technical = screen.getByText("Technical review and recovery").closest("details");
       const monitoringPage = findings.closest(".monitoring-page");

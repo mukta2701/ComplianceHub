@@ -38,6 +38,7 @@ import {
 } from "@/features/github/components/github-collection-health-panel";
 import { getGitHubRuntimeReadiness, type GitHubRuntimeReadiness } from "@/features/github/application/github-runtime-config";
 import { formatMonitoringTime } from "@/features/github/components/format-monitoring-time";
+import { classifyGitHubRepositoryCompliance } from "@/features/github/domain/compliance-control-room-state";
 
 const SEVERITY_TONE: Record<CheckSeverity, StatusTone> = { critical: "risk", high: "risk", medium: "attention", low: "neutral" };
 const SEVERITY_PILL: Record<CheckSeverity, string> = { critical: "red", high: "red", medium: "amber", low: "blue" };
@@ -110,18 +111,49 @@ function GitHubMonitoringSection({
   room: GitHubComplianceControlRoom;
   runtimeReadiness: GitHubRuntimeReadiness;
 }) {
-  const officialResults = room.repositories.flatMap((repository) => repository.officialResults);
   const isOutOfDate = (freshUntil: string) => !Number.isFinite(Date.parse(freshUntil))
     || !Number.isFinite(Date.parse(room.asOf))
     || Date.parse(room.asOf) >= Date.parse(freshUntil);
-  const currentPasses = officialResults.filter((result) => result.outcome === "pass" && !isOutOfDate(result.freshUntil)).length;
-  const previousPasses = officialResults.filter((result) => result.outcome === "pass" && isOutOfDate(result.freshUntil)).length;
-  const currentIssues = officialResults.filter((result) => result.outcome === "fail" && !isOutOfDate(result.freshUntil)).length;
-  const previousIssues = officialResults.filter((result) => result.outcome === "fail" && isOutOfDate(result.freshUntil)).length;
+  const resultsByRepository = room.repositories.map((repository) => {
+    const summary = repositories.find((candidate) => candidate.repository_id === repository.id);
+    const installation = installations.find((candidate) => candidate.id === summary?.installation_id);
+    const installationHealthy = repository.available
+      && summary?.available === true
+      && installation?.status === "active"
+      && installation.permissions_ok === true
+      && installation.health === "healthy";
+    const collection = repository.latestCollection;
+    const job = repository.latestMaterialisationJob;
+    const current = collection?.status === "succeeded"
+      && job?.status === "completed"
+      && job.collectionRunId === collection.id
+      && classifyGitHubRepositoryCompliance({
+        asOf: room.asOf,
+        installationHealthy,
+        approval: room.approval,
+        latestCollection: collection,
+        latestMaterialisationJob: job,
+        officialResults: repository.officialResults,
+      }) === "official_current";
+    return { results: repository.officialResults, current };
+  });
+  const officialResults = resultsByRepository.flatMap((repository) => repository.results);
+  const countResults = (outcome: "pass" | "fail", state: "current" | "previous" | "review") =>
+    resultsByRepository.reduce((count, repository) => count + repository.results.filter((result) =>
+      result.outcome === outcome && (isOutOfDate(result.freshUntil)
+        ? state === "previous"
+        : repository.current ? state === "current" : state === "review"),
+    ).length, 0);
+  const currentPasses = countResults("pass", "current");
+  const previousPasses = countResults("pass", "previous");
+  const reviewPasses = countResults("pass", "review");
+  const currentIssues = countResults("fail", "current");
+  const previousIssues = countResults("fail", "previous");
+  const reviewIssues = countResults("fail", "review");
   const unknown = officialResults.filter((result) => result.outcome === "unknown").length;
   const notApplicable = officialResults.filter((result) => result.outcome === "not_applicable").length;
   const outOfDate = officialResults.filter((result) => isOutOfDate(result.freshUntil)).length;
-  const lastObserved = officialResults
+  const mostRecentObservation = officialResults
     .map((result) => result.observedAt)
     .filter((date) => Number.isFinite(Date.parse(date)))
     .sort((left, right) => Date.parse(right) - Date.parse(left))[0];
@@ -138,16 +170,19 @@ function GitHubMonitoringSection({
       role="note"
       aria-label="GitHub check summary"
     >
-      <strong>{outOfDate > 0 ? "Saved GitHub results need a new check" : "GitHub results from the last check"}</strong>
-      <p>{officialResults.length} saved {officialResults.length === 1 ? "check" : "checks"}
-        {lastObserved && <> · Last checked <time dateTime={lastObserved}>{formatMonitoringTime(lastObserved)}</time></>}
+      <strong>{reviewPasses + reviewIssues > 0 ? "Saved GitHub results need review"
+        : outOfDate > 0 ? "Saved GitHub results need a new check" : "GitHub results from the last check"}</strong>
+      <p>{officialResults.length} saved {officialResults.length === 1 ? "check" : "checks"} on this page
+        {mostRecentObservation && <> · Most recent observation <time dateTime={mostRecentObservation}>{formatMonitoringTime(mostRecentObservation)}</time></>}
         {outOfDate > 0 && <> · {outOfDate} {outOfDate === 1 ? "result is" : "results are"} out of date</>}
       </p>
       <div className="github-check-summary-counts">
         {currentPasses > 0 && <span>{currentPasses} passed at last check</span>}
         {previousPasses > 0 && <span>{previousPasses} previously passed</span>}
+        {reviewPasses > 0 && <span>{reviewPasses} saved {reviewPasses === 1 ? "pass needs" : "passes need"} review</span>}
         {currentIssues > 0 && <Link href="#active-findings">{currentIssues} {currentIssues === 1 ? "issue" : "issues"} found</Link>}
         {previousIssues > 0 && <Link href="#active-findings">{previousIssues} previous {previousIssues === 1 ? "issue" : "issues"} still open</Link>}
+        {reviewIssues > 0 && <Link href="#active-findings">{reviewIssues} saved {reviewIssues === 1 ? "issue needs" : "issues need"} review</Link>}
         {unknown > 0 && <span>{unknown} could not be verified</span>}
         {notApplicable > 0 && <span>{notApplicable} not applicable</span>}
       </div>
