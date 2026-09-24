@@ -29,6 +29,7 @@ import {
 } from "@/features/github/application/github-compliance-control-room";
 import { loadGitHubMappingReview, type GitHubMappingReview } from "@/features/github/application/github-mapping-review";
 import { GitHubComplianceControlRoomPanel } from "@/features/github/components/github-compliance-control-room";
+import { GitHubOfficialResultSummary } from "@/features/github/components/github-official-result-summary";
 import type {
   GitHubInstallationSummary,
 } from "@/features/github/components/github-installation-panel";
@@ -110,10 +111,6 @@ function GitHubMonitoringSection({
   runtimeReadiness: GitHubRuntimeReadiness;
 }) {
   const officialResults = room.repositories.flatMap((repository) => repository.officialResults);
-  const passed = officialResults.filter((result) => result.outcome === "pass").length;
-  const needAction = officialResults.filter((result) => result.outcome === "fail").length;
-  const unknown = officialResults.filter((result) => result.outcome === "unknown").length;
-  const notApplicable = officialResults.filter((result) => result.outcome === "not_applicable").length;
   return <section className="monitor-github-section" aria-label="GitHub repository monitoring">
     <GitHubCollectionHealthPanel
       installations={installations}
@@ -122,15 +119,7 @@ function GitHubMonitoringSection({
       role={role}
       runtimeReadiness={runtimeReadiness}
     />
-    {officialResults.length > 0 && <Card
-      className="github-check-summary"
-      role="note"
-      aria-label="GitHub check summary"
-      style={{ marginTop: "12px", padding: "14px 18px", fontSize: "13px", fontWeight: 700 }}
-    >
-      {officialResults.length} {officialResults.length === 1 ? "check" : "checks"} · {passed} passed · <Link href="#active-findings">{needAction} {needAction === 1 ? "needs" : "need"} action</Link> · {unknown} could not be verified
-      {notApplicable > 0 && <> · {notApplicable} not applicable</>}
-    </Card>}
+    <GitHubOfficialResultSummary results={officialResults} />
   </section>;
 }
 
@@ -145,7 +134,7 @@ function GitHubTechnicalReview({
   role: "owner" | "admin" | "member";
   unhealthyRepositoryIds: string[];
 }) {
-  return <details className="monitor-technical-review">
+  return <details id="github-check-review" className="monitor-technical-review" open={review.entries.some((entry) => entry.review.status === "pending")}>
     <summary>Technical review and recovery</summary>
     <p>Review how repository checks become governed ISO evidence or findings, and use authorised recovery controls.</p>
     <GitHubComplianceControlRoomPanel
@@ -171,7 +160,7 @@ export default async function MonitoringPage({
   const parsedPage = requestedPage && /^[1-9][0-9]{0,2}$/.test(requestedPage) ? Number(requestedPage) : 1;
   const repositoryOffset = Math.min((parsedPage - 1) * 20, 10_000);
   if (monitoringAccess.presentation === "member") {
-    const [data, installationResult, repositorySummaryResult, controlRoom, mappingReview] = await Promise.all([
+    const [data, installationResult, repositorySummaryResult, controlRoom] = await Promise.all([
       loadMemberMonitoring(supabase, organisation.id),
       supabase.from("github_installations")
         .select("id,account_login,status,repository_selection,permissions_ok,health,health_diagnostic_code,last_successful_reconciliation_at")
@@ -182,7 +171,6 @@ export default async function MonitoringPage({
         .eq("organisation_id", organisation.id)
         .order("full_name", { ascending: true }),
       loadGitHubComplianceControlRoom(supabase, { organisationId: organisation.id, offset: repositoryOffset, limit: 20 }),
-      loadGitHubMappingReview(supabase, organisation.id),
     ]);
     if (installationResult.error || repositorySummaryResult.error) throw new Error("Could not load monitoring");
     const selectedFinding = requestedFinding && data.officialGitHubFindings.some((record) => record.findingId === requestedFinding)
@@ -204,12 +192,6 @@ export default async function MonitoringPage({
         nowIso={new Date().toISOString()}
         room={controlRoom}
         runtimeReadiness={runtimeReadiness}
-      />}
-      githubTechnicalReview={<GitHubTechnicalReview
-        room={controlRoom}
-        review={mappingReview}
-        role={membership.role}
-        unhealthyRepositoryIds={unhealthyGitHubRepositoryIds(controlRoom, installations, repositories)}
       />}
     />;
   }
@@ -272,6 +254,7 @@ export default async function MonitoringPage({
   const otherSources = sources.filter((source) => source.provider !== "github");
   const monitoredSystemCount = otherSources.length + (hasActiveGitHubInstallation ? 1 : 0);
   const highOrCritical = findings.filter((finding) => finding.severity === "high" || finding.severity === "critical").length;
+  const pendingGitHubCheckReviews = mappingReview.entries.filter((entry) => entry.review.status === "pending").length;
 
   return <div className="monitoring-page">
     <PageIntro
@@ -284,9 +267,11 @@ export default async function MonitoringPage({
       <span className={`monitor-dot ${findings.length === 0 ? "neutral" : "watch"}`} aria-hidden="true" />
       <div style={{ flex: 1 }}>
         <strong>{findings.length === 0 ? "No recorded active findings" : `${findings.length} active finding${findings.length === 1 ? "" : "s"}`}</strong>
-        <p>{highOrCritical} high or critical · {monitoredSystemCount} system{monitoredSystemCount === 1 ? "" : "s"} monitored{findings.length === 0 ? ". Monitoring status is not yet confirmed." : ""}</p>
+        <p>{highOrCritical} high or critical · {monitoredSystemCount} system{monitoredSystemCount === 1 ? "" : "s"} monitored{findings.length === 0 ? ". Check coverage and approvals before relying on this status." : ""}</p>
+        {pendingGitHubCheckReviews > 0 && <p>{pendingGitHubCheckReviews} GitHub check{pendingGitHubCheckReviews === 1 ? "" : "s"} await Owner review</p>}
       </div>
       <span className="monitor-banner-actions">
+        {pendingGitHubCheckReviews > 0 && <a className="button primary" href="#github-check-review">View {pendingGitHubCheckReviews} pending check{pendingGitHubCheckReviews === 1 ? "" : "s"}</a>}
         {shouldShowRunMonitoring(membership.role, otherSources.length) && <form action={runMonitoringNowAction}><button className="button">Run checks now</button></form>}
         <Link className="button secondary" href="/app/integrations">Manage connections and alerts</Link>
       </span>

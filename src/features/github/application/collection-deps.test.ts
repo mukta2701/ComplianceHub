@@ -117,6 +117,23 @@ describe("buildCollectionDependencies", () => {
     }));
   });
 
+  it("excludes unselected, unavailable, revoked and under-permissioned repositories from daily work", async () => {
+    const selected = repository(1);
+    const unselected = repository(2);
+    unselected.selected = false;
+    const unavailable = repository(3);
+    unavailable.available = false;
+    const revoked = repository(4);
+    (revoked.github_installations as Row).status = "revoked";
+    const underPermissioned = repository(5);
+    (underPermissioned.github_installations as Row).permissions_ok = false;
+    const deps = buildCollectionDependencies(client([selected, unselected, unavailable, revoked, underPermissioned]), configuration);
+
+    const targets = await deps.listTargets({ trigger: "scheduled", requestKey: "scheduled:2026-08-17" });
+
+    expect(targets.map((item) => item.repositoryId)).toEqual([selected.id]);
+  });
+
   it("reuses one preloaded in-memory token for the exact scoped installation and repository", async () => {
     const row = repository(1);
     const service = client([row]);

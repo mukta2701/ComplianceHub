@@ -10,12 +10,32 @@ export const githubConnectionReconcileBundle = resolve(
   "dist/github-connection-reconcile.mjs",
 );
 
+export const githubComplianceCollectBundle = resolve(
+  repositoryRoot,
+  "dist/github-compliance-collect.mjs",
+);
+
 export async function buildRuntimeBundles(): Promise<void> {
   await mkdir(resolve(repositoryRoot, "dist"), { recursive: true });
   await build({
     absWorkingDir: repositoryRoot,
     entryPoints: ["scripts/github-connection-reconcile.ts"],
     outfile: githubConnectionReconcileBundle,
+    bundle: true,
+    platform: "node",
+    format: "esm",
+    target: "node22",
+    conditions: ["react-server", "node"],
+    tsconfig: "tsconfig.json",
+    sourcemap: false,
+    sourcesContent: false,
+    legalComments: "none",
+    logLevel: "error",
+  });
+  await build({
+    absWorkingDir: repositoryRoot,
+    entryPoints: ["scripts/github-compliance-collect.ts"],
+    outfile: githubComplianceCollectBundle,
     bundle: true,
     platform: "node",
     format: "esm",

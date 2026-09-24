@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  loadOfficialGitHubComplianceResult,
   loadOfficialGitHubEvidenceProvenance,
   loadOfficialGitHubFindingProvenance,
   parseOfficialRecordSelection,
@@ -49,6 +50,7 @@ function query(result: Result) {
     limit = value;
     return chain;
   });
+  chain.maybeSingle = vi.fn(() => Promise.resolve(result));
   chain.then = (resolve: (value: Result) => unknown) => Promise.resolve({
     ...result,
     data: Array.isArray(result.data)
@@ -93,7 +95,7 @@ function clientFor(results: Record<string, Result | Result[]>) {
     calls.set(table, index + 1);
     const result = Array.isArray(configured) ? configured[index] ?? configured.at(-1)! : configured;
     const built = query(result);
-    queries.set(table, built);
+    if (!queries.has(table)) queries.set(table, built);
     return built;
   });
   return { client: { from }, from, queries };
@@ -105,6 +107,51 @@ describe("official GitHub record provenance", () => {
     expect(parseOfficialRecordSelection([EVIDENCE])).toBeNull();
     expect(parseOfficialRecordSelection("not-an-id")).toBeNull();
     expect(parseOfficialRecordSelection(undefined)).toBeNull();
+  });
+
+  it("loads one immutable result using the exact record id and caller's organisation", async () => {
+    const RESULT_ID = "70000000-0000-4000-8000-000000000001";
+    const record = { id: RESULT_ID, ...officialResult({ outcome: "unknown", evidence_id: null, finding_id: null }) };
+    const { client, from, queries } = clientFor({
+      github_official_compliance_results: [
+        { data: record, error: null },
+        { data: [officialResult({ outcome: "unknown", evidence_id: null, finding_id: null })], error: null },
+      ],
+      github_repositories: { data: [{ id: REPOSITORY, organisation_id: ORG, full_name: "mukta2701/ComplianceHub", html_url: "https://github.com/mukta2701/ComplianceHub" }], error: null },
+      github_mapping_entries: { data: [{ mapping_pack_id: PACK, check_id: "github.branch.force_pushes", rule_version: "github-repository-v1", iso_control_references: ["A.8.25"] }], error: null },
+    });
+
+    await expect(loadOfficialGitHubComplianceResult(client as never, ORG, RESULT_ID, "2026-08-26T09:00:00.000Z"))
+      .resolves.toMatchObject({
+        resultId: RESULT_ID,
+        outcome: "unknown",
+        freshness: "stale",
+        repository: { name: "mukta2701/ComplianceHub" },
+        isoControlReferences: ["A.8.25"],
+      });
+    expect(from).toHaveBeenCalledWith("github_official_compliance_results");
+    expect(queries.get("github_official_compliance_results")?.select).toHaveBeenCalledWith(
+      "id,organisation_id,observation_id,repository_id,mapping_pack_id,mapping_version,mapping_checksum,check_id,rule_version,outcome,failure_severity,catalogue_summary,observed_at,fresh_until,materialised_at,evidence_id,finding_id",
+    );
+    expect(queries.get("github_official_compliance_results")?.eq).toHaveBeenNthCalledWith(1, "id", RESULT_ID);
+    expect(queries.get("github_official_compliance_results")?.eq).toHaveBeenNthCalledWith(2, "organisation_id", ORG);
+  });
+
+  it("returns no result without querying for an invalid id or an id outside the active organisation", async () => {
+    const { client, from } = clientFor({ github_official_compliance_results: { data: null, error: null } });
+
+    await expect(loadOfficialGitHubComplianceResult(client as never, ORG, "not-a-uuid")).resolves.toBeNull();
+    await expect(loadOfficialGitHubComplianceResult(client as never, ORG, "70000000-0000-4000-8000-000000000099")).resolves.toBeNull();
+    expect(from).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed if an immutable result contains fields outside its safe schema", async () => {
+    const { client } = clientFor({
+      github_official_compliance_results: { data: { id: "70000000-0000-4000-8000-000000000001", ...officialResult(), provider_payload: "must never be rendered" }, error: null },
+    });
+
+    await expect(loadOfficialGitHubComplianceResult(client as never, ORG, "70000000-0000-4000-8000-000000000001"))
+      .rejects.toThrow("Could not load official GitHub record provenance");
   });
 
   it("loads bounded evidence provenance from official rows without touching observations", async () => {

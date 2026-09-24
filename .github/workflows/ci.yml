@@ -48,6 +48,7 @@ jobs:
               - 'tsconfig.json'
               - 'scripts/build-runtime-bundles.ts'
               - 'scripts/github-connection-reconcile.ts'
+              - 'scripts/github-compliance-collect.ts'
               - 'src/**'
             db:
               - 'supabase/**'
@@ -104,8 +105,10 @@ jobs:
           fixture_container="compliancehub-runner-store-ci"
           bundle_container=""
           runner_log="$RUNNER_TEMP/github-connection-reconcile.log"
+          daily_runner_log="$RUNNER_TEMP/github-compliance-collect.log"
           image_scan="$RUNNER_TEMP/compliancehub-image-inspection.txt"
           copied_bundle="$RUNNER_TEMP/github-connection-reconcile.mjs"
+          copied_daily_bundle="$RUNNER_TEMP/github-compliance-collect.mjs"
           fixture_secret="task8-container-fixture-secret"
           fixture_encryption_marker="task8-container-encryption-marker"
           fixture_slack_digest_marker="task8-container-slack-digest-marker"
@@ -156,10 +159,27 @@ jobs:
           grep -Fq -- 'webhookDeliveriesClaimed=0 installationsClaimed=0' "$runner_log"
           grep -Fq -- 'slackClaimed=0 slackDelivered=0 slackFailed=0' "$runner_log"
 
+          set +e
+          timeout 15s docker run --rm --network "$fixture_network" \
+            --env NODE_ENV=production \
+            --env NEXT_PUBLIC_SUPABASE_URL=http://compliancehub-runner-store-ci:4400 \
+            --env SUPABASE_SERVICE_ROLE_KEY="$fixture_secret" \
+            --env GITHUB_APP_ID=1 \
+            --env GITHUB_APP_PRIVATE_KEY="$private_key" \
+            --env GITHUB_APPROVED_SECURITY_WORKFLOW_IDS=1 \
+            compliancehub:ci node dist/github-compliance-collect.mjs >"$daily_runner_log" 2>&1
+          daily_runner_status=$?
+          set -e
+          test "$daily_runner_status" -eq 0
+          grep -Fq -- '"event":"github_daily_collection"' "$daily_runner_log"
+          grep -Fq -- '"complete":true' "$daily_runner_log"
+          grep -Fq -- '"repositoriesChecked":0' "$daily_runner_log"
+
           docker history --no-trunc compliancehub:ci >"$image_scan"
           docker inspect --format '{{json .Config.Env}}' compliancehub:ci >>"$image_scan"
           bundle_container="$(docker create compliancehub:ci)"
           docker cp "$bundle_container:/app/dist/github-connection-reconcile.mjs" "$copied_bundle"
+          docker cp "$bundle_container:/app/dist/github-compliance-collect.mjs" "$copied_daily_bundle"
           docker rm "$bundle_container" >/dev/null
           bundle_container=""
 
@@ -177,10 +197,10 @@ jobs:
               *) echo "Container evidence scan failed" >&2; return "$scan_status" ;;
             esac
           }
-          assert_pattern_absent fixed "$fixture_secret" "$runner_log" "$image_scan" "$copied_bundle"
-          assert_pattern_absent fixed "$fixture_encryption_marker" "$runner_log" "$image_scan" "$copied_bundle"
-          assert_pattern_absent fixed "$fixture_slack_digest_marker" "$runner_log" "$image_scan" "$copied_bundle"
-          assert_pattern_absent fixed "$private_key_marker" "$runner_log" "$image_scan" "$copied_bundle"
+          assert_pattern_absent fixed "$fixture_secret" "$runner_log" "$daily_runner_log" "$image_scan" "$copied_bundle" "$copied_daily_bundle"
+          assert_pattern_absent fixed "$fixture_encryption_marker" "$runner_log" "$daily_runner_log" "$image_scan" "$copied_bundle" "$copied_daily_bundle"
+          assert_pattern_absent fixed "$fixture_slack_digest_marker" "$runner_log" "$daily_runner_log" "$image_scan" "$copied_bundle" "$copied_daily_bundle"
+          assert_pattern_absent fixed "$private_key_marker" "$runner_log" "$daily_runner_log" "$image_scan" "$copied_bundle" "$copied_daily_bundle"
 
   application:
     needs: changes

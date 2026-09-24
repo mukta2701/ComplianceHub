@@ -9,7 +9,10 @@ function successorMigration() {
   const candidates = readdirSync(MIGRATIONS)
     .filter((name) => name.endsWith(".sql") && name > LAST_PUBLISHED_MIGRATION)
     .map((name) => ({ name, sql: readFileSync(`${MIGRATIONS}/${name}`, "utf8") }))
-    .filter(({ sql }) => sql.includes("get_mcp_github_compliance_results_v2"));
+    .filter(({ name, sql }) =>
+      /^2026\d{10}_mcp_github_official_results_v2\.sql$/.test(name) &&
+      sql.includes("get_mcp_github_compliance_results_v2"),
+    );
   expect(candidates).toHaveLength(1);
   return candidates[0]!;
 }

@@ -41,6 +41,12 @@ _Avoid_: using the term for the entire working controls area.
 
 **Provider verification**: A recorded result from an actual connected system check. Proposals, sandbox samples and completed tasks are not provider verification.
 
+**Mapping proposal**: A saved suggestion that a technical check relates to a compliance control. It has no effect on official results until an authorised reviewer approves that exact version.
+
+**Approved mapping**: An authorised review decision linking a versioned technical check to a control and permitted treatment. A material change requires a new decision; old results retain their original mapping history.
+
+**Technical check result**: A dated Pass, Failure, Unknown or Not applicable decision from a versioned rule and a recorded observation. It is narrower than certification or an overall control decision.
+
 **Finding closure**: An explicit recorded decision that an audit or monitoring finding is resolved under its own workflow. Completing corrective work alone is not closure.
 
 **Dated baseline**: A preserved account of scope, assessment, work, evidence and risks at a particular save. Comparisons require compatible recorded scope and calculation basis.

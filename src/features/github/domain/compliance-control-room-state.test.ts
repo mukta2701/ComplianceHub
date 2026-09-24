@@ -13,7 +13,6 @@ function input(overrides: Record<string, unknown> = {}) {
   return {
     asOf: "2026-08-25T12:00:00.000Z",
     installationHealthy: true,
-    approval: { mappingPackId: PACK, version: "github-iso-27001-v1", checksum: CHECKSUM },
     latestCollection: { status: "succeeded" as const },
     latestMaterialisationJob: { status: "completed" as const },
     officialResults: EXPECTED_GITHUB_CHECK_IDS.map((checkId, index) => ({
@@ -23,51 +22,92 @@ function input(overrides: Record<string, unknown> = {}) {
       mappingPackId: PACK,
       mappingVersion: "github-iso-27001-v1",
       mappingChecksum: CHECKSUM,
+      mappingStatus: "active" as const,
+      freshness: "current" as const,
     })),
     ...overrides,
   };
 }
 
 describe("GitHub official repository state", () => {
-  it("calls records current only for the exact active mapping, all 15 checks, a completed job, and fresh results", () => {
+  it("calls records current for the exact active mapping, all 15 checks, and fresh results", () => {
     expect(classifyGitHubRepositoryCompliance(input())).toBe("official_current");
+  });
+
+  it("keeps complete current coverage current while a newer collection is still processing", () => {
+    expect(classifyGitHubRepositoryCompliance(input({
+      latestMaterialisationJob: { status: "pending" },
+    }))).toBe("official_current");
   });
 
   it.each([
     ["unhealthy installation", { installationHealthy: false }],
     ["failed collection", { latestCollection: { status: "failed" } }],
+    ["partial collection", { latestCollection: { status: "partial" } }],
     ["rate-limited collection", { latestCollection: { status: "rate_limited" } }],
     ["retryable job", { latestMaterialisationJob: { status: "retryable" } }],
     ["exhausted job", { latestMaterialisationJob: { status: "exhausted" } }],
-    ["incomplete results", { officialResults: input().officialResults.slice(0, 14) }],
-    ["duplicate checks", { officialResults: input().officialResults.map((result, index) => index === 14 ? { ...result, checkId: EXPECTED_GITHUB_CHECK_IDS[0] } : result) }],
   ])("gives Needs attention precedence for %s", (_label, override) => {
     expect(classifyGitHubRepositoryCompliance(input(override))).toBe("needs_attention");
   });
 
-  it("shows Awaiting approval before Shadow when no active mapping is approved", () => {
-    expect(classifyGitHubRepositoryCompliance(input({ approval: null, officialResults: [] }))).toBe("awaiting_approval");
+  it("shows current results for all 15 approved entries without requiring a legacy pack approval", () => {
+    expect(classifyGitHubRepositoryCompliance(input())).toBe("official_current");
+  });
+
+  it("shows a partial review when one exact check is current and the other checks are still pending", () => {
+    expect(classifyGitHubRepositoryCompliance(input({
+      officialResults: input().officialResults.slice(0, 1),
+    }))).toBe("official_partial");
+  });
+
+  it("keeps incomplete or duplicate result sets out of the fully current state without calling them a failure", () => {
+    expect(classifyGitHubRepositoryCompliance(input({ officialResults: input().officialResults.slice(0, 14) }))).toBe("official_partial");
+    expect(classifyGitHubRepositoryCompliance(input({
+      officialResults: input().officialResults.map((result, index) => index === 14 ? { ...result, checkId: EXPECTED_GITHUB_CHECK_IDS[0] } : result),
+    }))).toBe("official_partial");
+  });
+
+  it("shows Awaiting approval only when the result job explicitly waits for mapping review", () => {
+    expect(classifyGitHubRepositoryCompliance(input({
+      officialResults: [],
+      latestMaterialisationJob: { status: "awaiting_approval" },
+    }))).toBe("awaiting_approval");
   });
 
   it("shows Shadow for collected data that has no official records yet", () => {
-    expect(classifyGitHubRepositoryCompliance(input({ officialResults: [], latestMaterialisationJob: null }))).toBe("shadow");
+    expect(classifyGitHubRepositoryCompliance(input({
+      officialResults: [],
+      latestMaterialisationJob: { status: "completed" },
+    }))).toBe("shadow");
   });
 
   it.each([
-    ["historical mapping", { officialResults: input().officialResults.map((result) => ({ ...result, mappingVersion: "github-iso-27001-v0" })) }],
-    ["historical mapping pack", { officialResults: input().officialResults.map((result) => ({ ...result, mappingPackId: "91000000-0000-4000-8000-000000000099" })) }],
-    ["historical mapping checksum", { officialResults: input().officialResults.map((result) => ({ ...result, mappingChecksum: "a".repeat(64) })) }],
-    ["expired result", { officialResults: input().officialResults.map((result, index) => index === 0 ? { ...result, freshUntil: "2026-08-25T12:00:00.000Z" } : result) }],
+    ["historical mapping", { officialResults: input().officialResults.map((result) => ({ ...result, mappingStatus: "historical" as const })) }],
+    ["expired results", { officialResults: input().officialResults.map((result) => ({ ...result, freshUntil: "2026-08-25T12:00:00.000Z" })) }],
+    ["stale result receipts", { officialResults: input().officialResults.map((result) => ({ ...result, freshness: "stale" as const })) }],
   ])("shows Official records stale for %s", (_label, override) => {
     expect(classifyGitHubRepositoryCompliance(input(override))).toBe("official_stale");
   });
 
-  it("counts the four outcomes without turning unknown into a pass", () => {
-    expect(countGitHubOfficialOutcomes(input().officialResults)).toEqual({
-      pass: 4,
-      fail: 4,
-      unknown: 4,
-      notApplicable: 3,
+  it("shows partial review when some current checks coexist with historical or stale records", () => {
+    const results = input().officialResults.map((result, index) => index === 0
+      ? { ...result, mappingStatus: "historical" as const }
+      : result);
+    expect(classifyGitHubRepositoryCompliance(input({ officialResults: results }))).toBe("official_partial");
+  });
+
+  it("counts only current approved results and reports old results separately", () => {
+    const results = input().officialResults.map((result, index) => {
+      if (index === 0) return { ...result, mappingStatus: "historical" as const };
+      if (index === 1) return { ...result, freshness: "stale" as const };
+      return result;
+    });
+
+    expect(countGitHubOfficialOutcomes(results)).toEqual({
+      current: { pass: 3, fail: 3, unknown: 4, notApplicable: 3 },
+      historical: 1,
+      stale: 1,
     });
   });
 });

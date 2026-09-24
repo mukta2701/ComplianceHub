@@ -33,6 +33,14 @@ const targetSchema = z.object({
 const retrySchema = targetSchema.extend({
   reasonCode: z.enum(GITHUB_MATERIALISATION_RETRY_REASON_CODES),
 }).strict();
+const entryDecisionSchema = z.object({
+  entryId: uuid,
+  entryDigest: checksum,
+  decision: z.enum(["approved", "rejected"]),
+  expectedRevision: z.string().regex(/^(0|[1-9][0-9]*)$/)
+    .transform(Number)
+    .pipe(z.number().int().nonnegative().safe()),
+}).strict();
 const publishedPackSchema = z.object({
   id: uuid,
   version: z.literal(STANDARD_GITHUB_ISO_MAPPING_PACK.version),
@@ -40,6 +48,22 @@ const publishedPackSchema = z.object({
   published_at: z.string().datetime({ offset: true }),
 }).strict();
 const approvalRowSchema = z.object({ id: uuid, mapping_pack_id: uuid }).strict();
+const effectiveEntryDecisionRowSchema = z.object({
+  organisation_id: uuid,
+  mapping_pack_id: uuid,
+  mapping_entry_id: uuid,
+  entry_digest: checksum,
+  status: z.enum(["pending", "approved", "rejected"]),
+  revision: z.number().int().nonnegative().safe(),
+}).strict();
+const effectiveEntryForRunSchema = z.object({
+  mapping_pack_id: uuid,
+  mapping_entry_id: uuid,
+  check_id: z.string().min(1).max(120),
+  entry_digest: checksum,
+  status: z.literal("approved"),
+}).strict();
+const observationCheckSchema = z.object({ check_id: z.string().min(1).max(120) }).strict();
 const runRowSchema = z.object({
   id: uuid,
   organisation_id: uuid,
@@ -61,6 +85,8 @@ const summarySchema = z.object({
   unchanged: z.number().int().min(0).max(1),
   awaitingApproval: z.number().int().min(0).max(1),
   needsAttention: z.number().int().min(0).max(3),
+  alertEventsCreated: z.number().int().min(0).optional(),
+  notificationsCreated: z.number().int().min(0).optional(),
 }).strict();
 
 type SessionClient = Awaited<ReturnType<typeof requireAppContext>>["supabase"];
@@ -92,12 +118,111 @@ async function loadActiveApproval(
   return error || !parsed.success ? null : parsed.data;
 }
 
-async function requireExactActiveApproval(supabase: SessionClient, organisationId: string) {
-  const [pack, approval] = await Promise.all([
-    loadExactPublishedPack(supabase),
-    loadActiveApproval(supabase, organisationId),
-  ]);
-  return pack && approval?.mapping_pack_id === pack.id ? approval : null;
+async function hasApprovedExactEntryForRun(
+  supabase: SessionClient,
+  organisationId: string,
+  collectionRunId: string,
+) {
+  try {
+    const { data: observationValues, error: observationError } = await supabase.from("github_observations")
+      .select("check_id")
+      .eq("organisation_id", organisationId)
+      .eq("collection_run_id", collectionRunId)
+      .limit(100);
+    const observations = z.array(observationCheckSchema).min(1).max(100).safeParse(observationValues);
+    if (observationError || !observations.success) return false;
+    const checkIds = [...new Set(observations.data.map(({ check_id }) => check_id))];
+
+    const { data: decisionValues, error: decisionError } = await supabase
+      .from("github_effective_mapping_entry_decisions")
+      .select("mapping_pack_id,mapping_entry_id,check_id,entry_digest,status")
+      .eq("organisation_id", organisationId)
+      .eq("status", "approved")
+      .in("check_id", checkIds)
+      .limit(15);
+    const decisions = z.array(effectiveEntryForRunSchema).max(15).safeParse(decisionValues);
+    if (decisionError || !decisions.success || decisions.data.length === 0) return false;
+    const selectedPackId = decisions.data[0].mapping_pack_id;
+    return decisions.data.every((decision) => decision.mapping_pack_id === selectedPackId
+      && checkIds.includes(decision.check_id));
+  } catch {
+    return false;
+  }
+}
+
+export async function recordGitHubMappingEntryDecisionAction(
+  formData: FormData,
+): Promise<GitHubControlRoomActionResult> {
+  const context = await requireAppContext();
+  const monitoringAccess = workspaceAccess(context.membership.role).section("monitoring");
+  if (!monitoringAccess.canManageOperation("approve-github-mapping")) {
+    return { ok: false, message: monitoringAccess.manageDeniedMessageFor("approve-github-mapping") };
+  }
+
+  const parsed = entryDecisionSchema.safeParse({
+    entryId: formData.get("entryId"),
+    entryDigest: formData.get("entryDigest"),
+    decision: formData.get("decision"),
+    expectedRevision: formData.get("expectedRevision"),
+  });
+  if (!parsed.success) return { ok: false, message: "This GitHub check decision is invalid. Refresh the review and try again." };
+
+  let currentValue: unknown;
+  let currentError: unknown;
+  try {
+    const currentResult = await context.supabase
+      .from("github_effective_mapping_entry_decisions")
+      .select("organisation_id,mapping_pack_id,mapping_entry_id,entry_digest,status,revision")
+      .eq("organisation_id", context.organisation.id)
+      .eq("mapping_entry_id", parsed.data.entryId)
+      .maybeSingle();
+    currentValue = currentResult.data;
+    currentError = currentResult.error;
+  } catch {
+    return { ok: false, message: "Could not load the current GitHub check review. Refresh and try again." };
+  }
+  const current = effectiveEntryDecisionRowSchema.safeParse(currentValue);
+  if (currentError || !current.success || current.data.organisation_id !== context.organisation.id
+    || current.data.mapping_entry_id !== parsed.data.entryId) {
+    return { ok: false, message: "This GitHub check is no longer available in the selected mapping. Refresh the review." };
+  }
+  if (current.data.entry_digest !== parsed.data.entryDigest) {
+    return { ok: false, message: "This GitHub check changed after you opened it. Refresh the review before deciding." };
+  }
+  if (current.data.revision !== parsed.data.expectedRevision) {
+    return { ok: false, message: "The GitHub mapping review changed. Refresh it before deciding." };
+  }
+
+  try {
+    await enforceRateLimit(`github-mapping-entry-decision:${context.organisation.id}:${context.user.id}`, {
+      limit: 30,
+      windowMs: 60_000,
+    });
+    const { data, error } = await createSupabaseServiceClient().rpc(
+      "record_github_mapping_entry_decision_server",
+      {
+        target_organisation_id: context.organisation.id,
+        target_actor_id: context.user.id,
+        target_mapping_entry_id: parsed.data.entryId,
+        target_entry_digest: parsed.data.entryDigest,
+        target_decision: parsed.data.decision,
+        expected_revision: parsed.data.expectedRevision,
+      },
+    );
+    if (error || !uuid.safeParse(data).success) {
+      if (error?.code === "40001" || error?.code === "22023") {
+        return { ok: false, message: "The GitHub mapping review changed. Refresh it before deciding." };
+      }
+      return { ok: false, message: "Could not save this GitHub check decision." };
+    }
+    revalidatePath("/app/monitoring");
+    return {
+      ok: true,
+      message: parsed.data.decision === "approved" ? "GitHub check approved." : "GitHub check rejected.",
+    };
+  } catch {
+    return { ok: false, message: "Could not save this GitHub check decision." };
+  }
 }
 
 export async function approveGitHubMappingPackAction(formData: FormData): Promise<GitHubControlRoomActionResult> {
@@ -198,11 +323,13 @@ export async function processApprovedGitHubResultsAction(formData: FormData): Pr
   }
   const parsed = targetSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { ok: false, message: "Could not process these GitHub results." };
-  const [approval, target] = await Promise.all([
-    requireExactActiveApproval(context.supabase, context.organisation.id),
-    loadExactTarget(context.supabase, context.organisation.id, parsed.data),
-  ]);
-  if (!approval || !target || !["pending", "awaiting_approval", "retryable"].includes(target.job.status)) {
+  const target = await loadExactTarget(context.supabase, context.organisation.id, parsed.data);
+  if (!target || !["pending", "awaiting_approval", "retryable"].includes(target.job.status)
+    || !await hasApprovedExactEntryForRun(
+      context.supabase,
+      context.organisation.id,
+      target.run.id,
+    )) {
     return { ok: false, message: "Could not process these GitHub results." };
   }
   try {

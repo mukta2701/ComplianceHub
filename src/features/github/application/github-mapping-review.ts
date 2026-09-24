@@ -33,6 +33,21 @@ const approvalRowSchema = z.object({
   approved_at: dateTime,
   revoked_at: dateTime.nullable(),
 }).strict();
+const effectiveDecisionRowSchema = z.object({
+  organisation_id: uuid,
+  mapping_pack_id: uuid,
+  mapping_entry_id: uuid,
+  check_id: z.string(),
+  entry_digest: z.string().regex(/^[0-9a-f]{64}$/),
+  status: z.enum(["pending", "approved", "rejected"]),
+  source: z.enum(["none", "legacy_pack", "entry_decision"]),
+  decision_id: uuid.nullable(),
+  legacy_approval_id: uuid.nullable(),
+  reviewer_id: uuid.nullable(),
+  reviewed_at: dateTime.nullable(),
+  revision: z.number().int().min(0),
+  change_reason: z.enum(["changed", "not_reviewed"]).nullable(),
+}).strict();
 
 const LOAD_ERROR = "Could not load the GitHub mapping review";
 
@@ -58,6 +73,17 @@ export type GitHubMappingReview = {
     failureSeverity: "low" | "medium" | "high" | "critical";
     remediation: string;
     treatments: typeof STANDARD_GITHUB_ISO_MAPPING_PACK.mappings[number]["treatments"];
+    review: {
+      entryDigest: string;
+      status: "pending" | "approved" | "rejected";
+      source: "none" | "legacy_pack" | "entry_decision";
+      decisionId: string | null;
+      legacyApprovalId: string | null;
+      reviewerId: string | null;
+      reviewedAt: string | null;
+      revision: number;
+      changeReason: "changed" | "not_reviewed" | null;
+    };
   }>;
   approvalHistory: Array<{
     id: string;
@@ -80,14 +106,24 @@ export async function loadGitHubMappingReview(
   if (!parsedOrganisationId.success) fail();
 
   try {
+    const effectiveDecisionResult = await supabase.from("github_effective_mapping_entry_decisions")
+      .select("organisation_id,mapping_pack_id,mapping_entry_id,check_id,entry_digest,status,source,decision_id,legacy_approval_id,reviewer_id,reviewed_at,revision,change_reason")
+      .eq("organisation_id", parsedOrganisationId.data)
+      .order("check_id", { ascending: true })
+      .limit(16);
+    const effectiveDecisions = z.array(effectiveDecisionRowSchema).length(15).safeParse(effectiveDecisionResult.data);
+    if (effectiveDecisionResult.error || !effectiveDecisions.success) fail();
+    const selectedPackId = effectiveDecisions.data[0].mapping_pack_id;
+    if (effectiveDecisions.data.some((decision) => decision.organisation_id !== parsedOrganisationId.data
+      || decision.mapping_pack_id !== selectedPackId)) fail();
+
     const { data: packValue, error: packError } = await supabase.from("github_mapping_packs")
       .select("id,version,title,checksum,published_at")
-      .eq("version", STANDARD_GITHUB_ISO_MAPPING_PACK.version)
-      .eq("checksum", STANDARD_GITHUB_ISO_MAPPING_PACK.checksum)
+      .eq("id", selectedPackId)
       .not("published_at", "is", null)
       .maybeSingle();
     const pack = packRowSchema.safeParse(packValue);
-    if (packError || !pack.success) fail();
+    if (packError || !pack.success || pack.data.id !== selectedPackId) fail();
 
     const [entryResult, approvalResult] = await Promise.all([
       supabase.from("github_mapping_entries")
@@ -104,6 +140,12 @@ export async function loadGitHubMappingReview(
     const entries = z.array(entryRowSchema).length(15).safeParse(entryResult.data);
     const approvals = z.array(approvalRowSchema).max(20).safeParse(approvalResult.data);
     if (entryResult.error || approvalResult.error || !entries.success || !approvals.success) fail();
+    const reviewByEntryId = new Map(effectiveDecisions.data.map((decision) => [decision.mapping_entry_id, decision]));
+    if (reviewByEntryId.size !== entries.data.length || entries.data.some((entry) => {
+      const decision = reviewByEntryId.get(entry.id);
+      return !decision || decision.organisation_id !== parsedOrganisationId.data
+        || decision.mapping_pack_id !== pack.data.id || decision.check_id !== entry.check_id;
+    })) fail();
 
     const candidate = mappingPackSchema.safeParse({
       version: pack.data.version,
@@ -118,12 +160,7 @@ export async function loadGitHubMappingReview(
         treatments: entry.treatments,
       })),
     });
-    if (
-      !candidate.success
-      || candidate.data.version !== STANDARD_GITHUB_ISO_MAPPING_PACK.version
-      || candidate.data.title !== STANDARD_GITHUB_ISO_MAPPING_PACK.title
-      || candidate.data.checksum !== STANDARD_GITHUB_ISO_MAPPING_PACK.checksum
-    ) fail();
+    if (!candidate.success) fail();
 
     return {
       pack: {
@@ -141,6 +178,21 @@ export async function loadGitHubMappingReview(
         failureSeverity: entry.failure_severity,
         remediation: entry.remediation,
         treatments: entry.treatments as GitHubMappingReview["entries"][number]["treatments"],
+        review: (() => {
+          const decision = reviewByEntryId.get(entry.id);
+          if (!decision) fail();
+          return {
+            entryDigest: decision.entry_digest,
+            status: decision.status,
+            source: decision.source,
+            decisionId: decision.decision_id,
+            legacyApprovalId: decision.legacy_approval_id,
+            reviewerId: decision.reviewer_id,
+            reviewedAt: decision.reviewed_at,
+            revision: decision.revision,
+            changeReason: decision.change_reason,
+          };
+        })(),
       })).sort((left, right) => left.checkId.localeCompare(right.checkId)),
       approvalHistory: approvals.data.map((approval) => ({
         id: approval.id,

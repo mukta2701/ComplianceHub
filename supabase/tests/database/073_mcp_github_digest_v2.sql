@@ -3,7 +3,7 @@
 -- row is transaction-local and rolled back.
 begin;
 
-select plan(60);
+select plan(62);
 
 select has_function('public','get_mcp_compliance_bundle',array['uuid','date','integer','integer'],'digest v2: rolling-compatible v1 bundle remains present');
 select function_returns('public','get_mcp_compliance_bundle',array['uuid','date','integer','integer'],'jsonb','digest v2: v1 return type is unchanged');
@@ -219,7 +219,7 @@ set role authenticated;
 select set_config('request.jwt.claims','{"sub":"76000000-0000-4000-8000-000000000011","role":"authenticated"}',true);
 select set_config('app.digest_v2_owner',public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,20)::text,true);
 select is((current_setting('app.digest_v2_owner')::jsonb->>'schemaVersion')::integer,2,'digest v2 fixture: Owner receives schema version two');
-select is(current_setting('app.digest_v2_owner')::jsonb#>'{github,partition}','{"activeCurrentPass":2,"activeCurrentFail":2,"activeCurrentUnknown":3,"activeCurrentNotApplicable":1,"activeStale":1,"historical":1,"total":10}'::jsonb,'digest v2 fixture: latest official identities form the exact active-current, stale, and historical partition');
+select is(current_setting('app.digest_v2_owner')::jsonb#>'{github,partition}','{"activeCurrentPass":2,"activeCurrentFail":2,"activeCurrentUnknown":2,"activeCurrentNotApplicable":1,"activeStale":1,"historical":2,"total":10}'::jsonb,'digest v2 fixture: revoked approval ancestry remains historical after the same pack is reapproved');
 select ok((select sum(value::integer) from pg_catalog.jsonb_each_text((current_setting('app.digest_v2_owner')::jsonb#>'{github,partition}') - 'total'))=(current_setting('app.digest_v2_owner')::jsonb#>>'{github,partition,total}')::integer,'digest v2 fixture: disjoint partition sums exactly to total');
 select is(current_setting('app.digest_v2_owner')::jsonb#>'{github,changes,counts}','{"newFailure":3,"reopen":1,"resolution":2,"supersedingPass":1,"total":7}'::jsonb,'digest v2 fixture: immutable transitions and evidence lineage preserve every exact lifecycle event count');
 select is((select pg_catalog.jsonb_agg(item.value->>'kind' order by item.ordinal)
@@ -231,10 +231,22 @@ select ok(current_setting('app.digest_v2_owner')::jsonb#>'{github,changes,items}
 select ok(current_setting('app.digest_v2_owner')::jsonb#>'{github,changes,items}' @> '[{"kind":"new_failure","resultId":"github_result:76000000-0000-4000-8000-000000000402","checkId":"digest.fail_pass","result":"fail"},{"kind":"resolution","resultId":"github_result:76000000-0000-4000-8000-000000000403","checkId":"digest.fail_pass","result":"pass"}]'::jsonb and not (current_setting('app.digest_v2_owner')::jsonb#>'{github,recommendedActions,items}' @> '[{"checkId":"digest.fail_pass"}]'::jsonb),'digest v2 fixture: fail then pass retains new-failure and resolution events while latest state is pass');
 select ok(current_setting('app.digest_v2_owner')::jsonb#>'{github,changes,items}' @> '[{"kind":"new_failure","resultId":"github_result:76000000-0000-4000-8000-000000000412","checkId":"digest.fail_pass_fail","result":"fail"},{"kind":"resolution","resultId":"github_result:76000000-0000-4000-8000-000000000413","checkId":"digest.fail_pass_fail","result":"pass"},{"kind":"reopen","resultId":"github_result:76000000-0000-4000-8000-000000000414","checkId":"digest.fail_pass_fail","result":"fail"}]'::jsonb and current_setting('app.digest_v2_owner')::jsonb#>'{github,recommendedActions,items}' @> '[{"id":"github_result:76000000-0000-4000-8000-000000000414","checkId":"digest.fail_pass_fail","result":"fail"}]'::jsonb,'digest v2 fixture: fail then pass then fail retains new-failure, resolution, and reopen events while latest state is fail');
 select ok(current_setting('app.digest_v2_owner')::jsonb#>>'{github,staleResults,items,0,checkId}'='digest.stale' and (current_setting('app.digest_v2_owner')::jsonb#>>'{github,staleResults,count}')::integer=1,'digest v2 fixture: fresh-until equality is classified stale with its full count');
-select ok(current_setting('app.digest_v2_owner')::jsonb#>'{github,unknowns,items}' @> '[{"checkId":"digest.reapproved_same_pack"}]'::jsonb and not (current_setting('app.digest_v2_owner')::jsonb#>'{github,unknowns,items}' @> '[{"checkId":"digest.changed_pack"}]'::jsonb),'digest v2 fixture: same-pack reapproval remains active while an exact mapping-identity change is historical');
+select ok(not (current_setting('app.digest_v2_owner')::jsonb#>'{github,unknowns,items}' @> '[{"checkId":"digest.reapproved_same_pack"}]'::jsonb) and not (current_setting('app.digest_v2_owner')::jsonb#>'{github,unknowns,items}' @> '[{"checkId":"digest.changed_pack"}]'::jsonb),'digest v2 fixture: old approval and changed mapping identity are both historical');
+select ok(
+  exists (
+    select 1
+    from pg_catalog.jsonb_array_elements(public.get_mcp_github_compliance_results_v1(
+      '76000000-0000-4000-8000-000000000001',
+      '76000000-0000-4000-8000-000000000302',
+      null, null, 'historical', null, 50
+    )->'results') result
+    where result ->> 'id' = 'github_result:76000000-0000-4000-8000-000000000409'
+  ),
+  'digest v2 fixture: legacy result stays historical after its exact approval is revoked and the same pack is reapproved'
+);
 select is(current_setting('app.digest_v2_owner')::jsonb#>>'{github,baseline,localDate}','2026-08-06','digest v2 fixture: baseline selects latest prior delivered local date');
 select is(current_setting('app.digest_v2_owner')::jsonb#>>'{github,baseline,deliveredAt}','2026-08-06T08:00:00+00:00','digest v2 fixture: baseline exposes exact delivery time');
-select ok((public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,1)#>>'{github,unknowns,count}')::integer=3 and (public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,1)#>>'{github,unknowns,truncated}')::boolean and pg_catalog.jsonb_array_length(public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,1)#>'{github,unknowns,items}')=1,'digest v2 fixture: unknown full count survives deterministic page truncation');
+select ok((public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,1)#>>'{github,unknowns,count}')::integer=2 and (public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,1)#>>'{github,unknowns,truncated}')::boolean and pg_catalog.jsonb_array_length(public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,1)#>'{github,unknowns,items}')=1,'digest v2 fixture: only currently consented unknowns enter deterministic paging');
 select ok((public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,1)#>>'{github,changes,counts,total}')::integer=7 and (public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,1)#>>'{github,changes,truncated}')::boolean and pg_catalog.jsonb_array_length(public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,1)#>'{github,changes,items}')=1,'digest v2 fixture: change full count survives deterministic page truncation');
 select is(current_setting('app.digest_v2_owner')::jsonb#>>'{delivery,factHash}',repeat('b',64),'digest v2 fixture: Owner receives immutable current delivery hash');
 select ok(current_setting('app.digest_v2_owner') !~ '"(providerRepositoryId|providerInstallationId|sourceUrl|explanation|remediation|accountLogin|ownerLogin|fullName|htmlUrl|actorId|memberId|webhook|config)"[[:space:]]*:','digest v2 fixture: bundle excludes provider, actor, destination, and raw-content keys');
@@ -264,7 +276,7 @@ insert into public.github_observations(
 );
 set role authenticated;
 select set_config('request.jwt.claims','{"sub":"76000000-0000-4000-8000-000000000011","role":"authenticated"}',true);
-select is(public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,20)->'github',current_setting('app.digest_v2_owner')::jsonb->'github','digest v2 fixture: newer raw shadow content and provider ordering cannot change official facts');
+select is((public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,20)->'github') - 'asOf', (current_setting('app.digest_v2_owner')::jsonb->'github') - 'asOf','digest v2 fixture: newer raw shadow content and provider ordering cannot change official facts');
 select is(public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,20)->'github',public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,20)->'github','digest v2 fixture: repeat reads and replay-equivalent state remain byte-for-byte deterministic');
 select set_config('request.jwt.claims','{"sub":"76000000-0000-4000-8000-000000000012","role":"authenticated"}',true);
 select set_config('app.digest_v2_admin',public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,20)::text,true);
@@ -275,6 +287,20 @@ select set_config('request.jwt.claims','{"sub":"76000000-0000-4000-8000-00000000
 select set_config('app.digest_v2_member',public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,20)::text,true);
 select is(current_setting('app.digest_v2_member')::jsonb#>'{github,baseline}',current_setting('app.digest_v2_owner')::jsonb#>'{github,baseline}','digest v2 fixture: Member receives the same safe prior-delivery baseline as Owner');
 select is(current_setting('app.digest_v2_member')::jsonb#>'{github,changes}',current_setting('app.digest_v2_owner')::jsonb#>'{github,changes}','digest v2 fixture: Member receives the same verified deltas as Owner');
+select ok(
+  exists (
+    select 1
+    from pg_catalog.jsonb_array_elements(public.get_mcp_github_compliance_results_v1(
+      '76000000-0000-4000-8000-000000000001',
+      '76000000-0000-4000-8000-000000000302',
+      null, null, 'historical', null, 50
+    )->'results') result
+    where result ->> 'id' = 'github_result:76000000-0000-4000-8000-000000000409'
+  )
+  and (current_setting('app.digest_v2_member')::jsonb#>>'{github,partition,historical}')::integer = 2
+  and not (current_setting('app.digest_v2_member')::jsonb#>'{github,unknowns,items}' @> '[{"checkId":"digest.reapproved_same_pack"}]'::jsonb),
+  'digest v2 fixture: Member sees old exact approval as historical across v1 and digest after same-pack reapproval'
+);
 select is(current_setting('app.digest_v2_member')::jsonb->'delivery','null'::jsonb,'digest v2 fixture: Member delivery metadata remains redacted');
 select set_config('request.jwt.claims','{"sub":"76000000-0000-4000-8000-000000000014","role":"authenticated"}',true);
 select is(public.get_mcp_compliance_bundle_v2('76000000-0000-4000-8000-000000000001','2026-08-07',20,20,20),null::jsonb,'digest v2 fixture: outsider receives no cross-tenant bundle');

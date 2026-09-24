@@ -1,10 +1,29 @@
 import { describe, expect, it } from "vitest";
 
-import { STANDARD_GITHUB_ISO_MAPPING_PACK } from "../domain/mapping";
+import { buildMappingPackChecksum, STANDARD_GITHUB_ISO_MAPPING_PACK } from "../domain/mapping";
 import { loadGitHubMappingReview } from "./github-mapping-review";
 
 const ORG = "a1000000-0000-4000-8000-000000000001";
 const PACK = "91000000-0000-4000-8000-000000000001";
+const LEGACY_APPROVAL = "a1000000-0000-4000-8000-000000000099";
+
+function effectiveEntryRows() {
+  return STANDARD_GITHUB_ISO_MAPPING_PACK.mappings.map((entry, index) => ({
+    organisation_id: ORG,
+    mapping_pack_id: PACK,
+    mapping_entry_id: `91000000-0000-4000-8000-${String(index + 101).padStart(12, "0")}`,
+    check_id: entry.checkId,
+    entry_digest: String(index + 1).padStart(64, "a"),
+    status: "approved",
+    source: "legacy_pack",
+    decision_id: null as string | null,
+    legacy_approval_id: LEGACY_APPROVAL as string | null,
+    reviewer_id: "a1000000-0000-4000-8000-000000000001" as string | null,
+    reviewed_at: "2026-08-25T07:00:00.000Z" as string | null,
+    revision: 0,
+    change_reason: null as string | null,
+  }));
+}
 
 function rows() {
   return {
@@ -26,11 +45,12 @@ function rows() {
       treatments: entry.treatments,
     })),
     github_mapping_approvals: [{
-      id: "a1000000-0000-4000-8000-000000000099",
+      id: LEGACY_APPROVAL,
       mapping_pack_id: PACK,
       approved_at: "2026-08-25T07:00:00.000Z",
       revoked_at: null,
     }],
+    github_effective_mapping_entry_decisions: effectiveEntryRows(),
   } as Record<string, unknown[]>;
 }
 
@@ -87,6 +107,72 @@ describe("published GitHub mapping review loader", () => {
     entries[0] = { ...(entries[0] as object), remediation: "Changed after publication." };
     await expect(loadGitHubMappingReview(client({ github_mapping_entries: entries }) as never, ORG))
       .rejects.toThrow("Could not load the GitHub mapping review");
+  });
+
+  it("shows an explicit rejection while retaining unchanged legacy approvals", async () => {
+    const states = effectiveEntryRows();
+    const rejectedIndex = states.findIndex((state) => state.check_id === "github.administration.outside_collaborator_admins");
+    states[rejectedIndex] = {
+      ...states[rejectedIndex],
+      status: "rejected",
+      source: "entry_decision",
+      decision_id: "a1000000-0000-4000-8000-000000000098",
+      legacy_approval_id: null,
+      reviewed_at: "2026-09-23T12:00:00.000Z",
+      revision: 1,
+    };
+    const supabase = client({ github_effective_mapping_entry_decisions: states });
+    const review = await loadGitHubMappingReview(supabase as never, ORG);
+
+    expect(review.entries[0]).toMatchObject({
+      checkId: "github.administration.outside_collaborator_admins",
+      review: { status: "rejected", source: "entry_decision", revision: 1 },
+    });
+    expect(review.entries[1].review).toMatchObject({ status: "approved", source: "legacy_pack" });
+    expect(supabase.calls).toContainEqual({
+      table: "github_effective_mapping_entry_decisions", operation: "eq", args: ["organisation_id", ORG],
+    });
+  });
+
+  it("loads the selected immutable pack instead of silently showing the compiled seed", async () => {
+    const version = "github-m2-test-v2";
+    const title = "Updated mapping review";
+    const mappings = STANDARD_GITHUB_ISO_MAPPING_PACK.mappings.map((entry) => ({
+      ...entry,
+      remediation: entry.checkId === "github.branch.stale_approvals"
+        ? "Review the changed mapping before use."
+        : entry.remediation,
+    }));
+    const checksum = buildMappingPackChecksum({ version, title, mappings });
+    const fixture = rows();
+    const entries = fixture.github_mapping_entries.map((row) => {
+      const entry = row as Record<string, unknown>;
+      return {
+        ...entry,
+        remediation: entry.check_id === "github.branch.stale_approvals"
+          ? "Review the changed mapping before use."
+          : entry.remediation,
+      };
+    });
+    const states = effectiveEntryRows().map((row) => row.check_id === "github.branch.stale_approvals"
+      ? { ...row, status: "pending", source: "none", legacy_approval_id: null,
+        reviewer_id: null, reviewed_at: null, change_reason: "changed" }
+      : row);
+    const supabase = client({
+      github_mapping_packs: [{ id: PACK, version, title, checksum, published_at: "2026-09-23T12:00:00.000Z" }],
+      github_mapping_entries: entries,
+      github_mapping_approvals: [],
+      github_effective_mapping_entry_decisions: states,
+    });
+
+    const review = await loadGitHubMappingReview(supabase as never, ORG);
+
+    expect(review.pack).toMatchObject({ version, checksum });
+    expect(review.entries.find((entry) => entry.checkId === "github.branch.stale_approvals")?.review)
+      .toMatchObject({ status: "pending", changeReason: "changed" });
+    expect(supabase.calls).toContainEqual({
+      table: "github_mapping_packs", operation: "eq", args: ["id", PACK],
+    });
   });
 
   it("rejects malformed workspace input before querying", async () => {

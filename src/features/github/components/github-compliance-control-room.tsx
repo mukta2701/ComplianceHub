@@ -4,8 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 import {
-  approveGitHubMappingPackAction,
   processApprovedGitHubResultsAction,
+  recordGitHubMappingEntryDecisionAction,
   retryExhaustedGitHubMaterialisationAction,
   revokeGitHubMappingApprovalAction,
 } from "@/app/app/monitoring/github-control-room-actions";
@@ -16,7 +16,9 @@ import type { GitHubComplianceControlRoom } from "../application/github-complian
 import type { GitHubMappingReview } from "../application/github-mapping-review";
 import {
   classifyGitHubRepositoryCompliance,
+  classifyGitHubOfficialResult,
   countGitHubOfficialOutcomes,
+  type GitHubOfficialResultCurrentness,
   type GitHubRepositoryComplianceState,
 } from "../domain/compliance-control-room-state";
 import { githubEvidenceTitle, groupChecksByArea } from "./github-check-presentation";
@@ -28,9 +30,9 @@ const STATE_PRESENTATION: Record<GitHubRepositoryComplianceState, { label: strin
     detail: "GitHub access or collection processing needs attention. Review the statuses and recovery options below.",
   },
   awaiting_approval: {
-    label: "Awaiting approval",
+    label: "Awaiting mapping review",
     tone: "amber",
-    detail: "Collected checks are stored, but an Owner has not approved the reviewed mapping.",
+    detail: "The latest processing job is waiting for a mapping review before it can produce official results.",
   },
   shadow: {
     label: "Collected, not official",
@@ -38,14 +40,19 @@ const STATE_PRESENTATION: Record<GitHubRepositoryComplianceState, { label: strin
     detail: "Collected checks exist, but no official evidence or findings have been produced yet.",
   },
   official_stale: {
-    label: "Official records stale",
+    label: "Records need review",
     tone: "amber",
-    detail: "Official records exist, but their mapping identity or freshness no longer matches the active review.",
+    detail: "Some results use an older mapping or are past their freshness window. Check each result label before relying on it as current.",
+  },
+  official_partial: {
+    label: "Partial review",
+    tone: "amber",
+    detail: "Some checks have a current official result. Other checks have no current result yet and are excluded from these counts.",
   },
   official_current: {
     label: "Official records current",
     tone: "green",
-    detail: "All 15 latest results match the active mapping and remain within their verified freshness window.",
+    detail: "All 15 expected checks have a current result.",
   },
 };
 
@@ -55,7 +62,18 @@ const RETRY_REASONS = [
   { value: "owner_reviewed", label: "Owner reviewed" },
 ] as const;
 
-function outcomeLabel(outcome: "pass" | "fail" | "unknown" | "not_applicable"): string {
+function currentnessLabel(currentness: GitHubOfficialResultCurrentness): string {
+  if (currentness === "historical") return "Historical mapping";
+  return currentness === "stale" ? "Stale · recheck needed" : "Current";
+}
+
+function outcomeLabel(outcome: "pass" | "fail" | "unknown" | "not_applicable", current: boolean): string {
+  if (!current) {
+    if (outcome === "pass") return "Passed when recorded";
+    if (outcome === "fail") return "Issue when recorded";
+    if (outcome === "unknown") return "Could not verify then";
+    return "Not applicable when recorded";
+  }
   if (outcome === "pass") return "Verified technical pass";
   if (outcome === "fail") return "Verified issue";
   if (outcome === "unknown") return "Could not verify";
@@ -81,7 +99,6 @@ function MappingReviewSection({
   runAction: (action: (formData: FormData) => Promise<{ ok: boolean; message: string }>, form: FormData) => Promise<void>;
   pending: boolean;
 }) {
-  const [confirmed, setConfirmed] = useState(false);
   const exactApprovalActive = room.approval !== null
     && room.approval.mappingPackId === review.pack.id
     && room.approval.version === review.pack.version
@@ -89,19 +106,19 @@ function MappingReviewSection({
   const activeHistory = review.approvalHistory.find((approval) =>
     approval.revokedAt === null && approval.mappingPackId === room.approval?.mappingPackId,
   );
-  const approvalLabel = exactApprovalActive
-    ? "Owner approved"
-    : room.approval
-      ? "Different mapping active"
-      : "Approval required";
   const canManageMapping = workspaceAccess(role).section("monitoring").canManageOperation("approve-github-mapping");
+  const counts = review.entries.reduce((total, entry) => {
+    total[entry.review.status] += 1;
+    return total;
+  }, { pending: 0, approved: 0, rejected: 0 });
 
-  function approve() {
+  function decide(entry: GitHubMappingReview["entries"][number], decision: "approved" | "rejected") {
     const form = new FormData();
-    form.set("version", review.pack.version);
-    form.set("checksum", review.pack.checksum);
-    form.set("confirmation", "accepted");
-    return runAction(approveGitHubMappingPackAction, form);
+    form.set("entryId", entry.id);
+    form.set("entryDigest", entry.review.entryDigest);
+    form.set("decision", decision);
+    form.set("expectedRevision", String(entry.review.revision));
+    return runAction(recordGitHubMappingEntryDecisionAction, form);
   }
 
   function revoke() {
@@ -114,12 +131,15 @@ function MappingReviewSection({
   return <section className="github-control-room-section" aria-labelledby="github-mapping-title">
     <div className="github-control-room-heading">
       <div>
-        <p className="eyebrow">REVIEWED MAPPING</p>
-        <h3 id="github-mapping-title">GitHub checks mapped to ISO/IEC 27001:2022</h3>
-        <p>Review the exact published mapping before any collected result becomes an official record.</p>
+        <p className="eyebrow">OWNER MAPPING REVIEW</p>
+        <h3 id="github-mapping-title">Individual mapping review</h3>
+        <p>Review each check separately. Only approved mapping entries are used when producing official records.</p>
       </div>
-      <Pill tone={exactApprovalActive ? "green" : "amber"}>{approvalLabel}</Pill>
     </div>
+
+    <p className="github-mapping-review-counts" role="note" aria-label="GitHub mapping review status">
+      {review.entries.length} checks · {counts.pending} pending · {counts.approved} approved · {counts.rejected} rejected
+    </p>
 
     <dl className="github-mapping-identity">
       <div><dt>Version</dt><dd>{review.pack.version}</dd></div>
@@ -132,53 +152,85 @@ function MappingReviewSection({
       <ul>{review.limitations.map((limitation) => <li key={limitation}>{limitation}</li>)}</ul>
     </div>
 
-    {canManageMapping ? room.approval && activeHistory ? <fieldset className="github-owner-decision">
-      <legend>Owner mapping approval</legend>
+    {canManageMapping && room.approval && (activeHistory ? <fieldset className="github-legacy-approval">
+      <legend>Earlier pack-wide approval</legend>
       <p>{exactApprovalActive
-        ? "This exact mapping is active. Revocation stops future official processing; existing records remain historical."
-        : "Revoke the historical mapping before approving this reviewed version. Existing records remain historical."}</p>
+        ? "This earlier approval covered the mapping as a pack. Check-by-check decisions below show the effective review for each entry. Revoking it removes only approvals inherited from that pack; individual check decisions remain in effect. Existing records remain historical."
+        : "An earlier pack-wide approval is still active. Revoking it removes only approvals inherited from that pack; individual check decisions remain in effect. Existing records remain historical."}</p>
       <button className="button secondary" type="button" disabled={pending} onClick={() => void revoke()}>
-        {exactApprovalActive ? "Revoke active mapping" : "Revoke historical mapping"}
-      </button>
-    </fieldset> : room.approval ? <p className="github-read-only-note" role="note">
-      The active mapping history could not be verified. Refresh before making an Owner decision.
-    </p> : <fieldset className="github-owner-decision">
-      <legend>Owner mapping approval</legend>
-      <label className="github-confirmation">
-        <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />
-        <span>I understand these technical signals do not certify ISO compliance or change readiness by themselves.</span>
-      </label>
-      <button className="button primary" type="button" disabled={!confirmed || pending} onClick={() => void approve()}>
-        Approve mapping for official records
+        {exactApprovalActive ? "Revoke earlier approval" : "Revoke historical mapping"}
       </button>
     </fieldset> : <p className="github-read-only-note" role="note">
-      Only workspace Owners can approve mappings or recover processing.
+      The earlier approval record could not be verified. Refresh before attempting to revoke it.
+    </p>)}
+
+    {!canManageMapping && <p className="github-read-only-note" role="note">
+      Only workspace Owners can decide mapping entries or recover processing.
     </p>}
 
-    <details className="github-mapping-details">
-      <summary>Review all 15 mapped checks</summary>
-      <div className="github-mapping-list">
-        {groupChecksByArea(review.entries).map((section) => <section key={section.group.id} aria-label={section.group.title}>
-          <h4 className="github-mapping-group">{section.group.title}</h4>
-          {section.items.map((entry) => <article key={entry.id} aria-label={`${entry.checkId} mapping check`}>
+    <div className="github-mapping-list">
+      {groupChecksByArea(review.entries).map((section) => <section key={section.group.id} aria-label={section.group.title}>
+        <h4 className="github-mapping-group">{section.group.title}</h4>
+        {section.items.map((entry) => {
+          const statusTone = entry.review.status === "approved" ? "green" : entry.review.status === "rejected" ? "red" : "amber";
+          const canApproveEntry = entry.review.status !== "approved" || entry.review.source === "legacy_pack";
+          const canRejectEntry = entry.review.status !== "rejected";
+          return <article key={entry.id} aria-label={`${entry.checkId} mapping check`}>
           <div className="github-mapping-check-head">
-            <div><strong>{githubEvidenceTitle(entry.checkId)}</strong><code>{entry.checkId}</code><small>Rule {entry.ruleVersion}</small></div>
-            <Pill tone={entry.failureSeverity}>{entry.failureSeverity} if failed</Pill>
+            <div>
+              <strong>{githubEvidenceTitle(entry.checkId)}</strong>
+              <code>{entry.checkId}</code>
+              <small>Rule {entry.ruleVersion}</small>
+            </div>
+            <div className="github-mapping-status-pills">
+              <Pill tone={statusTone}>{entry.review.status === "pending" ? "Pending review" : entry.review.status === "approved" ? "Approved" : "Rejected"}</Pill>
+              <Pill tone={entry.failureSeverity}>{entry.failureSeverity} if failed</Pill>
+            </div>
           </div>
-          <p><strong>ISO references:</strong> {entry.isoControlReferences.join(" · ")}</p>
-          <p><strong>Verified technical pass → evidence:</strong> {entry.treatments.pass.summary}</p>
-          <p><strong>Verified issue → finding:</strong> {entry.treatments.fail.summary}</p>
-          <p><strong>Could not verify:</strong> {entry.treatments.unknown.summary}</p>
-          <p><strong>Not applicable:</strong> {entry.treatments.not_applicable.summary}</p>
-          <p><strong>Suggested remediation:</strong> {entry.remediation}</p>
-          </article>)}
-        </section>)}
-      </div>
-    </details>
+          {entry.review.source === "legacy_pack" && <p className="github-mapping-source">Effective status comes from an earlier pack-wide approval.</p>}
+          {entry.review.source === "entry_decision" && entry.review.reviewedAt && <p className="github-mapping-source">
+            Owner {entry.review.status} on <time dateTime={entry.review.reviewedAt}>{entry.review.reviewedAt}</time>
+          </p>}
+          {entry.review.source === "legacy_pack" && entry.review.reviewedAt && <p className="github-mapping-source">
+            Earlier pack approved on <time dateTime={entry.review.reviewedAt}>{entry.review.reviewedAt}</time>
+          </p>}
+          {entry.review.changeReason === "changed" ? <p className="github-mapping-change-note" role="note">
+            Mapping changed since its last review. This version needs a fresh Owner decision.
+          </p> : entry.review.changeReason === "not_reviewed" ? <p className="github-mapping-change-note" role="note">
+            This check has not been reviewed by an Owner yet.
+          </p> : null}
+          <dl className="github-mapping-entry-details">
+            <div><dt>ISO references</dt><dd>{entry.isoControlReferences.join(" · ")}</dd></div>
+            <div><dt>When the check passes</dt><dd>{entry.treatments.pass.summary}</dd></div>
+            <div><dt>When the check finds an issue</dt><dd>{entry.treatments.fail.summary}</dd></div>
+            <div><dt>When the result is unknown</dt><dd>{entry.treatments.unknown.summary}</dd></div>
+            <div><dt>When the check does not apply</dt><dd>{entry.treatments.not_applicable.summary}</dd></div>
+            <div><dt>Suggested remediation</dt><dd>{entry.remediation}</dd></div>
+          </dl>
+          {canManageMapping && <div className="github-mapping-decision-controls" role="group" aria-label={`Owner decision for ${entry.checkId}`}>
+            {canApproveEntry && <button
+              className="button primary"
+              type="button"
+              disabled={pending}
+              aria-label={`Approve mapping for ${entry.checkId}`}
+              onClick={() => void decide(entry, "approved")}
+            >Approve check</button>}
+            {canRejectEntry && <button
+              className="button secondary"
+              type="button"
+              disabled={pending}
+              aria-label={`Reject mapping for ${entry.checkId}`}
+              onClick={() => void decide(entry, "rejected")}
+            >Reject check</button>}
+          </div>}
+          </article>;
+        })}
+      </section>)}
+    </div>
 
     <div className="github-approval-history">
-      <h4>Approval history</h4>
-      {review.approvalHistory.length === 0 ? <p>No mapping approval has been recorded.</p> : <ol>
+      <h4>Earlier pack-wide approval history</h4>
+      {review.approvalHistory.length === 0 ? <p>No earlier pack-wide approval has been recorded. Individual decisions are shown above.</p> : <ol>
         {review.approvalHistory.map((approval) => <li key={approval.id}>
           <span>Mapping pack <code>{approval.mappingPackId}</code></span>
           <span>Approved <time dateTime={approval.approvedAt}>{approval.approvedAt}</time></span>
@@ -195,7 +247,7 @@ function RepositoryOfficialCard({
   repository,
   room,
   installationHealthy,
-  exactReviewedApprovalActive,
+  hasApprovedMappingEntry,
   role,
   runAction,
   pending,
@@ -203,7 +255,7 @@ function RepositoryOfficialCard({
   repository: GitHubComplianceControlRoom["repositories"][number];
   room: GitHubComplianceControlRoom;
   installationHealthy: boolean;
-  exactReviewedApprovalActive: boolean;
+  hasApprovedMappingEntry: boolean;
   role: MembershipRole;
   runAction: (action: (formData: FormData) => Promise<{ ok: boolean; message: string }>, form: FormData) => Promise<void>;
   pending: boolean;
@@ -211,20 +263,27 @@ function RepositoryOfficialCard({
   const state = classifyGitHubRepositoryCompliance({
     asOf: room.asOf,
     installationHealthy,
-    approval: room.approval,
     latestCollection: repository.latestCollection,
     latestMaterialisationJob: repository.latestMaterialisationJob,
     officialResults: repository.officialResults,
   });
   const presentation = STATE_PRESENTATION[state];
+  const presentationLabel = state === "shadow" && !repository.latestCollection
+    ? "No official results"
+    : presentation.label;
   const counts = countGitHubOfficialOutcomes(repository.officialResults);
   const job = repository.latestMaterialisationJob;
   const run = repository.latestCollection;
   const stateDetail = !run && state === "awaiting_approval"
-    ? "No collection has completed yet. An Owner must also approve the reviewed mapping before official processing."
+    ? "No collection has completed yet; the latest processing job is waiting for mapping review."
     : !run && state === "shadow"
-      ? "No collection has completed yet, so no official records exist."
+      ? "No collection has completed, so there are no official results to show yet."
       : presentation.detail;
+  const processingDetail = job?.status === "pending"
+    ? "A newer collection is still processing. The counts below reflect current official results already recorded."
+    : job?.status === "awaiting_approval"
+      ? "A newer collection is waiting for mapping review before it can become official."
+      : null;
   const canProcessResults = workspaceAccess(role).section("monitoring").canManageOperation("process-github-results");
 
   function targetForm() {
@@ -247,38 +306,53 @@ function RepositoryOfficialCard({
         </a>
         <p>{repository.visibility} · default {repository.defaultBranch}{repository.archived ? " · archived" : ""}</p>
       </div>
-      <Pill tone={presentation.tone}>{presentation.label}</Pill>
+      <Pill tone={presentation.tone}>{presentationLabel}</Pill>
     </header>
     <p className="github-state-detail">{stateDetail}</p>
+    {processingDetail && <p className="github-processing-detail">{processingDetail}</p>}
+    <h4 className="github-current-results-heading">Current results</h4>
     <dl className="github-outcome-counts">
-      <div><dt>Verified technical pass</dt><dd>{counts.pass} verified technical pass</dd></div>
-      <div><dt>Verified issue</dt><dd>{counts.fail} verified issue</dd></div>
-      <div><dt>Could not verify</dt><dd>{counts.unknown} could not verify</dd></div>
-      <div><dt>Not applicable</dt><dd>{counts.notApplicable} not applicable</dd></div>
+      <div><dt>Passed</dt><dd>{counts.current.pass} passed</dd></div>
+      <div><dt>Need action</dt><dd>{counts.current.fail} {counts.current.fail === 1 ? "needs" : "need"} action</dd></div>
+      <div><dt>Could not verify</dt><dd>{counts.current.unknown} could not verify</dd></div>
+      <div><dt>Not applicable</dt><dd>{counts.current.notApplicable} not applicable</dd></div>
     </dl>
+    {(counts.historical > 0 || counts.stale > 0) && <p className="github-excluded-results-note">
+      {counts.historical > 0 && <>{counts.historical} historical {counts.historical === 1 ? "result" : "results"}</>}
+      {counts.historical > 0 && counts.stale > 0 && " · "}
+      {counts.stale > 0 && <>{counts.stale} stale {counts.stale === 1 ? "result" : "results"}</>}
+      {" (excluded from current counts; details remain below)"}
+    </p>}
 
     {repository.officialResults.length > 0 && <details className="github-official-results">
       <summary>Inspect {repository.officialResults.length} latest results</summary>
       {groupChecksByArea(repository.officialResults).map((section) => <section key={section.group.id} aria-label={`${section.group.title} results`}>
         <h4 className="github-results-group">{section.group.title}</h4>
-        <ul>{section.items.map((result) => <li key={result.id}>
+        <ul>{section.items.map((result) => {
+          const currentness = classifyGitHubOfficialResult(result);
+          const isCurrent = currentness === "current";
+          const resultTone = isCurrent ? outcomeTone(result.outcome) : currentness === "stale" ? "amber" : "neutral";
+          return <li key={result.id}>
         <div>
           <strong>{githubEvidenceTitle(result.checkId)}</strong>
           <code>{result.checkId}</code>
-          <Pill tone={outcomeTone(result.outcome)}>{outcomeLabel(result.outcome)}</Pill>
+          <Pill tone={resultTone}>{outcomeLabel(result.outcome, isCurrent)}</Pill>
+          <Pill tone={currentness === "current" ? "green" : currentness === "stale" ? "amber" : "neutral"}>{currentnessLabel(currentness)}</Pill>
         </div>
         <p>{result.summary}</p>
         <small>Rule {result.ruleVersion} · Mapping {result.mappingVersion}</small>
         <small>Observed <time dateTime={result.observedAt}>{result.observedAt}</time> · fresh until <time dateTime={result.freshUntil}>{result.freshUntil}</time></small>
         <span className="github-result-links">
+          <a href={`/app/monitoring/github-results/${result.id}`} aria-label={`View recorded result for ${result.checkId}`}>View recorded result</a>
           {result.evidenceId && <a href={`/app/evidence?evidence=${result.evidenceId}#evidence-${result.evidenceId}`} aria-label={`View evidence for ${result.checkId}`}>View evidence</a>}
           {result.findingId && <a href={`/app/monitoring?finding=${result.findingId}#finding-${result.findingId}`} aria-label={`View finding for ${result.checkId}`}>View finding</a>}
         </span>
-        </li>)}</ul>
+          </li>;
+        })}</ul>
       </section>)}
     </details>}
 
-    {canProcessResults && exactReviewedApprovalActive && run && job && ["pending", "awaiting_approval", "retryable"].includes(job.status)
+    {canProcessResults && hasApprovedMappingEntry && run && job && ["pending", "awaiting_approval", "retryable"].includes(job.status)
       && <div className="github-recovery-actions">
         <button className="button primary" type="button" disabled={pending} onClick={() => void process()}>
           Process approved results
@@ -365,10 +439,7 @@ export function GitHubComplianceControlRoomPanel({
   const currentPage = Math.floor(room.pagination.offset / room.pagination.limit) + 1;
   const hasPreviousPage = room.pagination.offset > 0;
   const hasNextPage = room.pagination.truncated;
-  const exactReviewedApprovalActive = room.approval !== null
-    && room.approval.mappingPackId === review.pack.id
-    && room.approval.version === review.pack.version
-    && room.approval.checksum === review.pack.checksum;
+  const hasApprovedMappingEntry = review.entries.some((entry) => entry.review.status === "approved");
 
   return <section className="github-control-room" aria-labelledby="github-control-room-title">
     <header className="github-control-room-hero">
@@ -421,7 +492,7 @@ export function GitHubComplianceControlRoomPanel({
           repository={repository}
           room={room}
           installationHealthy={!unhealthyRepositoryIds.includes(repository.id)}
-          exactReviewedApprovalActive={exactReviewedApprovalActive}
+          hasApprovedMappingEntry={hasApprovedMappingEntry}
           role={role}
           runAction={runAction}
           pending={pending}

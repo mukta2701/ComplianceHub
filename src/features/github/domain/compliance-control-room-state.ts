@@ -1,11 +1,5 @@
 import { EXPECTED_GITHUB_CHECK_IDS } from "./rules";
 
-type MappingIdentity = {
-  mappingPackId: string;
-  version: string;
-  checksum: string;
-};
-
 type OfficialResult = {
   checkId: string;
   outcome: "pass" | "fail" | "unknown" | "not_applicable";
@@ -13,19 +7,37 @@ type OfficialResult = {
   mappingPackId: string;
   mappingVersion: string;
   mappingChecksum: string;
+  mappingStatus: "active" | "historical";
+  freshness: "current" | "stale";
 };
+
+export type GitHubOfficialOutcomeCounts = {
+  pass: number;
+  fail: number;
+  unknown: number;
+  notApplicable: number;
+};
+
+export type GitHubOfficialResultCurrentness = "current" | "historical" | "stale";
+
+export function classifyGitHubOfficialResult(
+  result: Pick<OfficialResult, "mappingStatus" | "freshness">,
+): GitHubOfficialResultCurrentness {
+  if (result.mappingStatus === "historical") return "historical";
+  return result.freshness === "current" ? "current" : "stale";
+}
 
 export type GitHubRepositoryComplianceState =
   | "needs_attention"
   | "awaiting_approval"
   | "shadow"
   | "official_stale"
+  | "official_partial"
   | "official_current";
 
 export type GitHubRepositoryComplianceInput = {
   asOf: string;
   installationHealthy: boolean;
-  approval: MappingIdentity | null;
   latestCollection: { status: "succeeded" | "partial" | "failed" | "rate_limited" } | null;
   latestMaterialisationJob: {
     status: "pending" | "awaiting_approval" | "retryable" | "completed" | "exhausted";
@@ -34,12 +46,23 @@ export type GitHubRepositoryComplianceInput = {
 };
 
 export function countGitHubOfficialOutcomes(results: OfficialResult[]) {
-  const counts = { pass: 0, fail: 0, unknown: 0, notApplicable: 0 };
+  const counts: GitHubOfficialOutcomeCounts = { pass: 0, fail: 0, unknown: 0, notApplicable: 0 };
+  let historical = 0;
+  let stale = 0;
   for (const result of results) {
+    const currentness = classifyGitHubOfficialResult(result);
+    if (currentness === "historical") {
+      historical += 1;
+      continue;
+    }
+    if (currentness === "stale") {
+      stale += 1;
+      continue;
+    }
     if (result.outcome === "not_applicable") counts.notApplicable += 1;
     else counts[result.outcome] += 1;
   }
-  return counts;
+  return { current: counts, historical, stale };
 }
 
 function hasCompleteExpectedResults(results: OfficialResult[]): boolean {
@@ -55,26 +78,28 @@ export function classifyGitHubRepositoryCompliance(
   const jobStatus = input.latestMaterialisationJob?.status;
   if (
     !input.installationHealthy
+    || input.latestCollection?.status === "partial"
     || input.latestCollection?.status === "failed"
     || input.latestCollection?.status === "rate_limited"
     || jobStatus === "retryable"
     || jobStatus === "exhausted"
-    || (input.officialResults.length > 0 && !hasCompleteExpectedResults(input.officialResults))
   ) return "needs_attention";
 
-  if (!input.approval) return "awaiting_approval";
-  if (input.officialResults.length === 0) return "shadow";
-
   const asOf = Date.parse(input.asOf);
-  const allCurrent = Number.isFinite(asOf)
-    && jobStatus === "completed"
-    && hasCompleteExpectedResults(input.officialResults)
-    && input.officialResults.every((result) =>
-      result.mappingPackId === input.approval?.mappingPackId
-      && result.mappingVersion === input.approval?.version
-      && result.mappingChecksum === input.approval?.checksum
+  const currentResultCount = Number.isFinite(asOf)
+    ? input.officialResults.filter((result) =>
+      classifyGitHubOfficialResult(result) === "current"
       && Number.isFinite(Date.parse(result.freshUntil))
       && Date.parse(result.freshUntil) > asOf,
-    );
-  return allCurrent ? "official_current" : "official_stale";
+    ).length
+    : 0;
+
+  if (currentResultCount === 0) {
+    if (input.officialResults.length > 0) return "official_stale";
+    return jobStatus === "awaiting_approval" ? "awaiting_approval" : "shadow";
+  }
+
+  const allExpectedResultsCurrent = hasCompleteExpectedResults(input.officialResults)
+    && currentResultCount === EXPECTED_GITHUB_CHECK_IDS.length;
+  return allExpectedResultsCurrent ? "official_current" : "official_partial";
 }

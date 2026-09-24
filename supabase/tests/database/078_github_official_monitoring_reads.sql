@@ -31,7 +31,7 @@ select cmp_ok(
 );
 select ok(
   pg_catalog.pg_get_functiondef(
-    'public.get_github_compliance_control_room_v1(uuid,integer,integer)'::pg_catalog.regprocedure
+    'public.get_github_compliance_control_room_base_v1(uuid,integer,integer)'::pg_catalog.regprocedure
   ) ~ 'materialisation[.]collection_run_id = collection[.]id',
   'the control-room job is anchored to the displayed official collection'
 );
@@ -39,7 +39,7 @@ select cmp_ok(
   (select pg_catalog.count(*)
    from pg_catalog.regexp_matches(
      pg_catalog.pg_get_functiondef(
-       'public.get_github_compliance_control_room_v1(uuid,integer,integer)'::pg_catalog.regprocedure
+       'public.get_github_compliance_control_room_base_v1(uuid,integer,integer)'::pg_catalog.regprocedure
      ),
      'run_mode = ''official''', 'g'
    )),

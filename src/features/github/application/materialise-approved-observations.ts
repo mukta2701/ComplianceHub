@@ -3,9 +3,16 @@ import "server-only";
 import { z } from "zod";
 
 import {
+  mappingPackSchema,
   STANDARD_GITHUB_ISO_MAPPING_PACK,
   selectGitHubObservationTreatment,
+  type GitHubMappingPack,
 } from "../domain/mapping";
+import {
+  processGitHubComplianceResultAlerts,
+  type GitHubComplianceResultAlertRunOptions,
+} from "@/features/monitoring/application/github-compliance-result-alert-workflow";
+import { siteUrl } from "@/lib/site-url";
 import type { GitHubObservation } from "../domain/observation";
 import { EXPECTED_GITHUB_CHECK_IDS, RULE_PACK_VERSION } from "../domain/rules";
 
@@ -26,12 +33,16 @@ const terminalRunSchema = z.object({
   repositorySourceUrl: z.string().url().max(500),
 }).strict();
 
-const activeApprovalSchema = z.object({
-  approvalId: uuidSchema,
+const effectiveMappingSchema = z.object({
   mappingPackId: uuidSchema,
   version: z.string().min(1).max(80),
   checksum: z.string().regex(/^[a-f0-9]{64}$/),
   publishedAt: dateTimeSchema.nullable(),
+  pack: mappingPackSchema,
+  entries: z.array(z.object({
+    checkId: z.string().min(1).max(120),
+    status: z.enum(["approved", "rejected", "pending"]),
+  }).strict()).length(EXPECTED_GITHUB_CHECK_IDS.length),
 }).strict();
 
 const diagnosticCodeSchema = z.enum([
@@ -140,9 +151,15 @@ export type MaterialisationDependencies = {
   inspectJobs(scope: { limit: number; collectionRunIds?: string[] }): Promise<unknown[]>;
   finaliseJob(job: Pick<ClaimedMaterialisationJob, "jobId" | "leaseToken" | "attemptCount"> & { outcome: MaterialisationJobOutcome }): Promise<boolean>;
   loadTerminalRun(target: { organisationId: string; collectionRunId: string }): Promise<unknown | null>;
-  loadActiveApproval(organisationId: string): Promise<unknown | null>;
+  loadEffectiveMapping(organisationId: string): Promise<unknown | null>;
   loadObservations(target: { organisationId: string; collectionRunId: string }): Promise<unknown[]>;
   materialise(input: MaterialisationRpcInput): Promise<{ data: unknown; error: unknown }>;
+  evaluateResultAlerts(options: Pick<GitHubComplianceResultAlertRunOptions, "evaluatedAt" | "scope">): Promise<{
+    candidates: number;
+    eventsCreated: number;
+    notificationsCreated: number;
+    conflicts: number;
+  }>;
 };
 
 export type MaterialisationOutcome =
@@ -158,6 +175,8 @@ export type MaterialisationOutcome =
     findingsReopened: number;
     findingsResolved: number;
     skipped: number;
+    alertEventsCreated?: number;
+    notificationsCreated?: number;
   };
 
 export type ReconciliationSummary = {
@@ -166,6 +185,8 @@ export type ReconciliationSummary = {
   unchanged: number;
   awaitingApproval: number;
   needsAttention: number;
+  alertEventsCreated?: number;
+  notificationsCreated?: number;
 };
 
 type QueryResult = { data: unknown; error: unknown };
@@ -199,15 +220,26 @@ const rawRunSchema = z.object({
     html_url: z.string().url().max(500),
   }).strict(),
 }).strict();
-const rawApprovalSchema = z.object({
+const rawPackSchema = z.object({
   id: uuidSchema,
+  version: z.string().min(1).max(80),
+  title: z.string().min(1).max(160),
+  checksum: z.string().regex(/^[a-f0-9]{64}$/),
+  published_at: dateTimeSchema,
+}).strict();
+const rawMappingEntrySchema = z.object({
   mapping_pack_id: uuidSchema,
-  github_mapping_packs: z.object({
-    id: uuidSchema,
-    version: z.string().min(1).max(80),
-    checksum: z.string().regex(/^[a-f0-9]{64}$/),
-    published_at: dateTimeSchema,
-  }).strict(),
+  check_id: z.string().min(1).max(120),
+  rule_version: z.string().min(1).max(80),
+  iso_control_references: z.array(z.string()).min(1).max(4),
+  failure_severity: z.enum(["low", "medium", "high", "critical"]),
+  remediation: z.string().min(1).max(400),
+  treatments: z.unknown(),
+}).strict();
+const rawEffectiveEntrySchema = z.object({
+  mapping_pack_id: uuidSchema,
+  check_id: z.string().min(1).max(120),
+  status: z.enum(["approved", "rejected", "pending"]),
 }).strict();
 const scopeSchema = z.object({
   limit: z.number().int().min(1).max(100),
@@ -335,25 +367,57 @@ export function buildMaterialisationDependencies(serviceInput: unknown): Materia
       if (error) throw persistenceFailure();
       return data === null ? null : parseRawRun(data);
     },
-    async loadActiveApproval(organisationId) {
-      const { data, error } = await service.from("github_mapping_approvals")
-        .select("id,mapping_pack_id,github_mapping_packs!inner(id,version,checksum,published_at)")
+    async loadEffectiveMapping(organisationId) {
+      const { data, error } = await service.from("github_effective_mapping_entry_decisions")
+        .select("mapping_pack_id,check_id,status")
         .eq("organisation_id", organisationId)
-        .is("revoked_at", null)
-        .not("github_mapping_packs.published_at", "is", null)
-        .maybeSingle();
-      if (error) throw persistenceFailure();
-      if (data === null) return null;
-      const approval = rawApprovalSchema.safeParse(data);
-      if (!approval.success || approval.data.github_mapping_packs.id !== approval.data.mapping_pack_id) {
+        .order("check_id", { ascending: true })
+        .limit(100);
+      const entries = z.array(rawEffectiveEntrySchema).safeParse(data);
+      if (error || !entries.success) throw persistenceFailure();
+      if (entries.data.length === 0) return null;
+      const packId = entries.data[0]!.mapping_pack_id;
+      if (entries.data.length !== EXPECTED_GITHUB_CHECK_IDS.length
+        || entries.data.some((entry) => entry.mapping_pack_id !== packId)
+        || new Set(entries.data.map((entry) => entry.check_id)).size !== EXPECTED_GITHUB_CHECK_IDS.length
+        || entries.data.some((entry) => !EXPECTED_GITHUB_CHECK_IDS.includes(entry.check_id as typeof EXPECTED_GITHUB_CHECK_IDS[number]))) {
         throw persistenceFailure();
       }
+      const packResult = await service.from("github_mapping_packs")
+        .select("id,version,title,checksum,published_at")
+        .eq("id", packId)
+        .maybeSingle();
+      const pack = rawPackSchema.safeParse(packResult.data);
+      if (packResult.error || !pack.success || pack.data.id !== packId) throw persistenceFailure();
+      const mappingResult = await service.from("github_mapping_entries")
+        .select("mapping_pack_id,check_id,rule_version,iso_control_references,failure_severity,remediation,treatments")
+        .eq("mapping_pack_id", packId)
+        .order("check_id", { ascending: true })
+        .limit(100);
+      const mappingRows = z.array(rawMappingEntrySchema).safeParse(mappingResult.data);
+      if (mappingResult.error || !mappingRows.success || mappingRows.data.length !== EXPECTED_GITHUB_CHECK_IDS.length
+        || mappingRows.data.some((row) => row.mapping_pack_id !== packId)) throw persistenceFailure();
+      const selectedPack = mappingPackSchema.safeParse({
+        version: pack.data.version,
+        title: pack.data.title,
+        checksum: pack.data.checksum,
+        mappings: mappingRows.data.map((row) => ({
+          checkId: row.check_id,
+          ruleVersion: row.rule_version,
+          isoControlReferences: row.iso_control_references,
+          failureSeverity: row.failure_severity,
+          remediation: row.remediation,
+          treatments: row.treatments,
+        })),
+      });
+      if (!selectedPack.success) throw persistenceFailure();
       return {
-        approvalId: approval.data.id,
-        mappingPackId: approval.data.mapping_pack_id,
-        version: approval.data.github_mapping_packs.version,
-        checksum: approval.data.github_mapping_packs.checksum,
-        publishedAt: approval.data.github_mapping_packs.published_at,
+        mappingPackId: packId,
+        version: pack.data.version,
+        checksum: pack.data.checksum,
+        publishedAt: pack.data.published_at,
+        pack: selectedPack.data,
+        entries: entries.data.map((entry) => ({ checkId: entry.check_id, status: entry.status })),
       };
     },
     async loadObservations(target) {
@@ -368,8 +432,39 @@ export function buildMaterialisationDependencies(serviceInput: unknown): Materia
       return data;
     },
     async materialise(input) {
-      const { data, error } = await service.rpc("materialise_github_observations_server", input);
+      const { data, error } = await service.rpc("materialise_github_approved_entries_server", input);
       return { data, error };
+    },
+    async evaluateResultAlerts(options) {
+      const summary = await processGitHubComplianceResultAlerts({
+        async loadCandidates(input) {
+          const { data, error } = await service.rpc("load_github_compliance_result_alert_candidates", {
+            target_evaluated_at: input.evaluatedAt,
+            target_collection_run_id: input.collectionRunId ?? null,
+            target_organisation_id: input.organisationId ?? null,
+            target_after_organisation_id: input.after?.organisationId ?? null,
+            target_after_repository_id: input.after?.repositoryId ?? null,
+            target_after_check_id: input.after?.checkId ?? null,
+            target_limit: input.limit,
+          });
+          if (error) throw persistenceFailure();
+          return data;
+        },
+        async saveDecisions(decisions, evaluatedAt) {
+          const { data, error } = await service.rpc("record_github_compliance_result_alert_decisions", {
+            target_decisions: decisions,
+            target_evaluated_at: evaluatedAt,
+          });
+          if (error) throw persistenceFailure();
+          return data;
+        },
+      }, {
+        ...options,
+        appOrigin: siteUrl(),
+        allowLocalHttp: process.env.NODE_ENV !== "production",
+      });
+      if (summary.conflicts > 0) throw persistenceFailure();
+      return summary;
     },
   };
 }
@@ -403,7 +498,12 @@ function toObservation(row: z.infer<typeof observationRowSchema>): GitHubObserva
   };
 }
 
-function mapDecisions(rows: unknown[], run: z.infer<typeof terminalRunSchema>): MaterialisationDecision[] | null {
+function mapDecisions(
+  rows: unknown[],
+  run: z.infer<typeof terminalRunSchema>,
+  approvedCheckIds: ReadonlySet<string>,
+  selectedPack: GitHubMappingPack,
+): MaterialisationDecision[] | null {
   const parsed = z.array(observationRowSchema).safeParse(rows);
   if (
     !parsed.success
@@ -440,21 +540,24 @@ function mapDecisions(rows: unknown[], run: z.infer<typeof terminalRunSchema>): 
       ) return null;
       observationIds.add(row.id);
       checkIds.add(row.check_id);
-      const treatment = selectGitHubObservationTreatment(
+      const observedRuleTreatment = selectGitHubObservationTreatment(
         STANDARD_GITHUB_ISO_MAPPING_PACK,
         toObservation(row),
       );
       if (
         row.result === "fail"
-        && (row.severity !== treatment.failureSeverity || row.remediation !== treatment.remediation)
+        && (row.severity !== observedRuleTreatment.failureSeverity || row.remediation !== observedRuleTreatment.remediation)
       ) return null;
-      decisions.push({
-        observation_id: row.id,
-        treatment_kind: treatment.kind,
-        iso_control_references: [...treatment.isoControlReferences],
-        failure_severity: treatment.failureSeverity,
-        remediation: treatment.remediation,
-      });
+      if (approvedCheckIds.has(row.check_id)) {
+        const treatment = selectGitHubObservationTreatment(selectedPack, toObservation(row));
+        decisions.push({
+          observation_id: row.id,
+          treatment_kind: treatment.kind,
+          iso_control_references: [...treatment.isoControlReferences],
+          failure_severity: treatment.failureSeverity,
+          remediation: treatment.remediation,
+        });
+      }
     }
   } catch {
     return null;
@@ -485,19 +588,23 @@ export async function materialiseApprovedGitHubObservations(
     return { status: "invalid_data", collectionRunId: target.collectionRunId };
   }
 
-  let approvalValue: unknown | null;
+  let mappingValue: unknown | null;
   try {
-    approvalValue = await deps.loadActiveApproval(target.organisationId);
+    mappingValue = await deps.loadEffectiveMapping(target.organisationId);
   } catch {
     return { status: "retryable_failure", collectionRunId: target.collectionRunId };
   }
-  if (approvalValue === null) return { status: "awaiting_approval", collectionRunId: target.collectionRunId };
-  const parsedApproval = activeApprovalSchema.safeParse(approvalValue);
-  if (!parsedApproval.success) return { status: "invalid_data", collectionRunId: target.collectionRunId };
+  if (mappingValue === null) return { status: "awaiting_approval", collectionRunId: target.collectionRunId };
+  const parsedMapping = effectiveMappingSchema.safeParse(mappingValue);
+  if (!parsedMapping.success
+    || new Set(parsedMapping.data.entries.map((entry) => entry.checkId)).size !== EXPECTED_GITHUB_CHECK_IDS.length
+    || parsedMapping.data.entries.some((entry) => !EXPECTED_GITHUB_CHECK_IDS.includes(entry.checkId as typeof EXPECTED_GITHUB_CHECK_IDS[number]))) {
+    return { status: "invalid_data", collectionRunId: target.collectionRunId };
+  }
   if (
-    parsedApproval.data.publishedAt === null
-    || parsedApproval.data.version !== STANDARD_GITHUB_ISO_MAPPING_PACK.version
-    || parsedApproval.data.checksum !== STANDARD_GITHUB_ISO_MAPPING_PACK.checksum
+    parsedMapping.data.publishedAt === null
+    || parsedMapping.data.version !== parsedMapping.data.pack.version
+    || parsedMapping.data.checksum !== parsedMapping.data.pack.checksum
   ) return { status: "stale_approval", collectionRunId: target.collectionRunId };
 
   let rows: unknown[];
@@ -506,16 +613,22 @@ export async function materialiseApprovedGitHubObservations(
   } catch {
     return { status: "retryable_failure", collectionRunId: target.collectionRunId };
   }
-  const decisions = mapDecisions(rows, parsedRun.data);
+  const approvedCheckIds = new Set(parsedMapping.data.entries
+    .filter((entry) => entry.status === "approved")
+    .map((entry) => entry.checkId));
+  const decisions = mapDecisions(rows, parsedRun.data, approvedCheckIds, parsedMapping.data.pack);
   if (!decisions) return { status: "invalid_data", collectionRunId: target.collectionRunId };
+  if (decisions.length === 0 && parsedMapping.data.entries.some((entry) => entry.status === "pending")) {
+    return { status: "awaiting_approval", collectionRunId: target.collectionRunId };
+  }
 
   let rpcResult: { data: unknown; error: unknown };
   try {
     rpcResult = await deps.materialise({
       target_organisation_id: target.organisationId,
       target_collection_run_id: target.collectionRunId,
-      target_mapping_version: STANDARD_GITHUB_ISO_MAPPING_PACK.version,
-      target_mapping_checksum: STANDARD_GITHUB_ISO_MAPPING_PACK.checksum,
+      target_mapping_version: parsedMapping.data.version,
+      target_mapping_checksum: parsedMapping.data.checksum,
       target_decisions: decisions,
     });
   } catch {
@@ -532,6 +645,15 @@ export async function materialiseApprovedGitHubObservations(
     + summary.findings_refreshed
     + summary.findings_reopened
     + summary.findings_resolved;
+  let alertSummary: Awaited<ReturnType<MaterialisationDependencies["evaluateResultAlerts"]>>;
+  try {
+    alertSummary = await deps.evaluateResultAlerts({
+      evaluatedAt: new Date().toISOString(),
+      scope: { collectionRunId: target.collectionRunId, organisationId: target.organisationId },
+    });
+  } catch {
+    return { status: "retryable_failure", collectionRunId: target.collectionRunId };
+  }
   return {
     status: changed > 0 ? "materialised" : "unchanged",
     collectionRunId: target.collectionRunId,
@@ -543,6 +665,8 @@ export async function materialiseApprovedGitHubObservations(
     findingsReopened: summary.findings_reopened,
     findingsResolved: summary.findings_resolved,
     skipped: summary.skipped,
+    ...(alertSummary.eventsCreated > 0 ? { alertEventsCreated: alertSummary.eventsCreated } : {}),
+    ...(alertSummary.notificationsCreated > 0 ? { notificationsCreated: alertSummary.notificationsCreated } : {}),
   };
 }
 
@@ -609,8 +733,15 @@ export async function reconcileApprovedGitHubObservations(
       } catch { /* a retry or lease recovery will safely reclaim the job */ }
       if (!finalised) {
         empty.needsAttention += 1;
-      } else if (outcome.status === "materialised") empty.materialised += 1;
-      else if (outcome.status === "unchanged") empty.unchanged += 1;
+      } else if (outcome.status === "materialised") {
+        empty.materialised += 1;
+        if (outcome.alertEventsCreated) empty.alertEventsCreated = (empty.alertEventsCreated ?? 0) + outcome.alertEventsCreated;
+        if (outcome.notificationsCreated) empty.notificationsCreated = (empty.notificationsCreated ?? 0) + outcome.notificationsCreated;
+      } else if (outcome.status === "unchanged") {
+        empty.unchanged += 1;
+        if (outcome.alertEventsCreated) empty.alertEventsCreated = (empty.alertEventsCreated ?? 0) + outcome.alertEventsCreated;
+        if (outcome.notificationsCreated) empty.notificationsCreated = (empty.notificationsCreated ?? 0) + outcome.notificationsCreated;
+      }
       else if (outcome.status === "awaiting_approval") empty.awaitingApproval += 1;
       else empty.needsAttention += 1;
     }
@@ -651,6 +782,16 @@ export async function reconcileApprovedGitHubObservations(
         if (unclaimedRunIds) empty.runsConsidered += unclaimedRunIds.length;
       }
     }
+  }
+  try {
+    const alertSummary = await deps.evaluateResultAlerts({
+      evaluatedAt: new Date().toISOString(),
+      scope: { due: true },
+    });
+    if (alertSummary.eventsCreated > 0) empty.alertEventsCreated = (empty.alertEventsCreated ?? 0) + alertSummary.eventsCreated;
+    if (alertSummary.notificationsCreated > 0) empty.notificationsCreated = (empty.notificationsCreated ?? 0) + alertSummary.notificationsCreated;
+  } catch {
+    empty.needsAttention += 1;
   }
   return empty;
 }

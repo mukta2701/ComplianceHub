@@ -12,6 +12,7 @@ import { describe, expect, it, vi } from "vitest";
 const execFileAsync = promisify(execFile);
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const runtimePath = resolve(repositoryRoot, "dist/github-connection-reconcile.mjs");
+const dailyCollectionRuntimePath = resolve(repositoryRoot, "dist/github-compliance-collect.mjs");
 const fixtureSecret = "task8-fixture-secret-must-not-leak";
 const fixtureEncryptionMarker = "task8-fixture-encryption-marker";
 const fixtureSlackDigestMarker = "task8-fixture-slack-digest-marker";
@@ -83,6 +84,14 @@ async function buildRuntime(): Promise<BuiltRuntime> {
   expect(source).not.toContain(fixtureSecret);
   expect(source).not.toContain(fixtureEncryptionMarker);
   expect(source).not.toContain(fixtureSlackDigestMarker);
+
+  await access(dailyCollectionRuntimePath);
+  await expect(access(`${dailyCollectionRuntimePath}.map`)).rejects.toThrow();
+  const dailyCollectionSource = await readFile(dailyCollectionRuntimePath, "utf8");
+  expect(dailyCollectionSource).not.toContain("sourceMappingURL");
+  expect(dailyCollectionSource).not.toContain(fixtureSecret);
+  expect(dailyCollectionSource).not.toContain(fixtureEncryptionMarker);
+  expect(dailyCollectionSource).not.toContain(fixtureSlackDigestMarker);
   return import(`${pathToFileURL(runtimePath).href}?test=${Date.now()}`) as Promise<BuiltRuntime>;
 }
 

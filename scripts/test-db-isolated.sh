@@ -15,11 +15,13 @@ tmp_root="${TMPDIR:-/tmp}"
 
 fail() { echo "isolated database validation failed: $*" >&2; exit 64; }
 [[ -z "${DOCKER_HOST:-}" ]] || fail "DOCKER_HOST must be unset for local-only validation"
-[[ -z "${DOCKER_CONTEXT:-}" || "${DOCKER_CONTEXT}" == "colima" ]] || fail "DOCKER_CONTEXT must be colima or unset"
+[[ -z "${DOCKER_CONTEXT:-}" || "${DOCKER_CONTEXT}" == "colima" || "${DOCKER_CONTEXT}" == "default" || "${DOCKER_CONTEXT}" == "desktop-linux" ]] || fail "DOCKER_CONTEXT must name a local Docker context or be unset"
 [[ -x "$docker_bin" ]] || fail "approved local Docker executable is unavailable"
 command -v "$supabase_bin" >/dev/null 2>&1 || fail "Supabase CLI is unavailable"
 
-docker_socket="$($docker_bin context inspect colima --format '{{(index .Endpoints "docker").Host}}')"
+active_context="$($docker_bin context show)"
+[[ "$active_context" == "colima" || "$active_context" == "default" || "$active_context" == "desktop-linux" ]] || fail "active Docker context is not an approved local context"
+docker_socket="$($docker_bin context inspect "$active_context" --format '{{(index .Endpoints "docker").Host}}')"
 [[ "$docker_socket" == unix:///* ]] || fail "Docker context is not a local Unix socket"
 
 identity="$($docker_bin info --format '{{.Name}}|{{.ServerVersion}}' 2>/dev/null)" || fail "cannot inspect local Docker"
@@ -79,7 +81,7 @@ sed -i.bak \
   "$project_config"
 rm -f -- "$project_config.bak"
 
-"$supabase_bin" start --workdir "$project_dir" --exclude vector,mailpit --ignore-health-check >/dev/null
+"$supabase_bin" start --workdir "$project_dir" --exclude vector,mailpit,logflare --ignore-health-check >/dev/null
 started=1
 
 if [[ "$mode" == "fresh" || "$mode" == "both" ]]; then

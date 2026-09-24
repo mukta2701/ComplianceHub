@@ -282,9 +282,9 @@ select ok(
     where value->>'result'<>'fail' or value->>'freshness'<>'stale'
        or value->>'mappingStatus'<>'active' or value->>'severity'<>'medium'
        or (value->>'freshUntil')::timestamptz
-          <> (current_setting('app.mcp_v2_filtered_page')::jsonb->>'snapshotAt')::timestamptz
+          > (current_setting('app.mcp_v2_filtered_page')::jsonb->>'snapshotAt')::timestamptz
   ),
-  'GitHub MCP v2: normalized outcome freshness mapping and severity filters apply, with freshUntil equal to snapshotAt classified stale'
+  'GitHub MCP v2: normalized outcome freshness mapping and severity filters apply, with freshUntil no later than snapshotAt classified stale'
 );
 select ok(
   pg_temp.mcp_v2_cursor_payload(current_setting('app.mcp_v2_small_page_one')::jsonb->>'nextCursor')->>'issuedAt'
@@ -819,14 +819,14 @@ select ok(
   exists (
     select 1 from pg_catalog.jsonb_array_elements(public.get_mcp_github_compliance_results_v2(
       '81000000-0000-4000-8000-000000000001','81000000-0000-4000-8000-000000000201',null,null,null,null,50,null
-    )->'results') value where value->>'id'=current_setting('app.mcp_v2_eligible_result_id')
+    )->'results') value where value->>'id'=current_setting('app.mcp_v2_post_snapshot_result_id')
   )
   and not exists (
     select 1 from pg_catalog.jsonb_array_elements(public.get_mcp_github_compliance_results_v2(
       '81000000-0000-4000-8000-000000000001','81000000-0000-4000-8000-000000000201',null,null,null,null,50,null
     )->'results') value where value->>'id'=current_setting('app.mcp_v2_poison_result_id')
   ),
-  'GitHub MCP v2: v2 filters eligible ancestry before latest ranking so newer shadow poison cannot suppress older official state'
+  'GitHub MCP v2: v2 filters eligible ancestry before latest ranking so newer shadow poison cannot suppress the latest official state'
 );
 select ok(
   pg_catalog.jsonb_array_length(public.get_mcp_github_compliance_results_v2(

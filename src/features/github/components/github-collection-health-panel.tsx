@@ -75,7 +75,7 @@ function monitoringHealth(
   if (repository.latest_status === "rate_limited") return { label: "GitHub rate limit reached", tone: "red" };
   return isStale(repository, nowIso)
     ? { label: "Needs a new check", tone: "amber" }
-    : { label: "Up to date", tone: "green" };
+    : { label: "Checked recently", tone: "neutral" };
 }
 
 const formatLastChecked = formatMonitoringTime;
@@ -164,6 +164,8 @@ export function GitHubCollectionHealthPanel({
     <div className="github-collection-disclosure" role="note">
       <p>GitHub access reads repository settings and metadata and never changes GitHub.</p>
       <p id="github-recheck-effects">A check can update ComplianceHub&apos;s own evidence and findings.</p>
+      {installations.length > 0 && role === "admin" && <p>Owners manage the GitHub connection and repository selection. Owners and Admins can run a check.</p>}
+      {installations.length > 0 && role === "member" && <p>Only workspace Owners and Admins can run a check. Ask an Owner to manage the GitHub connection or repository selection.</p>}
     </div>
 
     {installations.length === 0 ? <div className="github-repositories-empty">
@@ -222,8 +224,6 @@ export function GitHubCollectionHealthPanel({
           {canRecheckGitHub && installation.repository_selection === "selected" && installationRepositories.length > 0 && !hasAvailableRepository && <p className="field-hint">
             No selected repositories are currently available to check.
           </p>}
-          {!canRecheckGitHub && <p className="field-hint">Only workspace Owners can check GitHub from here.</p>}
-
           {installationRepositories.length === 0 ? <div className="github-repositories-empty">
             <p>No repositories are selected for GitHub monitoring.</p>
             {canManageGitHub && <Link className="button secondary" href="/app/integrations">Choose repositories</Link>}
