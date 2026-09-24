@@ -1,4 +1,4 @@
-# Monitoring readability — local review, 24 September 2026
+# Monitoring readability — local review and AWS dev release, 24 September 2026
 
 This branch simplifies the GitHub part of Monitoring for an Owner, CISO or nontechnical teammate. It does not change GitHub collection, mapping approval, evidence creation, finding lifecycle, permissions or AWS configuration.
 
@@ -44,4 +44,10 @@ The earlier production build on `http://127.0.0.1:3600` reported `status: ok`, `
 
 Fresh targeted tests passed 91 of 91 across the parser and collection-status components; the production build, including TypeScript, passed after those changes. A fresh independent Sol review found no blocker in the four-file diff. The browser verified the fictional Owner's real local session, rendered data, disabled check action, collapsed technical area and mobile layout. No fresh live GitHub collection, Slack notification, AWS deployment, production release or human acceptance is claimed. No local database was reset or migrated for this walkthrough.
 
-The next operational step is an authorised AWS dev release review after the owner accepts the local design; live GitHub and role-specific acceptance remain separate checks.
+## AWS dev release
+
+After the owner accepted the local design and authorised AWS dev deployment, the exact application source `5964627ccdab0cf6e01c84de4e29ce976383b9d0` was deployed through [run 36065161534](https://github.com/mukta2701/ComplianceHub/actions/runs/36065161534). Its deployment job succeeded; the optional GitHub reconciliation acceptance jobs were deliberately skipped. The preceding [branch CI run 36063832268](https://github.com/mukta2701/ComplianceHub/actions/runs/36063832268) passed secrets, changes, container, application and database jobs, including the browser tests updated for the new UI wording. Those tests kept exact assertions; no check was skipped or loosened.
+
+A fresh hosted `GET /api/health` reported `status: ok`, `db: ok`, and the exact release SHA above. An unauthenticated request to `/app/monitoring` returned a 307 redirect to `/sign-in`, as expected for a protected page. This establishes the released source, database health and sign-in boundary; it does **not** demonstrate the signed-in AWS Monitoring UI or a new provider result. The screenshots above remain local fictional evidence. No GitHub App access, live repository, Slack destination or database data was changed for this deployment.
+
+The next step is a signed-in AWS dev Monitoring walkthrough with the owner, followed separately by a fresh live GitHub/provider check and human acceptance.
