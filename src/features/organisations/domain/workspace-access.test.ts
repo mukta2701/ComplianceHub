@@ -85,7 +85,7 @@ describe("Monitoring workspace access", () => {
     expect(() => monitoring.requireManage("run-monitoring")).toThrow("Only workspace operators can run monitoring");
   });
 
-  it("keeps every finding and official GitHub decision Owner-only with its exact denial", () => {
+  it("keeps GitHub decisions Owner-only while allowing Admins to run manual checks", () => {
     const owner = workspaceAccess("owner").section("monitoring");
     const admin = workspaceAccess("admin").section("monitoring");
     const member = workspaceAccess("member").section("monitoring");
@@ -102,7 +102,11 @@ describe("Monitoring workspace access", () => {
       expect(member.canManageOperation(operation)).toBe(false);
       expect(admin.manageDeniedMessageFor(operation)).toBe(message);
     }
-    expect(admin.canManageOperation("recheck-github-installation")).toBe(false);
+    expect(owner.canManageOperation("recheck-github-installation")).toBe(true);
+    expect(admin.canManageOperation("recheck-github-installation")).toBe(true);
+    expect(member.canManageOperation("recheck-github-installation")).toBe(false);
+    expect(member.manageDeniedMessageFor("recheck-github-installation")).toBe("Only workspace Owners and Admins can run a GitHub check.");
+    expect(admin.canManageOperation("approve-github-mapping")).toBe(false);
     expect(admin.canManageOperation("process-github-results")).toBe(false);
     expect(admin.canManageOperation("retry-github-materialisation")).toBe(false);
   });

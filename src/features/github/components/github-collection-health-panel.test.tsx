@@ -48,6 +48,7 @@ describe("GitHubCollectionHealthPanel", () => {
     const region = screen.getByRole("region", { name: "GitHub monitoring" });
     expect(within(region).getByText("GitHub access reads repository settings and metadata and never changes GitHub.")).toBeVisible();
     expect(within(region).getByText("A check can update ComplianceHub's own evidence and findings.")).toBeVisible();
+    expect(within(region).getByText("Owners manage the GitHub connection and repository selection. Owners and Admins can run a check.")).toBeVisible();
     for (const forbidden of ["official collection", "control room", "shadow", "materialisation", "mapping pack"]) {
       expect(within(region).queryByText(new RegExp(forbidden, "i"))).not.toBeInTheDocument();
     }
@@ -67,12 +68,18 @@ describe("GitHubCollectionHealthPanel", () => {
     expect(screen.queryByRole("link", { name: "Connect GitHub" })).not.toBeInTheDocument();
   });
 
-  it("shows connected-without-selection guidance and keeps non-Owners read-only", () => {
+  it("lets Admins run a check but keeps repository selection controls Owner-only", () => {
     renderPanel({ repositories: [], role: "admin" });
     expect(screen.getByText("No repositories are selected for GitHub monitoring.")).toBeVisible();
     expect(screen.queryByRole("link", { name: "Choose repositories" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Check GitHub now" })).toBeDisabled();
+    expect(screen.getByText("Select at least one available repository before checking GitHub.")).toBeVisible();
+  });
+
+  it("keeps Members from running checks and explains the Owner/Admin boundary", () => {
+    renderPanel({ role: "member" });
     expect(screen.queryByRole("button", { name: "Check GitHub now" })).not.toBeInTheDocument();
-    expect(screen.getByText("Only workspace Owners can check GitHub from here.")).toBeVisible();
+    expect(screen.getByText("Only workspace Owners and Admins can run a check. Ask an Owner to manage the GitHub connection or repository selection.")).toBeVisible();
   });
 
   it("disables Owner checks until at least one selected repository is available", () => {
@@ -159,11 +166,11 @@ describe("GitHubCollectionHealthPanel", () => {
     expect(within(repoArticle("SecondOrg/unavailable")).queryByText("Up to date")).not.toBeInTheDocument();
   });
 
-  it("uses an accessible Owner pending state and refreshes only after success", async () => {
+  it("uses an accessible Admin pending state and refreshes only after success", async () => {
     const user = userEvent.setup();
     let finish!: (value: { ok: true; message: string }) => void;
     hoisted.recheck.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
-    renderPanel();
+    renderPanel({ role: "admin" });
     const button = screen.getByRole("button", { name: "Check GitHub now" });
     await user.click(button);
     expect(button).toBeDisabled();
@@ -280,10 +287,10 @@ describe("GitHubCollectionHealthPanel", () => {
     expect(hoisted.refresh).toHaveBeenCalledOnce();
   });
 
-  it("shows a safe nearby error and does not refresh when an Owner check rejects", async () => {
+  it("shows a safe nearby error and does not refresh when an Admin check rejects", async () => {
     const user = userEvent.setup();
     hoisted.recheck.mockRejectedValueOnce(new Error("provider-sensitive-detail"));
-    renderPanel();
+    renderPanel({ role: "admin" });
     await user.click(screen.getByRole("button", { name: "Check GitHub now" }));
     const status = await screen.findByRole("status");
     expect(status).toHaveTextContent("GitHub could not be checked. Please try again.");

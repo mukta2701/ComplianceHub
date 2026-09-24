@@ -77,13 +77,13 @@ describe("official GitHub recheck action", () => {
     });
   });
 
-  it("passes explicit official mode, reconciles terminal runs, and revalidates every affected surface", async () => {
+  it.each(["owner", "admin"] as const)("allows %s to run a scoped official check and reconcile its terminal runs", async (role) => {
     const lookup = installationLookup();
     const service = { from: vi.fn(), rpc: vi.fn() };
     hoisted.createServiceClient.mockReturnValue(service);
     hoisted.ctx = {
       supabase: { from: vi.fn(() => lookup) },
-      user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
+      user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role },
     };
     const form = new FormData();
     form.set("installationId", INSTALLATION_ID);
@@ -92,6 +92,14 @@ describe("official GitHub recheck action", () => {
       ok: true,
       message: "Official GitHub recheck finished: 1 checked, 0 deferred, 0 failed.",
     });
+    expect(lookup.eq.mock.calls).toEqual([
+      ["id", INSTALLATION_ID],
+      ["organisation_id", ORGANISATION_ID],
+    ]);
+    expect(hoisted.enforceRateLimit).toHaveBeenCalledWith(
+      `github-manual:${ORGANISATION_ID}:${USER_ID}`,
+      { limit: 5, windowMs: 60_000 },
+    );
     expect(hoisted.runGitHubCollection).toHaveBeenCalledWith(
       { dependency: "collection" },
       {
@@ -112,7 +120,8 @@ describe("official GitHub recheck action", () => {
     ]);
   });
 
-  it.each(["admin", "member"] as const)("rejects a %s before lookup or collection", async (role) => {
+  it("rejects a Member before lookup or collection", async () => {
+    const role = "member";
     const from = vi.fn();
     hoisted.ctx = {
       supabase: { from }, user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role },
@@ -138,6 +147,24 @@ describe("official GitHub recheck action", () => {
       supabase: { from: vi.fn(() => lookup) },
       user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "owner" },
     };
+    const form = new FormData();
+    form.set("installationId", INSTALLATION_ID);
+
+    await expect(recheckGitHubInstallationAction(form)).resolves.toEqual({
+      ok: false,
+      message: "Could not run this official GitHub recheck. Please try again.",
+    });
+    expect(hoisted.runGitHubCollection).not.toHaveBeenCalled();
+    expect(hoisted.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("fails closed before collection when the manual-check rate limit is reached", async () => {
+    const lookup = installationLookup();
+    hoisted.ctx = {
+      supabase: { from: vi.fn(() => lookup) },
+      user: { id: USER_ID }, organisation: { id: ORGANISATION_ID }, membership: { role: "admin" },
+    };
+    hoisted.enforceRateLimit.mockRejectedValueOnce(new Error("rate limited"));
     const form = new FormData();
     form.set("installationId", INSTALLATION_ID);
 
