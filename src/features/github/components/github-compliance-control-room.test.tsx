@@ -168,6 +168,26 @@ describe("GitHubComplianceControlRoomPanel", () => {
     expect(within(repository).getAllByText("Past pass — needs review")[0].closest("span")).not.toHaveClass("green");
   });
 
+  it("labels an unverified saved issue without presenting it as a current finding", () => {
+    render(<GitHubComplianceControlRoomPanel room={room({ approval: null })} review={review()} role="member" unhealthyRepositoryIds={[]} />);
+    const repository = screen.getByRole("article", { name: "Mukta2701/ComplianceHub official compliance" });
+    expect(within(repository).queryAllByText("Issue found")).toHaveLength(0);
+    expect(within(repository).getAllByText("Saved issue; needs review").length).toBeGreaterThan(0);
+    expect(within(repository).getAllByRole("link", { name: /^View finding for / }).length).toBeGreaterThan(0);
+  });
+
+  it("uses readable names for check articles and record links", () => {
+    render(<GitHubComplianceControlRoomPanel room={room()} review={review()} role="member" unhealthyRepositoryIds={[]} />);
+    const catalogue = screen.getByText("Check definitions (15)").closest("details") as HTMLElement;
+    for (const article of within(catalogue).getAllByRole("article", { name: /mapping check$/ })) {
+      expect(article.getAttribute("aria-label")).not.toContain("github.");
+    }
+    const repository = screen.getByRole("article", { name: "Mukta2701/ComplianceHub official compliance" });
+    for (const link of within(repository).getAllByRole("link", { name: /^View (evidence|finding) for / })) {
+      expect(link.getAttribute("aria-label")).not.toContain("github.");
+    }
+  });
+
   it("uses exact current-state and outcome wording with only canonical repository/evidence/finding links", () => {
     render(<GitHubComplianceControlRoomPanel room={room()} review={review()} role="member" unhealthyRepositoryIds={[]} />);
     const repository = screen.getByRole("article", { name: "Mukta2701/ComplianceHub official compliance" });

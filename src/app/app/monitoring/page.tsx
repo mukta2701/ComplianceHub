@@ -102,6 +102,7 @@ function GitHubMonitoringSection({
   repositories,
   nowIso,
   room,
+  review,
   runtimeReadiness,
 }: {
   role: "owner" | "admin" | "member";
@@ -109,8 +110,13 @@ function GitHubMonitoringSection({
   repositories: GitHubRepositoryMonitoringSummary[];
   nowIso: string;
   room: GitHubComplianceControlRoom;
+  review: GitHubMappingReview;
   runtimeReadiness: GitHubRuntimeReadiness;
 }) {
+  const exactReviewedApprovalActive = room.approval != null
+    && room.approval.mappingPackId === review.pack.id
+    && room.approval.version === review.pack.version
+    && room.approval.checksum === review.pack.checksum;
   const isOutOfDate = (freshUntil: string) => !Number.isFinite(Date.parse(freshUntil))
     || !Number.isFinite(Date.parse(room.asOf))
     || Date.parse(room.asOf) >= Date.parse(freshUntil);
@@ -124,7 +130,8 @@ function GitHubMonitoringSection({
       && installation.health === "healthy";
     const collection = repository.latestCollection;
     const job = repository.latestMaterialisationJob;
-    const current = collection?.status === "succeeded"
+    const current = exactReviewedApprovalActive
+      && collection?.status === "succeeded"
       && job?.status === "completed"
       && job.collectionRunId === collection.id
       && classifyGitHubRepositoryCompliance({
@@ -259,6 +266,7 @@ export default async function MonitoringPage({
         repositories={repositories}
         nowIso={new Date().toISOString()}
         room={controlRoom}
+        review={mappingReview}
         runtimeReadiness={runtimeReadiness}
       />}
       githubTechnicalReview={<GitHubTechnicalReview
@@ -354,6 +362,7 @@ export default async function MonitoringPage({
       repositories={repositories}
       nowIso={new Date().toISOString()}
       room={controlRoom}
+      review={mappingReview}
       runtimeReadiness={runtimeReadiness}
     />
 

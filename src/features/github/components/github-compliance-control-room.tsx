@@ -82,8 +82,8 @@ function resultPresentation(
     };
   }
   if (result.outcome === "fail") return {
-    label: outOfDate ? "Previous issue; needs recheck" : "Issue found",
-    tone: outOfDate ? "amber" : "red",
+    label: outOfDate ? "Previous issue; needs recheck" : isOfficialCurrent ? "Issue found" : "Saved issue; needs review",
+    tone: outOfDate || !isOfficialCurrent ? "amber" : "red",
     description: githubFindingPresentation(result.checkId).explanation,
   };
   if (result.outcome === "unknown") return {
@@ -190,7 +190,7 @@ function MappingReviewSection({
       <div className="github-mapping-list">
         {groupChecksByArea(review.entries).map((section) => <section key={section.group.id} aria-label={section.group.title}>
           <h4 className="github-mapping-group">{section.group.title}</h4>
-          {section.items.map((entry) => <article key={entry.id} aria-label={`${entry.checkId} mapping check`}>
+          {section.items.map((entry) => <article key={entry.id} aria-label={`${githubEvidenceTitle(entry.checkId)} mapping check`}>
           <div className="github-mapping-check-head">
             <div><strong>{githubEvidenceTitle(entry.checkId)}</strong></div>
             <Pill tone={entry.failureSeverity}>{entry.failureSeverity} if failed</Pill>
@@ -311,8 +311,8 @@ function RepositoryOfficialCard({
         <p>{display.description}</p>
         <small>Last checked <time dateTime={result.observedAt}>{formatMonitoringTime(result.observedAt) ?? "Date unavailable"}</time></small>
         <span className="github-result-links">
-          {result.evidenceId && <a href={`/app/evidence?evidence=${result.evidenceId}#evidence-${result.evidenceId}`} aria-label={`View evidence for ${result.checkId}`}>View evidence</a>}
-          {result.findingId && <a href={`/app/monitoring?finding=${result.findingId}#finding-${result.findingId}`} aria-label={`View finding for ${result.checkId}`}>View finding</a>}
+          {result.evidenceId && <a href={`/app/evidence?evidence=${result.evidenceId}#evidence-${result.evidenceId}`} aria-label={`View evidence for ${githubEvidenceTitle(result.checkId)}`}>View evidence</a>}
+          {result.findingId && <a href={`/app/monitoring?finding=${result.findingId}#finding-${result.findingId}`} aria-label={`View finding for ${githubEvidenceTitle(result.checkId)}`}>View finding</a>}
         </span>
         <details className="github-result-audit">
           <summary>Audit identifiers</summary>

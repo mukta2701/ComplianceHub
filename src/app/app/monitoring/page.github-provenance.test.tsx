@@ -99,7 +99,7 @@ describe("MonitoringPage official GitHub findings", () => {
     hoisted.repositories = [{ repository_id: repositoryId, installation_id: installationId, available: true }];
     hoisted.loadOfficial.mockResolvedValue([provenance]);
     hoisted.loadControlRoom.mockResolvedValue({ repositories: [], pagination: { offset: 0, limit: 20, total: 0, truncated: false } });
-    hoisted.loadMappingReview.mockResolvedValue({ pack: {}, entries: [], approvalHistory: [], limitations: [] });
+    hoisted.loadMappingReview.mockResolvedValue({ pack: { id: mappingPackId, version: "github-iso-27001-v1", checksum: mappingChecksum }, entries: [], approvalHistory: [], limitations: [] });
   });
 
   it("selects exact official finding, renders safe Owner lifecycle, and preserves legacy controls", async () => {
@@ -183,6 +183,18 @@ describe("MonitoringPage official GitHub findings", () => {
     const summary = screen.getByRole("note", { name: "GitHub check summary" });
     expect(within(summary).getByText("15 passed at last check")).toBeVisible();
     expect(within(summary).queryByText(/certif/i)).not.toBeInTheDocument();
+  });
+
+  it("does not claim a current pass when the published mapping changed", async () => {
+    hoisted.loadControlRoom.mockResolvedValue(currentRoom());
+    hoisted.loadMappingReview.mockResolvedValue({ pack: { id: mappingPackId, version: "github-iso-27001-v1", checksum: "d".repeat(64) }, entries: [], approvalHistory: [], limitations: [] });
+
+    render(await MonitoringPage({ searchParams: Promise.resolve({}) }));
+
+    const summary = screen.getByRole("note", { name: "GitHub check summary" });
+    expect(within(summary).getByText("Saved GitHub results need review")).toBeVisible();
+    expect(within(summary).getByText("15 saved passes need review")).toBeVisible();
+    expect(within(summary).queryByText(/passed at last check/)).not.toBeInTheDocument();
   });
 
   it("keeps counts and observation date scoped to the loaded repository page", async () => {
