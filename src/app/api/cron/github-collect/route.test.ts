@@ -13,7 +13,10 @@ const hoisted = vi.hoisted(() => ({
 
 vi.mock("@/lib/supabase/service", () => ({ createSupabaseServiceClient: hoisted.createClient }));
 vi.mock("@/features/github/application/collection-deps", () => ({ buildCollectionDependencies: hoisted.build }));
-vi.mock("@/features/github/application/run-collection", () => ({ runGitHubCollection: hoisted.run }));
+vi.mock("@/features/github/application/run-collection", () => ({
+  runGitHubCollection: hoisted.run,
+  scheduledCollectionRequestKey: (now: Date) => `scheduled:${now.toISOString().slice(0, 10)}`,
+}));
 vi.mock("@/features/github/application/materialise-approved-observations", () => ({
   buildMaterialisationDependencies: hoisted.buildMaterialisation,
   reconcileApprovedGitHubObservations: hoisted.reconcile,
@@ -100,6 +103,35 @@ describe("POST /api/cron/github-collect", () => {
     expect(scheduledSignal.aborted).toBe(false);
     await vi.advanceTimersByTimeAsync(220_000);
     expect(scheduledSignal.aborted).toBe(true);
+  });
+
+  it("marks a failed repository attempt for attention even when reconciliation succeeds", async () => {
+    hoisted.run.mockResolvedValue({
+      installationsChecked: 1,
+      repositoriesChecked: 1,
+      observationsStored: 0,
+      repositoriesFailed: 1,
+      repositoriesDeferred: 0,
+      runsPartial: 0,
+      terminalRuns: [],
+    });
+    hoisted.reconcile.mockResolvedValue({
+      runsConsidered: 0,
+      materialised: 0,
+      unchanged: 0,
+      awaitingApproval: 0,
+      needsAttention: 0,
+    });
+    const { POST } = await import("./route");
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      collection: { repositoriesFailed: 1 },
+      materialisation: { needsAttention: 0 },
+      collectionHealth: "needs_attention",
+    });
   });
 
   it("continues scheduled reconciliation with a fresh signal when webhook drain throws", async () => {

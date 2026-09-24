@@ -6,7 +6,7 @@ import {
   reconcileApprovedGitHubObservations,
   type ReconciliationSummary,
 } from "@/features/github/application/materialise-approved-observations";
-import { runGitHubCollection } from "@/features/github/application/run-collection";
+import { runGitHubCollection, scheduledCollectionRequestKey } from "@/features/github/application/run-collection";
 import { buildWebhookWorkerDependencies, drainGitHubWebhookDeliveries } from "@/features/github/application/webhook-worker";
 import { logError } from "@/lib/observability/logger";
 import { isAuthorisedCron } from "@/lib/security/cron-auth";
@@ -71,7 +71,7 @@ export async function POST(request: Request) {
     const signal = deadlineSignal(SCHEDULED_COLLECTION_DEADLINE_MS);
     const collection = await runGitHubCollection(deps, {
       trigger: "scheduled",
-      requestKey: `scheduled:${now.toISOString().slice(0, 10)}`,
+      requestKey: scheduledCollectionRequestKey(now),
       signal,
     });
     let materialisation: ReconciliationSummary;
@@ -90,7 +90,11 @@ export async function POST(request: Request) {
       webhooks,
       collection,
       materialisation,
-      collectionHealth: materialisation.needsAttention > 0 ? "needs_attention" : "healthy",
+      collectionHealth: collection.repositoriesFailed > 0
+        || collection.repositoriesDeferred > 0
+        || materialisation.needsAttention > 0
+        ? "needs_attention"
+        : "healthy",
     });
   } catch {
     await logError("cron", "GitHub collection cron failed", undefined, { stage: "collection" });
