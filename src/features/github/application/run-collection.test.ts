@@ -146,6 +146,16 @@ describe("runGitHubCollection", () => {
     expect(summary.repositoriesFailed).toBe(1);
     expect(summary.runsPartial).toBe(1);
     expect(deps.finaliseRun).toHaveBeenCalledWith(expect.anything(), second, expect.objectContaining({ status: "partial", unknownCount: 15 }));
+    expect(deps.reserveRun).toHaveBeenNthCalledWith(1, first, expect.objectContaining({ trigger: "scheduled", requestKey: "scheduled:2026-08-17" }));
+    expect(deps.reserveRun).toHaveBeenNthCalledWith(2, second, expect.objectContaining({ trigger: "scheduled", requestKey: "scheduled:2026-08-17" }));
+    expect(deps.saveObservations).toHaveBeenCalledTimes(1);
+    expect(deps.saveObservations).toHaveBeenCalledWith(expect.anything(), second, expect.any(Array));
+  });
+
+  it("resumes a missed daily occurrence using the UTC date when the command runs", async () => {
+    const collection = await import("./run-collection");
+    expect("scheduledCollectionRequestKey" in collection).toBe(true);
+    expect(collection.scheduledCollectionRequestKey(new Date("2026-09-24T00:05:00.000Z"))).toBe("scheduled:2026-09-24");
   });
 
   it("groups interleaved targets and skips only the rate-limited installation", async () => {

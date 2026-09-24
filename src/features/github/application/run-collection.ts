@@ -102,6 +102,10 @@ function validateRequest(request: CollectionRequest): void {
   if (request.repositoryId && !uuid.test(request.repositoryId)) throw new GitHubCollectionTargetError();
 }
 
+export function scheduledCollectionRequestKey(now: Date): string {
+  return `scheduled:${now.toISOString().slice(0, 10)}`;
+}
+
 function validateTargets(targets: CollectionTarget[], request: CollectionRequest): void {
   const localRepositories = new Set<string>();
   const providerRepositories = new Set<number>();
