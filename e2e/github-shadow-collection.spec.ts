@@ -572,11 +572,10 @@ test("selects repository scope in Connections and shows official collection heal
   await expect(repositoryCard(page, `${accountLogin}/never`).getByText("Ready for first check", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Check GitHub now" })).toBeVisible();
   const technicalReview = page.locator("details.monitor-technical-review");
-  await expect(technicalReview).not.toHaveAttribute("open", "");
-  await expect(page.getByRole("heading", { name: "From repository facts to reviewed records" })).not.toBeVisible();
-  await technicalReview.locator(":scope > summary").click();
+  await expect(technicalReview).toHaveAttribute("open", "");
   await expect(page.getByRole("heading", { name: "From repository facts to reviewed records" })).toBeVisible();
-  await expect(page.getByText("Review all 15 mapped checks").locator("xpath=.." )).not.toHaveAttribute("open", "");
+  await expect(page.getByRole("note", { name: "GitHub mapping review status" })).toContainText("15 checks");
+  await expect(page.getByRole("note", { name: "GitHub mapping review status" })).toContainText("15 pending");
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 
   const { error: legacyFindingError } = await service.from("monitoring_findings").insert({
@@ -594,7 +593,7 @@ test("selects repository scope in Connections and shows official collection heal
   });
   if (legacyFindingError) throw legacyFindingError;
   await page.reload();
-  await page.locator("details.monitor-technical-review > summary").click();
+  await expect(page.locator("details.monitor-technical-review")).toHaveAttribute("open", "");
 
   for (const width of [1440, 1024, 801, 390]) {
     await page.setViewportSize({ width, height: 900 });
@@ -611,7 +610,7 @@ test("selects repository scope in Connections and shows official collection heal
     }
     if (width === 390) {
       await page.goto("/app/monitoring?githubPage=2");
-      await page.locator("details.monitor-technical-review > summary").click();
+      await expect(page.locator("details.monitor-technical-review")).toHaveAttribute("open", "");
       await page.waitForTimeout(250);
       const pagination = page.getByRole("navigation", { name: "Repository result pages" });
       await expect(pagination).toContainText("Page 2");
