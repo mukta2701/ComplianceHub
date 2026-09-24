@@ -305,4 +305,38 @@ describe("processGitHubComplianceResultAlerts", () => {
     })).rejects.toThrow("GitHub compliance alert evaluation failed");
     expect(saveDecisions).toHaveBeenCalledOnce();
   });
+
+  it("accepts a legitimate notification count above 200 across a large workspace", async () => {
+    const deps = ports([candidate()]);
+    deps.saveDecisions.mockResolvedValue({
+      processed: 1,
+      conflicts: 0,
+      eventsCreated: 1,
+      notificationsCreated: 250,
+    });
+
+    const summary = await processGitHubComplianceResultAlerts(deps, {
+      evaluatedAt,
+      appOrigin,
+      scope: { collectionRunId, organisationId },
+    });
+
+    expect(summary.notificationsCreated).toBe(250);
+  });
+
+  it("rejects an unsafe notification count from persistence", async () => {
+    const deps = ports([candidate()]);
+    deps.saveDecisions.mockResolvedValue({
+      processed: 1,
+      conflicts: 0,
+      eventsCreated: 1,
+      notificationsCreated: Number.MAX_SAFE_INTEGER + 1,
+    });
+
+    await expect(processGitHubComplianceResultAlerts(deps, {
+      evaluatedAt,
+      appOrigin,
+      scope: { collectionRunId, organisationId },
+    })).rejects.toThrow("GitHub compliance alert evaluation failed");
+  });
 });

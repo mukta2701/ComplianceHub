@@ -79,10 +79,50 @@ join public.github_mapping_entries entry
   on entry.mapping_pack_id=pack.id and entry.check_id=observation.check_id
  and entry.rule_version=observation.rule_version
 where observation.id='91000000-0000-4000-8000-000000000401';
+insert into public.github_observations(
+ id,organisation_id,installation_id,repository_id,provider_repository_id,collection_run_id,
+ observation_key,check_id,rule_version,subject_type,subject_id,result,severity,title,explanation,
+ remediation,observed_at,fresh_until,source_url,fingerprint,diagnostic_code
+) select '91000000-0000-4000-8000-000000000411','91000000-0000-4000-8000-000000000101',
+  '91000000-0000-4000-8000-000000000201','91000000-0000-4000-8000-000000000202',91003,
+  'Alert-Test/repo/'||entry.check_id||'/'||entry.rule_version,
+  entry.check_id,entry.rule_version,'github_repository','Alert-Test/repo','unknown',null,
+  'Bounded check title','Bounded check explanation',
+  'Restore the required GitHub App permission or feature, then run collection again.',
+  now()-interval '2 days',now()-interval '1 day','https://github.com/Alert-Test/repo',repeat('e',64),'permission_denied'
+from public.github_mapping_entries entry
+join public.github_mapping_packs pack on pack.id=entry.mapping_pack_id
+where pack.version='github-iso-27001-v1' and entry.check_id='github.repository.visibility';
+insert into public.github_official_compliance_results(
+ id,organisation_id,installation_id,repository_id,provider_repository_id,collection_run_id,observation_id,
+ approval_id,mapping_pack_id,mapping_version,mapping_checksum,check_id,rule_version,outcome,
+ catalogue_summary,observed_at,fresh_until
+)
+select '91000000-0000-4000-8000-000000000412',observation.organisation_id,observation.installation_id,observation.repository_id,
+  observation.provider_repository_id,observation.collection_run_id,observation.id,
+  approval.id,pack.id,pack.version,pack.checksum,observation.check_id,observation.rule_version,
+  observation.result,entry.treatments #>> array['unknown','summary'],observation.observed_at,observation.fresh_until
+from public.github_observations observation
+join public.github_mapping_approvals approval
+  on approval.id=current_setting('m2.alert_approval')::uuid
+ and approval.organisation_id=observation.organisation_id
+join public.github_mapping_packs pack on pack.id=approval.mapping_pack_id
+join public.github_mapping_entries entry
+  on entry.mapping_pack_id=pack.id and entry.check_id=observation.check_id
+ and entry.rule_version=observation.rule_version
+where observation.id='91000000-0000-4000-8000-000000000411';
 
 select ok(not has_table_privilege('authenticated','public.github_compliance_result_alert_states','SELECT')
-  and not has_table_privilege('service_role','public.github_compliance_result_alert_events','INSERT'),
+  and not has_table_privilege('authenticated','public.github_compliance_result_alert_events','SELECT')
+  and not has_table_privilege('service_role','public.github_compliance_result_alert_events','INSERT')
+  and not has_table_privilege('service_role','public.github_compliance_result_alert_states','SELECT')
+  and not has_table_privilege('service_role','public.github_compliance_result_alert_events','SELECT'),
   'alert storage is private; callers use the service-only functions');
+select ok(has_function_privilege('service_role',
+  'public.github_official_result_mapping_status_at_core(uuid,uuid,timestamptz)','EXECUTE')
+  and not has_function_privilege('authenticated',
+  'public.github_official_result_mapping_status_at_core(uuid,uuid,timestamptz)','EXECUTE'),
+  'mapping lineage core is callable only by the service role');
 select ok(has_function_privilege('service_role',
   'public.load_github_compliance_result_alert_candidates(timestamptz,uuid,uuid,uuid,uuid,text,integer)','EXECUTE')
   and not has_function_privilege('authenticated',
@@ -118,9 +158,9 @@ select is(public.record_github_compliance_result_alert_decisions(
     )
   )), now()
 )->>'notificationsCreated','2','first event creates owner and admin notifications');
+reset role;
 select is((select count(*) from public.notifications where organisation_id='91000000-0000-4000-8000-000000000101'),2::bigint,
   'one in-app notice is created for each Owner and Admin');
-reset role;
 
 select is((select count(*) from public.notifications where user_id='91000000-0000-4000-8000-000000000003'),0::bigint,
   'members do not receive owner/admin compliance alerts');
@@ -147,11 +187,13 @@ select is(public.record_github_compliance_result_alert_decisions(
     'event',null
   )),now()
 )->>'processed','1','the expected revision can be updated with a due time');
+reset role;
 select is((select revision from public.github_compliance_result_alert_states
   where organisation_id='91000000-0000-4000-8000-000000000101'
     and repository_id='91000000-0000-4000-8000-000000000202'
     and check_id='github.branch.status_checks'),2::bigint,
   'a successful compare-and-swap increments revision');
+set role service_role;
 select is(public.record_github_compliance_result_alert_decisions(
   pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
     'organisationId','91000000-0000-4000-8000-000000000101',
@@ -164,12 +206,133 @@ select is(public.record_github_compliance_result_alert_decisions(
     'nextEvaluationAt',now()+interval '2 hour','event',null
   )),now()
 )->>'conflicts','1','a stale expected revision is reported as a conflict');
+reset role;
 select is((select revision from public.github_compliance_result_alert_states
   where organisation_id='91000000-0000-4000-8000-000000000101'
     and repository_id='91000000-0000-4000-8000-000000000202'
     and check_id='github.branch.status_checks'),2::bigint,
   'a stale compare-and-swap leaves state unchanged');
+
+insert into public.github_mapping_packs(id,version,title)
+values ('91000000-0000-4000-8000-000000000203','github-alert-state-v2','Alert state test pack');
+insert into public.github_mapping_entries(
+  mapping_pack_id,check_id,rule_version,iso_control_references,failure_severity,remediation,treatments
+)
+select '91000000-0000-4000-8000-000000000203',entry.check_id,entry.rule_version,
+  entry.iso_control_references,entry.failure_severity,entry.remediation,entry.treatments
+from public.github_mapping_entries entry
+join public.github_mapping_packs pack on pack.id=entry.mapping_pack_id
+where pack.version='github-iso-27001-v1';
+select public.seal_github_mapping_pack_server(
+  'github-alert-state-v2',public.github_mapping_pack_checksum('91000000-0000-4000-8000-000000000203')
+);
+select public.select_github_mapping_pack_server(
+  '91000000-0000-4000-8000-000000000101',
+  '91000000-0000-4000-8000-000000000001',
+  'github-alert-state-v2',
+  (select checksum from public.github_mapping_packs where id='91000000-0000-4000-8000-000000000203'),0
+);
+
+set role service_role;
+select is(pg_catalog.jsonb_array_length(public.load_github_compliance_result_alert_candidates(
+  now()+interval '2 hours',null,null,null,null,null,100
+)->'candidates'),0,'a result mapped under a pack that is no longer selected is excluded from due alerts');
+select is(public.record_github_compliance_result_alert_decisions(
+  pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+    'organisationId','91000000-0000-4000-8000-000000000101',
+    'repositoryId','91000000-0000-4000-8000-000000000202',
+    'checkId','github.branch.status_checks','expectedRevision',2,
+    'currentResultId','91000000-0000-4000-8000-000000000402','currentOutcome','unknown',
+    'actionableUnknownSince',null,
+    'nextActiveIncident',pg_catalog.jsonb_build_object('kind','stale','incidentKey',repeat('a',64),'startedAt',now()-interval '2 days'),
+    'nextEvaluationAt',now()+interval '2 hours','event',null
+  )),now()+interval '2 hours'
+)->>'conflicts','1','a pack change between load and save skips the candidate');
 reset role;
+select is((select count(*) from public.github_compliance_result_alert_events
+  where organisation_id='91000000-0000-4000-8000-000000000101'),1::bigint,
+  'a mapping change retains the original event and creates no recovery');
+select is((select revision from public.github_compliance_result_alert_states
+  where organisation_id='91000000-0000-4000-8000-000000000101'
+    and repository_id='91000000-0000-4000-8000-000000000202'
+    and check_id='github.branch.status_checks'),2::bigint,
+  'a mapping change leaves alert state untouched');
+
+select public.select_github_mapping_pack_server(
+  '91000000-0000-4000-8000-000000000101',
+  '91000000-0000-4000-8000-000000000001',
+  'github-iso-27001-v1',
+  (select checksum from public.github_mapping_packs where version='github-iso-27001-v1'),1
+);
+set role service_role;
+select is(pg_catalog.jsonb_array_length(public.load_github_compliance_result_alert_candidates(
+  now()+interval '3 hours',null,null,null,null,null,100
+)->'candidates'),1,'a still-active selected pack remains eligible before repository deselection');
+reset role;
+update public.github_repositories set selected=false
+where id='91000000-0000-4000-8000-000000000202'
+  and organisation_id='91000000-0000-4000-8000-000000000101';
+set role service_role;
+select is(public.record_github_compliance_result_alert_decisions(
+  pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+    'organisationId','91000000-0000-4000-8000-000000000101',
+    'repositoryId','91000000-0000-4000-8000-000000000202',
+    'checkId','github.branch.status_checks','expectedRevision',2,
+    'currentResultId','91000000-0000-4000-8000-000000000402','currentOutcome','unknown',
+    'actionableUnknownSince',null,
+    'nextActiveIncident',pg_catalog.jsonb_build_object('kind','stale','incidentKey',repeat('a',64),'startedAt',now()-interval '2 days'),
+    'nextEvaluationAt',now()+interval '3 hours','event',null
+  )),now()+interval '3 hours'
+)->>'conflicts','1','a repository deselection between load and save skips the candidate');
+select is(pg_catalog.jsonb_array_length(public.load_github_compliance_result_alert_candidates(
+  now()+interval '4 hours',null,null,null,null,null,100
+)->'candidates'),0,'a repository outside selected scope is excluded from due alerts');
+reset role;
+select is((select revision from public.github_compliance_result_alert_states
+  where organisation_id='91000000-0000-4000-8000-000000000101'
+    and repository_id='91000000-0000-4000-8000-000000000202'
+    and check_id='github.branch.status_checks'),2::bigint,
+  'repository deselection leaves alert state untouched');
+
+update public.github_repositories set selected=true
+where id='91000000-0000-4000-8000-000000000202'
+  and organisation_id='91000000-0000-4000-8000-000000000101';
+select is(public.github_official_result_mapping_status_at_core(
+  '91000000-0000-4000-8000-000000000101',
+  '91000000-0000-4000-8000-000000000402',now()
+),'active','the service core recognises an approved result under the selected pack');
+select is(public.github_official_result_mapping_status_at_core(
+  '91000000-0000-4000-8000-000000000101',
+  '91000000-0000-4000-8000-000000000412',now()
+),'active','a second legacy-approved result remains current before approval revocation');
+select public.record_github_mapping_entry_decision_server(
+  '91000000-0000-4000-8000-000000000101',
+  '91000000-0000-4000-8000-000000000001',
+  (select entry.id from public.github_mapping_entries entry
+   join public.github_mapping_packs pack on pack.id=entry.mapping_pack_id
+   where pack.version='github-iso-27001-v1' and entry.check_id='github.branch.status_checks'),
+  public.github_mapping_entry_digest((select entry.id from public.github_mapping_entries entry
+   join public.github_mapping_packs pack on pack.id=entry.mapping_pack_id
+   where pack.version='github-iso-27001-v1' and entry.check_id='github.branch.status_checks')),
+  'rejected',2
+);
+select is(public.github_official_result_mapping_status_at_core(
+  '91000000-0000-4000-8000-000000000101',
+  '91000000-0000-4000-8000-000000000402',now()
+),'historical','an Owner rejection makes the old exact check result historical');
+select is(public.github_official_result_mapping_status_at_core(
+  '91000000-0000-4000-8000-000000000101',
+  '91000000-0000-4000-8000-000000000412',now()
+),'active','rejecting a different check does not change its mapping status');
+select public.revoke_github_mapping_approval_server(
+  '91000000-0000-4000-8000-000000000101',
+  '91000000-0000-4000-8000-000000000001',
+  current_setting('m2.alert_approval')::uuid
+);
+select is(public.github_official_result_mapping_status_at_core(
+  '91000000-0000-4000-8000-000000000101',
+  '91000000-0000-4000-8000-000000000412',now()
+),'historical','revoking the legacy approval makes its result historical');
 
 select * from finish();
 rollback;

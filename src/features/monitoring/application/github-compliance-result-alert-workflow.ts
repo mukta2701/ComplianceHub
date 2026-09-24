@@ -55,7 +55,7 @@ const saveResultSchema = z.object({
   processed: z.number().int().nonnegative().max(100),
   conflicts: z.number().int().nonnegative().max(100),
   eventsCreated: z.number().int().nonnegative().max(100),
-  notificationsCreated: z.number().int().nonnegative().max(200),
+  notificationsCreated: z.number().int().nonnegative().safe(),
 }).strict();
 
 type Candidate = z.infer<typeof candidateSchema>;

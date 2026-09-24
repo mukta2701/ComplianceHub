@@ -1,6 +1,192 @@
 -- Materialise alert decisions already made by the application rule builder.
 -- This migration stores state/events and in-app notices only; it does not send Slack.
 
+-- The existing member-facing status function applies the same lineage rules but
+-- requires auth.uid() membership. Alert workers need the predicate without a
+-- browser identity, so keep a service-only core and preserve the member wrapper.
+create function public.github_official_result_mapping_status_at_core(
+  target_organisation_id uuid,
+  target_result_id uuid,
+  target_snapshot_at timestamptz
+)
+returns text
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select case when exists (
+    select 1
+    from public.github_official_compliance_results result
+    join public.github_mapping_packs pack
+      on pack.id = result.mapping_pack_id
+     and pack.version = result.mapping_version
+     and pack.checksum = result.mapping_checksum
+     and pack.published_at is not null
+     and pack.published_at <= target_snapshot_at
+    where result.id = target_result_id
+      and result.organisation_id = target_organisation_id
+      and result.materialised_at <= target_snapshot_at
+      and exists (
+        select 1 from public.github_mapping_pack_selection_history history
+        where history.organisation_id = target_organisation_id
+          and history.recorded_at <= target_snapshot_at
+          and history.id = (
+            select latest.id
+            from public.github_mapping_pack_selection_history latest
+            where latest.organisation_id = target_organisation_id
+              and latest.recorded_at <= target_snapshot_at
+            order by latest.recorded_at desc, latest.id desc
+            limit 1
+          )
+          and (
+            (history.event_kind = 'selected' and history.mapping_pack_id = result.mapping_pack_id)
+            or (history.event_kind = 'legacy_fallback' and (
+              result.approval_id is not null or exists (
+                select 1 from public.github_entry_materialisation_receipts legacy_receipt
+                where legacy_receipt.id = result.entry_receipt_id
+                  and legacy_receipt.legacy_approval_id is not null
+              )
+            ))
+          )
+      )
+      and (
+        (result.entry_receipt_id is null and exists (
+          select 1
+          from public.github_mapping_approvals approval
+          where approval.id = result.approval_id
+            and approval.organisation_id = result.organisation_id
+            and approval.mapping_pack_id = result.mapping_pack_id
+            and approval.approved_at <= target_snapshot_at
+            and (approval.revoked_at is null or approval.revoked_at > target_snapshot_at)
+            and not exists (
+              select 1 from public.github_mapping_entries approved_entry
+              join public.github_mapping_entry_decisions decision
+                on decision.organisation_id = result.organisation_id
+               and decision.check_id = approved_entry.check_id
+               and decision.entry_digest = public.github_mapping_entry_digest(approved_entry.id)
+              where approved_entry.mapping_pack_id = result.mapping_pack_id
+                and approved_entry.check_id = result.check_id
+                and decision.decided_at <= target_snapshot_at
+            )
+        ))
+        or (result.entry_receipt_id is not null and exists (
+          select 1
+          from public.github_entry_materialisation_receipts receipt
+          join public.github_mapping_entries selected_entry
+            on selected_entry.id = receipt.selected_mapping_entry_id
+           and selected_entry.mapping_pack_id = receipt.selected_mapping_pack_id
+           and selected_entry.check_id = receipt.check_id
+          join public.github_mapping_entries source_entry
+            on source_entry.id = receipt.source_mapping_entry_id
+           and source_entry.mapping_pack_id = receipt.source_mapping_pack_id
+           and source_entry.check_id = receipt.check_id
+          where receipt.id = result.entry_receipt_id
+            and receipt.organisation_id = result.organisation_id
+            and receipt.selected_mapping_pack_id = result.mapping_pack_id
+            and receipt.check_id = result.check_id
+            and receipt.created_at <= target_snapshot_at
+            and public.github_mapping_entry_digest(selected_entry.id) = receipt.entry_digest
+            and public.github_mapping_entry_digest(source_entry.id) = receipt.entry_digest
+            and exists (
+              select 1 from public.github_mapping_pack_selection_history selected
+              where selected.organisation_id = target_organisation_id
+                and selected.recorded_at <= target_snapshot_at
+                and selected.id = (
+                  select latest.id
+                  from public.github_mapping_pack_selection_history latest
+                  where latest.organisation_id = target_organisation_id
+                    and latest.recorded_at <= target_snapshot_at
+                  order by latest.recorded_at desc, latest.id desc
+                  limit 1
+                )
+                and (
+                  (selected.event_kind = 'selected'
+                    and selected.mapping_pack_id = receipt.selected_mapping_pack_id)
+                  or (selected.event_kind = 'legacy_fallback'
+                    and receipt.legacy_approval_id is not null
+                    and receipt.selected_mapping_pack_id = receipt.source_mapping_pack_id)
+                )
+            )
+            and (
+              (receipt.entry_decision_id is not null and exists (
+                select 1 from public.github_mapping_entry_decisions decision
+                where decision.id = receipt.entry_decision_id
+                  and decision.organisation_id = receipt.organisation_id
+                  and decision.mapping_pack_id = receipt.source_mapping_pack_id
+                  and decision.mapping_entry_id = receipt.source_mapping_entry_id
+                  and decision.check_id = receipt.check_id
+                  and decision.entry_digest = receipt.entry_digest
+                  and decision.decision = 'approved'
+                  and decision.decided_at <= target_snapshot_at
+                  and not exists (
+                    select 1 from public.github_mapping_entry_decisions later
+                    where later.organisation_id = decision.organisation_id
+                      and later.check_id = decision.check_id
+                      and later.entry_digest = decision.entry_digest
+                      and later.decided_at <= target_snapshot_at
+                      and (later.revision, later.id) > (decision.revision, decision.id)
+                  )
+              ))
+              or (receipt.legacy_approval_id is not null and exists (
+                select 1 from public.github_mapping_approvals approval
+                where approval.id = receipt.legacy_approval_id
+                  and approval.organisation_id = receipt.organisation_id
+                  and approval.mapping_pack_id = receipt.source_mapping_pack_id
+                  and approval.approved_at <= target_snapshot_at
+                  and (approval.revoked_at is null or approval.revoked_at > target_snapshot_at)
+                  and not exists (
+                    select 1 from public.github_mapping_entry_decisions decision
+                    where decision.organisation_id = receipt.organisation_id
+                      and decision.check_id = receipt.check_id
+                      and decision.entry_digest = receipt.entry_digest
+                      and decision.decided_at <= target_snapshot_at
+                  )
+              ))
+            )
+        ))
+      )
+  ) then 'active' else 'historical' end
+  where target_organisation_id is not null
+    and target_result_id is not null
+    and target_snapshot_at is not null;
+$$;
+alter function public.github_official_result_mapping_status_at_core(uuid,uuid,timestamptz)
+  owner to postgres;
+revoke all on function public.github_official_result_mapping_status_at_core(uuid,uuid,timestamptz)
+  from public, anon, authenticated, service_role;
+grant execute on function public.github_official_result_mapping_status_at_core(uuid,uuid,timestamptz)
+  to service_role;
+
+create or replace function public.github_official_result_mapping_status_at(
+  target_organisation_id uuid,
+  target_result_id uuid,
+  target_snapshot_at timestamptz
+)
+returns text
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select case when exists (
+    select 1 from public.memberships membership
+    where membership.organisation_id = target_organisation_id
+      and membership.user_id = (select auth.uid())
+  ) then public.github_official_result_mapping_status_at_core(
+    target_organisation_id, target_result_id, target_snapshot_at
+  ) end
+  where target_organisation_id is not null
+    and target_result_id is not null
+    and target_snapshot_at is not null;
+$$;
+alter function public.github_official_result_mapping_status_at(uuid,uuid,timestamptz)
+  owner to postgres;
+revoke all on function public.github_official_result_mapping_status_at(uuid,uuid,timestamptz)
+  from public, anon, service_role;
+grant execute on function public.github_official_result_mapping_status_at(uuid,uuid,timestamptz)
+  to authenticated;
+
 alter table public.github_official_compliance_results
   add constraint github_official_results_alert_state_key
   unique (id, organisation_id, repository_id, check_id);
@@ -131,6 +317,9 @@ begin
      and installation.status = 'active'
      and installation.permissions_ok
      and installation.repository_selection = 'selected'
+    where public.github_official_result_mapping_status_at_core(
+      result.organisation_id, result.id, target_evaluated_at
+    ) = 'active'
     order by result.organisation_id, result.repository_id, result.check_id,
       result.observed_at desc, result.id desc
   ), candidates as (
@@ -216,6 +405,7 @@ declare
   v_current_outcome public.github_observation_result;
   v_organisation_id uuid;
   v_repository_id uuid;
+  v_installation_id uuid;
   v_check_id text;
   v_actionable_unknown_since timestamptz;
   v_active_incident_kind text;
@@ -241,7 +431,11 @@ begin
     raise exception 'invalid GitHub compliance alert decisions' using errcode = '22023';
   end if;
 
-  for decision in select value from pg_catalog.jsonb_array_elements(target_decisions) loop
+  for decision in
+    select item.value
+    from pg_catalog.jsonb_array_elements(target_decisions) item(value)
+    order by item.value ->> 'organisationId', item.value ->> 'repositoryId', item.value ->> 'checkId'
+  loop
     if pg_catalog.jsonb_typeof(decision) <> 'object'
       or pg_catalog.jsonb_typeof(decision -> 'event') not in ('object', 'null') then
       raise exception 'invalid GitHub compliance alert decision' using errcode = '22023';
@@ -267,6 +461,51 @@ begin
         or v_active_incident_started_at is null
       )) then
       raise exception 'invalid GitHub compliance alert decision' using errcode = '22023';
+    end if;
+
+    -- Serialize with mapping approvals/reviews and repository selection so a
+    -- candidate that became historical or was deselected after load cannot
+    -- create an event, clear an incident, or replace the last saved state.
+    perform pg_catalog.pg_advisory_xact_lock(
+      pg_catalog.hashtextextended('github-mapping-review:' || v_organisation_id::text, 0)
+    );
+    perform pg_catalog.pg_advisory_xact_lock(
+      pg_catalog.hashtextextended('github-mapping-approval:' || v_organisation_id::text, 0)
+    );
+    select repository.installation_id into v_installation_id
+    from public.github_repositories repository
+    where repository.id = v_repository_id
+      and repository.organisation_id = v_organisation_id;
+    if not found then
+      conflict_count := conflict_count + 1;
+      continue;
+    end if;
+    perform pg_catalog.pg_advisory_xact_lock(
+      pg_catalog.hashtextextended(v_installation_id::text, 0)
+    );
+    perform 1 from public.github_installations installation
+    where installation.id = v_installation_id
+      and installation.organisation_id = v_organisation_id
+      and installation.status = 'active'
+      and installation.permissions_ok
+      and installation.repository_selection = 'selected'
+    for update;
+    if not found then
+      conflict_count := conflict_count + 1;
+      continue;
+    end if;
+    perform 1 from public.github_repositories repository
+    where repository.id = v_repository_id
+      and repository.organisation_id = v_organisation_id
+      and repository.installation_id = v_installation_id
+      and repository.selected
+      and repository.available
+    for update;
+    if not found or public.github_official_result_mapping_status_at_core(
+      v_organisation_id, v_current_result_id, pg_catalog.clock_timestamp()
+    ) is distinct from 'active' then
+      conflict_count := conflict_count + 1;
+      continue;
     end if;
 
     if not exists (
