@@ -68,6 +68,8 @@ const officialResultRow = z.object({
   finding_id: uuid.nullable(),
 }).strict();
 
+const officialResultDetailRow = officialResultRow.extend({ id: uuid }).strict();
+
 const repositoryRow = z.object({
   id: uuid,
   organisation_id: uuid,
@@ -104,6 +106,12 @@ export type OfficialGitHubRecordProvenance = {
   mappingVersion: string;
   mappingChecksum: string;
   isoControlReferences: string[];
+};
+
+export type OfficialGitHubComplianceResult = OfficialGitHubRecordProvenance & {
+  resultId: string;
+  outcome: "pass" | "fail" | "unknown" | "not_applicable";
+  failureSeverity: "low" | "medium" | "high" | "critical" | null;
 };
 
 export type OfficialGitHubEvidenceProvenance = OfficialGitHubRecordProvenance & {
@@ -272,6 +280,66 @@ function commonRecord(
     mappingChecksum: result.mapping_checksum,
     isoControlReferences: [...mapping.iso_control_references],
   };
+}
+
+export async function loadOfficialGitHubComplianceResult(
+  supabase: SupabaseClient,
+  organisationId: string,
+  resultId: string,
+  asOfValue = new Date().toISOString(),
+): Promise<OfficialGitHubComplianceResult | null> {
+  const parsedOrganisationId = uuid.safeParse(organisationId);
+  const parsedResultId = uuid.safeParse(resultId);
+  const asOf = parseAsOf(asOfValue);
+  if (!parsedOrganisationId.success) fail();
+  if (!parsedResultId.success) return null;
+
+  try {
+    const resultQuery = await supabase.from("github_official_compliance_results")
+      .select("id,organisation_id,observation_id,repository_id,mapping_pack_id,mapping_version,mapping_checksum,check_id,rule_version,outcome,failure_severity,catalogue_summary,observed_at,fresh_until,materialised_at,evidence_id,finding_id")
+      .eq("id", parsedResultId.data)
+      .eq("organisation_id", parsedOrganisationId.data)
+      .maybeSingle();
+    if (resultQuery.error) fail();
+    if (resultQuery.data === null) return null;
+    const parsedResult = officialResultDetailRow.safeParse(resultQuery.data);
+    if (!parsedResult.success) fail();
+    const result = parsedResult.data;
+    if (result.id !== parsedResultId.data
+      || result.organisation_id !== parsedOrganisationId.data
+      || safeSummary(result.catalogue_summary, 280, "GitHub compliance result") !== result.catalogue_summary
+      || Date.parse(result.fresh_until) <= Date.parse(result.observed_at)
+      || Date.parse(result.materialised_at) < Date.parse(result.observed_at)
+      || ((result.outcome === "fail") !== (result.failure_severity !== null))) fail();
+
+    const supporting = await loadSupportingRows(supabase, parsedOrganisationId.data, [result.observation_id]);
+    const supportedResult = supporting.results.get(result.observation_id);
+    if (!supportedResult
+      || supportedResult.organisation_id !== result.organisation_id
+      || supportedResult.repository_id !== result.repository_id
+      || supportedResult.mapping_pack_id !== result.mapping_pack_id
+      || supportedResult.mapping_version !== result.mapping_version
+      || supportedResult.mapping_checksum !== result.mapping_checksum
+      || supportedResult.check_id !== result.check_id
+      || supportedResult.rule_version !== result.rule_version
+      || supportedResult.outcome !== result.outcome
+      || supportedResult.failure_severity !== result.failure_severity
+      || supportedResult.catalogue_summary !== result.catalogue_summary
+      || supportedResult.observed_at !== result.observed_at
+      || supportedResult.fresh_until !== result.fresh_until
+      || supportedResult.materialised_at !== result.materialised_at
+      || supportedResult.evidence_id !== result.evidence_id
+      || supportedResult.finding_id !== result.finding_id) fail();
+
+    return {
+      resultId: result.id,
+      outcome: result.outcome,
+      failureSeverity: result.failure_severity,
+      ...commonRecord(parsedOrganisationId.data, asOf, supportedResult, supporting),
+    };
+  } catch {
+    fail();
+  }
 }
 
 export async function loadOfficialGitHubEvidenceProvenance(

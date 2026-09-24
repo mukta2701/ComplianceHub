@@ -186,6 +186,9 @@ describe("GitHubComplianceControlRoomPanel", () => {
     expect(within(repository).getByRole("link", { name: "Open Mukta2701/ComplianceHub on GitHub" })).toHaveAttribute(
       "href", "https://github.com/Mukta2701/ComplianceHub",
     );
+    expect(within(repository).getAllByRole("link", { name: /^View recorded result for / })[0]).toHaveAttribute(
+      "href", "/app/monitoring/github-results/a2000000-0000-4000-8000-000000000001",
+    );
     expect(within(repository).getAllByRole("link", { name: /^View evidence for / })[0]).toHaveAttribute(
       "href",
       "/app/evidence?evidence=a3000000-0000-4000-8000-000000000001#evidence-a3000000-0000-4000-8000-000000000001",
