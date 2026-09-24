@@ -375,6 +375,7 @@ describe("GitHubComplianceControlRoomPanel", () => {
 
     expect(screen.getByText("Earlier pack-wide approval")).toBeVisible();
     expect(screen.getByText(/An earlier pack-wide approval is still active/)).toBeVisible();
+    expect(screen.getByText(/Revoking it removes only approvals inherited from that pack; individual check decisions remain in effect/)).toBeVisible();
     const legacyEntry = screen.getByRole("article", { name: "github.branch.force_pushes mapping check" });
     expect(within(legacyEntry).getByText("Effective status comes from an earlier pack-wide approval.")).toBeVisible();
     expect(within(legacyEntry).getByRole("button", { name: "Approve mapping for github.branch.force_pushes" })).toBeVisible();

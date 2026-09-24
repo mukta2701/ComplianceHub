@@ -5,6 +5,7 @@ const hoisted = vi.hoisted(() => ({
   loadOfficial: vi.fn().mockResolvedValue([]),
   controlRoomLoads: [] as unknown[][],
   mappingReviewLoads: [] as unknown[][],
+  mappingReviewEntries: [] as Array<{ review: { status: "pending" | "approved" | "rejected" } }>,
   tables: [] as string[],
   officialOutcomes: [
     "pass", "pass", "pass", "pass", "pass", "pass", "pass", "pass",
@@ -83,7 +84,7 @@ vi.mock("@/features/github/application/github-compliance-control-room", () => ({
 vi.mock("@/features/github/application/github-mapping-review", () => ({
   loadGitHubMappingReview: (...args: unknown[]) => {
     hoisted.mappingReviewLoads.push(args);
-    return Promise.resolve({ pack: {}, entries: [], approvalHistory: [], limitations: [] });
+    return Promise.resolve({ pack: {}, entries: hoisted.mappingReviewEntries, approvalHistory: [], limitations: [] });
   },
 }));
 vi.mock("@/features/github/components/github-compliance-control-room", () => ({
@@ -120,6 +121,7 @@ describe("operator monitoring page", () => {
   beforeEach(() => {
     hoisted.controlRoomLoads = [];
     hoisted.mappingReviewLoads = [];
+    hoisted.mappingReviewEntries = [];
     hoisted.tables = [];
     hoisted.officialOutcomes = [
       "pass", "pass", "pass", "pass", "pass", "pass", "pass", "pass",
@@ -210,9 +212,27 @@ describe("operator monitoring page", () => {
       expect(screen.queryByText("No active findings")).not.toBeInTheDocument();
       const banner = screen.getByText("No recorded active findings").closest(".monitor-banner");
       expect(banner).toHaveTextContent("1 system monitored");
-      expect(banner).toHaveTextContent("Monitoring status is not yet confirmed.");
+      expect(banner).toHaveTextContent("Check coverage and approvals before relying on this status.");
       expect(banner?.querySelector(".monitor-dot")).toHaveClass("neutral");
       expect(banner?.querySelector(".monitor-dot")).not.toHaveClass("ok");
+    } finally {
+      hoisted.rows.monitoring_findings = current;
+    }
+  });
+
+  it("surfaces pending GitHub check reviews before a zero-findings banner can reassure an operator", async () => {
+    const current = hoisted.rows.monitoring_findings;
+    hoisted.rows.monitoring_findings = [];
+    hoisted.mappingReviewEntries = [
+      { review: { status: "pending" } },
+      { review: { status: "pending" } },
+      { review: { status: "approved" } },
+    ];
+    try {
+      render(await MonitoringPage());
+      const banner = screen.getByText("No recorded active findings").closest(".monitor-banner");
+      expect(banner).toHaveTextContent("2 GitHub checks await Owner review");
+      expect(screen.getByText("Technical review and recovery").closest("details")).toHaveAttribute("open");
     } finally {
       hoisted.rows.monitoring_findings = current;
     }

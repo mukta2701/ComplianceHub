@@ -130,7 +130,7 @@ function GitHubTechnicalReview({
   role: "owner" | "admin" | "member";
   unhealthyRepositoryIds: string[];
 }) {
-  return <details className="monitor-technical-review">
+  return <details className="monitor-technical-review" open={review.entries.some((entry) => entry.review.status === "pending")}>
     <summary>Technical review and recovery</summary>
     <p>Review how repository checks become governed ISO evidence or findings, and use authorised recovery controls.</p>
     <GitHubComplianceControlRoomPanel
@@ -250,6 +250,7 @@ export default async function MonitoringPage({
   const otherSources = sources.filter((source) => source.provider !== "github");
   const monitoredSystemCount = otherSources.length + (hasActiveGitHubInstallation ? 1 : 0);
   const highOrCritical = findings.filter((finding) => finding.severity === "high" || finding.severity === "critical").length;
+  const pendingGitHubCheckReviews = mappingReview.entries.filter((entry) => entry.review.status === "pending").length;
 
   return <div className="monitoring-page">
     <PageIntro
@@ -262,7 +263,8 @@ export default async function MonitoringPage({
       <span className={`monitor-dot ${findings.length === 0 ? "neutral" : "watch"}`} aria-hidden="true" />
       <div style={{ flex: 1 }}>
         <strong>{findings.length === 0 ? "No recorded active findings" : `${findings.length} active finding${findings.length === 1 ? "" : "s"}`}</strong>
-        <p>{highOrCritical} high or critical · {monitoredSystemCount} system{monitoredSystemCount === 1 ? "" : "s"} monitored{findings.length === 0 ? ". Monitoring status is not yet confirmed." : ""}</p>
+        <p>{highOrCritical} high or critical · {monitoredSystemCount} system{monitoredSystemCount === 1 ? "" : "s"} monitored{findings.length === 0 ? ". Check coverage and approvals before relying on this status." : ""}</p>
+        {pendingGitHubCheckReviews > 0 && <p>{pendingGitHubCheckReviews} GitHub check{pendingGitHubCheckReviews === 1 ? "" : "s"} await Owner review</p>}
       </div>
       <span className="monitor-banner-actions">
         {shouldShowRunMonitoring(membership.role, otherSources.length) && <form action={runMonitoringNowAction}><button className="button">Run checks now</button></form>}

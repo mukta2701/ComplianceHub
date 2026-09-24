@@ -155,8 +155,8 @@ function MappingReviewSection({
     {canManageMapping && room.approval && (activeHistory ? <fieldset className="github-legacy-approval">
       <legend>Earlier pack-wide approval</legend>
       <p>{exactApprovalActive
-        ? "This earlier approval covered the mapping as a pack. Check-by-check decisions below now show the effective review for each entry. Revocation stops future official processing; existing records remain historical."
-        : "An earlier pack-wide approval is still active. Revoking it stops future official processing; existing records remain historical."}</p>
+        ? "This earlier approval covered the mapping as a pack. Check-by-check decisions below show the effective review for each entry. Revoking it removes only approvals inherited from that pack; individual check decisions remain in effect. Existing records remain historical."
+        : "An earlier pack-wide approval is still active. Revoking it removes only approvals inherited from that pack; individual check decisions remain in effect. Existing records remain historical."}</p>
       <button className="button secondary" type="button" disabled={pending} onClick={() => void revoke()}>
         {exactApprovalActive ? "Revoke earlier approval" : "Revoke historical mapping"}
       </button>
