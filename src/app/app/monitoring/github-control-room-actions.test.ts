@@ -28,13 +28,19 @@ function sessionClient() {
     from(table: string) {
       hoisted.calls.push(`from:${table}`);
       const query: Record<string, unknown> = {};
-      for (const method of ["select", "eq", "is", "not", "in"]) {
+      for (const method of ["select", "eq", "is", "not", "in", "limit"]) {
         query[method] = (...args: unknown[]) => {
           hoisted.calls.push(`${table}:${method}:${JSON.stringify(args)}`);
           return query;
         };
       }
       query.maybeSingle = () => Promise.resolve(hoisted.rows[table] ?? { data: null, error: null });
+      query.then = (
+        resolve: (value: { data: unknown; error: unknown }) => unknown,
+        reject?: (reason: unknown) => unknown,
+      ) => Promise.resolve(
+        hoisted.rows[table] ?? { data: [], error: null },
+      ).then(resolve, reject);
       return query;
     },
   };
@@ -111,6 +117,14 @@ describe("GitHub control-room actions", () => {
         id: JOB, organisation_id: ORG, repository_id: REPOSITORY,
         collection_run_id: RUN, status: "pending",
       }, error: null },
+      github_observations: { data: [{ check_id: "branch-protection" }], error: null },
+      github_effective_mapping_entry_decisions: { data: [{
+        mapping_pack_id: PACK,
+        mapping_entry_id: "a1000000-0000-4000-8000-000000000008",
+        check_id: "branch-protection",
+        entry_digest: "a".repeat(64),
+        status: "approved",
+      }], error: null },
     };
     hoisted.rateLimit.mockResolvedValue(undefined);
     hoisted.serviceRpc.mockResolvedValue({ data: APPROVAL, error: null });
@@ -212,6 +226,7 @@ describe("GitHub control-room actions", () => {
   });
 
   it("processes exactly one scoped terminal run and its current job", async () => {
+    hoisted.rows.github_mapping_approvals = { data: null, error: null };
     await expect(processApprovedGitHubResultsAction(targetForm())).resolves.toEqual({
       ok: true, message: "Official GitHub records processed: 1 run updated.",
     });
@@ -235,6 +250,22 @@ describe("GitHub control-room actions", () => {
       ["/app/evidence"],
       ["/app"],
     ]);
+  });
+
+  it("does not process a run without an approved exact mapping for one of its checks", async () => {
+    hoisted.rows.github_mapping_approvals = { data: null, error: null };
+    hoisted.rows.github_effective_mapping_entry_decisions = { data: [{
+      mapping_pack_id: PACK,
+      mapping_entry_id: "a1000000-0000-4000-8000-000000000008",
+      check_id: "branch-protection",
+      entry_digest: "a".repeat(64),
+      status: "rejected",
+    }], error: null };
+    await expect(processApprovedGitHubResultsAction(targetForm())).resolves.toEqual({
+      ok: false, message: "Could not process these GitHub results.",
+    });
+    expect(hoisted.reconcile).not.toHaveBeenCalled();
+    expect(hoisted.calls).not.toContain("service-client");
   });
 
   it("does not create a service client for malformed or cross-workspace processing targets", async () => {
