@@ -6,7 +6,39 @@ delete from public.github_materialisation_jobs where organisation_id in (
   '72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002',
   '72000000-0000-4000-8000-000000000004'
 );
+delete from public.github_official_compliance_results where organisation_id in (
+  '72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002',
+  '72000000-0000-4000-8000-000000000004'
+);
+delete from public.github_evidence_provenance where organisation_id in (
+  '72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002',
+  '72000000-0000-4000-8000-000000000004'
+);
+delete from public.evidence_links where organisation_id in (
+  '72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002',
+  '72000000-0000-4000-8000-000000000004'
+);
+delete from public.evidence where organisation_id in (
+  '72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002',
+  '72000000-0000-4000-8000-000000000004'
+);
+delete from public.github_entry_materialisation_receipts where organisation_id in (
+  '72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002',
+  '72000000-0000-4000-8000-000000000004'
+);
+delete from public.github_mapping_entry_decisions where organisation_id in (
+  '72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002',
+  '72000000-0000-4000-8000-000000000004'
+);
+delete from public.github_mapping_pack_selections where organisation_id in (
+  '72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002',
+  '72000000-0000-4000-8000-000000000004'
+);
 delete from public.github_mapping_approvals where organisation_id in (
+  '72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002',
+  '72000000-0000-4000-8000-000000000004'
+);
+delete from public.github_observations where organisation_id in (
   '72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002',
   '72000000-0000-4000-8000-000000000004'
 );
@@ -79,6 +111,16 @@ insert into public.memberships(organisation_id,user_id,role) values
  ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000001','owner'),
  ('72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000002','owner'),
  ('72000000-0000-4000-8000-000000000004','72000000-0000-4000-8000-000000000004','owner');
+select public.select_github_mapping_pack_server(
+ '72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000001',
+ 'github-iso-27001-v1',
+ (select checksum from public.github_mapping_packs where version='github-iso-27001-v1'),0
+);
+select public.select_github_mapping_pack_server(
+ '72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000002',
+ 'github-iso-27001-v1',
+ (select checksum from public.github_mapping_packs where version='github-iso-27001-v1'),0
+);
 insert into public.github_installations(
  id,organisation_id,provider_installation_id,account_id,account_login,account_type,
  repository_selection,status,connected_by,permissions,permissions_ok
@@ -104,6 +146,7 @@ insert into public.github_collection_runs(
  ('72000000-0000-4000-8000-000000000304','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000102','72000000-0000-4000-8000-000000000202',72302,'manual','job-b-old','running',now()-interval '3 hours',0,0,0,0,0,extensions.gen_random_uuid(),now()-interval '30 minutes',1),
  ('72000000-0000-4000-8000-000000000305','72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000101','72000000-0000-4000-8000-000000000201',72301,'manual','job-failed','running',now()-interval '1 hour',0,0,0,0,0,extensions.gen_random_uuid(),now()-interval '30 minutes',1),
  ('72000000-0000-4000-8000-000000000306','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000102','72000000-0000-4000-8000-000000000202',72302,'manual','job-b-race','running',now()-interval '2 hours',0,0,0,0,0,extensions.gen_random_uuid(),now()-interval '30 minutes',1),
+ ('72000000-0000-4000-8000-000000000308','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000102','72000000-0000-4000-8000-000000000202',72302,'manual','job-b-entry-race','running',now()-interval '2 hours',0,0,0,0,0,extensions.gen_random_uuid(),now()-interval '30 minutes',1),
  ('72000000-0000-4000-8000-000000000307','72000000-0000-4000-8000-000000000004','72000000-0000-4000-8000-000000000104','72000000-0000-4000-8000-000000000204',72304,'manual','job-sentinel','running',now()-interval '5 hours',0,0,0,0,0,extensions.gen_random_uuid(),now()-interval '30 minutes',1);
 update public.github_collection_runs
 set status=case when id='72000000-0000-4000-8000-000000000302' then 'partial'::public.github_collection_status else 'succeeded'::public.github_collection_status end,
@@ -113,6 +156,30 @@ set status=case when id='72000000-0000-4000-8000-000000000302' then 'partial'::p
 where id in (
  '72000000-0000-4000-8000-000000000301','72000000-0000-4000-8000-000000000302',
  '72000000-0000-4000-8000-000000000303','72000000-0000-4000-8000-000000000304',
+ '72000000-0000-4000-8000-000000000308',
+ '72000000-0000-4000-8000-000000000306','72000000-0000-4000-8000-000000000307'
+);
+insert into public.github_observations(
+ organisation_id,installation_id,repository_id,provider_repository_id,
+ collection_run_id,observation_key,check_id,rule_version,subject_type,subject_id,
+ result,title,explanation,observed_at,fresh_until,source_url,fingerprint
+)
+select run.organisation_id,run.installation_id,run.repository_id,
+       run.provider_repository_id,run.id,
+       run.id::text || '/' || entry.check_id || '/' || entry.rule_version,
+       entry.check_id,entry.rule_version,'github_repository',repository.full_name,
+       'pass','Official check: ' || entry.check_id,
+       'The official check was observed for the job lifecycle fixture.',
+       now()-interval '1 minute',now()+interval '1 day',repository.html_url,
+       encode(extensions.digest(convert_to(run.id::text || entry.id::text,'UTF8'),'sha256'),'hex')
+from public.github_collection_runs run
+join public.github_repositories repository on repository.id=run.repository_id
+join public.github_mapping_pack_selections selection on selection.organisation_id=run.organisation_id
+join public.github_mapping_entries entry on entry.mapping_pack_id=selection.mapping_pack_id
+where run.id in (
+ '72000000-0000-4000-8000-000000000301','72000000-0000-4000-8000-000000000302',
+ '72000000-0000-4000-8000-000000000303','72000000-0000-4000-8000-000000000304',
+ '72000000-0000-4000-8000-000000000308',
  '72000000-0000-4000-8000-000000000306','72000000-0000-4000-8000-000000000307'
 );
 update public.github_materialisation_jobs
@@ -136,7 +203,7 @@ select is(
   'the unrelated committed sentinel job is captured exactly once'
 );
 
-select is((select count(*) from public.github_materialisation_jobs where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002')),5::bigint,'each succeeded or partial finalisation transactionally enqueues exactly one job');
+select is((select count(*) from public.github_materialisation_jobs where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002')),6::bigint,'each succeeded or partial finalisation transactionally enqueues exactly one job');
 select is((select count(*) from public.github_materialisation_jobs where collection_run_id='72000000-0000-4000-8000-000000000305'),0::bigint,'failed collection runs never enqueue official materialisation');
 update public.github_collection_runs set status=status where id='72000000-0000-4000-8000-000000000301';
 select is((select count(*) from public.github_materialisation_jobs where collection_run_id='72000000-0000-4000-8000-000000000301'),1::bigint,'terminal replay cannot duplicate a job');
@@ -303,6 +370,140 @@ select ok((select status='pending' and available_at<=now() from public.github_ma
 select extensions.dblink_disconnect('github_job_approval');
 select extensions.dblink_disconnect('github_job_finalise');
 
+-- A new exact entry approval overlaps completed finalisation on the final
+-- attempt. The next worker must get a fresh budget and materialise that entry.
+begin;
+set local session_replication_role=replica;
+update public.github_mapping_approvals
+set revoked_by='72000000-0000-4000-8000-000000000002',revoked_at=now()
+where organisation_id='72000000-0000-4000-8000-000000000002' and revoked_at is null;
+commit;
+select public.record_github_mapping_entry_decision_server(
+  '72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000002',
+  (select id from public.github_mapping_entries where mapping_pack_id=(
+    select id from public.github_mapping_packs where version='github-iso-27001-v1'
+  ) and check_id='github.branch.force_pushes'),
+  public.github_mapping_entry_digest((select id from public.github_mapping_entries
+    where mapping_pack_id=(select id from public.github_mapping_packs where version='github-iso-27001-v1')
+      and check_id='github.branch.force_pushes')),
+  'approved',1
+);
+select public.materialise_github_approved_entries_server(
+  '72000000-0000-4000-8000-000000000002',
+  '72000000-0000-4000-8000-000000000308',
+  'github-iso-27001-v1',
+  (select checksum from public.github_mapping_packs where version='github-iso-27001-v1'),
+  (
+    select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
+      'observation_id', observation.id,
+      'treatment_kind', case when observation.result='pass' then 'evidence'
+        when observation.result='fail' then 'finding' else 'explanatory' end,
+      'iso_control_references', pg_catalog.to_jsonb(entry.iso_control_references),
+      'failure_severity', entry.failure_severity,
+      'remediation', entry.remediation
+    ))
+    from public.github_observations observation
+    join public.github_mapping_entries entry
+      on entry.mapping_pack_id=(select id from public.github_mapping_packs
+        where version='github-iso-27001-v1')
+     and entry.check_id=observation.check_id
+     and entry.rule_version=observation.rule_version
+    where observation.collection_run_id='72000000-0000-4000-8000-000000000308'
+      and observation.check_id='github.branch.force_pushes'
+  )
+);
+select is((select count(*) from public.github_official_compliance_results
+  where collection_run_id='72000000-0000-4000-8000-000000000308'),
+  1::bigint,'the first exact approval has a real result before the race');
+update public.github_materialisation_jobs
+set status='pending',attempt_count=24,available_at=now()-interval '1 minute',
+    lease_token=null,lease_expires_at=null,lease_attempt_incremented=null,exhausted_at=null
+where collection_run_id='72000000-0000-4000-8000-000000000308';
+set role service_role;
+select is((select attempt_count from public.claim_github_materialisation_jobs_server(
+  1,array['72000000-0000-4000-8000-000000000308'::uuid]
+)),25,'the exact-entry race starts with a live twenty-fifth lease');
+reset role;
+select extensions.dblink_connect('github_entry_approval','host='||pg_catalog.host(pg_catalog.inet_server_addr())||' port='||pg_catalog.inet_server_port()::text||' dbname='||current_database()||' user=postgres password=postgres connect_timeout=5');
+select extensions.dblink_connect('github_entry_finalise','host='||pg_catalog.host(pg_catalog.inet_server_addr())||' port='||pg_catalog.inet_server_port()::text||' dbname='||current_database()||' user=postgres password=postgres connect_timeout=5');
+select extensions.dblink_exec('github_entry_approval','set role service_role');
+select extensions.dblink_exec('github_entry_finalise','set role service_role');
+select extensions.dblink_exec('github_entry_approval','begin');
+select extensions.dblink_exec('github_entry_approval',$remote$
+  do $entry_approval$
+  begin
+    perform public.record_github_mapping_entry_decision_server(
+      '72000000-0000-4000-8000-000000000002',
+      '72000000-0000-4000-8000-000000000002',
+      (select id from public.github_mapping_entries where mapping_pack_id=(
+        select id from public.github_mapping_packs where version='github-iso-27001-v1'
+      ) and check_id='github.repository.visibility'),
+      public.github_mapping_entry_digest((select id from public.github_mapping_entries
+        where mapping_pack_id=(select id from public.github_mapping_packs where version='github-iso-27001-v1')
+          and check_id='github.repository.visibility')),
+      'approved',2
+    );
+  end
+  $entry_approval$
+$remote$);
+select extensions.dblink_send_query('github_entry_finalise',$remote$
+  select public.finalize_github_materialisation_job_server(
+    (select id from public.github_materialisation_jobs where collection_run_id='72000000-0000-4000-8000-000000000308'),
+    (select lease_token from public.github_materialisation_jobs where collection_run_id='72000000-0000-4000-8000-000000000308'),
+    25,'completed'
+  )
+$remote$);
+select pg_catalog.pg_sleep(0.1);
+select is(extensions.dblink_is_busy('github_entry_finalise'),1,'completed finalisation waits for the overlapping exact approval');
+select extensions.dblink_exec('github_entry_approval','commit');
+select ok(finalised,'the exact current lease completes after the approval commits')
+from extensions.dblink_get_result('github_entry_finalise') as result(finalised boolean);
+select ok((select status='pending' and attempt_count=0 and lease_token is null
+  from public.github_materialisation_jobs
+  where collection_run_id='72000000-0000-4000-8000-000000000308'),
+  'work approved during final-attempt completion receives a fresh budget');
+select extensions.dblink_disconnect('github_entry_approval');
+select extensions.dblink_disconnect('github_entry_finalise');
+set role service_role;
+select is((select attempt_count from public.claim_github_materialisation_jobs_server(
+  1,array['72000000-0000-4000-8000-000000000308'::uuid]
+)),1,'the overlapping exact approval is claimable at attempt one');
+reset role;
+select public.materialise_github_approved_entries_server(
+  '72000000-0000-4000-8000-000000000002',
+  '72000000-0000-4000-8000-000000000308',
+  'github-iso-27001-v1',
+  (select checksum from public.github_mapping_packs where version='github-iso-27001-v1'),
+  (
+    select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
+      'observation_id', observation.id,
+      'treatment_kind', case when observation.result='pass' then 'evidence'
+        when observation.result='fail' then 'finding' else 'explanatory' end,
+      'iso_control_references', pg_catalog.to_jsonb(entry.iso_control_references),
+      'failure_severity', entry.failure_severity,
+      'remediation', entry.remediation
+    ))
+    from public.github_observations observation
+    join public.github_mapping_entries entry
+      on entry.mapping_pack_id=(select id from public.github_mapping_packs
+        where version='github-iso-27001-v1')
+     and entry.check_id=observation.check_id
+     and entry.rule_version=observation.rule_version
+    where observation.collection_run_id='72000000-0000-4000-8000-000000000308'
+      and observation.check_id in ('github.branch.force_pushes','github.repository.visibility')
+  )
+);
+select is((select count(*) from public.github_official_compliance_results
+  where collection_run_id='72000000-0000-4000-8000-000000000308'),
+  2::bigint,'the newly approved visibility check materialises alongside its earlier result');
+set role service_role;
+select ok(public.finalize_github_materialisation_job_server(
+  (select id from public.github_materialisation_jobs where collection_run_id='72000000-0000-4000-8000-000000000308'),
+  (select lease_token from public.github_materialisation_jobs where collection_run_id='72000000-0000-4000-8000-000000000308'),
+  1,'completed'
+),'materialisation of the new exact entry completes its fresh cycle');
+reset role;
+
 update public.github_materialisation_jobs set status='retryable',attempt_count=24,available_at=now()-interval '1 minute',lease_token=null,lease_expires_at=null,lease_attempt_incremented=null where collection_run_id='72000000-0000-4000-8000-000000000303';
 set role service_role;
 select is((select attempt_count from public.claim_github_materialisation_jobs_server(1,array['72000000-0000-4000-8000-000000000303'::uuid])),25,'the final retry is claimed at attempt twenty-five');
@@ -341,8 +542,8 @@ select is(
 );
 reset role;
 
--- An active exact lease is inspectable rather than silently treated healthy;
--- completed jobs remain visible but non-reclaimable.
+-- An active exact lease is inspectable. A worker cannot strand approved
+-- observations by reporting completion before the immutable result rows exist.
 update public.github_materialisation_jobs set status='pending',attempt_count=0,available_at=now(),lease_token=null,lease_expires_at=null,lease_attempt_incremented=null where collection_run_id='72000000-0000-4000-8000-000000000306';
 set role service_role;
 select is((select count(*) from public.claim_github_materialisation_jobs_server(1,array['72000000-0000-4000-8000-000000000306'::uuid])),1::bigint,'an exact in-progress job can be leased');
@@ -357,10 +558,15 @@ select ok(public.finalize_github_materialisation_job_server(
 ),'the inspected active job can complete through its lease');
 select results_eq(
   $$ select collection_run_id,status,lease_active from public.inspect_github_materialisation_jobs_server(1,array['72000000-0000-4000-8000-000000000306'::uuid]) $$,
-  $$ values ('72000000-0000-4000-8000-000000000306'::uuid,'completed'::text,false) $$,
-  'exact inspection recognises completed non-reclaimable work'
+  $$ values ('72000000-0000-4000-8000-000000000306'::uuid,'pending'::text,false) $$,
+  'approved observations remain pending until official results exist'
 );
-select is((select count(*) from public.claim_github_materialisation_jobs_server(1,array['72000000-0000-4000-8000-000000000306'::uuid])),0::bigint,'completed inspected work remains non-reclaimable');
+select is((select count(*) from public.claim_github_materialisation_jobs_server(1,array['72000000-0000-4000-8000-000000000306'::uuid])),1::bigint,'unmaterialised approved work remains claimable after an optimistic completion');
+select ok(public.finalize_github_materialisation_job_server(
+  (select id from public.github_materialisation_jobs where collection_run_id='72000000-0000-4000-8000-000000000306'),
+  (select lease_token from public.github_materialisation_jobs where collection_run_id='72000000-0000-4000-8000-000000000306'),
+  (select attempt_count from public.github_materialisation_jobs where collection_run_id='72000000-0000-4000-8000-000000000306'),'awaiting_approval'
+),'the retrying worker releases its lease while exact approval remains active');
 reset role;
 
 set role authenticated;
@@ -380,7 +586,15 @@ select is(
 begin;
 set local session_replication_role = replica;
 delete from public.github_materialisation_jobs where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000004');
+delete from public.github_official_compliance_results where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000004');
+delete from public.github_evidence_provenance where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000004');
+delete from public.evidence_links where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000004');
+delete from public.evidence where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000004');
+delete from public.github_entry_materialisation_receipts where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000004');
+delete from public.github_mapping_entry_decisions where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000004');
+delete from public.github_mapping_pack_selections where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000004');
 delete from public.github_mapping_approvals where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000004');
+delete from public.github_observations where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000004');
 delete from public.github_collection_runs where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000004');
 delete from public.github_repositories where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000004');
 delete from public.github_installations where organisation_id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000004');
@@ -391,6 +605,14 @@ delete from public.audit_events where organisation_id in (
   '72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002',
   '72000000-0000-4000-8000-000000000004'
 );
+select is((select count(*) from public.evidence where organisation_id in (
+  '72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002',
+  '72000000-0000-4000-8000-000000000004'
+)),0::bigint,'synthetic materialised evidence is fully cleaned up');
+select is((select count(*) from public.evidence_links where organisation_id in (
+  '72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002',
+  '72000000-0000-4000-8000-000000000004'
+)),0::bigint,'synthetic evidence links are fully cleaned up');
 delete from public.organisations where id in ('72000000-0000-4000-8000-000000000001','72000000-0000-4000-8000-000000000002','72000000-0000-4000-8000-000000000004');
 delete from public.profiles where id::text like '72000000-0000-4000-8000-00000000000%';
 delete from auth.users where id::text like '72000000-0000-4000-8000-00000000000%';

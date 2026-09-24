@@ -200,6 +200,49 @@ describe("materialiseApprovedGitHubObservations", () => {
     expect(deps.materialise).not.toHaveBeenCalled();
   });
 
+  it("finishes without official results when every selected mapping is explicitly rejected", async () => {
+    const deps = dependencies({
+      loadEffectiveMapping: vi.fn().mockResolvedValue({
+        mappingPackId: PACK_ID,
+        version: STANDARD_GITHUB_ISO_MAPPING_PACK.version,
+        checksum: STANDARD_GITHUB_ISO_MAPPING_PACK.checksum,
+        publishedAt: "2026-08-24T09:00:00.000Z",
+        pack: STANDARD_GITHUB_ISO_MAPPING_PACK,
+        entries: ALL_CHECK_IDS.map((checkId) => ({ checkId, status: "rejected" })),
+      }),
+      materialise: vi.fn().mockResolvedValue({
+        data: {
+          evidence_created: 0,
+          evidence_refreshed: 0,
+          findings_created: 0,
+          findings_refreshed: 0,
+          findings_reopened: 0,
+          findings_resolved: 0,
+          skipped: 0,
+        },
+        error: null,
+      }),
+    });
+
+    await expect(materialiseApprovedGitHubObservations(deps, {
+      organisationId: ORGANISATION_ID,
+      collectionRunId: RUN_ID,
+    })).resolves.toEqual({
+      status: "unchanged",
+      collectionRunId: RUN_ID,
+      runStatus: "partial",
+      evidenceCreated: 0,
+      evidenceRefreshed: 0,
+      findingsCreated: 0,
+      findingsRefreshed: 0,
+      findingsReopened: 0,
+      findingsResolved: 0,
+      skipped: 0,
+    });
+
+    expect(deps.materialise).toHaveBeenCalledWith(expect.objectContaining({ target_decisions: [] }));
+  });
+
   it("uses a selected v2 treatment only for exact approved entries", async () => {
     const mappings = STANDARD_GITHUB_ISO_MAPPING_PACK.mappings.map((mapping) =>
       mapping.checkId === "github.branch.force_pushes"

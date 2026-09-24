@@ -572,7 +572,9 @@ export async function materialiseApprovedGitHubObservations(
     .map((entry) => entry.checkId));
   const decisions = mapDecisions(rows, parsedRun.data, approvedCheckIds, parsedMapping.data.pack);
   if (!decisions) return { status: "invalid_data", collectionRunId: target.collectionRunId };
-  if (decisions.length === 0) return { status: "awaiting_approval", collectionRunId: target.collectionRunId };
+  if (decisions.length === 0 && parsedMapping.data.entries.some((entry) => entry.status === "pending")) {
+    return { status: "awaiting_approval", collectionRunId: target.collectionRunId };
+  }
 
   let rpcResult: { data: unknown; error: unknown };
   try {
