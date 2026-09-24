@@ -67,6 +67,9 @@ export async function POST(request: Request) {
       reconcile: (scope) => reconcileApprovedGitHubObservations(buildMaterialisationDependencies(service), scope),
       now: () => now,
     }, signal);
+    if (cycle.collectionFailed) {
+      await logError("cron", "GitHub collection cron failed", undefined, { stage: "collection" });
+    }
     if (cycle.materialisationFailed) {
       try {
         await logError("cron", "GitHub materialisation failed", undefined, { stage: "materialisation" });
@@ -76,8 +79,9 @@ export async function POST(request: Request) {
       webhooks,
       collection: cycle.collection,
       materialisation: cycle.materialisation,
+      collectionFailed: cycle.collectionFailed,
       collectionHealth: cycle.collectionHealth,
-    });
+    }, { status: cycle.collectionFailed ? 500 : 200 });
   } catch {
     await logError("cron", "GitHub collection cron failed", undefined, { stage: "collection" });
     return NextResponse.json({ error: "GitHub collection failed" }, { status: 500 });

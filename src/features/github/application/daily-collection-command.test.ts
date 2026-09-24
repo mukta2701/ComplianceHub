@@ -19,6 +19,7 @@ const success: ScheduledCollectionCycle = {
       status: "succeeded",
     }],
   },
+  collectionFailed: false,
   materialisation: {
     runsConsidered: 1,
     materialised: 1,
@@ -65,7 +66,8 @@ describe("runDailyCollectionCommand", () => {
   it("returns failure but still reports a safe summary for an incomplete cycle", async () => {
     const run = vi.fn().mockResolvedValue({
       ...success,
-      collection: { ...success.collection, repositoriesFailed: 1 },
+      collection: { ...success.collection, repositoriesChecked: 0, observationsStored: 0, repositoriesFailed: 0, terminalRuns: [] },
+      collectionFailed: true,
       collectionHealth: "needs_attention",
       complete: false,
     });
@@ -76,7 +78,7 @@ describe("runDailyCollectionCommand", () => {
     const exitCode = await command({ run, writeStdout, writeStderr });
 
     expect(exitCode).toBe(1);
-    expect(writeStdout).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('"repositoriesFailed":1'));
+    expect(writeStdout).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('"collectionFailed":true'));
     expect(writeStderr).not.toHaveBeenCalled();
   });
 

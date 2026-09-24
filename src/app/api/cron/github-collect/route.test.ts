@@ -81,10 +81,12 @@ describe("POST /api/cron/github-collect", () => {
     expect(hoisted.drainWebhooks.mock.invocationCallOrder[0]).toBeLessThan(hoisted.run.mock.invocationCallOrder[0]);
     expect(hoisted.reconcile).toHaveBeenCalledWith({ dependency: "materialisation" }, { limit: 100, terminalRuns });
     expect(hoisted.run.mock.invocationCallOrder[0]).toBeLessThan(hoisted.reconcile.mock.invocationCallOrder[0]);
-    expect(await response.json()).toEqual({
+    const body = await response.json();
+    expect(body).toEqual({
       webhooks: { claimed: 2, processed: 1, ignored: 1, failed: 0, ownershipLost: 0 },
       collection: { installationsChecked: 1, repositoriesChecked: 1, observationsStored: 15, repositoriesFailed: 0, repositoriesDeferred: 0, runsPartial: 0, terminalRuns },
       materialisation: { runsConsidered: 1, materialised: 1, unchanged: 0, awaitingApproval: 0, needsAttention: 0 },
+      collectionFailed: false,
       collectionHealth: "healthy",
     });
   });
@@ -130,6 +132,7 @@ describe("POST /api/cron/github-collect", () => {
     expect(await response.json()).toMatchObject({
       collection: { repositoriesFailed: 1 },
       materialisation: { needsAttention: 0 },
+      collectionFailed: false,
       collectionHealth: "needs_attention",
     });
   });
@@ -141,10 +144,12 @@ describe("POST /api/cron/github-collect", () => {
     const response = await POST(request());
     expect(response.status).toBe(200);
     expect(hoisted.run).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ trigger: "scheduled", signal: expect.any(AbortSignal) }));
-    expect(await response.json()).toEqual({
+    const body = await response.json();
+    expect(body).toEqual({
       webhooks: { claimed: 0, processed: 0, ignored: 0, failed: 1, ownershipLost: 0 },
       collection: { installationsChecked: 1, repositoriesChecked: 1, observationsStored: 15, repositoriesFailed: 0, repositoriesDeferred: 0, runsPartial: 0, terminalRuns },
       materialisation: { runsConsidered: 1, materialised: 1, unchanged: 0, awaitingApproval: 0, needsAttention: 0 },
+      collectionFailed: false,
       collectionHealth: "healthy",
     });
     expect(hoisted.logError).toHaveBeenCalledWith("cron", "GitHub webhook drain failed", undefined, { stage: "webhook_drain" });
@@ -156,8 +161,17 @@ describe("POST /api/cron/github-collect", () => {
     const { POST } = await import("./route");
     const response = await POST(request());
     expect(response.status).toBe(500);
+    expect(hoisted.reconcile).toHaveBeenCalledWith({ dependency: "materialisation" }, { limit: 100 });
+    const body = await response.json();
+    expect(body).toEqual({
+      webhooks: { claimed: 2, processed: 1, ignored: 1, failed: 0, ownershipLost: 0 },
+      collection: { installationsChecked: 0, repositoriesChecked: 0, observationsStored: 0, repositoriesFailed: 0, repositoriesDeferred: 0, runsPartial: 0, terminalRuns: [] },
+      materialisation: { runsConsidered: 1, materialised: 1, unchanged: 0, awaitingApproval: 0, needsAttention: 0 },
+      collectionFailed: true,
+      collectionHealth: "needs_attention",
+    });
     expect(hoisted.logError).toHaveBeenCalledWith("cron", "GitHub collection cron failed", undefined, { stage: "collection" });
-    expect(JSON.stringify(hoisted.logError.mock.calls)).not.toContain("token-secret");
+    expect(JSON.stringify([hoisted.logError.mock.calls, body])).not.toContain("token-secret");
   });
 
   it("surfaces materialisation failure as health attention without rewriting collection success", async () => {
@@ -171,6 +185,7 @@ describe("POST /api/cron/github-collect", () => {
       webhooks: { claimed: 2, processed: 1, ignored: 1, failed: 0, ownershipLost: 0 },
       collection: { installationsChecked: 1, repositoriesChecked: 1, observationsStored: 15, repositoriesFailed: 0, repositoriesDeferred: 0, runsPartial: 0, terminalRuns },
       materialisation: { runsConsidered: 0, materialised: 0, unchanged: 0, awaitingApproval: 0, needsAttention: 1 },
+      collectionFailed: false,
       collectionHealth: "needs_attention",
     });
     expect(hoisted.logError).toHaveBeenCalledWith("cron", "GitHub materialisation failed", undefined, { stage: "materialisation" });

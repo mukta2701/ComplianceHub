@@ -10,6 +10,7 @@ export type ScheduledCollectionDependencies = {
 
 export type ScheduledCollectionCycle = {
   collection: CollectionSummary;
+  collectionFailed: boolean;
   materialisation: ReconciliationSummary;
   materialisationFailed: boolean;
   collectionHealth: "healthy" | "needs_attention";
@@ -24,31 +25,52 @@ const failedMaterialisation: ReconciliationSummary = {
   needsAttention: 1,
 };
 
+const emptyCollection: CollectionSummary = {
+  installationsChecked: 0,
+  repositoriesChecked: 0,
+  observationsStored: 0,
+  repositoriesFailed: 0,
+  repositoriesDeferred: 0,
+  runsPartial: 0,
+  terminalRuns: [],
+};
+
 export async function runScheduledGitHubCollection(
   dependencies: ScheduledCollectionDependencies,
   signal?: AbortSignal,
 ): Promise<ScheduledCollectionCycle> {
-  const collection = await dependencies.collect({
-    trigger: "scheduled",
-    requestKey: scheduledCollectionRequestKey(dependencies.now()),
-    signal,
-  });
+  let collection: CollectionSummary;
+  let collectionFailed = false;
+  try {
+    collection = await dependencies.collect({
+      trigger: "scheduled",
+      requestKey: scheduledCollectionRequestKey(dependencies.now()),
+      signal,
+    });
+  } catch {
+    collection = { ...emptyCollection, terminalRuns: [] };
+    collectionFailed = true;
+  }
 
   let materialisation = failedMaterialisation;
   let materialisationFailed = false;
   try {
-    materialisation = await dependencies.reconcile({ limit: 100, terminalRuns: collection.terminalRuns });
+    materialisation = await dependencies.reconcile(collectionFailed
+      ? { limit: 100 }
+      : { limit: 100, terminalRuns: collection.terminalRuns });
   } catch {
     materialisationFailed = true;
   }
 
-  const needsAttention = collection.repositoriesFailed > 0
+  const needsAttention = collectionFailed
+    || collection.repositoriesFailed > 0
     || collection.repositoriesDeferred > 0
     || materialisationFailed
     || materialisation.needsAttention > 0;
 
   return {
     collection,
+    collectionFailed,
     materialisation,
     materialisationFailed,
     collectionHealth: needsAttention ? "needs_attention" : "healthy",
@@ -60,6 +82,7 @@ export function scheduledGitHubCollectionLogSummary(cycle: ScheduledCollectionCy
   return {
     complete: cycle.complete,
     collectionHealth: cycle.collectionHealth,
+    collectionFailed: cycle.collectionFailed,
     collection: {
       installationsChecked: cycle.collection.installationsChecked,
       repositoriesChecked: cycle.collection.repositoriesChecked,

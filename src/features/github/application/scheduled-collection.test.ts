@@ -12,6 +12,7 @@ type ScheduledCollectionRunner = (
   signal?: AbortSignal,
 ) => Promise<{
   collection: CollectionSummary;
+  collectionFailed: boolean;
   materialisation: ReconciliationSummary;
   materialisationFailed: boolean;
   collectionHealth: "healthy" | "needs_attention";
@@ -69,6 +70,7 @@ describe("runScheduledGitHubCollection", () => {
     expect(scheduled.scheduledGitHubCollectionLogSummary(result)).toEqual({
       complete: true,
       collectionHealth: "healthy",
+      collectionFailed: false,
       collection: {
         installationsChecked: 2,
         repositoriesChecked: 2,
@@ -123,5 +125,27 @@ describe("runScheduledGitHubCollection", () => {
     expect(result.materialisation).toEqual({ ...emptyReconciliation, needsAttention: 1 });
     expect(result).toMatchObject({ collectionHealth: "needs_attention", materialisationFailed: true, complete: false });
     expect(JSON.stringify(result)).not.toContain("private RPC detail");
+  });
+
+  it("still runs bounded reconciliation when collection throws and reports a safe incomplete cycle", async () => {
+    const privateMarker = "Authorization: token-private-provider-body";
+    const collect = vi.fn().mockRejectedValue(new Error(privateMarker));
+    const reconcile = vi.fn().mockResolvedValue({ ...emptyReconciliation, runsConsidered: 1, needsAttention: 1 });
+    const runner = await scheduledRunner();
+
+    const result = await runner({ collect, reconcile, now: () => new Date("2026-09-24T08:00:00.000Z") });
+
+    expect(reconcile).toHaveBeenCalledExactlyOnceWith({ limit: 100 });
+    expect(result).toMatchObject({
+      collectionFailed: true,
+      collectionHealth: "needs_attention",
+      materialisationFailed: false,
+      complete: false,
+      materialisation: { runsConsidered: 1, needsAttention: 1 },
+    });
+    const scheduled = await import("./scheduled-collection");
+    expect(scheduled.scheduledGitHubCollectionLogSummary(result)).toMatchObject({ collectionFailed: true, complete: false });
+    expect(JSON.stringify(result)).not.toContain("token-private-provider-body");
+    expect(JSON.stringify(scheduled.scheduledGitHubCollectionLogSummary(result))).not.toContain("token-private-provider-body");
   });
 });
