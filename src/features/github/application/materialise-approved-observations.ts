@@ -8,6 +8,11 @@ import {
   selectGitHubObservationTreatment,
   type GitHubMappingPack,
 } from "../domain/mapping";
+import {
+  processGitHubComplianceResultAlerts,
+  type GitHubComplianceResultAlertRunOptions,
+} from "@/features/monitoring/application/github-compliance-result-alert-workflow";
+import { siteUrl } from "@/lib/site-url";
 import type { GitHubObservation } from "../domain/observation";
 import { EXPECTED_GITHUB_CHECK_IDS, RULE_PACK_VERSION } from "../domain/rules";
 
@@ -149,6 +154,12 @@ export type MaterialisationDependencies = {
   loadEffectiveMapping(organisationId: string): Promise<unknown | null>;
   loadObservations(target: { organisationId: string; collectionRunId: string }): Promise<unknown[]>;
   materialise(input: MaterialisationRpcInput): Promise<{ data: unknown; error: unknown }>;
+  evaluateResultAlerts(options: Pick<GitHubComplianceResultAlertRunOptions, "evaluatedAt" | "scope">): Promise<{
+    candidates: number;
+    eventsCreated: number;
+    notificationsCreated: number;
+    conflicts: number;
+  }>;
 };
 
 export type MaterialisationOutcome =
@@ -164,6 +175,8 @@ export type MaterialisationOutcome =
     findingsReopened: number;
     findingsResolved: number;
     skipped: number;
+    alertEventsCreated?: number;
+    notificationsCreated?: number;
   };
 
 export type ReconciliationSummary = {
@@ -172,6 +185,8 @@ export type ReconciliationSummary = {
   unchanged: number;
   awaitingApproval: number;
   needsAttention: number;
+  alertEventsCreated?: number;
+  notificationsCreated?: number;
 };
 
 type QueryResult = { data: unknown; error: unknown };
@@ -420,6 +435,37 @@ export function buildMaterialisationDependencies(serviceInput: unknown): Materia
       const { data, error } = await service.rpc("materialise_github_approved_entries_server", input);
       return { data, error };
     },
+    async evaluateResultAlerts(options) {
+      const summary = await processGitHubComplianceResultAlerts({
+        async loadCandidates(input) {
+          const { data, error } = await service.rpc("load_github_compliance_result_alert_candidates", {
+            target_evaluated_at: input.evaluatedAt,
+            target_collection_run_id: input.collectionRunId ?? null,
+            target_organisation_id: input.organisationId ?? null,
+            target_after_organisation_id: input.after?.organisationId ?? null,
+            target_after_repository_id: input.after?.repositoryId ?? null,
+            target_after_check_id: input.after?.checkId ?? null,
+            target_limit: input.limit,
+          });
+          if (error) throw persistenceFailure();
+          return data;
+        },
+        async saveDecisions(decisions, evaluatedAt) {
+          const { data, error } = await service.rpc("record_github_compliance_result_alert_decisions", {
+            target_decisions: decisions,
+            target_evaluated_at: evaluatedAt,
+          });
+          if (error) throw persistenceFailure();
+          return data;
+        },
+      }, {
+        ...options,
+        appOrigin: siteUrl(),
+        allowLocalHttp: process.env.NODE_ENV !== "production",
+      });
+      if (summary.conflicts > 0) throw persistenceFailure();
+      return summary;
+    },
   };
 }
 
@@ -599,6 +645,15 @@ export async function materialiseApprovedGitHubObservations(
     + summary.findings_refreshed
     + summary.findings_reopened
     + summary.findings_resolved;
+  let alertSummary: Awaited<ReturnType<MaterialisationDependencies["evaluateResultAlerts"]>>;
+  try {
+    alertSummary = await deps.evaluateResultAlerts({
+      evaluatedAt: new Date().toISOString(),
+      scope: { collectionRunId: target.collectionRunId, organisationId: target.organisationId },
+    });
+  } catch {
+    return { status: "retryable_failure", collectionRunId: target.collectionRunId };
+  }
   return {
     status: changed > 0 ? "materialised" : "unchanged",
     collectionRunId: target.collectionRunId,
@@ -610,6 +665,8 @@ export async function materialiseApprovedGitHubObservations(
     findingsReopened: summary.findings_reopened,
     findingsResolved: summary.findings_resolved,
     skipped: summary.skipped,
+    ...(alertSummary.eventsCreated > 0 ? { alertEventsCreated: alertSummary.eventsCreated } : {}),
+    ...(alertSummary.notificationsCreated > 0 ? { notificationsCreated: alertSummary.notificationsCreated } : {}),
   };
 }
 
@@ -676,8 +733,15 @@ export async function reconcileApprovedGitHubObservations(
       } catch { /* a retry or lease recovery will safely reclaim the job */ }
       if (!finalised) {
         empty.needsAttention += 1;
-      } else if (outcome.status === "materialised") empty.materialised += 1;
-      else if (outcome.status === "unchanged") empty.unchanged += 1;
+      } else if (outcome.status === "materialised") {
+        empty.materialised += 1;
+        if (outcome.alertEventsCreated) empty.alertEventsCreated = (empty.alertEventsCreated ?? 0) + outcome.alertEventsCreated;
+        if (outcome.notificationsCreated) empty.notificationsCreated = (empty.notificationsCreated ?? 0) + outcome.notificationsCreated;
+      } else if (outcome.status === "unchanged") {
+        empty.unchanged += 1;
+        if (outcome.alertEventsCreated) empty.alertEventsCreated = (empty.alertEventsCreated ?? 0) + outcome.alertEventsCreated;
+        if (outcome.notificationsCreated) empty.notificationsCreated = (empty.notificationsCreated ?? 0) + outcome.notificationsCreated;
+      }
       else if (outcome.status === "awaiting_approval") empty.awaitingApproval += 1;
       else empty.needsAttention += 1;
     }
@@ -718,6 +782,16 @@ export async function reconcileApprovedGitHubObservations(
         if (unclaimedRunIds) empty.runsConsidered += unclaimedRunIds.length;
       }
     }
+  }
+  try {
+    const alertSummary = await deps.evaluateResultAlerts({
+      evaluatedAt: new Date().toISOString(),
+      scope: { due: true },
+    });
+    if (alertSummary.eventsCreated > 0) empty.alertEventsCreated = (empty.alertEventsCreated ?? 0) + alertSummary.eventsCreated;
+    if (alertSummary.notificationsCreated > 0) empty.notificationsCreated = (empty.notificationsCreated ?? 0) + alertSummary.notificationsCreated;
+  } catch {
+    empty.needsAttention += 1;
   }
   return empty;
 }

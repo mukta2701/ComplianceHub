@@ -137,6 +137,12 @@ function dependencies(overrides: Partial<MaterialisationDependencies> = {}) {
       },
       error: null,
     }),
+    evaluateResultAlerts: vi.fn().mockResolvedValue({
+      candidates: 0,
+      eventsCreated: 0,
+      notificationsCreated: 0,
+      conflicts: 0,
+    }),
     ...overrides,
   };
   return value as MaterialisationDependencies & {
@@ -147,6 +153,7 @@ function dependencies(overrides: Partial<MaterialisationDependencies> = {}) {
     loadEffectiveMapping: ReturnType<typeof vi.fn>;
     loadObservations: ReturnType<typeof vi.fn>;
     materialise: ReturnType<typeof vi.fn>;
+    evaluateResultAlerts: ReturnType<typeof vi.fn>;
   };
 }
 
@@ -327,7 +334,14 @@ describe("materialiseApprovedGitHubObservations", () => {
   });
 
   it("validates and deterministically maps observations into exact five-key RPC decisions", async () => {
-    const deps = dependencies();
+    const deps = dependencies({
+      evaluateResultAlerts: vi.fn().mockResolvedValue({
+        candidates: 1,
+        eventsCreated: 1,
+        notificationsCreated: 2,
+        conflicts: 0,
+      }),
+    });
 
     const result = await materialiseApprovedGitHubObservations(deps, {
       organisationId: ORGANISATION_ID,
@@ -345,6 +359,12 @@ describe("materialiseApprovedGitHubObservations", () => {
       findingsReopened: 0,
       findingsResolved: 0,
       skipped: 13,
+      alertEventsCreated: 1,
+      notificationsCreated: 2,
+    });
+    expect(deps.evaluateResultAlerts).toHaveBeenCalledWith({
+      evaluatedAt: expect.any(String),
+      scope: { collectionRunId: RUN_ID, organisationId: ORGANISATION_ID },
     });
     const rpcInput = deps.materialise.mock.calls[0]![0];
     expect(rpcInput).toMatchObject({

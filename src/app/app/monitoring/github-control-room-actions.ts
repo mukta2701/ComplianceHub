@@ -85,6 +85,8 @@ const summarySchema = z.object({
   unchanged: z.number().int().min(0).max(1),
   awaitingApproval: z.number().int().min(0).max(1),
   needsAttention: z.number().int().min(0).max(3),
+  alertEventsCreated: z.number().int().min(0).optional(),
+  notificationsCreated: z.number().int().min(0).optional(),
 }).strict();
 
 type SessionClient = Awaited<ReturnType<typeof requireAppContext>>["supabase"];
