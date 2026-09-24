@@ -17,6 +17,7 @@ This is source and test evidence on `codex/m2-monitoring-design`, not a schedule
 - A direct command invocation with deliberately blank required configuration exited unsuccessfully with only a generic error; it did not call a provider or database. This is a safe failure check, not proof that a live command collects data.
 - The earlier disposable database clean-install and upgrade checks predate this source-only runner. No database migration was added or rerun for this increment.
 - After packaging integration, the full application suite passed **359 files, 3,250 tests, 3 intentionally skipped**. Typecheck, full lint, guarded runtime bundle build and guarded web production build passed. The isolated packaging increment also passed **12 focused tests**, workflow syntax validation and a missing-configuration smoke check that failed closed. An independent review identified three workflow defects before integration; all three were corrected with parser and workflow regressions.
+- [Fresh feature-branch CI](https://github.com/mukta2701/ComplianceHub/actions/runs/35960457196) passed secret scanning, container build/smoke, database upgrade (14 assertions) and full pgTAP (110 files, 2,515 assertions), 3,250 application tests with 3 skips, 5 integration files, and 32 Chromium browser tests with 26 intentionally skipped. The browser journey now asserts the truthful “Checked recently” label and opens Owner mapping review when approvals are pending. This is CI against disposable data, not a live GitHub provider or AWS scheduled run.
 
 ## Release boundary
 
