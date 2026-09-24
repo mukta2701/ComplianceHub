@@ -4,8 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 import {
-  approveGitHubMappingPackAction,
   processApprovedGitHubResultsAction,
+  recordGitHubMappingEntryDecisionAction,
   retryExhaustedGitHubMaterialisationAction,
   revokeGitHubMappingApprovalAction,
 } from "@/app/app/monitoring/github-control-room-actions";
@@ -99,7 +99,6 @@ function MappingReviewSection({
   runAction: (action: (formData: FormData) => Promise<{ ok: boolean; message: string }>, form: FormData) => Promise<void>;
   pending: boolean;
 }) {
-  const [confirmed, setConfirmed] = useState(false);
   const exactApprovalActive = room.approval !== null
     && room.approval.mappingPackId === review.pack.id
     && room.approval.version === review.pack.version
@@ -107,19 +106,19 @@ function MappingReviewSection({
   const activeHistory = review.approvalHistory.find((approval) =>
     approval.revokedAt === null && approval.mappingPackId === room.approval?.mappingPackId,
   );
-  const approvalLabel = exactApprovalActive
-    ? "Owner approved"
-    : room.approval
-      ? "Different mapping active"
-      : "Approval required";
   const canManageMapping = workspaceAccess(role).section("monitoring").canManageOperation("approve-github-mapping");
+  const counts = review.entries.reduce((total, entry) => {
+    total[entry.review.status] += 1;
+    return total;
+  }, { pending: 0, approved: 0, rejected: 0 });
 
-  function approve() {
+  function decide(entry: GitHubMappingReview["entries"][number], decision: "approved" | "rejected") {
     const form = new FormData();
-    form.set("version", review.pack.version);
-    form.set("checksum", review.pack.checksum);
-    form.set("confirmation", "accepted");
-    return runAction(approveGitHubMappingPackAction, form);
+    form.set("entryId", entry.id);
+    form.set("entryDigest", entry.review.entryDigest);
+    form.set("decision", decision);
+    form.set("expectedRevision", String(entry.review.revision));
+    return runAction(recordGitHubMappingEntryDecisionAction, form);
   }
 
   function revoke() {
@@ -132,12 +131,15 @@ function MappingReviewSection({
   return <section className="github-control-room-section" aria-labelledby="github-mapping-title">
     <div className="github-control-room-heading">
       <div>
-        <p className="eyebrow">REVIEWED MAPPING</p>
-        <h3 id="github-mapping-title">GitHub checks mapped to ISO/IEC 27001:2022</h3>
-        <p>Review the exact published mapping before any collected result becomes an official record.</p>
+        <p className="eyebrow">OWNER MAPPING REVIEW</p>
+        <h3 id="github-mapping-title">Individual mapping review</h3>
+        <p>Review each check separately. Only approved mapping entries are used when producing official records.</p>
       </div>
-      <Pill tone={exactApprovalActive ? "green" : "amber"}>{approvalLabel}</Pill>
     </div>
+
+    <p className="github-mapping-review-counts" role="note" aria-label="GitHub mapping review status">
+      {review.entries.length} checks · {counts.pending} pending · {counts.approved} approved · {counts.rejected} rejected
+    </p>
 
     <dl className="github-mapping-identity">
       <div><dt>Version</dt><dd>{review.pack.version}</dd></div>
@@ -150,49 +152,75 @@ function MappingReviewSection({
       <ul>{review.limitations.map((limitation) => <li key={limitation}>{limitation}</li>)}</ul>
     </div>
 
-    {canManageMapping ? room.approval && activeHistory ? <fieldset className="github-owner-decision">
-      <legend>Owner mapping approval</legend>
+    {canManageMapping && room.approval && (activeHistory ? <fieldset className="github-legacy-approval">
+      <legend>Earlier pack-wide approval</legend>
       <p>{exactApprovalActive
-        ? "This exact mapping is active. Revocation stops future official processing; existing records remain historical."
-        : "Revoke the historical mapping before approving this reviewed version. Existing records remain historical."}</p>
+        ? "This earlier approval covered the mapping as a pack. Check-by-check decisions below now show the effective review for each entry. Revocation stops future official processing; existing records remain historical."
+        : "An earlier pack-wide approval is still active. Revoking it stops future official processing; existing records remain historical."}</p>
       <button className="button secondary" type="button" disabled={pending} onClick={() => void revoke()}>
-        {exactApprovalActive ? "Revoke active mapping" : "Revoke historical mapping"}
-      </button>
-    </fieldset> : room.approval ? <p className="github-read-only-note" role="note">
-      The active mapping history could not be verified. Refresh before making an Owner decision.
-    </p> : <fieldset className="github-owner-decision">
-      <legend>Owner mapping approval</legend>
-      <label className="github-confirmation">
-        <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />
-        <span>I understand these technical signals do not certify ISO compliance or change readiness by themselves.</span>
-      </label>
-      <button className="button primary" type="button" disabled={!confirmed || pending} onClick={() => void approve()}>
-        Approve mapping for official records
+        {exactApprovalActive ? "Revoke earlier approval" : "Revoke historical mapping"}
       </button>
     </fieldset> : <p className="github-read-only-note" role="note">
-      Only workspace Owners can approve mappings or recover processing.
+      The earlier approval record could not be verified. Refresh before attempting to revoke it.
+    </p>)}
+
+    {!canManageMapping && <p className="github-read-only-note" role="note">
+      Only workspace Owners can decide mapping entries or recover processing.
     </p>}
 
-    <details className="github-mapping-details">
-      <summary>Review all 15 mapped checks</summary>
-      <div className="github-mapping-list">
-        {groupChecksByArea(review.entries).map((section) => <section key={section.group.id} aria-label={section.group.title}>
-          <h4 className="github-mapping-group">{section.group.title}</h4>
-          {section.items.map((entry) => <article key={entry.id} aria-label={`${entry.checkId} mapping check`}>
+    <div className="github-mapping-list">
+      {groupChecksByArea(review.entries).map((section) => <section key={section.group.id} aria-label={section.group.title}>
+        <h4 className="github-mapping-group">{section.group.title}</h4>
+        {section.items.map((entry) => {
+          const statusTone = entry.review.status === "approved" ? "green" : entry.review.status === "rejected" ? "red" : "amber";
+          const canApproveEntry = entry.review.status !== "approved" || entry.review.source === "legacy_pack";
+          const canRejectEntry = entry.review.status !== "rejected";
+          return <article key={entry.id} aria-label={`${entry.checkId} mapping check`}>
           <div className="github-mapping-check-head">
-            <div><strong>{githubEvidenceTitle(entry.checkId)}</strong><code>{entry.checkId}</code><small>Rule {entry.ruleVersion}</small></div>
-            <Pill tone={entry.failureSeverity}>{entry.failureSeverity} if failed</Pill>
+            <div>
+              <strong>{githubEvidenceTitle(entry.checkId)}</strong>
+              <code>{entry.checkId}</code>
+              <small>Rule {entry.ruleVersion}</small>
+            </div>
+            <div className="github-mapping-status-pills">
+              <Pill tone={statusTone}>{entry.review.status === "pending" ? "Pending review" : entry.review.status === "approved" ? "Approved" : "Rejected"}</Pill>
+              <Pill tone={entry.failureSeverity}>{entry.failureSeverity} if failed</Pill>
+            </div>
           </div>
-          <p><strong>ISO references:</strong> {entry.isoControlReferences.join(" · ")}</p>
-          <p><strong>Verified technical pass → evidence:</strong> {entry.treatments.pass.summary}</p>
-          <p><strong>Verified issue → finding:</strong> {entry.treatments.fail.summary}</p>
-          <p><strong>Could not verify:</strong> {entry.treatments.unknown.summary}</p>
-          <p><strong>Not applicable:</strong> {entry.treatments.not_applicable.summary}</p>
-          <p><strong>Suggested remediation:</strong> {entry.remediation}</p>
-          </article>)}
-        </section>)}
-      </div>
-    </details>
+          {entry.review.source === "legacy_pack" && <p className="github-mapping-source">Effective status comes from an earlier pack-wide approval.</p>}
+          {entry.review.changeReason === "changed" ? <p className="github-mapping-change-note" role="note">
+            Mapping changed since its last review. This version needs a fresh Owner decision.
+          </p> : entry.review.changeReason === "not_reviewed" ? <p className="github-mapping-change-note" role="note">
+            This check has not been reviewed by an Owner yet.
+          </p> : null}
+          <dl className="github-mapping-entry-details">
+            <div><dt>ISO references</dt><dd>{entry.isoControlReferences.join(" · ")}</dd></div>
+            <div><dt>When the check passes</dt><dd>{entry.treatments.pass.summary}</dd></div>
+            <div><dt>When the check finds an issue</dt><dd>{entry.treatments.fail.summary}</dd></div>
+            <div><dt>When the result is unknown</dt><dd>{entry.treatments.unknown.summary}</dd></div>
+            <div><dt>When the check does not apply</dt><dd>{entry.treatments.not_applicable.summary}</dd></div>
+            <div><dt>Suggested remediation</dt><dd>{entry.remediation}</dd></div>
+          </dl>
+          {canManageMapping && <div className="github-mapping-decision-controls" aria-label={`Owner decision for ${entry.checkId}`}>
+            {canApproveEntry && <button
+              className="button primary"
+              type="button"
+              disabled={pending}
+              aria-label={`Approve mapping for ${entry.checkId}`}
+              onClick={() => void decide(entry, "approved")}
+            >Approve check</button>}
+            {canRejectEntry && <button
+              className="button secondary"
+              type="button"
+              disabled={pending}
+              aria-label={`Reject mapping for ${entry.checkId}`}
+              onClick={() => void decide(entry, "rejected")}
+            >Reject check</button>}
+          </div>}
+          </article>;
+        })}
+      </section>)}
+    </div>
 
     <div className="github-approval-history">
       <h4>Approval history</h4>

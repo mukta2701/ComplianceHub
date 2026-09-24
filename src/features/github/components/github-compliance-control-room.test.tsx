@@ -7,10 +7,11 @@ import type { GitHubComplianceControlRoom } from "../application/github-complian
 import type { GitHubMappingReview } from "../application/github-mapping-review";
 
 const hoisted = vi.hoisted(() => ({
-  approve: vi.fn(), revoke: vi.fn(), process: vi.fn(), retry: vi.fn(), refresh: vi.fn(),
+  approve: vi.fn(), recordDecision: vi.fn(), revoke: vi.fn(), process: vi.fn(), retry: vi.fn(), refresh: vi.fn(),
 }));
 vi.mock("@/app/app/monitoring/github-control-room-actions", () => ({
   approveGitHubMappingPackAction: hoisted.approve,
+  recordGitHubMappingEntryDecisionAction: hoisted.recordDecision,
   revokeGitHubMappingApprovalAction: hoisted.revoke,
   processApprovedGitHubResultsAction: hoisted.process,
   retryExhaustedGitHubMaterialisationAction: hoisted.retry,
@@ -57,6 +58,19 @@ function review(): GitHubMappingReview {
       "A verified technical pass is evidence for review, not proof that the mapped control is fully implemented.",
       "Unknown or not-applicable results do not create compliance-positive evidence or improve readiness.",
     ],
+  };
+}
+
+function reviewWithEntryDecisions(
+  decisions: Array<Partial<GitHubMappingReview["entries"][number]["review"]>>,
+): GitHubMappingReview {
+  const fixture = review();
+  return {
+    ...fixture,
+    entries: fixture.entries.map((entry, index) => ({
+      ...entry,
+      review: { ...entry.review, ...decisions[index] },
+    })),
   };
 }
 
@@ -114,28 +128,48 @@ describe("GitHubComplianceControlRoomPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     hoisted.approve.mockResolvedValue({ ok: true, message: "GitHub mapping approved. Official records can now be processed." });
+    hoisted.recordDecision.mockResolvedValue({ ok: true, message: "GitHub mapping entry updated." });
     hoisted.revoke.mockResolvedValue({ ok: true, message: "GitHub mapping approval revoked. Existing records remain historical." });
     hoisted.process.mockResolvedValue({ ok: true, message: "Official GitHub records processed: 1 run updated." });
     hoisted.retry.mockResolvedValue({ ok: true, message: "GitHub processing retry queued." });
   });
 
-  it("explains the four phases and shows exact mapping identity, all 15 checks, ISO references, treatments, limitations, and identity-free history", () => {
-    render(<GitHubComplianceControlRoomPanel room={room()} review={review()} role="member" unhealthyRepositoryIds={[]} />);
+  it("shows counts and 15 individual mapping decisions, with changed reasons and technical mapping details", () => {
+    const mappingReview = reviewWithEntryDecisions([
+      {
+        status: "pending", source: "none", decisionId: null, legacyApprovalId: null,
+        reviewerId: null, reviewedAt: null, revision: 2, changeReason: "changed",
+      },
+      {
+        status: "rejected", source: "entry_decision", decisionId: APPROVAL, legacyApprovalId: null,
+        reviewerId: ORG, reviewedAt: "2026-08-25T08:00:00.000Z", revision: 1, changeReason: null,
+      },
+    ]);
+    render(<GitHubComplianceControlRoomPanel room={room()} review={mappingReview} role="member" unhealthyRepositoryIds={[]} />);
 
     const workflow = screen.getByRole("list", { name: "How GitHub compliance becomes official" });
     expect(within(workflow).getAllByRole("listitem")).toHaveLength(4);
-    expect(screen.getByText("Review all 15 mapped checks").closest("details")).not.toHaveAttribute("open");
     expect(screen.getByText(STANDARD_GITHUB_ISO_MAPPING_PACK.version)).toBeVisible();
     expect(screen.getByText(STANDARD_GITHUB_ISO_MAPPING_PACK.checksum)).toBeVisible();
     expect(screen.getAllByRole("article", { name: /mapping check$/ })).toHaveLength(15);
-    const mapping = screen.getByText("Review all 15 mapped checks").closest("details") as HTMLElement;
+    expect(screen.getByRole("note", { name: "GitHub mapping review status" }))
+      .toHaveTextContent("15 checks · 1 pending · 13 approved · 1 rejected");
+    const pendingEntry = mappingReview.entries[0]!;
+    const pendingCard = screen.getByRole("article", { name: `${pendingEntry.checkId} mapping check` });
+    expect(within(pendingCard).getByText("Pending review")).toBeVisible();
+    expect(within(pendingCard).getByText(/Mapping changed since its last review/)).toBeVisible();
+    expect(within(pendingCard).getByText(pendingEntry.isoControlReferences.join(" · "))).toBeVisible();
+    expect(within(pendingCard).getByText(pendingEntry.treatments.pass.summary)).toBeVisible();
+    expect(within(pendingCard).getByText(pendingEntry.treatments.fail.summary)).toBeVisible();
+    const rejectedEntry = mappingReview.entries[1]!;
+    expect(within(screen.getByRole("article", { name: `${rejectedEntry.checkId} mapping check` }))
+      .getByText("Rejected")).toBeVisible();
+    const mapping = screen.getByRole("region", { name: "Individual mapping review" });
     for (const group of ["Repository basics", "Branch protection", "Dependency and code alerts", "Secret protection", "Workflows and access"]) {
       expect(within(mapping).getByRole("heading", { name: group })).toBeInTheDocument();
     }
-    expect(within(mapping).getByText("Force-push protection")).toBeInTheDocument();
-    expect(within(mapping).getByText("github.branch.force_pushes")).toBeInTheDocument();
-    expect(screen.getByText("A.5.18 · A.8.2")).not.toBeVisible();
-    expect(screen.getAllByText(/Verified technical pass → evidence/).length).toBeGreaterThan(0);
+    expect(within(mapping).getByText("Force-push protection")).toBeVisible();
+    expect(within(mapping).getByText("github.branch.force_pushes")).toBeVisible();
     expect(screen.getByText(/do not certify ISO\/IEC 27001 compliance/)).toBeVisible();
     expect(screen.getByRole("heading", { name: "Approval history" })).toBeVisible();
     expect(screen.queryByText(/approved_by|actor|email/i)).not.toBeInTheDocument();
@@ -271,40 +305,49 @@ describe("GitHubComplianceControlRoomPanel", () => {
     const repository = screen.getByRole("article", { name: "Mukta2701/ComplianceHub official compliance" });
     expect(within(repository).getByText("Collected, not official")).toBeVisible();
     expect(repository).not.toHaveTextContent(/\bshadow\b/i);
-    expect(screen.getByText(/before any collected result becomes an official record/i)).toBeVisible();
+    expect(screen.getByText(/Only approved mapping entries are used when producing official records/i)).toBeVisible();
   });
 
   it.each(["admin", "member"] as const)("keeps mapping and recovery controls read-only for %s", (role) => {
-    render(<GitHubComplianceControlRoomPanel room={room()} review={review()} role={role} unhealthyRepositoryIds={[]} />);
-    expect(screen.getByText("Only workspace Owners can approve mappings or recover processing.")).toBeVisible();
+    const mappingReview = reviewWithEntryDecisions([
+      { status: "pending", source: "none", legacyApprovalId: null, revision: 1, changeReason: "not_reviewed" },
+    ]);
+    render(<GitHubComplianceControlRoomPanel room={room()} review={mappingReview} role={role} unhealthyRepositoryIds={[]} />);
+    expect(screen.getByText("Only workspace Owners can decide mapping entries or recover processing.")).toBeVisible();
     expect(screen.queryByRole("button", { name: /approve|revoke|process|retry/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /reject mapping/i })).not.toBeInTheDocument();
   });
 
-  it("requires an explicit Owner confirmation and reports the safe action result through one live region", async () => {
+  it.each([
+    ["approved", "Approve mapping for github.branch.force_pushes"],
+    ["rejected", "Reject mapping for github.branch.force_pushes"],
+  ] as const)("records one exact Owner decision as %s and reports the safe result", async (decision, buttonName) => {
     const user = userEvent.setup();
+    const mappingReview = reviewWithEntryDecisions(review().entries.map(() => ({
+      status: "pending", source: "none", legacyApprovalId: null, revision: 3, changeReason: "not_reviewed",
+    })));
+    const entry = mappingReview.entries.find((candidate) => candidate.checkId === "github.branch.force_pushes")!;
     render(<GitHubComplianceControlRoomPanel
       room={room({ approval: null })}
-      review={review()}
+      review={mappingReview}
       role="owner"
       unhealthyRepositoryIds={[]}
     />);
-    const fieldset = screen.getByRole("group", { name: "Owner mapping approval" });
-    const approve = within(fieldset).getByRole("button", { name: "Approve mapping for official records" });
-    expect(approve).toBeDisabled();
-    await user.click(within(fieldset).getByRole("checkbox", { name: /I understand/ }));
-    expect(approve).toBeEnabled();
-    await user.click(approve);
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("GitHub mapping approved"));
-    expect(Object.fromEntries(hoisted.approve.mock.calls[0][0] as FormData)).toEqual({
-      version: STANDARD_GITHUB_ISO_MAPPING_PACK.version,
-      checksum: STANDARD_GITHUB_ISO_MAPPING_PACK.checksum,
-      confirmation: "accepted",
+    const entryCard = screen.getByRole("article", { name: `${entry.checkId} mapping check` });
+    await user.click(within(entryCard).getByRole("button", { name: buttonName }));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("GitHub mapping entry updated"));
+    expect(Object.fromEntries(hoisted.recordDecision.mock.calls[0][0] as FormData)).toEqual({
+      entryId: entry.id,
+      entryDigest: "a".repeat(64),
+      decision,
+      expectedRevision: "3",
     });
+    expect(hoisted.approve).not.toHaveBeenCalled();
     expect(hoisted.refresh).toHaveBeenCalledOnce();
     expect(screen.getAllByRole("status")).toHaveLength(1);
   });
 
-  it("does not label a historical active mapping as approval of the reviewed pack", () => {
+  it("keeps a historical pack approval separate from the individual mapping decisions", () => {
     const historicalRoom = room();
     historicalRoom.approval = {
       ...historicalRoom.approval!,
@@ -330,9 +373,14 @@ describe("GitHubComplianceControlRoomPanel", () => {
       unhealthyRepositoryIds={[]}
     />);
 
-    expect(screen.getByText("Different mapping active")).toBeVisible();
-    expect(screen.getByText(/Revoke the historical mapping before approving this reviewed version/)).toBeVisible();
+    expect(screen.getByText("Earlier pack-wide approval")).toBeVisible();
+    expect(screen.getByText(/An earlier pack-wide approval is still active/)).toBeVisible();
+    const legacyEntry = screen.getByRole("article", { name: "github.branch.force_pushes mapping check" });
+    expect(within(legacyEntry).getByText("Effective status comes from an earlier pack-wide approval.")).toBeVisible();
+    expect(within(legacyEntry).getByRole("button", { name: "Approve mapping for github.branch.force_pushes" })).toBeVisible();
+    expect(within(legacyEntry).getByRole("button", { name: "Reject mapping for github.branch.force_pushes" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Revoke historical mapping" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Approve mapping for official records" })).not.toBeInTheDocument();
     expect(screen.queryByText("Owner approved")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Process approved results" })).not.toBeInTheDocument();
   });
