@@ -1,0 +1,150 @@
+name: Collect GitHub compliance checks (AWS dev)
+
+on:
+  schedule:
+    - cron: "23 9 * * *"
+  workflow_dispatch:
+    inputs:
+      expected_release_sha:
+        description: Exact release SHA currently shown by AWS dev health
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compliancehub-github-daily-collection-aws-dev
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: eu-west-2
+  ECR_REPOSITORY: compliancehub-dev
+
+jobs:
+  collect:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: aws-dev
+    timeout-minutes: 12
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check required AWS, Supabase and GitHub App configuration
+        env:
+          AWS_DEV_DEPLOY_ROLE_ARN: ${{ secrets.AWS_DEV_DEPLOY_ROLE_ARN }}
+          AWS_DEV_ECR_REGISTRY: ${{ vars.AWS_DEV_ECR_REGISTRY }}
+          AWS_DEV_SERVICE_ARN: ${{ vars.AWS_DEV_SERVICE_ARN }}
+          AWS_DEV_SITE_URL: ${{ vars.AWS_DEV_SITE_URL }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          AWS_DEV_GITHUB_APP_ID: ${{ secrets.AWS_DEV_GITHUB_APP_ID }}
+          AWS_DEV_GITHUB_APP_PRIVATE_KEY: ${{ secrets.AWS_DEV_GITHUB_APP_PRIVATE_KEY }}
+          AWS_DEV_GITHUB_APPROVED_SECURITY_WORKFLOW_IDS: ${{ secrets.AWS_DEV_GITHUB_APPROVED_SECURITY_WORKFLOW_IDS }}
+        run: node scripts/daily-collection-image-binding.mjs --check-config
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEV_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve current App Runner image and prove its release
+        id: image
+        env:
+          AWS_DEV_DEPLOY_ROLE_ARN: ${{ secrets.AWS_DEV_DEPLOY_ROLE_ARN }}
+          AWS_DEV_ECR_REGISTRY: ${{ vars.AWS_DEV_ECR_REGISTRY }}
+          AWS_DEV_SERVICE_ARN: ${{ vars.AWS_DEV_SERVICE_ARN }}
+          AWS_DEV_SITE_URL: ${{ vars.AWS_DEV_SITE_URL }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          AWS_DEV_GITHUB_APP_ID: ${{ secrets.AWS_DEV_GITHUB_APP_ID }}
+          AWS_DEV_GITHUB_APP_PRIVATE_KEY: ${{ secrets.AWS_DEV_GITHUB_APP_PRIVATE_KEY }}
+          AWS_DEV_GITHUB_APPROVED_SECURITY_WORKFLOW_IDS: ${{ secrets.AWS_DEV_GITHUB_APPROVED_SECURITY_WORKFLOW_IDS }}
+          COMPLIANCEHUB_EVENT_NAME: ${{ github.event_name }}
+          EXPECTED_RELEASE_SHA: ${{ inputs.expected_release_sha }}
+        run: |
+          set -euo pipefail
+          image_identifier="$(aws apprunner describe-service \
+            --region "$AWS_REGION" \
+            --service-arn "$AWS_DEV_SERVICE_ARN" \
+            --query 'Service.SourceConfiguration.ImageRepository.ImageIdentifier' \
+            --output text)"
+          expected_prefix="${AWS_DEV_ECR_REGISTRY}/${ECR_REPOSITORY}@"
+          if [[ "$image_identifier" != "$expected_prefix"* ]]; then
+            echo "AWS dev is not using the expected immutable ECR image" >&2
+            exit 1
+          fi
+          image_digest="${image_identifier#"$expected_prefix"}"
+          if [[ ! "$image_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "AWS dev image digest is invalid" >&2
+            exit 1
+          fi
+
+          live_health="$(curl --fail-with-body --retry 3 --retry-all-errors --retry-delay 2 \
+            --connect-timeout 10 --max-time 60 "${AWS_DEV_SITE_URL%/}/api/health/live")"
+          database_health="$(curl --fail-with-body --retry 3 --retry-all-errors --retry-delay 2 \
+            --connect-timeout 10 --max-time 60 "${AWS_DEV_SITE_URL%/}/api/health")"
+          ecr_details="$(aws ecr describe-images --region "$AWS_REGION" \
+            --repository-name "$ECR_REPOSITORY" --image-ids "imageDigest=$image_digest" \
+            --query 'imageDetails[0].{imageDigest:imageDigest,imageTags:imageTags}' --output json)"
+
+          export AWS_DEV_IMAGE_IDENTIFIER="$image_identifier"
+          export AWS_DEV_LIVE_HEALTH_JSON="$live_health"
+          export AWS_DEV_DATABASE_HEALTH_JSON="$database_health"
+          export AWS_DEV_ECR_IMAGE_DETAILS_JSON="$ecr_details"
+          binding="$(node scripts/daily-collection-image-binding.mjs)"
+          printf '%s\n' "$binding" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to ECR and pull the verified image digest
+        env:
+          IMAGE_URI: ${{ steps.image.outputs.image_uri }}
+          AWS_DEV_ECR_REGISTRY: ${{ vars.AWS_DEV_ECR_REGISTRY }}
+        run: |
+          set -euo pipefail
+          aws ecr get-login-password --region "$AWS_REGION" | \
+            docker login --username AWS --password-stdin "$AWS_DEV_ECR_REGISTRY"
+          docker pull "$IMAGE_URI"
+
+      - name: Run one bounded daily GitHub collection cycle
+        env:
+          IMAGE_URI: ${{ steps.image.outputs.image_uri }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+          GITHUB_APP_ID: ${{ secrets.AWS_DEV_GITHUB_APP_ID }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.AWS_DEV_GITHUB_APP_PRIVATE_KEY }}
+          GITHUB_APPROVED_SECURITY_WORKFLOW_IDS: ${{ secrets.AWS_DEV_GITHUB_APPROVED_SECURITY_WORKFLOW_IDS }}
+          NODE_ENV: production
+        run: |
+          set -euo pipefail
+          runner_log="${RUNNER_TEMP}/compliancehub-github-daily-${GITHUB_RUN_ID}.log"
+          trap 'rm -f "$runner_log"' EXIT
+          set +e
+          timeout --kill-after=10s 7m docker run --rm \
+            --read-only --tmpfs /tmp:rw,noexec,nosuid,size=16m \
+            --memory 1g --cpus 1 --pids-limit 128 \
+            --env NODE_ENV \
+            --env NEXT_PUBLIC_SUPABASE_URL \
+            --env SUPABASE_SERVICE_ROLE_KEY \
+            --env GITHUB_APP_ID \
+            --env GITHUB_APP_PRIVATE_KEY \
+            --env GITHUB_APPROVED_SECURITY_WORKFLOW_IDS \
+            --entrypoint node \
+            "$IMAGE_URI" dist/github-compliance-collect.mjs >"$runner_log" 2>&1
+          status=$?
+          set -e
+          set +e
+          safe_summary="$(node scripts/daily-collection-image-binding.mjs --sanitize-runner-log "$runner_log" 2>/dev/null)"
+          summary_status=$?
+          set -e
+          if [[ -n "$safe_summary" ]]; then
+            printf '%s\n' "$safe_summary"
+          else
+            echo "Daily GitHub collection returned no safe summary."
+          fi
+          if [[ "$status" -ne 0 || "$summary_status" -ne 0 ]]; then
+            exit 1
+          fi

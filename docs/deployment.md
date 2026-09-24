@@ -134,16 +134,17 @@ from ECR (`compliancehub-dev`). Render, Azure, and Vercel hosting are not used.
 2. Record the App Runner service URL. Set `NEXT_PUBLIC_SITE_URL` to its HTTPS
    origin and `MCP_RESOURCE_URL` to the same origin ending exactly in `/mcp`.
 3. Create the protected GitHub environment `aws-dev`. Configure the
-   variables and secrets below. Public values are build inputs; secret values
-   are passed only to the App Runner update call as runtime environment
-   variables and are never baked into the container image.
+   variables and secrets below. Public values are build inputs; server secrets
+   are passed at runtime to App Runner or to a bounded collection container,
+   never baked into the image.
 4. The **Deploy AWS dev** workflow (`.github/workflows/deploy-aws-dev.yml`)
    builds and pushes the immutable image for `main` (reusing the image when
    the commit is already built), updates the App Runner service, waits for it
    to report `RUNNING`, then verifies `/api/health/live` matches the deployed
-   SHA and `/api/health` reports database access. The deploy job alone
-   receives the AWS OIDC token and environment secrets; build and test actions
-   run outside that trust boundary.
+   SHA and `/api/health` reports database access. The deploy and daily
+   collection jobs receive the AWS OIDC token only inside the protected
+   `aws-dev` environment; each receives only the secrets it needs. Build and
+   general test actions run outside that trust boundary.
 5. Do not merge or deploy a release until the hosted migration checkpoint and
    GitHub organisation-owner registration checkpoint below are complete.
 
@@ -176,7 +177,7 @@ printing their values.
 
 | Secret | Purpose |
 |---|---|
-| `AWS_DEV_DEPLOY_ROLE_ARN` | OIDC role the deploy job assumes |
+| `AWS_DEV_DEPLOY_ROLE_ARN` | Existing OIDC role used by the AWS dev deploy and daily collection jobs |
 | `SUPABASE_SERVICE_ROLE_KEY` | Server-only cron and validated digest lifecycle |
 | `APP_ENCRYPTION_KEY` | Stable AES-256-GCM application key |
 | `CRON_SECRET` | Authenticates maintenance workflow calls |
@@ -189,6 +190,34 @@ printing their values.
 | `AWS_DEV_GITHUB_APP_SLUG` | Maps to runtime `GITHUB_APP_SLUG`; exact private App slug |
 | `AWS_DEV_GITHUB_ALLOWED_ACCOUNT_ID` | Maps to runtime `GITHUB_ALLOWED_ACCOUNT_ID`; immutable numeric organisation ID |
 | `AWS_DEV_GITHUB_APPROVED_SECURITY_WORKFLOW_IDS` | Maps to runtime `GITHUB_APPROVED_SECURITY_WORKFLOW_IDS`; one to twenty comma-separated numeric workflow IDs for the dedicated pilot repository |
+
+### Daily GitHub compliance collection (AWS dev)
+
+Once merged to `main`, the protected `Collect GitHub compliance checks (AWS
+dev)` workflow is configured to run daily at 09:23 UTC, subject to the
+`aws-dev` environment protections. It requires the AWS dev, Supabase and
+read-only GitHub App configuration above. Before running, it checks that the
+live app and database are healthy. It also checks that the App Runner image
+uses the exact ECR digest and that the live release SHA is a tag on that
+digest. A manual run must supply the exact release SHA shown by the live
+health endpoint.
+The runner then executes `dist/github-compliance-collect.mjs` from that
+immutable image, collecting only active, selected repositories and writing
+count-only results to the workflow log. The collection command has a
+four-minute internal deadline; Docker and the job have seven- and twelve-minute
+limits.
+
+This is source configuration only. No scheduled run, live GitHub collection or
+provider acceptance has been demonstrated from this feature branch.
+
+The job's GitHub permissions are `contents: read` plus `id-token: write` for
+AWS OIDC; it has no repository write permission and contains no App Runner
+update call. It reuses the existing `AWS_DEV_DEPLOY_ROLE_ARN` for the approved
+Milestone 1 workflow pattern. A dedicated AWS role restricted to describing
+the App Runner service and pulling this ECR repository is a later IAM
+hardening option. The container receives only the Supabase service-role key
+and GitHub App ID, private key and approved workflow IDs as secrets. It does
+not receive Slack, webhook or OAuth-client credentials.
 
 GitHub may download an RSA private key with a `BEGIN RSA PRIVATE KEY` header,
 but the runtime deliberately accepts PKCS#8 only. Convert the downloaded key
