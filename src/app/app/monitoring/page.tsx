@@ -130,7 +130,7 @@ function GitHubTechnicalReview({
   role: "owner" | "admin" | "member";
   unhealthyRepositoryIds: string[];
 }) {
-  return <details className="monitor-technical-review" open={review.entries.some((entry) => entry.review.status === "pending")}>
+  return <details id="github-check-review" className="monitor-technical-review" open={review.entries.some((entry) => entry.review.status === "pending")}>
     <summary>Technical review and recovery</summary>
     <p>Review how repository checks become governed ISO evidence or findings, and use authorised recovery controls.</p>
     <GitHubComplianceControlRoomPanel
@@ -267,6 +267,7 @@ export default async function MonitoringPage({
         {pendingGitHubCheckReviews > 0 && <p>{pendingGitHubCheckReviews} GitHub check{pendingGitHubCheckReviews === 1 ? "" : "s"} await Owner review</p>}
       </div>
       <span className="monitor-banner-actions">
+        {pendingGitHubCheckReviews > 0 && <a className="button" href="#github-check-review">View {pendingGitHubCheckReviews} pending check{pendingGitHubCheckReviews === 1 ? "" : "s"}</a>}
         {shouldShowRunMonitoring(membership.role, otherSources.length) && <form action={runMonitoringNowAction}><button className="button">Run checks now</button></form>}
         <Link className="button secondary" href="/app/integrations">Manage connections and alerts</Link>
       </span>

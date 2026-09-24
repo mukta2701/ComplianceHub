@@ -210,7 +210,7 @@ describe("operator monitoring page", () => {
       render(await MonitoringPage());
       expect(screen.getByText("No recorded active findings")).toBeVisible();
       expect(screen.queryByText("No active findings")).not.toBeInTheDocument();
-      const banner = screen.getByText("No recorded active findings").closest(".monitor-banner");
+      const banner = screen.getByText("No recorded active findings").closest<HTMLElement>(".monitor-banner");
       expect(banner).toHaveTextContent("1 system monitored");
       expect(banner).toHaveTextContent("Check coverage and approvals before relying on this status.");
       expect(banner?.querySelector(".monitor-dot")).toHaveClass("neutral");
@@ -230,8 +230,12 @@ describe("operator monitoring page", () => {
     ];
     try {
       render(await MonitoringPage());
-      const banner = screen.getByText("No recorded active findings").closest(".monitor-banner");
+      const banner = screen.getByText("No recorded active findings").closest<HTMLElement>(".monitor-banner");
       expect(banner).toHaveTextContent("2 GitHub checks await Owner review");
+      expect(within(banner!).getByRole("link", { name: "View 2 pending checks" }))
+        .toHaveAttribute("href", "#github-check-review");
+      expect(screen.getByText("Technical review and recovery").closest("details"))
+        .toHaveAttribute("id", "github-check-review");
       expect(screen.getByText("Technical review and recovery").closest("details")).toHaveAttribute("open");
     } finally {
       hoisted.rows.monitoring_findings = current;
