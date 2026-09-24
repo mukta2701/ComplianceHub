@@ -563,7 +563,8 @@ test("selects repository scope in Connections and shows official collection heal
 
   await page.goto("/app/monitoring");
   await expect(page.getByRole("heading", { name: "GitHub monitoring" })).toBeVisible();
-  await expect(repositoryCard(page, `${accountLogin}/fresh`).getByText("Up to date", { exact: true })).toBeVisible();
+  await expect(repositoryCard(page, `${accountLogin}/fresh`).getByText("Checked recently", { exact: true })).toBeVisible();
+  await expect(repositoryCard(page, `${accountLogin}/fresh`).getByText("Up to date", { exact: true })).toHaveCount(0);
   await expect(repositoryCard(page, `${accountLogin}/fresh`)).toContainText("1 check needs attention");
   await expect(repositoryCard(page, `${accountLogin}/fresh`)).toContainText("Last checked");
   await expect(repositoryCard(page, `${accountLogin}/partial`).getByText("Some checks could not be completed", { exact: true })).toBeVisible();
