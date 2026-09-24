@@ -20,9 +20,27 @@ type DailyCollectionCommandDependencies = {
   writeStderr(message: string): void;
 };
 
-export async function runDailyCollectionCommand(dependencies: DailyCollectionCommandDependencies): Promise<number> {
+type DailyCollectionCommandOptions = {
+  deadlineMs?: number;
+  onDeadline?(): void;
+};
+
+export async function runDailyCollectionCommand(
+  dependencies: DailyCollectionCommandDependencies,
+  options: DailyCollectionCommandOptions = {},
+): Promise<number> {
+  const expired = Symbol("daily collection deadline");
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<typeof expired>((resolve) => {
+    timer = setTimeout(() => resolve(expired), options.deadlineMs ?? SCHEDULED_COLLECTION_DEADLINE_MS);
+  });
   try {
-    const cycle = await dependencies.run();
+    const cycle = await Promise.race([dependencies.run(), deadline]);
+    if (cycle === expired) {
+      dependencies.writeStderr("GitHub daily collection did not complete.");
+      options.onDeadline?.();
+      return 1;
+    }
     dependencies.writeStdout(JSON.stringify({
       event: "github_daily_collection",
       ...scheduledGitHubCollectionLogSummary(cycle),
@@ -31,6 +49,8 @@ export async function runDailyCollectionCommand(dependencies: DailyCollectionCom
   } catch {
     dependencies.writeStderr("GitHub daily collection did not complete.");
     return 1;
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
@@ -52,7 +72,7 @@ async function main(): Promise<void> {
     run: runCollection,
     writeStdout: (message) => process.stdout.write(`${message}\n`),
     writeStderr: (message) => process.stderr.write(`${message}\n`),
-  });
+  }, { onDeadline: () => process.exit(1) });
   process.exitCode = exitCode;
 }
 

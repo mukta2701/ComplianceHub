@@ -250,6 +250,8 @@ export async function runGitHubCollection(deps: CollectionDependencies, request:
         if (reservation.acquisitionState === "completed_duplicate") {
           if (reservation.status === "succeeded" || reservation.status === "partial") {
             summary.terminalRuns.push(terminalReference(reservation, target, reservation.status));
+          } else {
+            summary.repositoriesFailed += 1;
           }
           continue;
         }

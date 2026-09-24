@@ -197,17 +197,18 @@ describe("runGitHubCollection", () => {
     ]);
   });
 
-  it("does not expose failed completed duplicates as materialisation candidates", async () => {
+  it.each(["failed", "rate_limited"] as const)("keeps a %s completed duplicate visible as failed daily work", async (status) => {
     const item = target();
     const deps = dependencies([item]);
     vi.mocked(deps.reserveRun).mockResolvedValue(reservation(item, {
       acquisitionState: "completed_duplicate",
-      status: "failed",
+      status,
     }));
 
     const summary = await runGitHubCollection(deps, { trigger: "manual", requestKey: "manual:failed-duplicate" });
 
     expect(summary.terminalRuns).toEqual([]);
+    expect(summary.repositoriesFailed).toBe(1);
   });
 
   it("fails closed before collection when a dependency returns a different persisted run mode", async () => {

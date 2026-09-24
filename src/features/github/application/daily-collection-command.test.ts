@@ -38,7 +38,7 @@ async function commandRunner() {
       run(): Promise<ScheduledCollectionCycle>;
       writeStdout(message: string): void;
       writeStderr(message: string): void;
-    }) => Promise<number>;
+    }, options?: { deadlineMs?: number; onDeadline?(): void }) => Promise<number>;
   }).runDailyCollectionCommand;
   expect(runner).toBeTypeOf("function");
   if (!runner) throw new Error("daily collection command is missing");
@@ -92,5 +92,29 @@ describe("runDailyCollectionCommand", () => {
     expect(writeStdout).not.toHaveBeenCalled();
     expect(writeStderr).toHaveBeenCalledExactlyOnceWith("GitHub daily collection did not complete.");
     expect(writeStderr.mock.calls.join(" ")).not.toContain("private RPC response");
+  });
+
+  it("ends a stalled dependency at the overall deadline without exposing its detail", async () => {
+    vi.useFakeTimers();
+    try {
+      const command = await commandRunner();
+      const writeStdout = vi.fn();
+      const writeStderr = vi.fn();
+      const onDeadline = vi.fn();
+      const result = command({
+        run: () => new Promise<ScheduledCollectionCycle>(() => undefined),
+        writeStdout,
+        writeStderr,
+      }, { deadlineMs: 250, onDeadline });
+
+      await vi.advanceTimersByTimeAsync(250);
+
+      expect(await result).toBe(1);
+      expect(onDeadline).toHaveBeenCalledOnce();
+      expect(writeStdout).not.toHaveBeenCalled();
+      expect(writeStderr).toHaveBeenCalledExactlyOnceWith("GitHub daily collection did not complete.");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
