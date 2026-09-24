@@ -173,21 +173,25 @@ function MappingReviewSection({
     </p>}
 
     <details className="github-mapping-details">
-      <summary>Review all 15 mapped checks</summary>
+      <summary>Check definitions ({review.entries.length})</summary>
       <div className="github-mapping-list">
         {groupChecksByArea(review.entries).map((section) => <section key={section.group.id} aria-label={section.group.title}>
           <h4 className="github-mapping-group">{section.group.title}</h4>
           {section.items.map((entry) => <article key={entry.id} aria-label={`${entry.checkId} mapping check`}>
           <div className="github-mapping-check-head">
-            <div><strong>{githubEvidenceTitle(entry.checkId)}</strong><code>{entry.checkId}</code><small>Rule {entry.ruleVersion}</small></div>
+            <div><strong>{githubEvidenceTitle(entry.checkId)}</strong></div>
             <Pill tone={entry.failureSeverity}>{entry.failureSeverity} if failed</Pill>
           </div>
           <p><strong>ISO references:</strong> {entry.isoControlReferences.join(" · ")}</p>
-          <p><strong>Verified technical pass → evidence:</strong> {entry.treatments.pass.summary}</p>
-          <p><strong>Verified issue → finding:</strong> {entry.treatments.fail.summary}</p>
-          <p><strong>Could not verify:</strong> {entry.treatments.unknown.summary}</p>
-          <p><strong>Not applicable:</strong> {entry.treatments.not_applicable.summary}</p>
           <p><strong>Suggested remediation:</strong> {entry.remediation}</p>
+          <details className="github-rule-details">
+            <summary>Rule details</summary>
+            <p>Check <code>{entry.checkId}</code> · Rule {entry.ruleVersion}</p>
+            <p><strong>Verified technical pass → evidence:</strong> {entry.treatments.pass.summary}</p>
+            <p><strong>Verified issue → finding:</strong> {entry.treatments.fail.summary}</p>
+            <p><strong>Could not verify:</strong> {entry.treatments.unknown.summary}</p>
+            <p><strong>Not applicable:</strong> {entry.treatments.not_applicable.summary}</p>
+          </details>
           </article>)}
         </section>)}
       </div>

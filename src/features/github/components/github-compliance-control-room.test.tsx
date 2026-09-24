@@ -110,11 +110,11 @@ describe("GitHubComplianceControlRoomPanel", () => {
 
     const workflow = screen.getByRole("list", { name: "How GitHub compliance becomes official" });
     expect(within(workflow).getAllByRole("listitem")).toHaveLength(4);
-    expect(screen.getByText("Review all 15 mapped checks").closest("details")).not.toHaveAttribute("open");
+    expect(screen.getByText("Check definitions (15)").closest("details")).not.toHaveAttribute("open");
     expect(screen.getAllByText(STANDARD_GITHUB_ISO_MAPPING_PACK.version)[0]).toBeVisible();
     expect(screen.getByText(STANDARD_GITHUB_ISO_MAPPING_PACK.checksum)).toBeVisible();
     expect(screen.getAllByRole("article", { name: /mapping check$/ })).toHaveLength(15);
-    const mapping = screen.getByText("Review all 15 mapped checks").closest("details") as HTMLElement;
+    const mapping = screen.getByText("Check definitions (15)").closest("details") as HTMLElement;
     for (const group of ["Repository basics", "Branch protection", "Dependency and code alerts", "Secret protection", "Workflows and access"]) {
       expect(within(mapping).getByRole("heading", { name: group })).toBeInTheDocument();
     }
@@ -125,6 +125,32 @@ describe("GitHubComplianceControlRoomPanel", () => {
     expect(screen.getByText(/do not certify ISO\/IEC 27001 compliance/)).toBeVisible();
     expect(screen.getByRole("heading", { name: "Approval history" })).toBeVisible();
     expect(screen.queryByText(/approved_by|actor|email/i)).not.toBeInTheDocument();
+  });
+
+  it("leads catalogue rows with plain titles and nests raw rule details", async () => {
+    const user = userEvent.setup();
+    render(<GitHubComplianceControlRoomPanel room={room()} review={review()} role="member" unhealthyRepositoryIds={[]} />);
+
+    const catalogue = screen.getByText("Check definitions (15)").closest("details") as HTMLElement;
+    expect(screen.queryByText("Review all 15 mapped checks")).not.toBeInTheDocument();
+    expect(catalogue).not.toHaveAttribute("open");
+    await user.click(within(catalogue).getByText("Check definitions (15)"));
+    expect(screen.getAllByRole("article", { name: /mapping check$/ })).toHaveLength(15);
+    const firstCheck = within(catalogue).getAllByRole("article", { name: /mapping check$/ })[0] as HTMLElement;
+    expect(within(firstCheck).getByText(/if failed/)).toBeVisible();
+    expect(within(firstCheck).getByText(/ISO references:/)).toBeVisible();
+    expect(within(firstCheck).getByText(/Suggested remediation:/)).toBeVisible();
+
+    const ruleDetails = within(firstCheck).getByText("Rule details").closest("details") as HTMLElement;
+    expect(ruleDetails).not.toHaveAttribute("open");
+    expect(within(ruleDetails).getByText(/Verified technical pass → evidence/)).not.toBeVisible();
+    expect(within(ruleDetails).getAllByText(/github\./)[0]).not.toBeVisible();
+    await user.click(within(ruleDetails).getByText("Rule details"));
+    expect(within(ruleDetails).getAllByText(/github\./)[0]).toBeVisible();
+    expect(within(ruleDetails).getByText(/Verified technical pass → evidence/)).toBeVisible();
+    expect(within(ruleDetails).getByText(/Verified issue → finding/)).toBeVisible();
+    expect(within(ruleDetails).getByText(/Could not verify:/)).toBeVisible();
+    expect(within(ruleDetails).getByText(/Not applicable:/)).toBeVisible();
   });
 
   it("uses exact current-state and outcome wording with only canonical repository/evidence/finding links", () => {

@@ -231,17 +231,19 @@ export function OfficialGitHubFindingCard({
       ? <OfficialFindingActions findingId={record.findingId} currentStatus={status} allowedTransitions={record.allowedTransitions} canRaiseTask={!taskId} />
       : <p className="github-read-only-note" role="note">Official finding review is read-only for your role. A workspace Owner records review-state decisions.</p>}
     <details className="github-technical-evidence">
-      <summary>Technical evidence</summary>
-      <p>{record.catalogueSummary}</p>
-      <dl className="github-official-provenance">
-        <div><dt>Check</dt><dd><code>{record.checkId}</code></dd></div>
-        <div><dt>Rule version</dt><dd><code>{record.ruleVersion}</code></dd></div>
-        <div><dt>Mapping version</dt><dd><code>{record.mappingVersion}</code></dd></div>
-        <div><dt>Materialised</dt><dd><time dateTime={record.materialisedAt}>{formatTime(record.materialisedAt)}</time></dd></div>
-        <div><dt>First detected</dt><dd><time dateTime={record.firstDetectedAt}>{formatTime(record.firstDetectedAt)}</time></dd></div>
-        <div><dt>Most recent detection</dt><dd><time dateTime={record.mostRecentDetectedAt}>{formatTime(record.mostRecentDetectedAt)}</time></dd></div>
-        <div className="github-official-provenance-wide"><dt>Mapping checksum</dt><dd><code>{record.mappingChecksum}</code></dd></div>
-      </dl>
+      <summary>Audit details</summary>
+      <p>First found <time dateTime={record.firstDetectedAt}>{formatTime(record.firstDetectedAt)}</time> · Last found <time dateTime={record.mostRecentDetectedAt}>{formatTime(record.mostRecentDetectedAt)}</time></p>
+      <details className="github-internal-identifiers">
+        <summary>Internal identifiers</summary>
+        <p>{record.catalogueSummary}</p>
+        <dl className="github-official-provenance">
+          <div><dt>Check</dt><dd><code>{record.checkId}</code></dd></div>
+          <div><dt>Rule version</dt><dd><code>{record.ruleVersion}</code></dd></div>
+          <div><dt>Mapping version</dt><dd><code>{record.mappingVersion}</code></dd></div>
+          <div><dt>Materialised</dt><dd><time dateTime={record.materialisedAt}>{formatTime(record.materialisedAt)}</time></dd></div>
+          <div className="github-official-provenance-wide"><dt>Mapping checksum</dt><dd><code>{record.mappingChecksum}</code></dd></div>
+        </dl>
+      </details>
       <p className="github-official-boundary" role="note">
         This technical signal does not certify ISO/IEC 27001 compliance or change readiness. It automatically resolves only after a newer fresh passing check; human review, task completion, an exception request, or risk acceptance does not turn it into a passing result.
       </p>
