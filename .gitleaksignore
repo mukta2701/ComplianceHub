@@ -1,0 +1,4 @@
+# Historical false positive: the named field held only the literal test marker
+# "fixture-marker-123". The field has been removed; retain this exact finding
+# fingerprint so the branch-history scan does not suppress any future finding.
+89749b58cf707ef8701c08f2ef25552a1f0e5955:src/test/github-daily-collection-packaging.test.ts:generic-api-key:129

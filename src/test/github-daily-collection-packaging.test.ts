@@ -126,7 +126,6 @@ describe("AWS dev daily GitHub compliance collection workflow", () => {
         repositoriesFailed: 0,
         repositoriesDeferred: 0,
         runsPartial: 0,
-        privateKey: "fixture-marker-123",
       },
       materialisation: {
         runsConsidered: 4,
