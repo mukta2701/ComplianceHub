@@ -163,6 +163,7 @@ jobs:
           timeout 15s docker run --rm --network "$fixture_network" \
             --env NODE_ENV=production \
             --env NEXT_PUBLIC_SUPABASE_URL=http://compliancehub-runner-store-ci:4400 \
+            --env NEXT_PUBLIC_SITE_URL=https://compliancehub-ci.example \
             --env SUPABASE_SERVICE_ROLE_KEY="$fixture_secret" \
             --env GITHUB_APP_ID=1 \
             --env GITHUB_APP_PRIVATE_KEY="$private_key" \

@@ -100,6 +100,14 @@ describe("AWS dev daily GitHub compliance collection workflow", () => {
     expect(workflow).toContain("scripts/daily-collection-image-binding.mjs --sanitize-runner-log");
   });
 
+  it("passes the validated AWS dev site origin to the production collector", async () => {
+    const workflow = await readFile(workflowPath, "utf8");
+    const runnerStep = workflow.split("      - name: Run one bounded daily GitHub collection cycle")[1] ?? "";
+
+    expect(runnerStep).toContain("NEXT_PUBLIC_SITE_URL: ${{ vars.AWS_DEV_SITE_URL }}");
+    expect(runnerStep).toContain("--env NEXT_PUBLIC_SITE_URL");
+  });
+
   it("fails closed when required variables or secrets are absent without echoing values", () => {
     const secretMarker = "private-fixture-secret-must-never-be-printed";
     const environment = Object.fromEntries(DAILY_COLLECTION_REQUIRED_ENV.map((name) => [name, secretMarker]));

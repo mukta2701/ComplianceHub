@@ -114,6 +114,7 @@ jobs:
           IMAGE_URI: ${{ steps.image.outputs.image_uri }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SITE_URL: ${{ vars.AWS_DEV_SITE_URL }}
           GITHUB_APP_ID: ${{ secrets.AWS_DEV_GITHUB_APP_ID }}
           GITHUB_APP_PRIVATE_KEY: ${{ secrets.AWS_DEV_GITHUB_APP_PRIVATE_KEY }}
           GITHUB_APPROVED_SECURITY_WORKFLOW_IDS: ${{ secrets.AWS_DEV_GITHUB_APPROVED_SECURITY_WORKFLOW_IDS }}
@@ -128,6 +129,7 @@ jobs:
             --memory 1g --cpus 1 --pids-limit 128 \
             --env NODE_ENV \
             --env NEXT_PUBLIC_SUPABASE_URL \
+            --env NEXT_PUBLIC_SITE_URL \
             --env SUPABASE_SERVICE_ROLE_KEY \
             --env GITHUB_APP_ID \
             --env GITHUB_APP_PRIVATE_KEY \
