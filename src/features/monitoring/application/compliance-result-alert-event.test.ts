@@ -108,6 +108,55 @@ describe("buildComplianceResultAlertEvent", () => {
     });
   });
 
+  it("alerts an unchanged Pass at the exact freshness boundary", () => {
+    const value = buildComplianceResultAlertEvent(input({
+      previousOutcome: "pass",
+      current: {
+        id: "10000000-0000-4000-8000-000000000013",
+        outcome: "pass",
+        observedAt: "2026-09-23T10:00:00.000Z",
+        freshUntil: "2026-09-24T22:00:00.000Z",
+        findingId: null,
+        evidenceId: recoveryEvidenceId,
+        severity: null,
+      },
+      evaluatedAt: "2026-09-24T22:00:00.000Z",
+    }));
+
+    expect(readyEvent(value)).toMatchObject({
+      kind: "stale",
+      recordUrl: `${appOrigin}/app/evidence?evidence=${recoveryEvidenceId}#evidence-${recoveryEvidenceId}`,
+    });
+  });
+
+  it("never calls an older or future Pass a verified recovery", () => {
+    const incidentKey = "a".repeat(64);
+    const current = {
+      id: "10000000-0000-4000-8000-000000000014",
+      outcome: "pass" as const,
+      observedAt: "2026-09-24T11:00:00.000Z",
+      freshUntil: "2026-09-25T23:00:00.000Z",
+      findingId: null,
+      evidenceId: recoveryEvidenceId,
+      severity: null,
+    };
+    const earlier = buildComplianceResultAlertEvent(input({
+      previousOutcome: "fail",
+      current,
+      activeIncident: { kind: "failure", incidentKey, startedAt: "2026-09-24T12:00:00.000Z" },
+      evaluatedAt: "2026-09-24T12:05:00.000Z",
+    }));
+    const future = buildComplianceResultAlertEvent(input({
+      previousOutcome: "fail",
+      current: { ...current, observedAt: "2026-09-24T13:00:00.000Z" },
+      activeIncident: { kind: "failure", incidentKey, startedAt: "2026-09-24T12:00:00.000Z" },
+      evaluatedAt: "2026-09-24T12:05:00.000Z",
+    }));
+
+    expect(earlier).toMatchObject({ status: "suppressed" });
+    expect(future).toMatchObject({ status: "blocked", reason: "invalid_input" });
+  });
+
   it("chooses stale over a simultaneous sustained Unknown when the record is not addressable", () => {
     const result = buildComplianceResultAlertEvent(input({
       current: {
@@ -150,7 +199,7 @@ describe("buildComplianceResultAlertEvent", () => {
       current: {
         ...input().current,
         id: "10000000-0000-4000-8000-000000000009",
-        observedAt,
+        observedAt: "2026-09-24T15:00:00.000Z",
       },
       activeIncident: null,
       evaluatedAt: "2026-09-24T15:01:00.000Z",
@@ -198,6 +247,7 @@ describe("buildComplianceResultAlertEvent", () => {
     const activeFailure = buildComplianceResultAlertEvent(input({
       current: { ...unsafeCurrent, id: "10000000-0000-4000-8000-000000000011", observedAt: "2026-09-24T10:05:00.000Z" },
       activeIncident: { kind: "failure", incidentKey: first.incidentKey, startedAt: observedAt },
+      evaluatedAt: "2026-09-24T10:06:00.000Z",
     }));
     const unsafeLink = buildComplianceResultAlertEvent(input({
       appOrigin: "http://untrusted.example",

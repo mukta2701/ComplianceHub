@@ -118,6 +118,7 @@ function isValidInput(input: ComplianceResultAlertInput): boolean {
     || !isTimestamp(input.current.freshUntil)
     || !isTimestamp(input.evaluatedAt)
     || freshUntil <= observedAt
+    || observedAt > Date.parse(input.evaluatedAt)
     || !validAppOrigin(input.appOrigin, input.allowLocalHttp)) return false;
 
   if (input.actionableUnknownSince !== null && !isTimestamp(input.actionableUnknownSince)) return false;
@@ -183,7 +184,7 @@ function decideKind(input: ComplianceResultAlertInput): {
   incidentStartedAt: string;
 } | null {
   const now = Date.parse(input.evaluatedAt);
-  const stale = now > Date.parse(input.current.freshUntil);
+  const stale = now >= Date.parse(input.current.freshUntil);
 
   if (stale) {
     if (input.activeIncident?.kind === "stale"
@@ -195,6 +196,7 @@ function decideKind(input: ComplianceResultAlertInput): {
 
   if (input.current.outcome === "pass") {
     if (!input.activeIncident) return null;
+    if (Date.parse(input.current.observedAt) <= Date.parse(input.activeIncident.startedAt)) return null;
     return {
       kind: "recovery",
       incidentKey: input.activeIncident.incidentKey,
@@ -237,7 +239,8 @@ export function buildComplianceResultAlertEvent(
   if (!origin) return { status: "blocked", reason: "invalid_app_origin" };
   if (!isValidInput(input)) return { status: "blocked", reason: "invalid_input" };
 
-  if (input.current.outcome === "pass" && input.previousOutcome === "pass" && !input.activeIncident) {
+  if (input.current.outcome === "pass" && input.previousOutcome === "pass" && !input.activeIncident
+    && Date.parse(input.evaluatedAt) < Date.parse(input.current.freshUntil)) {
     return { status: "suppressed", reason: "unchanged_pass" };
   }
 
