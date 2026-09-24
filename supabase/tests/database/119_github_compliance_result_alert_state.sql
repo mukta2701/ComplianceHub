@@ -85,6 +85,7 @@ insert into public.github_observations(
  remediation,observed_at,fresh_until,source_url,fingerprint,diagnostic_code
 ) select '91000000-0000-4000-8000-000000000411','91000000-0000-4000-8000-000000000101',
   '91000000-0000-4000-8000-000000000201','91000000-0000-4000-8000-000000000202',91003,
+  '91000000-0000-4000-8000-000000000301',
   'Alert-Test/repo/'||entry.check_id||'/'||entry.rule_version,
   entry.check_id,entry.rule_version,'github_repository','Alert-Test/repo','unknown',null,
   'Bounded check title','Bounded check explanation',
