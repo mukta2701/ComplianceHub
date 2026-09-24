@@ -131,10 +131,10 @@ select ok(has_function_privilege('service_role',
 
 set role service_role;
 select is(pg_catalog.jsonb_array_length(public.load_github_compliance_result_alert_candidates(
-  now(),'91000000-0000-4000-8000-000000000301','91000000-0000-4000-8000-000000000101',null,null,null,100
-)->'candidates'),1,'the exact new run loads its current official result');
+  pg_catalog.clock_timestamp(),'91000000-0000-4000-8000-000000000301','91000000-0000-4000-8000-000000000101',null,null,null,100
+)->'candidates'),2,'the exact new run loads both current official results');
 select is(pg_catalog.jsonb_array_length(public.load_github_compliance_result_alert_candidates(
-  now(),'91000000-0000-4000-8000-000000000301','91000000-0000-4000-8000-000000000102',null,null,null,100
+  pg_catalog.clock_timestamp(),'91000000-0000-4000-8000-000000000301','91000000-0000-4000-8000-000000000102',null,null,null,100
 )->'candidates'),0,'the exact run cannot cross organisation scope');
 
 select is(public.record_github_compliance_result_alert_decisions(
@@ -299,11 +299,11 @@ where id='91000000-0000-4000-8000-000000000202'
   and organisation_id='91000000-0000-4000-8000-000000000101';
 select is(public.github_official_result_mapping_status_at_core(
   '91000000-0000-4000-8000-000000000101',
-  '91000000-0000-4000-8000-000000000402',now()
+  '91000000-0000-4000-8000-000000000402',pg_catalog.clock_timestamp()
 ),'active','the service core recognises an approved result under the selected pack');
 select is(public.github_official_result_mapping_status_at_core(
   '91000000-0000-4000-8000-000000000101',
-  '91000000-0000-4000-8000-000000000412',now()
+  '91000000-0000-4000-8000-000000000412',pg_catalog.clock_timestamp()
 ),'active','a second legacy-approved result remains current before approval revocation');
 select public.record_github_mapping_entry_decision_server(
   '91000000-0000-4000-8000-000000000101',
@@ -318,11 +318,11 @@ select public.record_github_mapping_entry_decision_server(
 );
 select is(public.github_official_result_mapping_status_at_core(
   '91000000-0000-4000-8000-000000000101',
-  '91000000-0000-4000-8000-000000000402',now()
+  '91000000-0000-4000-8000-000000000402',pg_catalog.clock_timestamp()
 ),'historical','an Owner rejection makes the old exact check result historical');
 select is(public.github_official_result_mapping_status_at_core(
   '91000000-0000-4000-8000-000000000101',
-  '91000000-0000-4000-8000-000000000412',now()
+  '91000000-0000-4000-8000-000000000412',pg_catalog.clock_timestamp()
 ),'active','rejecting a different check does not change its mapping status');
 select public.revoke_github_mapping_approval_server(
   '91000000-0000-4000-8000-000000000101',
@@ -331,7 +331,7 @@ select public.revoke_github_mapping_approval_server(
 );
 select is(public.github_official_result_mapping_status_at_core(
   '91000000-0000-4000-8000-000000000101',
-  '91000000-0000-4000-8000-000000000412',now()
+  '91000000-0000-4000-8000-000000000412',pg_catalog.clock_timestamp()
 ),'historical','revoking the legacy approval makes its result historical');
 
 select * from finish();
