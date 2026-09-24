@@ -6,7 +6,6 @@ const hoisted = vi.hoisted(() => ({
   tables: [] as string[],
   selections: {} as Record<string, string>,
   monitoringInstallations: [] as unknown[],
-  unhealthyRepositoryIds: [] as string[],
   loadControlRoom: vi.fn(),
   loadMappingReview: vi.fn(),
   rows: {} as Record<string, unknown[]>,
@@ -40,8 +39,7 @@ vi.mock("@/features/github/application/github-mapping-review", () => ({
   loadGitHubMappingReview: hoisted.loadMappingReview,
 }));
 vi.mock("@/features/github/components/github-compliance-control-room", () => ({
-  GitHubComplianceControlRoomPanel: ({ role, unhealthyRepositoryIds }: { role: string; unhealthyRepositoryIds: string[] }) => {
-    hoisted.unhealthyRepositoryIds = unhealthyRepositoryIds;
+  GitHubComplianceControlRoomPanel: ({ role }: { role: string }) => {
     return <section aria-label="Technical GitHub review">Read-only technical review · {role}</section>;
   },
 }));
@@ -98,11 +96,10 @@ describe("Member monitoring page branch", () => {
     expect(screen.queryByText("Legacy GitHub")).not.toBeInTheDocument();
   });
 
-  it("loads and applies the GitHub connection health for Members too", async () => {
+  it("loads GitHub connection health for Members without exposing technical review", async () => {
     hoisted.tables = [];
     hoisted.selections = {};
     hoisted.monitoringInstallations = [];
-    hoisted.unhealthyRepositoryIds = [];
     hoisted.rows = {
       github_installations: [{
         id: "43000000-0000-4000-8000-000000000001", account_login: "ExampleOrg", status: "active",
@@ -129,6 +126,6 @@ describe("Member monitoring page branch", () => {
     expect(hoisted.selections.github_installations).toContain("health_diagnostic_code");
     expect(hoisted.selections.github_installations).toContain("last_successful_reconciliation_at");
     expect((hoisted.monitoringInstallations[0] as { health: string }).health).toBe("disconnected");
-    expect(hoisted.unhealthyRepositoryIds).toContain("43000000-0000-4000-8000-000000000002");
+    expect(screen.queryByRole("region", { name: "Technical GitHub review" })).not.toBeInTheDocument();
   });
 });
