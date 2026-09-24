@@ -153,6 +153,21 @@ describe("GitHubComplianceControlRoomPanel", () => {
     expect(within(ruleDetails).getByText(/Not applicable:/)).toBeVisible();
   });
 
+  it.each([
+    ["the connection is unhealthy", (value: GitHubComplianceControlRoom) => value, [REPOSITORY]],
+    ["approval is missing", (value: GitHubComplianceControlRoom) => ({ ...value, approval: null }), []],
+    ["the result set is incomplete", (value: GitHubComplianceControlRoom) => ({ ...value, repositories: [{ ...value.repositories[0]!, officialResults: value.repositories[0]!.officialResults.slice(0, 1) }] }), []],
+    ["the mapping differs", (value: GitHubComplianceControlRoom) => ({ ...value, approval: { ...value.approval!, checksum: "b".repeat(64) } }), []],
+    ["the collection is partial", (value: GitHubComplianceControlRoom) => ({ ...value, repositories: [{ ...value.repositories[0]!, latestCollection: { ...value.repositories[0]!.latestCollection!, status: "partial" as const } }] }), []],
+    ["processing belongs to an older run", (value: GitHubComplianceControlRoom) => ({ ...value, repositories: [{ ...value.repositories[0]!, latestMaterialisationJob: { ...value.repositories[0]!.latestMaterialisationJob!, collectionRunId: "a1000000-0000-4000-8000-000000000099" } }] }), []],
+  ] as const)("does not show a green pass when %s", (_reason, change, unhealthyRepositoryIds) => {
+    render(<GitHubComplianceControlRoomPanel room={change(room())} review={review()} role="member" unhealthyRepositoryIds={[...unhealthyRepositoryIds]} />);
+    const repository = screen.getByRole("article", { name: "Mukta2701/ComplianceHub official compliance" });
+    expect(within(repository).queryByText("Passed at last check")).not.toBeInTheDocument();
+    expect(within(repository).getAllByText("Past pass — needs review").length).toBeGreaterThan(0);
+    expect(within(repository).getAllByText("Past pass — needs review")[0].closest("span")).not.toHaveClass("green");
+  });
+
   it("uses exact current-state and outcome wording with only canonical repository/evidence/finding links", () => {
     render(<GitHubComplianceControlRoomPanel room={room()} review={review()} role="member" unhealthyRepositoryIds={[]} />);
     const repository = screen.getByRole("article", { name: "Mukta2701/ComplianceHub official compliance" });

@@ -59,15 +59,28 @@ const RETRY_REASONS = [
 function resultPresentation(
   result: GitHubComplianceControlRoom["repositories"][number]["officialResults"][number],
   asOf: string,
+  isOfficialCurrent: boolean,
 ): { label: string; tone: string; description: string } {
   const outOfDate = !Number.isFinite(Date.parse(result.freshUntil))
     || !Number.isFinite(Date.parse(asOf))
     || Date.parse(asOf) >= Date.parse(result.freshUntil);
-  if (result.outcome === "pass") return {
-    label: outOfDate ? "Previously passed; needs recheck" : "Passed at last check",
-    tone: outOfDate ? "amber" : "green",
-    description: "No issue was found when GitHub was last checked.",
-  };
+  if (result.outcome === "pass") {
+    if (outOfDate) return {
+      label: "Previously passed; needs recheck",
+      tone: "amber",
+      description: "No issue was found when GitHub was last checked.",
+    };
+    if (isOfficialCurrent) return {
+      label: "Passed at last check",
+      tone: "green",
+      description: "No issue was found when GitHub was last checked.",
+    };
+    return {
+      label: "Past pass — needs review",
+      tone: "amber",
+      description: "This saved pass is not currently verified. Review the connection and mapping or run a new check before relying on it.",
+    };
+  }
   if (result.outcome === "fail") return {
     label: outOfDate ? "Previous issue; needs recheck" : "Issue found",
     tone: outOfDate ? "amber" : "red",
@@ -237,10 +250,16 @@ function RepositoryOfficialCard({
     latestMaterialisationJob: repository.latestMaterialisationJob,
     officialResults: repository.officialResults,
   });
-  const presentation = STATE_PRESENTATION[state];
-  const counts = countGitHubOfficialOutcomes(repository.officialResults);
   const job = repository.latestMaterialisationJob;
   const run = repository.latestCollection;
+  const isOfficialCurrent = state === "official_current"
+    && repository.available
+    && exactReviewedApprovalActive
+    && run?.status === "succeeded"
+    && job?.status === "completed"
+    && job.collectionRunId === run.id;
+  const presentation = STATE_PRESENTATION[state === "official_current" && !isOfficialCurrent ? "needs_attention" : state];
+  const counts = countGitHubOfficialOutcomes(repository.officialResults);
   const stateDetail = !run && state === "awaiting_approval"
     ? "No collection has completed yet. An Owner must also approve the reviewed mapping before official processing."
     : !run && state === "shadow"
@@ -283,7 +302,7 @@ function RepositoryOfficialCard({
       {groupChecksByArea(repository.officialResults).map((section) => <section key={section.group.id} aria-label={`${section.group.title} results`}>
         <h4 className="github-results-group">{section.group.title}</h4>
         <ul>{section.items.map((result) => {
-          const display = resultPresentation(result, room.asOf);
+          const display = resultPresentation(result, room.asOf, isOfficialCurrent);
           return <li key={result.id}>
         <div>
           <strong>{githubEvidenceTitle(result.checkId)}</strong>
