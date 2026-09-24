@@ -48,7 +48,7 @@ function monitoringHealth(
   if (repository.latest_status === "rate_limited") return { label: "GitHub rate limit reached", tone: "red" };
   return isStale(repository, nowIso)
     ? { label: "Needs a new check", tone: "amber" }
-    : { label: "Up to date", tone: "green" };
+    : { label: "Checked recently", tone: "neutral" };
 }
 
 const formatLastChecked = formatMonitoringTime;

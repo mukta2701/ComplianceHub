@@ -108,7 +108,7 @@ describe("GitHubCollectionHealthPanel", () => {
     />);
     expect(screen.getByRole("button", { name: "Check GitHub now" })).toBeDisabled();
     expect(screen.getByText("Saved GitHub results remain visible, but fresh GitHub verification is unavailable in this app runtime.")).toBeVisible();
-    expect(screen.getByText("Up to date")).toBeVisible();
+    expect(screen.getByText("Checked recently")).toBeVisible();
   });
 
   it("fails closed when readiness is omitted", () => {
@@ -131,7 +131,7 @@ describe("GitHubCollectionHealthPanel", () => {
     renderPanel({ repositories: variants });
     expect(within(repoArticle("Adtecher/compliancehub")).getByText("Ready for first check")).toBeVisible();
     expect(within(repoArticle("Adtecher/running")).getByText("Checking now")).toBeVisible();
-    expect(within(repoArticle("Adtecher/current")).getByText("Up to date")).toBeVisible();
+    expect(within(repoArticle("Adtecher/current")).getByText("Checked recently")).toBeVisible();
     expect(repoArticle("Adtecher/current")).toHaveTextContent(/Last checked 01 Sep 2026, 09:00/);
     expect(within(repoArticle("Adtecher/issue")).getByText("1 check needs attention")).toBeVisible();
     expect(within(repoArticle("Adtecher/partial")).getByText("Some checks could not be completed")).toBeVisible();
@@ -161,9 +161,9 @@ describe("GitHubCollectionHealthPanel", () => {
     });
 
     expect(within(repoArticle("Adtecher/compliancehub")).getByText("GitHub connection needs attention")).toBeVisible();
-    expect(within(repoArticle("Adtecher/compliancehub")).queryByText("Up to date")).not.toBeInTheDocument();
+    expect(within(repoArticle("Adtecher/compliancehub")).queryByText("Checked recently")).not.toBeInTheDocument();
     expect(within(repoArticle("SecondOrg/unavailable")).getByText("Repository access needs attention")).toBeVisible();
-    expect(within(repoArticle("SecondOrg/unavailable")).queryByText("Up to date")).not.toBeInTheDocument();
+    expect(within(repoArticle("SecondOrg/unavailable")).queryByText("Checked recently")).not.toBeInTheDocument();
   });
 
   it("uses an accessible Admin pending state and refreshes only after success", async () => {
