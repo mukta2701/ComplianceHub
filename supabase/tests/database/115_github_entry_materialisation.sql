@@ -7,6 +7,18 @@ select has_function(
   array['uuid','uuid','text','text','jsonb'],
   'the service materialises only the approved subset through an entry-aware boundary'
 );
+select ok(has_function_privilege('service_role',
+  'public.materialise_github_approved_entries_server(uuid,uuid,text,text,jsonb)', 'EXECUTE'),
+  'the current entry-aware materialiser remains available to service callers');
+select ok(not has_function_privilege('service_role',
+  'public.materialise_github_observations_server(uuid,uuid,text,text,jsonb)', 'EXECUTE'),
+  'service callers cannot execute the legacy whole-pack materialiser');
+set local role service_role;
+select throws_ok($$ select public.materialise_github_observations_server(
+  null::uuid, null::uuid, null::text, null::text, null::jsonb) $$,
+  '42501', null,
+  'the legacy whole-pack materialiser is denied at the service-role call site');
+reset role;
 select has_table('public', 'github_entry_materialisation_receipts',
   'new official writes retain selected-entry and consent-source ancestry separately');
 select has_column('public', 'github_official_compliance_results', 'entry_receipt_id',
@@ -307,6 +319,26 @@ select lives_ok($sql$
       and observation.check_id='github.repository.visibility')
   )
 $sql$, 'one approved entry materialises while 14 rejected or pending observations remain technical');
+set local role service_role;
+select lives_ok($sql$
+  select public.materialise_github_approved_entries_server(
+    '75000000-0000-4000-8000-000000000102',
+    '75000000-0000-4000-8000-000000000311',
+    'github-m2-material-v2',
+    (select checksum from public.github_mapping_packs where version='github-m2-material-v2'),
+    (select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
+      'observation_id',observation.id,'treatment_kind','evidence',
+      'iso_control_references',pg_catalog.to_jsonb(entry.iso_control_references),
+      'failure_severity',entry.failure_severity,'remediation',entry.remediation
+    ))
+    from public.github_observations observation
+    join public.github_mapping_entries entry on entry.check_id=observation.check_id
+      and entry.mapping_pack_id='75000000-0000-4000-8000-000000000501'
+    where observation.collection_run_id='75000000-0000-4000-8000-000000000311'
+      and observation.check_id='github.repository.visibility')
+  )
+$sql$, 'the current exact-entry materialiser accepts the service role and safely replays');
+reset role;
 select is((select count(*) from public.github_official_compliance_results
   where collection_run_id='75000000-0000-4000-8000-000000000311'),
   1::bigint, 'only the approved entry has an official ledger row');

@@ -25,7 +25,7 @@ select ok((select proconfig @> array['search_path=""'] from pg_catalog.pg_proc w
 select ok(has_function_privilege('authenticated','public.get_mcp_github_compliance_results_v1(uuid,uuid,public.github_observation_result,text,text,public.monitor_severity,integer)','EXECUTE'),'official fixture: authenticated callers enter the RLS-scoped read');
 select ok(not has_function_privilege('anon','public.get_mcp_github_compliance_results_v1(uuid,uuid,public.github_observation_result,text,text,public.monitor_severity,integer)','EXECUTE'),'official fixture: anonymous callers cannot execute the MCP read');
 select ok(not has_function_privilege('service_role','public.get_mcp_github_compliance_results_v1(uuid,uuid,public.github_observation_result,text,text,public.monitor_severity,integer)','EXECUTE'),'official fixture: service role has no MCP read bypass');
-select ok(has_function_privilege('service_role','public.materialise_github_observations_server(uuid,uuid,text,text,jsonb)','EXECUTE'),'official fixture: wrapper is service executable');
+select ok(not has_function_privilege('service_role','public.materialise_github_observations_server(uuid,uuid,text,text,jsonb)','EXECUTE'),'official fixture: legacy wrapper is not service executable');
 select ok(not has_function_privilege('authenticated','public.materialise_github_observations_server(uuid,uuid,text,text,jsonb)','EXECUTE'),'official fixture: wrapper rejects authenticated callers');
 select ok(not has_function_privilege('anon','public.materialise_github_observations_server(uuid,uuid,text,text,jsonb)','EXECUTE'),'official fixture: wrapper rejects anonymous callers');
 select ok(not has_function_privilege('service_role','public.materialise_github_observations_task2_server(uuid,uuid,text,text,jsonb)','EXECUTE'),'official fixture: service role cannot bypass wrapper through inner materialiser');
@@ -35,6 +35,25 @@ select ok(not has_table_privilege('authenticated','public.github_official_compli
 select ok((select pg_catalog.pg_get_functiondef('public.materialise_github_observations_legacy_unchecked(uuid,uuid,text,text,jsonb)'::regprocedure) ~* 'on conflict \(observation_id\) do nothing'),'official fixture: retained legacy ledger contains the observation replay conflict prerequisite');
 select ok((select pg_catalog.pg_get_functiondef('public.materialise_github_observations_legacy_unchecked(uuid,uuid,text,text,jsonb)'::regprocedure) ~ 'inserted_count not in \(0, expected_count\)'),'official fixture: retained legacy ledger rejects partial insertion counts');
 select ok((select pg_catalog.pg_get_functiondef('public.materialise_github_observations_legacy_unchecked(uuid,uuid,text,text,jsonb)'::regprocedure) ~ 'ledger_count <> expected_count'),'official fixture: retained legacy ledger verifies complete run insertion');
+
+-- Keep historical ledger fixtures testable through a session-local adapter,
+-- without restoring a production runtime grant.
+create function pg_temp.materialise_github_legacy_fixture(
+  target_organisation_id uuid, target_collection_run_id uuid,
+  target_mapping_version text, target_mapping_checksum text, target_decisions jsonb
+) returns jsonb
+language sql security definer set search_path = '' as $$
+  select public.materialise_github_observations_server(
+    target_organisation_id, target_collection_run_id, target_mapping_version,
+    target_mapping_checksum, target_decisions
+  );
+$$;
+alter function pg_temp.materialise_github_legacy_fixture(uuid,uuid,text,text,jsonb)
+  owner to postgres;
+revoke all on function pg_temp.materialise_github_legacy_fixture(uuid,uuid,text,text,jsonb)
+  from public, anon, authenticated, service_role;
+grant execute on function pg_temp.materialise_github_legacy_fixture(uuid,uuid,text,text,jsonb)
+  to service_role;
 
 create or replace function pg_temp.official_decision(target_observation_id uuid, target_kind text)
 returns jsonb language sql immutable as $$
@@ -167,33 +186,33 @@ insert into public.github_observations(
  ('75000000-0000-4000-8000-000000000418','75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000101','75000000-0000-4000-8000-000000000212',75312,'75000000-0000-4000-8000-000000000318','partial-a','github.branch.stale_approvals','github-repository-v1','github_repository','Provider-A/partial-ledger','pass',null,'Provider partial A','Provider partial A explanation',null,now()-interval '2 hours',now()+interval '1 day','https://github.test/private/418',repeat('0',63)||'3',null),
  ('75000000-0000-4000-8000-000000000419','75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000101','75000000-0000-4000-8000-000000000212',75312,'75000000-0000-4000-8000-000000000318','partial-b','github.branch.stale_approvals','github-repository-v1','github_repository','Provider-A/partial-ledger','pass',null,'Provider partial B','Provider partial B explanation',null,now()-interval '119 minutes',now()+interval '1 day','https://github.test/private/419',repeat('0',63)||'4',null);
 
--- Exercise all four outcomes through the real service-only wrapper.
+-- Exercise legacy result-ledger mechanics through the test-only adapter.
 set role service_role;
-select public.materialise_github_observations_server('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000301','github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',pg_temp.official_decision('75000000-0000-4000-8000-000000000401','evidence'));
+select pg_temp.materialise_github_legacy_fixture('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000301','github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',pg_temp.official_decision('75000000-0000-4000-8000-000000000401','evidence'));
 reset role;
 select ok((select result.organisation_id='75000000-0000-4000-8000-000000000001' and result.installation_id='75000000-0000-4000-8000-000000000101' and result.repository_id='75000000-0000-4000-8000-000000000201' and result.provider_repository_id=75301 and result.collection_run_id='75000000-0000-4000-8000-000000000301' and result.observation_id='75000000-0000-4000-8000-000000000401' and result.approval_id='75000000-0000-4000-8000-000000000601' and pack.id=result.mapping_pack_id and result.mapping_version='github-iso-27001-v1' and result.mapping_checksum='b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f' and result.check_id='github.branch.stale_approvals' and result.rule_version='github-repository-v1' and result.outcome='pass' and result.failure_severity is null and result.catalogue_summary=entry.treatments #>> array['pass','summary'] and result.observed_at=now()-interval '6 hours' and result.fresh_until=now()+interval '1 day' and result.evidence_id=provenance.evidence_id and result.finding_id is null from public.github_official_compliance_results result join public.github_mapping_packs pack on pack.id=result.mapping_pack_id join public.github_mapping_entries entry on entry.mapping_pack_id=result.mapping_pack_id and entry.check_id=result.check_id and entry.rule_version=result.rule_version join public.github_evidence_provenance provenance on provenance.observation_id=result.observation_id where result.observation_id='75000000-0000-4000-8000-000000000401'),'official fixture: pass retains exact ancestry approved summary and evidence lineage');
 
 set role service_role;
-select public.materialise_github_observations_server('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000302','github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',pg_temp.official_decision('75000000-0000-4000-8000-000000000402','finding'));
+select pg_temp.materialise_github_legacy_fixture('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000302','github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',pg_temp.official_decision('75000000-0000-4000-8000-000000000402','finding'));
 reset role;
 select ok((select result.outcome='fail' and result.failure_severity=entry.failure_severity and result.evidence_id is null and result.finding_id=transition.finding_id and result.catalogue_summary=entry.treatments #>> array['fail','summary'] and finding.status='open' from public.github_official_compliance_results result join public.github_mapping_entries entry on entry.mapping_pack_id=result.mapping_pack_id and entry.check_id=result.check_id and entry.rule_version=result.rule_version join public.github_finding_transitions transition on transition.observation_id=result.observation_id join public.monitoring_findings finding on finding.id=result.finding_id where result.observation_id='75000000-0000-4000-8000-000000000402'),'official fixture: fail retains approved severity summary and exact open finding lineage');
 
 select set_config('app.official_evidence_before_explanatory',(select count(*)::text from public.evidence where organisation_id='75000000-0000-4000-8000-000000000001'),true);
 select set_config('app.official_findings_before_explanatory',(select count(*)::text from public.monitoring_findings where organisation_id='75000000-0000-4000-8000-000000000001'),true);
 set role service_role;
-select public.materialise_github_observations_server('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000303','github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',pg_temp.official_decision('75000000-0000-4000-8000-000000000403','explanatory'));
+select pg_temp.materialise_github_legacy_fixture('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000303','github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',pg_temp.official_decision('75000000-0000-4000-8000-000000000403','explanatory'));
 reset role;
 select ok((select result.outcome='unknown' and result.failure_severity is null and result.evidence_id is null and result.finding_id is null from public.github_official_compliance_results result where result.observation_id='75000000-0000-4000-8000-000000000403') and (select count(*) from public.evidence where organisation_id='75000000-0000-4000-8000-000000000001')=current_setting('app.official_evidence_before_explanatory')::bigint and (select count(*) from public.monitoring_findings where organisation_id='75000000-0000-4000-8000-000000000001')=current_setting('app.official_findings_before_explanatory')::bigint and (select status='open' from public.monitoring_findings where id=(select finding_id from public.github_official_compliance_results where observation_id='75000000-0000-4000-8000-000000000402')),'official fixture: unknown creates no evidence or finding and resolves nothing');
 
 set role service_role;
-select public.materialise_github_observations_server('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000304','github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',pg_temp.official_decision('75000000-0000-4000-8000-000000000404','explanatory'));
+select pg_temp.materialise_github_legacy_fixture('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000304','github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',pg_temp.official_decision('75000000-0000-4000-8000-000000000404','explanatory'));
 reset role;
 select ok((select result.outcome='not_applicable' and result.failure_severity is null and result.evidence_id is null and result.finding_id is null from public.github_official_compliance_results result where result.observation_id='75000000-0000-4000-8000-000000000404') and (select count(*) from public.evidence where organisation_id='75000000-0000-4000-8000-000000000001')=current_setting('app.official_evidence_before_explanatory')::bigint and (select count(*) from public.monitoring_findings where organisation_id='75000000-0000-4000-8000-000000000001')=current_setting('app.official_findings_before_explanatory')::bigint and (select status='open' from public.monitoring_findings where id=(select finding_id from public.github_official_compliance_results where observation_id='75000000-0000-4000-8000-000000000402')),'official fixture: not-applicable creates no evidence or finding and resolves nothing');
 select results_eq($$ select outcome::text from public.github_official_compliance_results where observation_id in ('75000000-0000-4000-8000-000000000401','75000000-0000-4000-8000-000000000402','75000000-0000-4000-8000-000000000403','75000000-0000-4000-8000-000000000404') order by outcome::text $$,$$ values ('fail'::text),('not_applicable'::text),('pass'::text),('unknown'::text) $$,'official fixture: wrapper persists all four exact official outcomes');
 
 select set_config('app.official_evidence_before_stale',(select count(*)::text from public.evidence where organisation_id='75000000-0000-4000-8000-000000000001'),true);
 set role service_role;
-select public.materialise_github_observations_server('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000305','github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',pg_temp.official_decision('75000000-0000-4000-8000-000000000405','evidence'));
+select pg_temp.materialise_github_legacy_fixture('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000305','github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',pg_temp.official_decision('75000000-0000-4000-8000-000000000405','evidence'));
 reset role;
 select ok((select outcome='pass' and fresh_until<now() and evidence_id is null from public.github_official_compliance_results where observation_id='75000000-0000-4000-8000-000000000405') and (select count(*) from public.evidence where organisation_id='75000000-0000-4000-8000-000000000001')=current_setting('app.official_evidence_before_stale')::bigint,'official fixture: stale pass remains official without positive evidence');
 
@@ -204,8 +223,8 @@ select set_config('app.official_findings_before_terminal',(select count(*)::text
 select set_config('app.official_finding_provenance_before_terminal',(select count(*)::text from public.github_finding_provenance where organisation_id='75000000-0000-4000-8000-000000000001'),true);
 select set_config('app.official_transitions_before_terminal',(select count(*)::text from public.github_finding_transitions where organisation_id='75000000-0000-4000-8000-000000000001'),true);
 set role service_role;
-select lives_ok($$ select public.materialise_github_observations_server('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000316','github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',pg_temp.official_decision('75000000-0000-4000-8000-000000000416','finding')) $$,'official fixture: failed collection replay is a safe old no-op');
-select lives_ok($$ select public.materialise_github_observations_server('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000317','github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',pg_temp.official_decision('75000000-0000-4000-8000-000000000417','finding')) $$,'official fixture: rate-limited collection replay is a safe old no-op');
+select lives_ok($$ select pg_temp.materialise_github_legacy_fixture('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000316','github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',pg_temp.official_decision('75000000-0000-4000-8000-000000000416','finding')) $$,'official fixture: failed collection replay is a safe old no-op');
+select lives_ok($$ select pg_temp.materialise_github_legacy_fixture('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000317','github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',pg_temp.official_decision('75000000-0000-4000-8000-000000000417','finding')) $$,'official fixture: rate-limited collection replay is a safe old no-op');
 reset role;
 select ok(
   (select count(*) from public.github_official_compliance_results where organisation_id='75000000-0000-4000-8000-000000000001')=current_setting('app.official_rows_before_terminal')::bigint
@@ -219,29 +238,29 @@ select ok(
 
 -- Replay lineage remains exact after later materialisation.
 set role service_role;
-select public.materialise_github_observations_server('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000306','github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',pg_temp.official_decision('75000000-0000-4000-8000-000000000406','evidence'));
+select pg_temp.materialise_github_legacy_fixture('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000306','github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',pg_temp.official_decision('75000000-0000-4000-8000-000000000406','evidence'));
 reset role;
 select set_config('app.official_old_evidence',(select evidence_id::text from public.github_official_compliance_results where observation_id='75000000-0000-4000-8000-000000000406'),true);
 set role service_role;
-select public.materialise_github_observations_server('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000307','github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',pg_temp.official_decision('75000000-0000-4000-8000-000000000407','evidence'));
+select pg_temp.materialise_github_legacy_fixture('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000307','github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',pg_temp.official_decision('75000000-0000-4000-8000-000000000407','evidence'));
 reset role;
 select ok((select evidence_id=current_setting('app.official_old_evidence')::uuid from public.github_official_compliance_results where observation_id='75000000-0000-4000-8000-000000000406') and (select evidence_id is distinct from current_setting('app.official_old_evidence')::uuid from public.github_official_compliance_results where observation_id='75000000-0000-4000-8000-000000000407'),'official fixture: later pass preserves old evidence ID and creates a distinct new lineage');
 select set_config('app.official_evidence_before_replay',(select count(*)::text from public.evidence where organisation_id='75000000-0000-4000-8000-000000000001'),true);
 set role service_role;
-select public.materialise_github_observations_server('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000306','github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',pg_temp.official_decision('75000000-0000-4000-8000-000000000406','evidence'));
+select pg_temp.materialise_github_legacy_fixture('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000306','github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',pg_temp.official_decision('75000000-0000-4000-8000-000000000406','evidence'));
 reset role;
 select ok((select count(*)=1 and (array_agg(evidence_id))[1]=current_setting('app.official_old_evidence')::uuid from public.github_official_compliance_results where observation_id='75000000-0000-4000-8000-000000000406') and (select count(*) from public.evidence where organisation_id='75000000-0000-4000-8000-000000000001')=current_setting('app.official_evidence_before_replay')::bigint,'official fixture: exact replay retains one official row and creates no duplicate evidence');
 
 set role service_role;
-select public.materialise_github_observations_server('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000308','github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',pg_temp.official_decision('75000000-0000-4000-8000-000000000408','finding'));
+select pg_temp.materialise_github_legacy_fixture('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000308','github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',pg_temp.official_decision('75000000-0000-4000-8000-000000000408','finding'));
 reset role;
 select set_config('app.official_old_finding',(select finding_id::text from public.github_official_compliance_results where observation_id='75000000-0000-4000-8000-000000000408'),true);
 set role service_role;
-select public.materialise_github_observations_server('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000309','github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',pg_temp.official_decision('75000000-0000-4000-8000-000000000409','evidence'));
+select pg_temp.materialise_github_legacy_fixture('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000309','github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',pg_temp.official_decision('75000000-0000-4000-8000-000000000409','evidence'));
 reset role;
 select ok((select finding_id=current_setting('app.official_old_finding')::uuid from public.github_official_compliance_results where observation_id='75000000-0000-4000-8000-000000000408') and (select finding_id=current_setting('app.official_old_finding')::uuid from public.github_official_compliance_results where observation_id='75000000-0000-4000-8000-000000000409') and (select status='resolved' from public.monitoring_findings where id=current_setting('app.official_old_finding')::uuid),'official fixture: later pass preserves failure finding ID and records exact resolution lineage');
 set role service_role;
-select public.materialise_github_observations_server('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000308','github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',pg_temp.official_decision('75000000-0000-4000-8000-000000000408','finding'));
+select pg_temp.materialise_github_legacy_fixture('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000308','github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',pg_temp.official_decision('75000000-0000-4000-8000-000000000408','finding'));
 reset role;
 select ok((select count(*)=1 and (array_agg(finding_id))[1]=current_setting('app.official_old_finding')::uuid from public.github_official_compliance_results where observation_id='75000000-0000-4000-8000-000000000408') and (select status='resolved' from public.monitoring_findings where id=current_setting('app.official_old_finding')::uuid),'official fixture: failure replay retains one immutable result without undoing later resolution');
 
@@ -251,7 +270,7 @@ select '75000000-0000-4000-8000-000000000701',observation.organisation_id,observ
 from public.github_observations observation join public.github_mapping_approvals approval on approval.organisation_id=observation.organisation_id and approval.revoked_at is null join public.github_mapping_packs pack on pack.id=approval.mapping_pack_id join public.github_mapping_entries entry on entry.mapping_pack_id=pack.id and entry.check_id=observation.check_id and entry.rule_version=observation.rule_version where observation.id='75000000-0000-4000-8000-000000000418';
 select set_config('app.official_evidence_before_atomic',(select count(*)::text from public.evidence where organisation_id='75000000-0000-4000-8000-000000000001'),true);
 set role service_role;
-select throws_ok($$ select public.materialise_github_observations_server('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000318','github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',pg_temp.official_decision('75000000-0000-4000-8000-000000000418','evidence') || pg_temp.official_decision('75000000-0000-4000-8000-000000000419','evidence')) $$,'P0001','official result ledger is incomplete or conflicts','official fixture: partial ledger rejects whole materialisation transaction');
+select throws_ok($$ select pg_temp.materialise_github_legacy_fixture('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000318','github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',pg_temp.official_decision('75000000-0000-4000-8000-000000000418','evidence') || pg_temp.official_decision('75000000-0000-4000-8000-000000000419','evidence')) $$,'P0001','official result ledger is incomplete or conflicts','official fixture: partial ledger rejects whole materialisation transaction');
 reset role;
 select ok((select count(*) from public.github_evidence_provenance where observation_id in ('75000000-0000-4000-8000-000000000418','75000000-0000-4000-8000-000000000419'))=0 and (select count(*) from public.evidence where organisation_id='75000000-0000-4000-8000-000000000001')=current_setting('app.official_evidence_before_atomic')::bigint and (select count(*) from public.github_official_compliance_results where observation_id='75000000-0000-4000-8000-000000000419')=0,'official fixture: partial-ledger failure rolls back lifecycle and newly inserted result');
 
@@ -259,13 +278,13 @@ insert into public.github_official_compliance_results(id,organisation_id,install
 select '75000000-0000-4000-8000-000000000702',observation.organisation_id,observation.installation_id,observation.repository_id,observation.provider_repository_id,observation.collection_run_id,observation.id,approval.id,pack.id,pack.version,pack.checksum,observation.check_id,observation.rule_version,observation.result,'Conflicting approved summary',observation.observed_at,observation.fresh_until
 from public.github_observations observation join public.github_mapping_approvals approval on approval.organisation_id=observation.organisation_id and approval.revoked_at is null join public.github_mapping_packs pack on pack.id=approval.mapping_pack_id where observation.id='75000000-0000-4000-8000-000000000420';
 set role service_role;
-select throws_ok($$ select public.materialise_github_observations_server('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000319','github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',pg_temp.official_decision('75000000-0000-4000-8000-000000000420','evidence')) $$,'P0001','official result ledger is incomplete or conflicts','official fixture: conflicting ledger rejects replay atomically');
+select throws_ok($$ select pg_temp.materialise_github_legacy_fixture('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000319','github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',pg_temp.official_decision('75000000-0000-4000-8000-000000000420','evidence')) $$,'P0001','official result ledger is incomplete or conflicts','official fixture: conflicting ledger rejects replay atomically');
 reset role;
 select ok((select count(*) from public.github_evidence_provenance where observation_id='75000000-0000-4000-8000-000000000420')=0 and (select catalogue_summary='Conflicting approved summary' from public.github_official_compliance_results where observation_id='75000000-0000-4000-8000-000000000420'),'official fixture: conflicting-ledger failure rolls back lifecycle and preserves prior immutable row');
 
 -- Establish v1 active status before replacing the approval.
 set role service_role;
-select public.materialise_github_observations_server('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000310','github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',pg_temp.official_decision('75000000-0000-4000-8000-000000000410','explanatory'));
+select pg_temp.materialise_github_legacy_fixture('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000310','github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',pg_temp.official_decision('75000000-0000-4000-8000-000000000410','explanatory'));
 reset role;
 set role authenticated;
 select set_config('request.jwt.claims','{"sub":"75000000-0000-4000-8000-000000000011","role":"authenticated"}',true);
@@ -298,13 +317,13 @@ select set_config('app.official_v2_approval',public.approve_github_mapping_pack_
 reset role;
 
 set role service_role;
-select public.materialise_github_observations_server('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000311','github-official-results-fixture-v2','41cb62e51bef67edaa0d32313cb4bcfc9d042b39b04492488c71d74dec31cea5',pg_temp.official_decision('75000000-0000-4000-8000-000000000411','explanatory'));
-select public.materialise_github_observations_server('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000312','github-official-results-fixture-v2','41cb62e51bef67edaa0d32313cb4bcfc9d042b39b04492488c71d74dec31cea5',pg_temp.official_decision('75000000-0000-4000-8000-000000000412','explanatory'));
-select public.materialise_github_observations_server('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000313','github-official-results-fixture-v2','41cb62e51bef67edaa0d32313cb4bcfc9d042b39b04492488c71d74dec31cea5',pg_temp.official_decision('75000000-0000-4000-8000-000000000413','finding'));
-select public.materialise_github_observations_server('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000314','github-official-results-fixture-v2','41cb62e51bef67edaa0d32313cb4bcfc9d042b39b04492488c71d74dec31cea5',pg_temp.official_decision('75000000-0000-4000-8000-000000000414','evidence'));
-select public.materialise_github_observations_server('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000315','github-official-results-fixture-v2','41cb62e51bef67edaa0d32313cb4bcfc9d042b39b04492488c71d74dec31cea5',pg_temp.official_decision('75000000-0000-4000-8000-000000000415','explanatory'));
-select set_config('app.official_active_replay',public.materialise_github_observations_server('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000311','github-official-results-fixture-v2','41cb62e51bef67edaa0d32313cb4bcfc9d042b39b04492488c71d74dec31cea5',pg_temp.official_decision('75000000-0000-4000-8000-000000000411','explanatory'))::text,true);
-select public.materialise_github_observations_server('75000000-0000-4000-8000-000000000002','75000000-0000-4000-8000-000000000320','github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',pg_temp.official_decision('75000000-0000-4000-8000-000000000421','explanatory'));
+select pg_temp.materialise_github_legacy_fixture('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000311','github-official-results-fixture-v2','41cb62e51bef67edaa0d32313cb4bcfc9d042b39b04492488c71d74dec31cea5',pg_temp.official_decision('75000000-0000-4000-8000-000000000411','explanatory'));
+select pg_temp.materialise_github_legacy_fixture('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000312','github-official-results-fixture-v2','41cb62e51bef67edaa0d32313cb4bcfc9d042b39b04492488c71d74dec31cea5',pg_temp.official_decision('75000000-0000-4000-8000-000000000412','explanatory'));
+select pg_temp.materialise_github_legacy_fixture('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000313','github-official-results-fixture-v2','41cb62e51bef67edaa0d32313cb4bcfc9d042b39b04492488c71d74dec31cea5',pg_temp.official_decision('75000000-0000-4000-8000-000000000413','finding'));
+select pg_temp.materialise_github_legacy_fixture('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000314','github-official-results-fixture-v2','41cb62e51bef67edaa0d32313cb4bcfc9d042b39b04492488c71d74dec31cea5',pg_temp.official_decision('75000000-0000-4000-8000-000000000414','evidence'));
+select pg_temp.materialise_github_legacy_fixture('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000315','github-official-results-fixture-v2','41cb62e51bef67edaa0d32313cb4bcfc9d042b39b04492488c71d74dec31cea5',pg_temp.official_decision('75000000-0000-4000-8000-000000000415','explanatory'));
+select set_config('app.official_active_replay',pg_temp.materialise_github_legacy_fixture('75000000-0000-4000-8000-000000000001','75000000-0000-4000-8000-000000000311','github-official-results-fixture-v2','41cb62e51bef67edaa0d32313cb4bcfc9d042b39b04492488c71d74dec31cea5',pg_temp.official_decision('75000000-0000-4000-8000-000000000411','explanatory'))::text,true);
+select pg_temp.materialise_github_legacy_fixture('75000000-0000-4000-8000-000000000002','75000000-0000-4000-8000-000000000320','github-iso-27001-v1','b4400a3868d0011cd174e4c5faa580d8c1f93b5636aed6f11a0f8abce7ab634f',pg_temp.official_decision('75000000-0000-4000-8000-000000000421','explanatory'));
 reset role;
 select ok((current_setting('app.official_active_replay')::jsonb->>'skipped')::int=1 and (select count(*) from public.github_official_compliance_results where observation_id='75000000-0000-4000-8000-000000000411')=1,'official fixture: active replay reports one skip and retains exactly one result');
 
