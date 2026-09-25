@@ -68,7 +68,7 @@ describe("post-auth continuation", () => {
   });
   afterEach(() => vi.unstubAllEnvs());
 
-  it.each(["/invite", "/app", "/app/policies?state=draft"])("preserves safe password sign-in destination %s", async (next) => {
+  it.each(["/app", "/app/policies?state=draft"])("preserves safe password sign-in destination %s", async (next) => {
     const auth = authClient();
     hoisted.serverClient = auth.value;
 
@@ -77,14 +77,14 @@ describe("post-auth continuation", () => {
     expect(auth.signInWithPassword).toHaveBeenCalledWith({ email: "member@example.test", password: TEST_PASSWORD });
   });
 
-  it("revalidates the invitation page on successful password sign-in continuing to it", async () => {
+  it("bounces invitation sign-in through a fresh request under the invitation cookie path", async () => {
     const auth = authClient();
     hoisted.serverClient = auth.value;
     vi.mocked(revalidatePath).mockClear();
 
-    await expect(signInAction(signInForm("/invite"))).rejects.toThrow("REDIRECT:/invite");
+    await expect(signInAction(signInForm("/invite"))).rejects.toThrow("REDIRECT:/invite/continue");
 
-    expect(revalidatePath).toHaveBeenCalledWith("/invite");
+    expect(revalidatePath).not.toHaveBeenCalled();
   });
 
   it("leaves cached pages alone for non-invitation sign-in destinations", async () => {
@@ -148,14 +148,14 @@ describe("post-auth continuation", () => {
     await expect(signUpAction(signUpForm("/app"))).rejects.toThrow("REDIRECT:/app");
   });
 
-  it("revalidates the invitation page when sign-up returns an immediate session continuing to it", async () => {
+  it("bounces immediate-session sign-up under the invitation cookie path", async () => {
     const auth = authClient({ signupSession: {} });
     hoisted.serverClient = auth.value;
     vi.mocked(revalidatePath).mockClear();
 
-    await expect(signUpAction(signUpForm("/invite"))).rejects.toThrow("REDIRECT:/invite");
+    await expect(signUpAction(signUpForm("/invite"))).rejects.toThrow("REDIRECT:/invite/continue");
 
-    expect(revalidatePath).toHaveBeenCalledWith("/invite");
+    expect(revalidatePath).not.toHaveBeenCalled();
   });
 
   it("strips invite query/hash data from password and confirmation continuations", async () => {
@@ -166,7 +166,7 @@ describe("post-auth continuation", () => {
       () => new Error("sign-in action unexpectedly resolved"),
       (error: unknown) => error as Error,
     );
-    expect(signInError.message).toBe("REDIRECT:/invite");
+    expect(signInError.message).toBe("REDIRECT:/invite/continue");
     expect(signInError.message).not.toContain(RAW_INVITATION_VALUE);
 
     await signUpAction(signUpForm(`/invite#${RAW_INVITATION_VALUE}`)).catch(() => undefined);

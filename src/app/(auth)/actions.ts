@@ -1,6 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { signInSchema, signUpSchema, requestPasswordResetSchema, updatePasswordSchema } from "@/features/auth/application/auth";
@@ -25,6 +24,10 @@ function authCallbackUrl(next: string): string {
   return callback.toString();
 }
 
+// Keep the invitation token scoped to /invite. Sign-in actions run at /sign-in,
+// where that cookie is unavailable, so continue through a fresh /invite GET.
+const INVITE_CONTINUATION_PATH = "/invite/continue";
+
 export async function signInAction(formData: FormData) {
   const next = safeNext(formData);
   await enforceRateLimit(`sign-in:${String(formData.get("email")).trim().toLowerCase()}`, { limit: 8, windowMs: 15 * 60_000 });
@@ -40,8 +43,7 @@ export async function signInAction(formData: FormData) {
     const failure = authFailureMessage(error.message, "sign-in");
     redirect(message(failure.path, failure.message, next));
   }
-  // A client-side Server Action redirect must not reuse the signed-out invite page.
-  if (next === "/invite") revalidatePath("/invite");
+  if (next === "/invite") redirect(INVITE_CONTINUATION_PATH);
   redirect(next);
 }
 
@@ -61,7 +63,7 @@ export async function signUpAction(formData: FormData) {
     redirect(message(failure.path, failure.message, next));
   }
   if (data.session) {
-    if (next === "/invite") revalidatePath("/invite");
+    if (next === "/invite") redirect(INVITE_CONTINUATION_PATH);
     redirect(next);
   }
   redirect(message("/sign-in", "Check your email to confirm your account.", next));
