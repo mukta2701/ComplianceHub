@@ -6,7 +6,6 @@ import { getGitHubConnectionConfig } from "@/features/github/application/github-
 import {
   claimDueReconciliations,
   finalizeReconciliationRun,
-  listSelectedRepositoryIds,
   listStoredRepositories,
   loadInstallationContext,
   projectConnectionNotice,
@@ -282,15 +281,17 @@ export async function runGitHubConnectionReconcile(input: {
                 appJwt,
                 provideInstallationToken: async () => {
                   deadlineSignal.throwIfAborted();
-                  const repositoryIds = await listSelectedRepositoryIds(
-                    client,
-                    claim.installationUuid,
-                    deadlineSignal,
-                  );
-                  deadlineSignal.throwIfAborted();
+                  // Inventory must cover every repository the GitHub App installation
+                  // can access, independent of Owner-selected monitoring scope.
+                  // An unrestricted installation token (permissions only, no
+                  // repository_ids) lets GET /installation/repositories return the
+                  // full App-accessible set. GET /installation/repositories only
+                  // needs Metadata read, so inventory mints { metadata: "read" }.
+                  // Collection stays Owner-selected only via its separate
+                  // selected-scope token path with the six READ_PERMISSIONS.
                   const installationToken = await dependencies.createInstallationToken({
                     installationId: claim.providerInstallationId,
-                    repositoryIds,
+                    purpose: "inventory",
                     appJwt,
                     signal: deadlineSignal,
                     fetchImpl: deadlineFetch(deadlineSignal),

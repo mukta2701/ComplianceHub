@@ -392,4 +392,266 @@ describe("github-connection-reconcile entry point", () => {
     expect(stderr.join("")).toMatch(/^github-connection-reconcile execution=[0-9a-f-]+ failed\n$/);
     expect(stderr.join("")).not.toContain("webhook fixture secret");
   });
+
+  it("inventories all App-accessible repositories when only one is Owner-selected", async () => {
+    const events: string[] = [];
+    const signalRef: { signal?: AbortSignal; cycleSignal?: AbortSignal; drainSignal?: AbortSignal } = {};
+    const createInstallationToken = vi.fn().mockResolvedValue({ token: "x", expiresAt: "2026-09-20T00:00:00.000Z" });
+    const readInstallationSnapshot = vi.fn().mockImplementation(async (input: {
+      installationId: number;
+      provideInstallationToken?: () => Promise<string>;
+    }) => {
+      // Reconciliation inventory must use an unrestricted installation token so
+      // GET /installation/repositories sees every App-accessible repository.
+      const token = await input.provideInstallationToken?.();
+      expect(token).toBe("x");
+      return {
+        installationId: 77,
+        account: { id: 99, login: "Adtecher", type: "Organization" as const },
+        repositorySelection: "selected" as const,
+        permissions: {
+          actions: "read",
+          administration: "read",
+          metadata: "read",
+          secret_scanning_alerts: "read",
+          security_events: "read",
+          vulnerability_alerts: "read",
+        },
+        suspendedAt: null,
+        repositories: [
+          {
+            id: 101, owner: "Adtecher", name: "repo-101", fullName: "Adtecher/repo-101",
+            htmlUrl: "https://github.com/Adtecher/repo-101", visibility: "private" as const,
+            archived: false, defaultBranch: "main",
+          },
+          {
+            id: 102, owner: "Adtecher", name: "repo-102", fullName: "Adtecher/repo-102",
+            htmlUrl: "https://github.com/Adtecher/repo-102", visibility: "private" as const,
+            archived: false, defaultBranch: "main",
+          },
+        ],
+      };
+    });
+    const rpc = vi.fn().mockResolvedValue({ data: "none", error: null });
+    const from = () => ({
+      select: (columns: string) => {
+        const single = async () => ({ data: null, error: null });
+        // Owner selects only repo 101; repo 102 remains App-accessible but unselected.
+        // Stored inventory keeps both App-scope rows.
+        const data = columns.includes("selected")
+          ? [
+            { provider_repository_id: 101, selected: true, available: true },
+            { provider_repository_id: 102, selected: false, available: true },
+          ]
+          : [
+            { provider_repository_id: 101, full_name: "Adtecher/repo-101" },
+            { provider_repository_id: 102, full_name: "Adtecher/repo-102" },
+          ];
+        const query = Object.assign(Promise.resolve({ data, error: null }), { single });
+        return { eq: () => query, single };
+      },
+    });
+    const result = await runGitHubConnectionReconcile({
+      environment: {},
+      executionId: "11111111-1111-4111-8111-111111111111",
+      dependencies: runtimeDependencies(events, signalRef, {
+        createInstallationToken,
+        readInstallationSnapshot,
+        createServiceClient: () => ({ rpc, from }) as never,
+        runCycle: async (cycleDependencies, input) => {
+          const reconciliation = await cycleDependencies.reconcileClaim({
+            runId: "33333333-3333-4333-8333-333333333333",
+            installationUuid: "22222222-2222-4222-8222-222222222222",
+            providerInstallationId: 77,
+            organisationId: "55555555-5555-4555-8555-555555555555",
+            previousHealth: "healthy",
+            consecutiveFailures: 0,
+            expectedAccount: { id: 99, login: "Adtecher", type: "Organization" },
+          });
+          expect(reconciliation.decision).toMatchObject({ health: "healthy", openIncident: false });
+          expect(reconciliation.repositoriesSeen).toBe(2);
+          return {
+            executionId: input.executionId,
+            webhookDeliveriesClaimed: 0,
+            installationsClaimed: 1,
+            healthy: 1,
+            retrying: 0,
+            actionRequired: 0,
+            recovered: 0,
+            ownershipLost: 0,
+          };
+        },
+        drainSlackDeliveries: async () => ({ claimed: 0, delivered: 0, failed: 0 }),
+      }),
+    });
+    expect(result.summary).toMatchObject({ healthy: 1, actionRequired: 0 });
+    // Inventory token must not be restricted to the Owner-selected subset
+    // and must use the narrow metadata-read inventory purpose.
+    expect(createInstallationToken).toHaveBeenCalledTimes(1);
+    expect(createInstallationToken).toHaveBeenCalledWith(expect.objectContaining({ purpose: "inventory" }));
+    expect(createInstallationToken).toHaveBeenCalledWith(expect.not.objectContaining({ repositoryIds: expect.anything() }));
+    expect(rpc).toHaveBeenCalledWith("finalize_github_connection_reconciliation_server", expect.objectContaining({
+      target_outcome: "success",
+    }));
+  });
+
+  it("succeeds with zero Owner-selected repositories when App access remains", async () => {
+    const events: string[] = [];
+    const signalRef: { signal?: AbortSignal; cycleSignal?: AbortSignal; drainSignal?: AbortSignal } = {};
+    const createInstallationToken = vi.fn().mockResolvedValue({ token: "x", expiresAt: "2026-09-20T00:00:00.000Z" });
+    const readInstallationSnapshot = vi.fn().mockImplementation(async (input: {
+      provideInstallationToken?: () => Promise<string>;
+    }) => {
+      const token = await input.provideInstallationToken?.();
+      expect(token).toBe("x");
+      return {
+        installationId: 77,
+        account: { id: 99, login: "Adtecher", type: "Organization" as const },
+        repositorySelection: "selected" as const,
+        permissions: {
+          actions: "read",
+          administration: "read",
+          metadata: "read",
+          secret_scanning_alerts: "read",
+          security_events: "read",
+          vulnerability_alerts: "read",
+        },
+        suspendedAt: null,
+        repositories: [
+          {
+            id: 102, owner: "Adtecher", name: "repo-102", fullName: "Adtecher/repo-102",
+            htmlUrl: "https://github.com/Adtecher/repo-102", visibility: "private" as const,
+            archived: false, defaultBranch: "main",
+          },
+        ],
+      };
+    });
+    const rpc = vi.fn().mockResolvedValue({ data: "none", error: null });
+    const from = () => ({
+      select: (columns: string) => {
+        const single = async () => ({ data: null, error: null });
+        const data = columns.includes("selected")
+          ? [{ provider_repository_id: 102, selected: false, available: true }]
+          : [{ provider_repository_id: 102, full_name: "Adtecher/repo-102" }];
+        const query = Object.assign(Promise.resolve({ data, error: null }), { single });
+        return { eq: () => query, single };
+      },
+    });
+    const result = await runGitHubConnectionReconcile({
+      environment: {},
+      executionId: "11111111-1111-4111-8111-111111111111",
+      dependencies: runtimeDependencies(events, signalRef, {
+        createInstallationToken,
+        readInstallationSnapshot,
+        createServiceClient: () => ({ rpc, from }) as never,
+        runCycle: async (cycleDependencies, input) => {
+          const reconciliation = await cycleDependencies.reconcileClaim({
+            runId: "33333333-3333-4333-8333-333333333333",
+            installationUuid: "22222222-2222-4222-8222-222222222222",
+            providerInstallationId: 77,
+            organisationId: "55555555-5555-4555-8555-555555555555",
+            previousHealth: "healthy",
+            consecutiveFailures: 0,
+            expectedAccount: { id: 99, login: "Adtecher", type: "Organization" },
+          });
+          expect(reconciliation.decision).toMatchObject({ health: "healthy", openIncident: false });
+          return {
+            executionId: input.executionId,
+            webhookDeliveriesClaimed: 0,
+            installationsClaimed: 1,
+            healthy: 1,
+            retrying: 0,
+            actionRequired: 0,
+            recovered: 0,
+            ownershipLost: 0,
+          };
+        },
+        drainSlackDeliveries: async () => ({ claimed: 0, delivered: 0, failed: 0 }),
+      }),
+    });
+    expect(result.summary).toMatchObject({ healthy: 1 });
+    expect(createInstallationToken).toHaveBeenCalledTimes(1);
+    expect(createInstallationToken).toHaveBeenCalledWith(expect.objectContaining({ purpose: "inventory" }));
+    expect(createInstallationToken).toHaveBeenCalledWith(expect.not.objectContaining({ repositoryIds: expect.anything() }));
+  });
+
+  it("still reports partial when real App access is removed", async () => {
+    const events: string[] = [];
+    const signalRef: { signal?: AbortSignal; cycleSignal?: AbortSignal; drainSignal?: AbortSignal } = {};
+    const createInstallationToken = vi.fn().mockResolvedValue({ token: "x", expiresAt: "2026-09-20T00:00:00.000Z" });
+    const readInstallationSnapshot = vi.fn().mockResolvedValue({
+      installationId: 77,
+      account: { id: 99, login: "Adtecher", type: "Organization" as const },
+      repositorySelection: "selected" as const,
+      permissions: {
+        actions: "read",
+        administration: "read",
+        metadata: "read",
+        secret_scanning_alerts: "read",
+        security_events: "read",
+        vulnerability_alerts: "read",
+      },
+      suspendedAt: null,
+      repositories: [
+        {
+          id: 101, owner: "Adtecher", name: "repo-101", fullName: "Adtecher/repo-101",
+          htmlUrl: "https://github.com/Adtecher/repo-101", visibility: "private" as const,
+          archived: false, defaultBranch: "main",
+        },
+      ],
+    });
+    const rpc = vi.fn().mockResolvedValue({ data: "opened", error: null });
+    const from = () => ({
+      select: (columns: string) => {
+        const single = async () => ({ data: null, error: null });
+        const data = columns.includes("selected")
+          ? [
+            { provider_repository_id: 101, selected: true, available: true },
+            { provider_repository_id: 102, selected: true, available: true },
+          ]
+          : [
+            { provider_repository_id: 101, full_name: "Adtecher/repo-101" },
+            { provider_repository_id: 102, full_name: "Adtecher/repo-102" },
+          ];
+        const query = Object.assign(Promise.resolve({ data, error: null }), { single });
+        return { eq: () => query, single };
+      },
+    });
+    await runGitHubConnectionReconcile({
+      environment: {},
+      executionId: "11111111-1111-4111-8111-111111111111",
+      dependencies: runtimeDependencies(events, signalRef, {
+        createInstallationToken,
+        readInstallationSnapshot,
+        createServiceClient: () => ({ rpc, from }) as never,
+        runCycle: async (cycleDependencies, input) => {
+          const reconciliation = await cycleDependencies.reconcileClaim({
+            runId: "33333333-3333-4333-8333-333333333333",
+            installationUuid: "22222222-2222-4222-8222-222222222222",
+            providerInstallationId: 77,
+            organisationId: "55555555-5555-4555-8555-555555555555",
+            previousHealth: "healthy",
+            consecutiveFailures: 0,
+            expectedAccount: { id: 99, login: "Adtecher", type: "Organization" },
+          });
+          expect(reconciliation.decision).toMatchObject({ health: "partially_unavailable", openIncident: true });
+          return {
+            executionId: input.executionId,
+            webhookDeliveriesClaimed: 0,
+            installationsClaimed: 1,
+            healthy: 0,
+            retrying: 0,
+            actionRequired: 0,
+            recovered: 0,
+            ownershipLost: 0,
+          };
+        },
+        drainSlackDeliveries: async () => ({ claimed: 0, delivered: 0, failed: 0 }),
+      }),
+    });
+    expect(rpc).toHaveBeenCalledWith("finalize_github_connection_reconciliation_server", expect.objectContaining({
+      target_outcome: "partial",
+      target_diagnostic_code: "repository_unavailable",
+    }));
+  });
 });
