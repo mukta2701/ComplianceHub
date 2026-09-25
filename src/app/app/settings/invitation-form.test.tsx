@@ -76,4 +76,18 @@ describe("InvitationForm", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Copy failed. Select the link and copy it manually.");
     expect(screen.getByDisplayValue(invitationUrl)).toBeVisible();
   });
+
+  it("exposes readable invite controls with stable labels, placeholders and autocomplete", () => {
+    render(<InvitationForm canInviteAdmin />);
+
+    const email = screen.getByRole("textbox", { name: "Invite by email" });
+    expect(email).toHaveAttribute("placeholder", "member@example.com");
+    expect(email).toHaveAttribute("autocomplete", "email");
+
+    const jobTitle = screen.getByRole("textbox", { name: "Job title" });
+    expect(jobTitle.getAttribute("placeholder") ?? "").not.toHaveLength(0);
+
+    expect(screen.getByRole("combobox", { name: "Role" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Create invite" })).toBeVisible();
+  });
 });

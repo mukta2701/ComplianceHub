@@ -14,7 +14,11 @@
 }
 
 .navigationLink {
+  display: inline-flex;
   flex: 1 0 auto;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
   padding: 9px 13px;
   border-radius: 7px;
   color: #596273;
@@ -319,6 +323,14 @@
   border-top: 1px solid var(--line);
 }
 
+.inviteForm > button {
+  min-height: 44px;
+}
+
+.invitationResultActions button {
+  min-height: 44px;
+}
+
 .securityRow > svg {
   width: 19px;
   flex: none;
@@ -363,6 +375,54 @@
 .integratedSection :global(.team-list > div > span) {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .navigation {
+    flex-wrap: wrap;
+    overflow-x: visible;
+  }
+
+  .navigationLink {
+    flex: 1 1 140px;
+  }
+
+  .inviteForm {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .inviteForm label {
+    flex-basis: auto;
+  }
+
+  .field,
+  .inviteForm input,
+  .inviteForm select {
+    padding: 10px 12px;
+    font-size: 16px;
+  }
+
+  .inviteForm > button {
+    width: 100%;
+  }
+
+  .smallButton {
+    min-height: 44px;
+  }
+
+  .invitationResult {
+    padding: 16px;
+  }
+
+  .invitationResultActions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .invitationResultActions button {
+    width: 100%;
+  }
 }
 
 @media (max-width: 760px) {

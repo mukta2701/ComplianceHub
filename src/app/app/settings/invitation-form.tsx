@@ -76,8 +76,8 @@ export function InvitationForm({ canInviteAdmin }: { canInviteAdmin: boolean }) 
     {message && <p className={styles.statusMessage} role="status">{message}</p>}
     {error && <p className={styles.formError} role="alert">{error}</p>}
     <form onSubmit={submit} aria-busy={pending} className={styles.inviteForm}>
-      <label>Invite by email<input type="email" name="email" required placeholder="member@example.com" /></label>
-      <label>Job title<input name="jobTitle" maxLength={120} placeholder="Developer, CTO, Employee…" /></label>
+      <label>Invite by email<input type="email" name="email" required placeholder="member@example.com" autoComplete="email" inputMode="email" /></label>
+      <label>Job title<input name="jobTitle" maxLength={120} placeholder="Developer, CTO, Employee…" autoComplete="organization-title" /></label>
       <label>Role<select name="role"><option value="member">Member</option>{canInviteAdmin && <option value="admin">Admin</option>}</select></label>
       <button className="button primary" disabled={pending}><Icon name="plus" />{pending ? "Creating…" : "Create invite"}</button>
     </form>

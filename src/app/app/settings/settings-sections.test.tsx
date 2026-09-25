@@ -1,4 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { SettingsSections } from "./settings-sections";
 
@@ -64,5 +67,19 @@ describe("SettingsSections", () => {
     expect(screen.queryByRole("link", { name: "AI assistance" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Customer trust" })).toHaveAttribute("href", "/app/settings#customer-trust");
     expect(screen.queryByRole("link", { name: "Connected assistants" })).not.toBeInTheDocument();
+  });
+
+  it("keeps narrow-screen invite stacking, touch targets and tab wrapping in owned CSS", () => {
+    const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "settings-sections.module.css"), "utf8");
+
+    // Invite fields stack full-width at ~600px (not only at 460px).
+    expect(css).toMatch(/@media\s*\([^)]*max-width:\s*640px[^)]*\)[\s\S]*?\.inviteForm/);
+    // Invite submit and invitation-result actions reach a 44px touch target.
+    expect(css).toMatch(/\.inviteForm\s*>\s*button[\s\S]*?min-height:\s*44px/);
+    expect(css).toMatch(/\.invitationResultActions[\s\S]*?min-height:\s*44px/);
+    // Invite inputs stay readable on small screens (16px avoids iOS auto-zoom).
+    expect(css).toMatch(/@media\s*\([^)]*max-width:\s*640px[^)]*\)[\s\S]*?font-size:\s*16px/);
+    // Section tabs wrap or stay reachable without clipping at narrow widths.
+    expect(css).toMatch(/@media\s*\([^)]*max-width:\s*640px[^)]*\)[\s\S]*?\.navigation/);
   });
 });
