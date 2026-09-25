@@ -432,10 +432,6 @@ export default async function AppHome() {
           </li>)}
         </ol>
       </Card>}
-      {!checklist.complete && <Card>
-        <div className="card-head"><div><h2>Reduce admin later</h2><p>Integrations are optional. Connect your systems when you want to collect evidence and prepare drafts for review.</p></div></div>
-        <Link className="button secondary" href="/app/setup">Explore integrations <Icon name="arrow" /></Link>
-      </Card>}
     </div>
   </div>;
 }

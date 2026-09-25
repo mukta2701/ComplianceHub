@@ -19,6 +19,7 @@ it("keeps the original programme builder beside recent activity", async () => {
   expect(screen.getByText("1 of 7 done")).toBeInTheDocument();
   expect(screen.queryByRole("heading", { name: /setup roadmap|continue your programme/i })).not.toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "What changed" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "Reduce admin later" })).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Reduce admin later" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: /Explore integrations/ })).not.toBeInTheDocument();
   expect(screen.getByRole("link", { name: /Open risks/ })).toHaveAttribute("href", "/app/risks");
 });
