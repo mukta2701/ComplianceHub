@@ -34,9 +34,14 @@ const appConfigSchema = z.object({
 const installationTokenInputSchema = z.object({
   installationId: z.number().int().positive().safe(),
   repositoryIds: z.array(z.number().int().positive().safe()).min(1).max(100)
-    .refine((ids) => new Set(ids).size === ids.length),
+    .refine((ids) => new Set(ids).size === ids.length).optional(),
+  purpose: z.enum(["collection", "inventory"]).optional(),
   appJwt: z.string().trim().min(1),
-}).strict();
+}).strict().refine((data) => data.purpose !== "inventory" || data.repositoryIds === undefined, {
+  message: "Invalid GitHub installation token request",
+}).refine((data) => data.purpose === "inventory" || data.repositoryIds !== undefined, {
+  message: "Invalid GitHub installation token request",
+});
 
 const installationTokenResponseSchema = z.object({
   token: z.string().min(1),
@@ -50,6 +55,10 @@ export const READ_PERMISSIONS = {
   secret_scanning_alerts: "read",
   security_events: "read",
   vulnerability_alerts: "read",
+} as const;
+
+export const INVENTORY_PERMISSIONS = {
+  metadata: "read",
 } as const;
 
 export function hasExactReadPermissions(value: unknown): value is typeof READ_PERMISSIONS {
@@ -86,7 +95,8 @@ export async function createAppJwt(
 
 export async function createInstallationToken(input: {
   installationId: number;
-  repositoryIds: number[];
+  repositoryIds?: number[];
+  purpose?: "collection" | "inventory";
   appJwt: string;
   fetchImpl?: FetchLike;
   signal?: AbortSignal;
@@ -94,6 +104,7 @@ export async function createInstallationToken(input: {
   const parsed = installationTokenInputSchema.safeParse({
     installationId: input.installationId,
     repositoryIds: input.repositoryIds,
+    purpose: input.purpose,
     appJwt: input.appJwt,
   });
   if (!parsed.success) throw new Error("Invalid GitHub installation token request");
@@ -115,8 +126,8 @@ export async function createInstallationToken(input: {
           "X-GitHub-Api-Version": GITHUB_API_VERSION,
         },
         body: JSON.stringify({
-          repository_ids: parsed.data.repositoryIds,
-          permissions: READ_PERMISSIONS,
+          ...(parsed.data.repositoryIds !== undefined ? { repository_ids: parsed.data.repositoryIds } : {}),
+          permissions: parsed.data.purpose === "inventory" ? INVENTORY_PERMISSIONS : READ_PERMISSIONS,
         }),
         cache: "no-store",
         redirect: "error",

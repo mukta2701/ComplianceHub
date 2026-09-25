@@ -104,6 +104,100 @@ describe("GitHub App authentication", () => {
     );
   });
 
+  it("mints an unrestricted inventory token with metadata read only when no scope is supplied", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      token: "x",
+      expires_at: "2026-08-17T13:00:00Z",
+    }), { status: 201, headers: { "content-type": "application/json" } }));
+
+    const result = await createInstallationToken({
+      installationId: 77,
+      purpose: "inventory",
+      fetchImpl,
+      appJwt: "signed-app-jwt",
+    });
+
+    expect(result).toEqual({ token: "x", expiresAt: "2026-08-17T13:00:00Z" });
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://api.github.com/app/installations/77/access_tokens",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ permissions: { metadata: "read" } }),
+      }),
+    );
+    expect((fetchImpl.mock.calls[0] as [string, RequestInit])[1].body as string).not.toContain("repository_ids");
+  });
+
+  it("rejects an inventory token restricted to repositories", async () => {
+    const fetchImpl = vi.fn();
+
+    await expect(createInstallationToken({
+      installationId: 77,
+      repositoryIds: [101],
+      purpose: "inventory",
+      fetchImpl,
+      appJwt: "signed-app-jwt",
+    })).rejects.toThrow("Invalid GitHub installation token request");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("rejects a token with neither purpose nor repository scope before requesting", async () => {
+    const fetchImpl = vi.fn();
+
+    await expect(createInstallationToken({
+      installationId: 77,
+      fetchImpl,
+      appJwt: "signed-app-jwt",
+    })).rejects.toThrow("Invalid GitHub installation token request");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("rejects an explicit collection token without repository scope before requesting", async () => {
+    const fetchImpl = vi.fn();
+
+    await expect(createInstallationToken({
+      installationId: 77,
+      purpose: "collection",
+      fetchImpl,
+      appJwt: "signed-app-jwt",
+    })).rejects.toThrow("Invalid GitHub installation token request");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("requests an explicit collection token restricted to selected repositories and read permissions", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      token: "x",
+      expires_at: "2026-08-17T13:00:00Z",
+    }), { status: 201, headers: { "content-type": "application/json" } }));
+
+    const result = await createInstallationToken({
+      installationId: 77,
+      repositoryIds: [101, 102],
+      purpose: "collection",
+      fetchImpl,
+      appJwt: "signed-app-jwt",
+    });
+
+    expect(result).toEqual({ token: "x", expiresAt: "2026-08-17T13:00:00Z" });
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://api.github.com/app/installations/77/access_tokens",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          repository_ids: [101, 102],
+          permissions: {
+            actions: "read",
+            administration: "read",
+            metadata: "read",
+            secret_scanning_alerts: "read",
+            security_events: "read",
+            vulnerability_alerts: "read",
+          },
+        }),
+      }),
+    );
+  });
+
   it.each([
     { repositoryIds: [], label: "empty" },
     { repositoryIds: [101, 101], label: "duplicate" },
