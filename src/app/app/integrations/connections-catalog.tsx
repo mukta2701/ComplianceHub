@@ -66,6 +66,12 @@ const PROVIDERS: Array<{
   description: string;
 }> = [
   {
+    id: "slack",
+    label: "Slack",
+    mark: "SL",
+    description: "Choose a private team channel for alerts that link back to ComplianceHub.",
+  },
+  {
     id: "github",
     label: "GitHub Issues",
     mark: "GH",
@@ -77,13 +83,10 @@ const PROVIDERS: Array<{
     mark: "JI",
     description: "Track remediation work in your Jira projects.",
   },
-  {
-    id: "slack",
-    label: "Slack",
-    mark: "SL",
-    description: "Send new finding alerts to your team.",
-  },
 ];
+
+const ALERT_PROVIDER_IDS: ProviderId[] = ["slack"];
+const OPTIONAL_PROVIDER_IDS: ProviderId[] = ["github", "jira"];
 
 function connectionNeedsSetup(connection: ConnectionSummary) {
   if (connection.connection_mode !== "oauth") return false;
@@ -381,6 +384,7 @@ function SlackPanel({ alertChannels, canManageDailyDigest, digestDeliveries }: {
   }
 
   return <div className="connections-slack-panel">
+    <p className="connections-panel-copy">Choose a private team channel for alerts. Alerts link back to ComplianceHub, and reviews and follow-up stay in ComplianceHub.</p>
     {alertChannels.length > 0 && <div className="connections-account-list">
       {alertChannels.map((channel) => <div className="connections-account" key={channel.id}>
         <div className="connections-account-summary">
@@ -449,6 +453,7 @@ export function ConnectionsCatalog({
   connections,
   alertChannels,
   navigation,
+  githubPanel,
   canManageDailyDigest = false,
   digestDeliveries = [],
   nativeJiraConnections = [],
@@ -456,6 +461,7 @@ export function ConnectionsCatalog({
   connections: ConnectionSummary[];
   alertChannels: AlertChannelSummary[];
   navigation?: React.ReactNode;
+  githubPanel?: React.ReactNode;
   canManageDailyDigest?: boolean;
   digestDeliveries?: DailyDigestDeliverySummary[];
   nativeJiraConnections?: NativeJiraConnectionSummary[];
@@ -476,6 +482,48 @@ export function ConnectionsCatalog({
     setSelectedProvider(null);
   }
 
+  function renderProviderCard(provider: (typeof PROVIDERS)[number]) {
+    const providerConnections = connections.filter((connection) => connection.provider === provider.id);
+    const nativeConnections = provider.id === "jira" ? nativeJiraConnections : [];
+    const records = provider.id === "slack" ? liveSlackChannels : [...providerConnections, ...nativeConnections];
+    const needsSetup = providerConnections.some(connectionNeedsSetup) || nativeConnections.some(nativeJiraNeedsSetup);
+    const hasEnabledRecord = records.some((record) => record.enabled);
+    const status = records.length === 0
+      ? "Not connected"
+      : needsSetup
+        ? "Setup required"
+        : hasEnabledRecord
+          ? "Connected"
+          : "Paused";
+    const action = records.length === 0 ? "Connect" : needsSetup ? "Continue setup" : "Manage";
+    const targetSummary = providerTargetSummary(provider.id, connections, liveSlackChannels, nativeJiraConnections);
+    return <article className="connections-provider-card connection-card" aria-label={`${provider.label} connection`} key={provider.id}>
+      <div className="connections-provider-heading connection-card-head">
+        <span className={`connections-provider-mark connection-icon ${provider.id}`} aria-hidden="true">{provider.mark}</span>
+        <div>
+          <h3>{provider.label}</h3>
+          <span className="connection-status"><Pill tone={status === "Connected" ? "green" : status === "Setup required" ? "amber" : "neutral"}>{status}</Pill></span>
+        </div>
+      </div>
+      <p>{provider.description}</p>
+      <div className="connection-card-footer">
+        <span className="connection-card-target">{targetSummary}</span>
+        <button
+          className={`button ${records.length === 0 || needsSetup ? "primary" : "secondary"}`}
+          type="button"
+          ref={(element) => { triggerRefs.current[provider.id] = element; }}
+          aria-controls="connection-management-panel"
+          aria-expanded={selectedProvider === provider.id}
+          aria-label={`${action} ${provider.label}`}
+          onClick={() => setSelectedProvider(provider.id)}
+        >{action}</button>
+      </div>
+    </article>;
+  }
+
+  const alertProviders = PROVIDERS.filter((provider) => ALERT_PROVIDER_IDS.includes(provider.id));
+  const optionalProviders = PROVIDERS.filter((provider) => OPTIONAL_PROVIDER_IDS.includes(provider.id));
+
   return <div className="connections-catalog">
     <header className="connections-catalog-head">
       <div>
@@ -487,46 +535,23 @@ export function ConnectionsCatalog({
 
     {navigation}
 
-    <div className="connections-provider-grid connections-grid" data-testid="connections-grid">
-      {PROVIDERS.map((provider) => {
-        const providerConnections = connections.filter((connection) => connection.provider === provider.id);
-        const nativeConnections = provider.id === "jira" ? nativeJiraConnections : [];
-        const records = provider.id === "slack" ? liveSlackChannels : [...providerConnections, ...nativeConnections];
-        const needsSetup = providerConnections.some(connectionNeedsSetup) || nativeConnections.some(nativeJiraNeedsSetup);
-        const hasEnabledRecord = records.some((record) => record.enabled);
-        const status = records.length === 0
-          ? "Not connected"
-          : needsSetup
-            ? "Setup required"
-            : hasEnabledRecord
-              ? "Connected"
-              : "Paused";
-        const action = records.length === 0 ? "Connect" : needsSetup ? "Continue setup" : "Manage";
-        const targetSummary = providerTargetSummary(provider.id, connections, liveSlackChannels, nativeJiraConnections);
-        return <article className="connections-provider-card connection-card" aria-label={`${provider.label} connection`} key={provider.id}>
-          <div className="connections-provider-heading connection-card-head">
-            <span className={`connections-provider-mark connection-icon ${provider.id}`} aria-hidden="true">{provider.mark}</span>
-            <div>
-              <h3>{provider.label}</h3>
-              <span className="connection-status"><Pill tone={status === "Connected" ? "green" : status === "Setup required" ? "amber" : "neutral"}>{status}</Pill></span>
-            </div>
-          </div>
-          <p>{provider.description}</p>
-          <div className="connection-card-footer">
-            <span className="connection-card-target">{targetSummary}</span>
-            <button
-              className={`button ${records.length === 0 || needsSetup ? "primary" : "secondary"}`}
-              type="button"
-              ref={(element) => { triggerRefs.current[provider.id] = element; }}
-              aria-controls="connection-management-panel"
-              aria-expanded={selectedProvider === provider.id}
-              aria-label={`${action} ${provider.label}`}
-              onClick={() => setSelectedProvider(provider.id)}
-            >{action}</button>
-          </div>
-        </article>;
-      })}
-    </div>
+    {githubPanel}
+
+    <section aria-label="Team alerts" className="connections-section">
+      <div className="connections-provider-grid connections-grid" data-testid="connections-grid">
+        {alertProviders.map(renderProviderCard)}
+      </div>
+    </section>
+
+    <section aria-label="Optional work trackers" className="connections-section connections-optional-section">
+      <div className="connections-section-head">
+        <h3 id="optional-work-trackers">Optional work trackers</h3>
+        <p>Optional work trackers help coordinate follow-up. Repository monitoring is managed above.</p>
+      </div>
+      <div className="connections-provider-grid connections-grid" data-testid="connections-optional-grid">
+        {optionalProviders.map(renderProviderCard)}
+      </div>
+    </section>
 
     {selectedProvider && <ProviderPanel
       provider={selectedProvider}

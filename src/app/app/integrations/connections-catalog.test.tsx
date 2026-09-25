@@ -351,6 +351,61 @@ describe("ConnectionsCatalog", () => {
     expect(within(panel).getByRole("button", { name: "Stop daily digest" })).toBeEnabled();
   });
 
+  it("renders the primary GitHub panel after heading and navigation but before team alerts", () => {
+    render(<ConnectionsCatalog
+      connections={connections}
+      alertChannels={alertChannels}
+      navigation={<nav aria-label="Settings tabs"><a href="/app/settings">Settings</a></nav>}
+      githubPanel={<section aria-label="Primary GitHub panel">GitHub repository access</section>}
+    />);
+
+    const heading = screen.getByRole("heading", { name: "Connections" });
+    const navigation = screen.getByRole("navigation", { name: "Settings tabs" });
+    const githubPanel = screen.getByRole("region", { name: "Primary GitHub panel" });
+    const alerts = screen.getByRole("region", { name: "Team alerts" });
+    const optional = screen.getByRole("region", { name: "Optional work trackers" });
+    expect(heading.compareDocumentPosition(navigation) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(navigation.compareDocumentPosition(githubPanel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(githubPanel.compareDocumentPosition(alerts) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(alerts.compareDocumentPosition(optional) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("describes optional trackers as follow-up coordination with monitoring managed above", () => {
+    render(<ConnectionsCatalog connections={connections} alertChannels={alertChannels} />);
+
+    expect(screen.getByText("Optional work trackers help coordinate follow-up. Repository monitoring is managed above.")).toBeVisible();
+    expect(screen.queryByText(/only track remediation tasks/i)).not.toBeInTheDocument();
+  });
+
+  it("places team alerts ahead of optional work trackers", () => {
+    render(<ConnectionsCatalog connections={connections} alertChannels={alertChannels} />);
+
+    const alerts = screen.getByRole("region", { name: "Team alerts" });
+    const optional = screen.getByRole("region", { name: "Optional work trackers" });
+    expect(alerts.compareDocumentPosition(optional) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(alerts).getByRole("article", { name: "Slack connection" })).toBeVisible();
+    expect(within(optional).getByRole("article", { name: "GitHub Issues connection" })).toBeVisible();
+    expect(within(optional).getByRole("article", { name: "Jira connection" })).toBeVisible();
+    expect(within(optional).getByRole("heading", { name: "Optional work trackers" })).toBeVisible();
+  });
+
+  it("advises choosing a private team channel for Slack alerts that link back to ComplianceHub", async () => {
+    const user = userEvent.setup();
+    render(<ConnectionsCatalog connections={[]} alertChannels={alertChannels} canManageDailyDigest />);
+
+    const slackCard = screen.getByRole("article", { name: "Slack connection" });
+    expect(slackCard).toHaveTextContent(/choose a private team channel/i);
+    expect(slackCard).toHaveTextContent(/link back to ComplianceHub/i);
+
+    await user.click(within(slackCard).getByRole("button", { name: "Manage Slack" }));
+    const panel = screen.getByRole("region", { name: "Manage Slack" });
+    expect(panel).toHaveTextContent(/choose a private team channel/i);
+    expect(panel).toHaveTextContent(/link back to ComplianceHub/i);
+    expect(panel).toHaveTextContent(/stay in ComplianceHub/i);
+    expect(panel).not.toHaveTextContent(/alerts go to a private team channel/i);
+    expect(panel).not.toHaveTextContent(/direct message/i);
+  });
+
   it("lets an Owner stop a stale selected digest while its Slack channel is paused", async () => {
     const user = userEvent.setup();
     render(<ConnectionsCatalog

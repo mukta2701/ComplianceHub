@@ -262,9 +262,10 @@ export function GitHubInstallationPanel({
             {installationRepositories.length} {installationRepositories.length === 1 ? "repository" : "repositories"}
             {` · ${selectedCount} selected · ${availableCount} available`}
           </p>
-          {installation.permissions_ok ? <div className="github-approved-permissions">
+          {installation.permissions_ok ? <details className="github-access-details">
+            <summary>Read-only access details</summary>
             <p><strong>Approved read-only access:</strong> {APPROVED_READ_PERMISSIONS.join(" · ")}</p>
-          </div> : null}
+          </details> : null}
           {canManageInstallation && installation.health !== "disconnected" && <DisconnectInstallationButton
             installationId={installation.id}
             onMessage={setMessage}
@@ -296,7 +297,7 @@ export function GitHubInstallationPanel({
                       aria-busy={pending}
                       onChange={(event) => void changeRepository(repository, event.target.checked)}
                     />
-                    <span>Allow ComplianceHub to read and include {repository.full_name} in monitoring</span>
+                    <span>Choose to include {repository.full_name} in monitoring</span>
                   </label>
                   <div>
                     <a

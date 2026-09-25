@@ -69,7 +69,7 @@ describe("GitHubInstallationPanel configuration boundary", () => {
     expect(region).toHaveTextContent("ComplianceHub reads selected repositories for monitoring and never changes GitHub.");
     expect(within(region).getByRole("article", { name: "Adtecher GitHub installation" })).toHaveTextContent("Healthy");
     expect(within(region).getByRole("checkbox", {
-      name: "Allow ComplianceHub to read and include Adtecher/compliancehub in monitoring",
+      name: "Choose to include Adtecher/compliancehub in monitoring",
     })).toBeEnabled();
     expect(within(region).getByRole("link", { name: "Open GitHub monitoring" })).toHaveAttribute("href", "/app/monitoring");
     expect(within(region).getByRole("link", { name: "Manage repository access" })).toHaveAttribute("href", "/api/github/setup");
@@ -110,7 +110,7 @@ describe("GitHubInstallationPanel configuration boundary", () => {
     />);
 
     const checkbox = screen.getByRole("checkbox", {
-      name: "Allow ComplianceHub to read and include Adtecher/compliancehub in monitoring",
+      name: "Choose to include Adtecher/compliancehub in monitoring",
     });
     expect(checkbox).toBeDisabled();
     expect(screen.getByText("Only workspace Owners can change repository scope.")).toBeVisible();
@@ -212,17 +212,46 @@ describe("GitHubInstallationPanel connection health", () => {
     />);
   }
 
-  it("shows plain-language status, exact permissions and scope totals", () => {
+  it("shows plain-language status, exact permissions and scope totals", async () => {
+    const user = userEvent.setup();
     renderPanel();
 
     const article = screen.getByRole("article", { name: "Adtecher GitHub installation" });
     expect(within(article).getByText("Healthy")).toBeVisible();
     expect(within(article).getByText(/checked 2 hours ago/i)).toBeVisible();
+    await user.click(within(article).getByText("Read-only access details"));
     expect(within(article).getByText(/Approved read-only access:/)).toBeVisible();
     for (const permission of ["Metadata", "Administration", "Actions", "Dependabot alerts", "Code scanning alerts", "Secret scanning alerts"]) {
       expect(within(article).getByText(permission, { exact: false })).toBeVisible();
     }
     expect(within(article).getByText("2 repositories · 1 selected · 1 available")).toBeVisible();
+  });
+
+  it("keeps technical permissions in a collapsed disclosure after status and scope", () => {
+    renderPanel();
+
+    const article = screen.getByRole("article", { name: "Adtecher GitHub installation" });
+    const summary = within(article).getByText("Read-only access details");
+    const disclosure = summary.closest("details");
+    expect(disclosure).not.toBeNull();
+    expect(disclosure).not.toHaveAttribute("open");
+    for (const permission of ["Metadata", "Administration", "Actions", "Dependabot alerts", "Code scanning alerts", "Secret scanning alerts"]) {
+      expect(within(disclosure as HTMLElement).getByText(permission, { exact: false })).toBeInTheDocument();
+    }
+    const status = within(article).getByText("Healthy");
+    const totals = within(article).getByText("2 repositories · 1 selected · 1 available");
+    expect(status.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(totals.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("labels repository scope without claiming the checkbox grants app access", () => {
+    renderPanel({}, true);
+
+    const article = screen.getByRole("article", { name: "Adtecher GitHub installation" });
+    expect(within(article).getByRole("checkbox", {
+      name: "Choose to include Adtecher/compliancehub in monitoring",
+    })).toBeEnabled();
+    expect(within(article).queryByText(/grants.*access|allow ComplianceHub to read/i)).not.toBeInTheDocument();
   });
 
   it("shows action-required status with the next step", () => {
@@ -232,6 +261,9 @@ describe("GitHubInstallationPanel connection health", () => {
     expect(within(article).getByText("Owner action required")).toBeVisible();
     expect(within(article).getByText(/permission may have changed/i)).toBeVisible();
     expect(within(article).getByText(/Next step:/)).toBeVisible();
+    const nextStep = within(article).getByText(/Next step:/);
+    const disclosure = within(article).getByText("Read-only access details");
+    expect(nextStep.compareDocumentPosition(disclosure) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("disconnects only after a deliberate second click and never claims provider removal", async () => {

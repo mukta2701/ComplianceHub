@@ -266,20 +266,20 @@ export default async function IntegrationsPage({
         { href: "/app/settings", label: "Settings" },
         { href: connectionsAccess.href, label: connectionsAccess.label },
       ]} />}
+      githubPanel={<GitHubInstallationPanel
+        installations={(installationResult.data ?? []) as GitHubInstallationSummary[]}
+        repositories={(repositorySummaryResult.data ?? []).map((repository) => ({
+          ...repository,
+          repository_id: repository.id,
+        })) as GitHubRepositoryConfigurationSummary[]}
+        canManageInstallation={connectionsAccess.canManageOperation("manage-github-app")}
+        canManageRepositoryScope={connectionsAccess.canManageOperation("manage-github-app")}
+        nowIso={new Date().toISOString()}
+      />}
     />
     <div style={{ maxWidth: "1100px", margin: "16px auto" }}>
       <ConnectedApplications state={oauthGrantState} />
     </div>
-    <GitHubInstallationPanel
-      installations={(installationResult.data ?? []) as GitHubInstallationSummary[]}
-      repositories={(repositorySummaryResult.data ?? []).map((repository) => ({
-        ...repository,
-        repository_id: repository.id,
-      })) as GitHubRepositoryConfigurationSummary[]}
-      canManageInstallation={connectionsAccess.canManageOperation("manage-github-app")}
-      canManageRepositoryScope={connectionsAccess.canManageOperation("manage-github-app")}
-      nowIso={new Date().toISOString()}
-    />
     {showDeveloperTools && <DeveloperConnectionTools />}
   </>;
 }
