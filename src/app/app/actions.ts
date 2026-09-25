@@ -25,6 +25,7 @@ import {
   updateMemberJobTitleAction as updateMemberJobTitle,
 } from "@/features/organisations/application/membership-actions";
 import {
+  createAdditionalOrganisationAction as createAdditionalOrganisation,
   createOrganisationAction as createOrganisation,
   signOutAction as signOut,
   switchWorkspaceAction as switchWorkspace,
@@ -44,6 +45,10 @@ export type { SaveSoaDecisionResult };
 
 export async function createOrganisationAction(formData: FormData) {
   return createOrganisation(formData);
+}
+
+export async function createAdditionalOrganisationAction(formData: FormData) {
+  return createAdditionalOrganisation(formData);
 }
 
 export async function switchWorkspaceAction(formData: FormData) {

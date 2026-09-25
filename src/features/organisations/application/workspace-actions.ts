@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createOrganisation } from "@/features/organisations/application/organisation";
-import { clearActiveOrganisationCookie, setActiveOrganisationCookie } from "@/lib/app-context";
+import { clearActiveOrganisationCookie, requireAppContext, setActiveOrganisationCookie } from "@/lib/app-context";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export async function createOrganisationAction(formData: FormData) {
@@ -32,6 +32,37 @@ export async function createOrganisationAction(formData: FormData) {
 
   // Selection happens after the database transaction has committed. A cookie
   // failure must surface as an operational error, not invite a duplicate retry.
+  await setActiveOrganisationCookie(organisation.id);
+  revalidatePath("/app", "layout");
+  redirect("/app");
+}
+
+export async function createAdditionalOrganisationAction(formData: FormData) {
+  // Signed-in Owners may hold several isolated workspaces. Verify the Owner
+  // role from the server-side membership (never client input) before creating.
+  // requireAppContext redirects to sign-in without a user and to onboarding
+  // without any membership, so those cases never reach the creation RPC.
+  const { supabase, user, membership } = await requireAppContext();
+  if (membership.role !== "owner") throw new Error("Only workspace owners can create an organisation");
+  let organisation: Awaited<ReturnType<typeof createOrganisation>>;
+  try {
+    organisation = await createOrganisation({ name: formData.get("name") }, {
+      userId: user.id,
+      insert: async ({ name, slug, createdBy }) => {
+        const uniqueSlug = `${slug}-${crypto.randomUUID().slice(0, 8)}`;
+        void createdBy;
+        const { data, error } = await supabase.rpc("create_organisation_with_owner", {
+          organisation_name: name,
+          organisation_slug: uniqueSlug,
+        });
+        if (error) throw error;
+        return { id: String(data), name, slug: uniqueSlug };
+      },
+    });
+  } catch {
+    redirect(`/app/organisations/new?message=${encodeURIComponent("Could not create the organisation. Check the name and try again.")}`);
+  }
+
   await setActiveOrganisationCookie(organisation.id);
   revalidatePath("/app", "layout");
   redirect("/app");

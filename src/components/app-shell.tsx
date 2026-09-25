@@ -96,6 +96,7 @@ const EXTRA_TITLES: Array<[string, string]> = [
   ["/app/soa/import", "Import Statement of Applicability"],
   ["/app/policies/new", "Author a policy"],
   ["/app/onboarding", "Workspace setup"],
+  ["/app/organisations/new", "Create a new organisation"],
   ["/app/invitations", "Invitation"],
   [automationSetupMetadata.href, automationSetupMetadata.title],
 ];
@@ -242,6 +243,9 @@ export function AppShell({ organisationId, orgName, orgInitials, userInitials, u
                   <button className={styles.accountAction} aria-label={`Switch to ${workspace.name}`}>Switch to {workspace.name}<small>{roleLabel(workspace.role)}</small></button>
                 </form>
               ))}
+              {role === "owner" && (
+                <Link className={styles.accountAction} href="/app/organisations/new">Create organisation</Link>
+              )}
               <form action={signOutAction}><button className={styles.accountAction}>Sign out</button></form>
             </div>
           </details>

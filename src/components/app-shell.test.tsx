@@ -169,4 +169,25 @@ describe("AppShell role-specific navigation", () => {
     expect(screen.queryByRole("navigation", { name: "Workspace" })).not.toBeInTheDocument();
     expect(screen.getByText("Workspace setup", { selector: "span" })).toBeInTheDocument();
   });
+
+  it("offers organisation creation to Owners in the account menu", () => {
+    renderShell("owner");
+
+    fireEvent.click(screen.getByRole("button", { name: "Account menu" }));
+    expect(screen.getByRole("link", { name: "Create organisation" })).toHaveAttribute("href", "/app/organisations/new");
+  });
+
+  it.each(["admin", "member"] as const)("hides organisation creation from a %s in the account menu", (role) => {
+    renderShell(role);
+
+    fireEvent.click(screen.getByRole("button", { name: "Account menu" }));
+    expect(screen.queryByRole("link", { name: "Create organisation" })).not.toBeInTheDocument();
+  });
+
+  it("titles the new-organisation page in the header breadcrumb", () => {
+    hoisted.pathname = "/app/organisations/new";
+    renderShell("owner");
+
+    expect(screen.getByRole("heading", { name: "Create a new organisation", level: 1 })).toBeInTheDocument();
+  });
 });

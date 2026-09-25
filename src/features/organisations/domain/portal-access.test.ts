@@ -112,6 +112,14 @@ describe("workspace portal route access", () => {
     expect(workspaceRequestAccess("/api/app/reports/readiness/pdf", { authenticated: true, role: null })).toBe("forbidden");
   });
 
+  it("reserves additional organisation creation for Owners", () => {
+    expect(workspaceRequestAccess("/app/organisations/new", { authenticated: true, role: "owner" })).toBe("allow");
+    expect(workspaceRequestAccess("/app/organisations/new", { authenticated: true, role: "admin" })).toBe("redirect-member-home");
+    expect(workspaceRequestAccess("/app/organisations/new", { authenticated: true, role: "member" })).toBe("redirect-member-home");
+    expect(workspaceRequestAccess("/app/organisations/new", { authenticated: true, role: null })).toBe("redirect-onboarding");
+    expect(workspaceRequestAccess("/app/organisations/new", { authenticated: false, role: null })).toBe("redirect-sign-in");
+  });
+
   it("keeps the public Trust Center outside workspace membership gates", () => {
     expect(workspaceRequestAccess("/trust/example", { authenticated: false, role: null })).toBe("allow");
   });

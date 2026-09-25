@@ -36,6 +36,9 @@ export function workspaceRequestAccess(
   }
 
   if (pathname === "/app/onboarding") return "redirect-member-home";
+  if (pathname === "/app/organisations/new") {
+    return identity.role === "owner" ? "allow" : "redirect-member-home";
+  }
   if (identity.role === "owner" || identity.role === "admin") return "allow";
 
   const section = workspaceAccess(identity.role).sectionForPath(pathname);

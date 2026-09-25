@@ -36,6 +36,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 import * as actions from "./actions";
+import { requireAppContext } from "@/lib/app-context";
 
 type SwitchWorkspaceAction = (formData: FormData) => Promise<void>;
 
@@ -47,6 +48,12 @@ function invokeSwitch(formData: FormData): Promise<void> {
 function formData(organisationId: string): FormData {
   const data = new FormData();
   data.set("organisationId", organisationId);
+  return data;
+}
+
+function organisationNameData(name: string): FormData {
+  const data = new FormData();
+  data.set("name", name);
   return data;
 }
 
@@ -78,6 +85,7 @@ describe("active workspace actions", () => {
     hoisted.revalidatePath.mockReset();
     hoisted.createOrganisation.mockReset();
     hoisted.from.mockReset();
+    vi.mocked(requireAppContext).mockReset();
   });
 
   it("switches only after an RLS-scoped membership check and redirects to /app", async () => {
@@ -183,5 +191,72 @@ describe("active workspace actions", () => {
 
     expect(signOut).toHaveBeenCalledOnce();
     expect(hoisted.clearActiveOrganisationCookie).not.toHaveBeenCalled();
+  });
+
+  it.each(["admin", "member"] as const)("rejects an additional organisation from a signed-in %s before creation", async (role) => {
+    vi.mocked(requireAppContext).mockResolvedValue({
+      supabase: hoisted.serverClient,
+      user: { id: USER_ID },
+      membership: { role },
+      organisation: { id: "old-org", name: "Old" },
+    } as never);
+
+    await expect(actions.createAdditionalOrganisationAction(organisationNameData("Second Ltd"))).rejects.toThrow(
+      "Only workspace owners can create an organisation",
+    );
+
+    expect(hoisted.createOrganisation).not.toHaveBeenCalled();
+    expect(hoisted.setActiveOrganisationCookie).not.toHaveBeenCalled();
+    expect(hoisted.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("does not create an additional organisation without authentication", async () => {
+    vi.mocked(requireAppContext).mockRejectedValueOnce(
+      Object.assign(new Error("REDIRECT:/sign-in"), { digest: "NEXT_REDIRECT" }),
+    );
+
+    await expect(actions.createAdditionalOrganisationAction(organisationNameData("Second Ltd"))).rejects.toThrow(
+      "REDIRECT:/sign-in",
+    );
+
+    expect(hoisted.createOrganisation).not.toHaveBeenCalled();
+    expect(hoisted.setActiveOrganisationCookie).not.toHaveBeenCalled();
+    expect(hoisted.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("creates an additional organisation for an Owner and makes it active", async () => {
+    vi.mocked(requireAppContext).mockResolvedValue({
+      supabase: hoisted.serverClient,
+      user: { id: USER_ID },
+      membership: { role: "owner" },
+      organisation: { id: "old-org", name: "Old" },
+    } as never);
+    hoisted.createOrganisation.mockResolvedValue({ id: ORG_ID, name: "Second Ltd", slug: "second-ltd" });
+
+    await expect(actions.createAdditionalOrganisationAction(organisationNameData("Second Ltd"))).rejects.toThrow(
+      "REDIRECT:/app",
+    );
+
+    expect(hoisted.createOrganisation).toHaveBeenCalledOnce();
+    expect(hoisted.createOrganisation.mock.calls[0]?.[0]).toEqual({ name: "Second Ltd" });
+    expect(hoisted.setActiveOrganisationCookie).toHaveBeenCalledWith(ORG_ID);
+    expect(hoisted.revalidatePath).toHaveBeenCalledWith("/app", "layout");
+  });
+
+  it("returns an Owner to the new-organisation page when creation fails", async () => {
+    vi.mocked(requireAppContext).mockResolvedValue({
+      supabase: hoisted.serverClient,
+      user: { id: USER_ID },
+      membership: { role: "owner" },
+      organisation: { id: "old-org", name: "Old" },
+    } as never);
+    hoisted.createOrganisation.mockRejectedValueOnce(new Error("name taken"));
+
+    await expect(actions.createAdditionalOrganisationAction(organisationNameData(""))).rejects.toThrow(
+      "REDIRECT:/app/organisations/new",
+    );
+
+    expect(hoisted.setActiveOrganisationCookie).not.toHaveBeenCalled();
+    expect(hoisted.revalidatePath).not.toHaveBeenCalled();
   });
 });
