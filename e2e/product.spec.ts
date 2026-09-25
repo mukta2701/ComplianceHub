@@ -1444,7 +1444,7 @@ test("an invited Member opens Framework Coverage from read-only navigation", asy
   await page.getByLabel("Password", { exact: true }).fill(memberPassword);
   await page.getByRole("button", { name: "Sign in" }).click();
   await page.waitForURL(/\/app$/);
-  await expect(page.getByLabel("Portal access")).toHaveText("Member view");
+  await expect(page.getByText("Member view", { exact: true })).toBeVisible();
 
   const navigationToggle = page.getByRole("button", { name: "Open navigation" });
   if (await navigationToggle.isVisible()) await navigationToggle.click();

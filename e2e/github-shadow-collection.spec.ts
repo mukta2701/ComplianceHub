@@ -144,7 +144,7 @@ function providerBase(testInfo: TestInfo): number {
 async function selectRepository(page: Page, repositoryName: string) {
   const repository = page.getByRole("article", { name: `${repositoryName} repository scope` });
   const checkbox = repository.getByRole("checkbox", {
-    name: `Allow ComplianceHub to read and include ${repositoryName} in monitoring`,
+    name: `Choose to include ${repositoryName} in monitoring`,
   });
   await expect(checkbox).not.toBeChecked();
   const response = page.waitForResponse((candidate) =>

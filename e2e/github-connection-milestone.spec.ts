@@ -172,6 +172,9 @@ test.describe("GitHub connection milestone", () => {
     await expect(installation.getByText("Pending first check")).toBeVisible();
     await expect(installation.getByText("ComplianceHub has not verified this GitHub connection yet. Its health is unconfirmed.")).toBeVisible();
     await expect(installation.getByText("ComplianceHub will check automatically. An Owner can run the first check sooner.")).toBeVisible();
+    const accessDisclosure = installation.locator("details.github-access-details");
+    await expect(accessDisclosure.getByText("Read-only access details")).toBeVisible();
+    await accessDisclosure.locator("summary").click();
     await expect(installation.getByText(/Approved read-only access:/)).toBeVisible();
     await expect(installation.getByText("2 repositories · 0 selected · 2 available")).toBeVisible();
     await expect(ownerPage.getByRole("link", { name: "Manage repository access" })).toHaveAttribute("href", "/api/github/setup");
