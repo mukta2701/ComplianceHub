@@ -1,8 +1,10 @@
 # Milestone 1 — GitHub organisation and repository integration design
 
-**Status:** Approved design
+**Status:** Approved design; acceptance environment revised 25 September 2026
 
 **Approved:** 14 September 2026
+
+**Owner decision, 25 September 2026:** Use the existing AWS dev environment for Milestone 1 pilot acceptance. A separate AWS staging stack is not required. AWS dev must pass the equivalent live, security, reliability and evidence checks in this design before the milestone is accepted. This decision does not approve production use or waive any GitHub, role, webhook, alert, recovery, audit or human-acceptance gate.
 
 **Product milestone:** 1 of 5 in the trusted compliance platform roadmap
 
@@ -20,7 +22,7 @@ The accepted user-visible outcome is:
 
 Complete and harden the existing GitHub integration. Do not rebuild it and do not create a generic provider platform first.
 
-The existing installation, OAuth, repository-selection, webhook, database and Connections-interface foundations remain the implementation base. Work should close verified gaps, strengthen focused seams where required, configure the minimum company AWS staging runtime, and produce current live-provider acceptance evidence.
+The existing installation, OAuth, repository-selection, webhook, database and Connections-interface foundations remain the implementation base. Work should close verified gaps, strengthen focused seams where required, verify the existing AWS dev runtime for the pilot, and produce current live-provider acceptance evidence. Do not create a separate staging stack for Milestone 1.
 
 Existing GitHub collection, Monitoring and materialisation code may remain in the repository. Its presence is not Milestone 1 acceptance and it must not blur the boundary between trusted connection data and later compliance interpretation.
 
@@ -47,13 +49,13 @@ A Member has no access to GitHub connection configuration, provider diagnostics 
 
 ### Company AWS/security administrator
 
-The company administrator controls the approved AWS account, region, networking, IAM, secrets, logging, cost controls and staging acceptance. Product tests do not replace this approval.
+The company AWS/security administrator reviews the AWS dev account, access, secrets, logging, cost controls and runtime safeguards used for the pilot. Product tests do not replace this review. A separate staging-account approval is not required for Milestone 1.
 
 ## 4. Permission and scope contract
 
 ### 4.1 Repository permissions
 
-The staging GitHub App requests exactly these six repository permissions, all at read level:
+The private dev pilot GitHub App requests exactly these six repository permissions, all at read level:
 
 - `metadata`;
 - `administration`;
@@ -121,7 +123,7 @@ GitHub remains the authorisation provider. Milestone 1 introduces no hosted auth
 
 1. A signed-in Owner starts setup.
 2. ComplianceHub creates a short-lived, one-use security state bound to the Owner and workspace.
-3. GitHub asks the Owner to install the private staging App on selected repositories.
+3. GitHub asks the Owner to install the private dev pilot App on selected repositories.
 4. GitHub redirects the Owner back to the registered ComplianceHub callback.
 5. ComplianceHub verifies the state, actor, workspace, GitHub authority, organisation identity, installation ID, repository-selection mode and exact permission set.
 6. ComplianceHub follows every repository-results page within configured bounds.
@@ -176,9 +178,9 @@ Historical connection and repository facts follow the company-approved retention
 - Installation tokens are created on demand, kept in memory and never persisted or logged.
 - The private key is rotated every 90 days and immediately after suspected exposure.
 - Rotation validates the replacement key before revoking the previous key.
-- Staging and production use separate private, company-owned GitHub Apps, installations, callback and webhook addresses, credentials and AWS secrets.
+- The dev pilot and production use separate private, company-owned GitHub Apps, installations, callback and webhook addresses, credentials and AWS secrets.
 
-Milestone 1 provisions and accepts only the staging App. The production App belongs to the later production release path.
+Milestone 1 accepts only the dev pilot App. The production App belongs to the later production release path.
 
 ## 9. Interface design
 
@@ -225,24 +227,15 @@ One-off temporary failures stay quiet. Serious access failures alert immediately
 
 ComplianceHub never automatically reinstalls the App, widens permissions, or restores repository scope.
 
-## 11. Minimum AWS staging architecture
+## 11. Existing AWS dev pilot runtime
 
-Milestone 1 uses the approved AWS platform pattern only to the extent required for a live provider pilot:
+Milestone 1 uses the existing AWS dev environment as its pilot target. Do not provision a separate ECS/Fargate staging service, EventBridge scheduler, or duplicate DNS/network stack solely to complete this milestone. Keep Supabase for authentication, PostgreSQL and storage.
 
-- the existing ComplianceHub image is stored in Amazon ECR;
-- the Next.js application runs as an ECS Fargate staging service;
-- a company-approved load balancer exposes the HTTPS application, callback and webhook routes;
-- Route 53 and ACM provide company-controlled DNS and TLS where approved;
-- EventBridge Scheduler starts a finite Fargate GitHub-reconciliation task;
-- Secrets Manager and KMS protect runtime secrets;
-- CloudWatch receives sanitised logs, metrics and alarms;
-- Supabase temporarily continues to provide authentication, PostgreSQL and storage.
+The current AWS dev web service runs on App Runner. The reconciliation schedule may use the existing unattended runner path (currently GitHub Actions) only if the exact workflow and application revision are recorded, the run is bounded, secrets are protected, retries do not widen access, and failed or missed runs are independently visible to an operator. A successful manual or one-time run does not prove unattended operation.
 
-The web service, reconciliation task, scheduler, deployment identity and human administrators use separate least-privilege IAM roles. GitHub Actions uses AWS OIDC federation instead of permanent AWS access keys.
+Before accepting AWS dev, verify the live HTTPS callback and webhook routes, application/database health, exact release identity, environment-specific secret handling, least-privilege deployment/runtime access, sanitised logs and alerts, and an operator-visible failure path for both web and scheduled reconciliation. Record the evidence against the exact deployed revision. If any check fails, Milestone 1 remains open; do not silently waive it or create new infrastructure without a separate decision.
 
-The running application reports its exact release identity and database health. AWS independently detects a web-service outage or reconciliation task that fails to start, so a failed application task is not solely responsible for reporting its own failure.
-
-The company AWS administrator must supply and approve the exact non-production account, region, VPC, subnets, ingress and egress rules, DNS name, certificate approach, log retention, budgets and alert destination before infrastructure implementation. This staging prerequisite does not complete Milestone 4 or authorise production cutover.
+The company AWS/security administrator reviews the safeguards on the existing dev account and the ComplianceHub Owner accepts the live pilot. Production credentials, broader access, production cutover and organisation-wide rollout remain separate decisions.
 
 ## 12. Verification strategy
 
@@ -268,13 +261,13 @@ Automated checks cover:
 
 An exact production-mode local build uses fictional, provider-shaped data to demonstrate the complete Connections experience on desktop and mobile. This proves application behaviour only. It is not live GitHub, AWS or human acceptance.
 
-### 12.3 AWS staging acceptance
+### 12.3 AWS dev pilot acceptance
 
-The exact tested image is deployed to the approved staging target. Acceptance verifies HTTPS callback and webhook availability, application and database health, release identity, secret injection, least-privilege IAM, EventBridge task startup, independent CloudWatch failure detection, and absence of secrets from the image, health response, logs and alerts.
+The exact tested revision is verified on the existing AWS dev target. Acceptance verifies HTTPS callback and webhook availability, application and database health, release identity, environment-specific secret handling, least-privilege access, scheduled reconciliation and its operator-visible failure path, and absence of secrets from the image, health response, logs and alerts. This is evidence for the dev pilot only, not production acceptance.
 
 ### 12.4 Live GitHub pilot
 
-The company-owned staging App is installed on one dedicated repository. An Owner connects it, discovers and selects the repository, receives a genuine webhook and observes successful reconciliation. The pilot also demonstrates scope removal, fail-closed disconnection, role restrictions, one sanitised Slack incident and recovery.
+The company-owned dev pilot App is installed on one dedicated repository. An Owner connects it, discovers and selects the repository, receives a genuine webhook and observes successful reconciliation. The pilot also demonstrates scope removal, fail-closed disconnection, role restrictions, one sanitised Slack incident and recovery.
 
 The granted GitHub permissions and available provider audit information must support the claim that ComplianceHub performed no write operation. Historical provider observations are not a substitute for this current pilot.
 
@@ -286,7 +279,7 @@ Milestone 1 completes only after the ComplianceHub Owner and company AWS/securit
 
 Milestone 1 is finished when all of the following are true:
 
-- the private staging GitHub App is installed on one approved pilot repository;
+- the private dev pilot GitHub App is installed on one approved pilot repository;
 - GitHub grants exactly the six approved read permissions;
 - an Owner connects the App and selects the repository;
 - Admins inspect health without changing connection or scope;
@@ -298,7 +291,7 @@ Milestone 1 is finished when all of the following are true:
 - verified recovery closes the incident and sends a recovery notice;
 - no GitHub write, general source-code collection, raw-payload retention or secret leakage occurs;
 - required automated checks pass;
-- the exact local build, AWS staging runtime and live GitHub round trip have separately recorded evidence;
+- the exact local build, AWS dev runtime and live GitHub round trip have separately recorded evidence;
 - the ComplianceHub Owner and company AWS/security administrator approve the pilot.
 
 ## 14. Explicitly deferred
@@ -319,4 +312,4 @@ Milestone 1 is finished when all of the following are true:
 
 The implementation plan must begin from a fresh gap analysis against this approved design. It must distinguish existing behaviour that only needs current verification from missing behaviour that requires implementation. It must not claim that historical local or provider proof satisfies the milestone.
 
-Each phase must state its user-visible outcome, affected module seams, automated checks, local evidence, external dependency and exit criterion. Infrastructure phases must wait for the company AWS administrator's exact staging inputs and authority. No phase may broaden GitHub permissions, enable later Monitoring outcomes, deploy to production or connect additional company repositories without a new decision.
+Each phase must state its user-visible outcome, affected module seams, automated checks, local evidence, external dependency and exit criterion. Runtime work must verify the existing AWS dev safeguards and remain within current authority; it must not create a separate staging stack by default. No phase may broaden GitHub permissions, enable later Monitoring outcomes, deploy to production or connect additional company repositories without a new decision.
