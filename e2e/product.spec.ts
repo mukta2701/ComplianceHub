@@ -1128,7 +1128,7 @@ test("a task is pushed to a sandbox tracker, polled to In Progress, then the con
 
   await page.goto("/app/monitoring");
   await expect(page.getByRole("heading", { name: "Continuous monitoring", level: 2 })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Active findings" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Findings to review" })).toBeVisible();
   await expect(page.getByText("No active findings are currently visible.")).toBeVisible();
   await expect(page.getByRole("link", { name: "Manage connections and alerts" })).toHaveAttribute("href", "/app/integrations");
   await expect(page.getByRole("button", { name: /Connect/ })).toHaveCount(0);

@@ -116,29 +116,133 @@ describe("GitHub user OAuth", () => {
     }
   });
 
-  it("reads app installation metadata and requires a selected inventory of at most 100", async () => {
+  it("reads app installation metadata", async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({
         id: 77, account: { id: 99, login: "Adtecher", type: "Organization" },
         repository_selection: "selected", permissions: { metadata: "read" }, suspended_at: null,
-      })))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ total_count: 1, repositories: [{
-        id: 101, owner: { login: "Adtecher" }, name: "portal", full_name: "Adtecher/portal",
-        html_url: "https://github.com/Adtecher/portal", visibility: "private", archived: false, default_branch: "main",
-      }] })));
+      })));
     await expect(getAppInstallation({ appJwt: "jwt", installationId: 77, fetchImpl })).resolves.toMatchObject({ id: 77, repositorySelection: "selected" });
-    await expect(collectUserInstallationRepositories({ userToken: "user", installationId: 77, fetchImpl })).resolves.toHaveLength(1);
     expect(fetchImpl.mock.calls.every((call) => (call[1] as RequestInit).redirect === "error")).toBe(true);
   });
+});
 
-  it("rejects inventories that are truncated, exceed 100, or contain duplicate repository IDs", async () => {
-    const repository = { id: 101, owner: { login: "Adtecher" }, name: "portal", full_name: "Adtecher/portal", html_url: "https://github.com/Adtecher/portal", visibility: "private", archived: false, default_branch: "main" };
-    for (const body of [
-      { total_count: 101, repositories: [repository] },
-      { total_count: 2, repositories: [repository, repository] },
-    ]) {
-      const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify(body)));
-      await expect(collectUserInstallationRepositories({ userToken: "user", installationId: 77, fetchImpl })).rejects.toThrow("GitHub verification failed");
+function discoveryRepository(id: number) {
+  return {
+    id, owner: { login: "Adtecher" }, name: `repo-${id}`, full_name: `Adtecher/repo-${id}`,
+    html_url: `https://github.com/Adtecher/repo-${id}`, visibility: "private",
+    archived: false, default_branch: "main",
+  };
+}
+
+function discoveryPage(ids: number[], total: number, next?: string) {
+  return new Response(JSON.stringify({ total_count: total, repositories: ids.map(discoveryRepository) }), {
+    headers: next ? { Link: `<${next}>; rel="next"` } : {},
+  });
+}
+
+function rangeIds(from: number, to: number): number[] {
+  return Array.from({ length: to - from + 1 }, (_, index) => from + index);
+}
+
+describe("complete repository discovery", () => {
+  it("follows three trusted pages and returns 201 repositories with per_page forced", async () => {
+    const userToken = crypto.randomUUID();
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(discoveryPage(rangeIds(1, 100), 201, "https://api.github.com/user/installations/77/repositories?page=2"))
+      .mockResolvedValueOnce(discoveryPage(rangeIds(101, 200), 201, "https://api.github.com/user/installations/77/repositories?page=3"))
+      .mockResolvedValueOnce(discoveryPage([201], 201));
+    const repositories = await collectUserInstallationRepositories({ userToken, installationId: 77, fetchImpl });
+    expect(repositories).toHaveLength(201);
+    expect(repositories[0]?.id).toBe(1);
+    expect(repositories[200]?.id).toBe(201);
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    for (const call of fetchImpl.mock.calls) {
+      expect(new URL(call[0] as string).searchParams.get("per_page")).toBe("100");
+      expect((call[1] as RequestInit).redirect).toBe("error");
     }
+    expect(JSON.stringify(repositories)).not.toContain(userToken);
+  });
+
+  it("rejects a hostile pagination origin after one request", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(discoveryPage([101], 2, "https://attacker.example/steal"));
+    await expect(collectUserInstallationRepositories({ userToken: crypto.randomUUID(), installationId: 77, fetchImpl })).rejects.toThrow("GitHub verification failed");
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a repeated page, duplicate IDs, a changed total, and missing final rows", async () => {
+    const twoPages = (first: Response, second: Response) => vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+    const cases: Array<[string, () => unknown]> = [
+      ["repeated page", () => twoPages(
+        discoveryPage(rangeIds(1, 100), 200, "https://api.github.com/user/installations/77/repositories?page=2"),
+        discoveryPage(rangeIds(1, 100), 200),
+      )],
+      ["duplicate ID across pages", () => twoPages(
+        discoveryPage(rangeIds(1, 100), 150, "https://api.github.com/user/installations/77/repositories?page=2"),
+        discoveryPage(rangeIds(100, 149), 150),
+      )],
+      ["changed total", () => twoPages(
+        discoveryPage(rangeIds(1, 100), 150, "https://api.github.com/user/installations/77/repositories?page=2"),
+        discoveryPage(rangeIds(101, 150), 999),
+      )],
+      ["missing final row", () => twoPages(
+        discoveryPage(rangeIds(1, 100), 201, "https://api.github.com/user/installations/77/repositories?page=2"),
+        discoveryPage(rangeIds(101, 200), 201),
+      )],
+      ["truncated single page", () => vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ total_count: 101, repositories: [discoveryRepository(101)] })),
+      )],
+      ["duplicate single page", () => vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ total_count: 2, repositories: [discoveryRepository(101), discoveryRepository(101)] })),
+      )],
+    ];
+    for (const [label, makeFetch] of cases) {
+      await expect(
+        collectUserInstallationRepositories({ userToken: crypto.randomUUID(), installationId: 77, fetchImpl: makeFetch() as typeof fetch }),
+        label,
+      ).rejects.toThrow("GitHub verification failed");
+    }
+  });
+
+  it("rejects inventories beyond 100 pages or 10,000 repositories", async () => {
+    const overTotal = vi.fn().mockResolvedValue(discoveryPage(rangeIds(1, 100), 10_001, "https://api.github.com/user/installations/77/repositories?page=2"));
+    await expect(collectUserInstallationRepositories({ userToken: crypto.randomUUID(), installationId: 77, fetchImpl: overTotal })).rejects.toThrow("GitHub verification failed");
+    const pageOf = (page: number) => discoveryPage(
+      rangeIds((page - 1) * 100 + 1, page * 100),
+      10_100,
+      page < 101 ? `https://api.github.com/user/installations/77/repositories?page=${page + 1}` : undefined,
+    );
+    const manyPages = vi.fn().mockImplementation((url: string) => {
+      const page = Number(new URL(url).searchParams.get("page") ?? "1");
+      return Promise.resolve(pageOf(page));
+    });
+    await expect(collectUserInstallationRepositories({ userToken: crypto.randomUUID(), installationId: 77, fetchImpl: manyPages })).rejects.toThrow("GitHub verification failed");
+    expect(manyPages.mock.calls.length).toBeLessThanOrEqual(100);
+  });
+
+  it("accepts exactly 10,000 repositories across 100 pages", async () => {
+    const pageOf = (page: number) => discoveryPage(
+      rangeIds((page - 1) * 100 + 1, page * 100),
+      10_000,
+      page < 100 ? `https://api.github.com/user/installations/77/repositories?page=${page + 1}` : undefined,
+    );
+    const fetchImpl = vi.fn().mockImplementation((url: string) => {
+      const page = Number(new URL(url).searchParams.get("page") ?? "1");
+      return Promise.resolve(pageOf(page));
+    });
+    const repositories = await collectUserInstallationRepositories({ userToken: crypto.randomUUID(), installationId: 77, fetchImpl });
+    expect(repositories).toHaveLength(10_000);
+    expect(fetchImpl).toHaveBeenCalledTimes(100);
+  });
+
+  it("maps discovery rate limits to the generic verification error without leaking details", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response("limited", { status: 429, headers: { "retry-after": "120" } }));
+    const error = await collectUserInstallationRepositories({ userToken: "x", installationId: 77, fetchImpl }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe("GitHub verification failed");
+    expect(String(error)).not.toContain("limited");
+    expect(String(error)).not.toContain("120");
+    expect(String(error).toLowerCase()).not.toContain("retry");
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });

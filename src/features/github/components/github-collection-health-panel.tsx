@@ -25,6 +25,32 @@ export type GitHubRepositoryMonitoringSummary = {
   last_completed_collection_at: string | null;
 };
 
+const UNHEALTHY_CONNECTION_STATUS: Record<
+  Exclude<GitHubInstallationSummary["health"], "healthy">,
+  { label: string; tone: string; guidance: string }
+> = {
+  retrying: {
+    label: "GitHub is retrying",
+    tone: "amber",
+    guidance: "ComplianceHub is retrying automatically. Saved GitHub results remain visible; manual checks resume after connection health is restored.",
+  },
+  partially_unavailable: {
+    label: "GitHub partly unavailable",
+    tone: "amber",
+    guidance: "Some repositories cannot currently be verified. Saved results remain visible; manual checks resume after connection health is restored.",
+  },
+  owner_action_required: {
+    label: "Owner action required",
+    tone: "red",
+    guidance: "A workspace Owner needs to resolve this GitHub connection issue before another manual check can run.",
+  },
+  disconnected: {
+    label: "GitHub disconnected",
+    tone: "neutral",
+    guidance: "Reconnect this GitHub installation before running another manual check.",
+  },
+};
+
 function isStale(repository: GitHubRepositoryMonitoringSummary, nowIso: string): boolean {
   if (!repository.last_completed_collection_at) return false;
   const now = Date.parse(nowIso);
@@ -41,6 +67,7 @@ function monitoringHealth(
   if (installation.status !== "active" || !installation.permissions_ok) {
     return { label: "GitHub connection needs attention", tone: "amber" };
   }
+  if (installation.health !== "healthy") return UNHEALTHY_CONNECTION_STATUS[installation.health];
   if (!repository.latest_run_id || !repository.latest_status) return { label: "Ready for first check", tone: "neutral" };
   if (repository.latest_status === "running") return { label: "Checking now", tone: "blue" };
   if (repository.latest_status === "partial") return { label: "Some checks could not be completed", tone: "amber" };
@@ -48,7 +75,7 @@ function monitoringHealth(
   if (repository.latest_status === "rate_limited") return { label: "GitHub rate limit reached", tone: "red" };
   return isStale(repository, nowIso)
     ? { label: "Needs a new check", tone: "amber" }
-    : { label: "Up to date", tone: "green" };
+    : { label: "Last check completed", tone: "neutral" };
 }
 
 const formatLastChecked = formatMonitoringTime;
@@ -153,6 +180,7 @@ export function GitHubCollectionHealthPanel({
         const hasAvailableRepository = installationRepositories.some((repository) => repository.available);
         const canRunThisInstallation = installation.status === "active"
           && installation.permissions_ok
+          && installation.health === "healthy"
           && installation.repository_selection === "selected"
           && hasAvailableRepository
           && runtimeReadiness.available;
@@ -181,6 +209,9 @@ export function GitHubCollectionHealthPanel({
           </p>}
           {!installation.permissions_ok && <p className="github-configuration-note" role="note">
             GitHub permissions need attention before this connection can be checked.
+          </p>}
+          {installation.health !== "healthy" && <p className="github-configuration-note" role="note">
+            {UNHEALTHY_CONNECTION_STATUS[installation.health].guidance}
           </p>}
           {!runtimeReadiness.available && <p className="github-configuration-note" role="note">
             Saved GitHub results remain visible, but fresh GitHub verification is unavailable in this app runtime.

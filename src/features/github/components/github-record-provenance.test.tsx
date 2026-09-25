@@ -94,7 +94,7 @@ describe("official GitHub provenance cards", () => {
     expect(within(article).getByText("medium")).toBeVisible();
     expect(within(article).getByText("Open")).toBeVisible();
 
-    const technical = within(article).getByText("Technical evidence").closest("details");
+    const technical = within(article).getByText("Audit details").closest("details");
     expect(technical).not.toHaveAttribute("open");
     for (const hidden of [
       "github.branch.stale_approvals",
@@ -124,7 +124,7 @@ describe("official GitHub provenance cards", () => {
     />);
 
     const article = screen.getByRole("article", { name: "GitHub finding: Force pushes are allowed" });
-    const technical = within(article).getByText("Technical evidence").closest("details");
+    const technical = within(article).getByText("Audit details").closest("details");
     expect(technical).not.toHaveAttribute("open");
     expect(within(technical as HTMLElement).getByText(/automatically resolves only after a newer fresh passing check/i)).not.toBeVisible();
     expect(within(technical as HTMLElement).getByText(/does not certify ISO\/IEC 27001 compliance or change readiness/i)).not.toBeVisible();
@@ -162,6 +162,47 @@ describe("official GitHub provenance cards", () => {
     expect(within(article).getByText(/does not certify ISO\/IEC 27001 compliance or change readiness/i)).not.toBeVisible();
     expect(within(article).queryByText("Resolve")).not.toBeInTheDocument();
     expect(within(article).queryByText("Reopen")).not.toBeInTheDocument();
+  });
+
+  it("shows plain finding history in Audit details and nests internal identifiers", () => {
+    render(<OfficialGitHubFindingCard
+      record={{
+        ...common,
+        checkId: "github.branch.force_pushes",
+        catalogueSummary: "A verified issue was materialised as an approved finding.",
+        findingId: "40000000-0000-4000-8000-000000000002",
+        severity: "high",
+        firstDetectedAt: "2026-08-24T08:00:00.000Z",
+        mostRecentDetectedAt: "2026-08-25T08:00:00.000Z",
+        allowedTransitions: ["open", "acknowledged"],
+      }}
+      status="open"
+      taskId={null}
+      role="member"
+      selected={false}
+    />);
+
+    const article = screen.getByRole("article", { name: "GitHub finding: Force pushes are allowed" });
+    const audit = within(article).getByText("Audit details").closest("details") as HTMLElement;
+    expect(within(article).queryByText("Technical evidence")).not.toBeInTheDocument();
+    expect(audit).not.toHaveAttribute("open");
+    expect(within(audit).getByText(/First found/)).not.toBeVisible();
+    expect(within(audit).getByText(/Last found/)).not.toBeVisible();
+
+    fireEvent.click(within(audit).getByText("Audit details"));
+    expect(within(audit).getByText(/First found/)).toBeVisible();
+    expect(within(audit).getByText(/Last found/)).toBeVisible();
+    expect(within(audit).getByText(/does not turn it into a passing result/i)).toBeVisible();
+
+    const internal = within(audit).getByText("Internal identifiers").closest("details") as HTMLElement;
+    expect(internal).not.toHaveAttribute("open");
+    expect(within(internal).getByText(common.mappingChecksum)).not.toBeVisible();
+    fireEvent.click(within(internal).getByText("Internal identifiers"));
+    expect(within(internal).getByText("github.branch.force_pushes")).toBeVisible();
+    expect(within(internal).getByText(common.ruleVersion)).toBeVisible();
+    expect(within(internal).getByText(common.mappingVersion)).toBeVisible();
+    expect(within(internal).getByText(common.mappingChecksum)).toBeVisible();
+    expect(within(internal).getByText("A verified issue was materialised as an approved finding.")).toBeVisible();
   });
 
   it("resets a preserved transition choice after refreshed lifecycle props change", async () => {

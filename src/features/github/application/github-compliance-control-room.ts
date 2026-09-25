@@ -80,6 +80,8 @@ const officialResultSchema = z.object({
   mappingChecksum: checksum,
   evidenceId: uuid.nullable(),
   findingId: uuid.nullable(),
+  freshness: z.enum(["stale", "current"]).optional(),
+  mappingStatus: z.enum(["active", "historical"]).optional(),
 }).strict().superRefine((result, ctx) => {
   if ((result.outcome === "fail") !== (result.severity !== null)) {
     ctx.addIssue({ code: "custom", message: "severity must match failure outcome" });

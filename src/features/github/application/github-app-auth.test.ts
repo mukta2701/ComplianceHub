@@ -7,6 +7,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import {
   createAppJwt,
   createInstallationToken,
+  hasExactReadPermissions,
   READ_PERMISSIONS,
 } from "./github-app-auth";
 import { GitHubRateLimitError } from "./github-collection-error";
@@ -103,6 +104,100 @@ describe("GitHub App authentication", () => {
     );
   });
 
+  it("mints an unrestricted inventory token with metadata read only when no scope is supplied", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      token: "x",
+      expires_at: "2026-08-17T13:00:00Z",
+    }), { status: 201, headers: { "content-type": "application/json" } }));
+
+    const result = await createInstallationToken({
+      installationId: 77,
+      purpose: "inventory",
+      fetchImpl,
+      appJwt: "signed-app-jwt",
+    });
+
+    expect(result).toEqual({ token: "x", expiresAt: "2026-08-17T13:00:00Z" });
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://api.github.com/app/installations/77/access_tokens",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ permissions: { metadata: "read" } }),
+      }),
+    );
+    expect((fetchImpl.mock.calls[0] as [string, RequestInit])[1].body as string).not.toContain("repository_ids");
+  });
+
+  it("rejects an inventory token restricted to repositories", async () => {
+    const fetchImpl = vi.fn();
+
+    await expect(createInstallationToken({
+      installationId: 77,
+      repositoryIds: [101],
+      purpose: "inventory",
+      fetchImpl,
+      appJwt: "signed-app-jwt",
+    })).rejects.toThrow("Invalid GitHub installation token request");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("rejects a token with neither purpose nor repository scope before requesting", async () => {
+    const fetchImpl = vi.fn();
+
+    await expect(createInstallationToken({
+      installationId: 77,
+      fetchImpl,
+      appJwt: "signed-app-jwt",
+    })).rejects.toThrow("Invalid GitHub installation token request");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("rejects an explicit collection token without repository scope before requesting", async () => {
+    const fetchImpl = vi.fn();
+
+    await expect(createInstallationToken({
+      installationId: 77,
+      purpose: "collection",
+      fetchImpl,
+      appJwt: "signed-app-jwt",
+    })).rejects.toThrow("Invalid GitHub installation token request");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("requests an explicit collection token restricted to selected repositories and read permissions", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      token: "x",
+      expires_at: "2026-08-17T13:00:00Z",
+    }), { status: 201, headers: { "content-type": "application/json" } }));
+
+    const result = await createInstallationToken({
+      installationId: 77,
+      repositoryIds: [101, 102],
+      purpose: "collection",
+      fetchImpl,
+      appJwt: "signed-app-jwt",
+    });
+
+    expect(result).toEqual({ token: "x", expiresAt: "2026-08-17T13:00:00Z" });
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://api.github.com/app/installations/77/access_tokens",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          repository_ids: [101, 102],
+          permissions: {
+            actions: "read",
+            administration: "read",
+            metadata: "read",
+            secret_scanning_alerts: "read",
+            security_events: "read",
+            vulnerability_alerts: "read",
+          },
+        }),
+      }),
+    );
+  });
+
   it.each([
     { repositoryIds: [], label: "empty" },
     { repositoryIds: [101, 101], label: "duplicate" },
@@ -153,6 +248,24 @@ describe("GitHub App authentication", () => {
   });
 
   it.each([
+    [401, "unauthorized"],
+    [403, "forbidden"],
+    [404, "not_found"],
+    [422, "forbidden"],
+    [503, "server"],
+  ] as const)("classifies token exchange status %s without exposing provider content", async (status, kind) => {
+    const providerBody = crypto.randomUUID();
+    const error = await createInstallationToken({
+      installationId: 77,
+      repositoryIds: [101],
+      fetchImpl: vi.fn().mockResolvedValue(new Response(providerBody, { status })),
+      appJwt: "signed-app-jwt",
+    }).catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ kind });
+    expect(String(error)).not.toContain(providerBody);
+  });
+
+  it.each([
     { status: 429, headers: { "retry-after": "60" } },
     { status: 403, headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1786969000" } },
     { status: 403, headers: { "retry-after": "30" } },
@@ -170,6 +283,7 @@ describe("GitHub App authentication", () => {
     }).catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(GitHubRateLimitError);
     expect((error as GitHubRateLimitError).diagnosticCode).toBe("rate_limited");
+    expect((error as GitHubRateLimitError).kind).toBe("rate_limited");
     expect(String(error)).not.toContain(providerBody);
   });
 
@@ -189,5 +303,34 @@ describe("GitHub App authentication", () => {
 
     expect(String(error)).toContain("GitHub returned an invalid installation token response");
     expect(String(error)).not.toContain(providerCredential);
+  });
+});
+
+describe("hasExactReadPermissions", () => {
+  it("accepts exactly the six approved read permissions", () => {
+    expect(hasExactReadPermissions({ ...READ_PERMISSIONS })).toBe(true);
+  });
+
+  it.each([
+    ["missing metadata", { actions: "read", administration: "read", secret_scanning_alerts: "read", security_events: "read", vulnerability_alerts: "read" }],
+    ["missing actions", { administration: "read", metadata: "read", secret_scanning_alerts: "read", security_events: "read", vulnerability_alerts: "read" }],
+    ["missing administration", { actions: "read", metadata: "read", secret_scanning_alerts: "read", security_events: "read", vulnerability_alerts: "read" }],
+    ["missing secret_scanning_alerts", { actions: "read", administration: "read", metadata: "read", security_events: "read", vulnerability_alerts: "read" }],
+    ["missing security_events", { actions: "read", administration: "read", metadata: "read", secret_scanning_alerts: "read", vulnerability_alerts: "read" }],
+    ["missing vulnerability_alerts", { actions: "read", administration: "read", metadata: "read", secret_scanning_alerts: "read", security_events: "read" }],
+  ])("rejects %s", (label, permissions) => {
+    expect(hasExactReadPermissions(permissions)).toBe(false);
+  });
+
+  it("rejects one added permission", () => {
+    expect(hasExactReadPermissions({ ...READ_PERMISSIONS, contents: "read" })).toBe(false);
+  });
+
+  it("rejects one write value", () => {
+    expect(hasExactReadPermissions({ ...READ_PERMISSIONS, administration: "write" })).toBe(false);
+  });
+
+  it("rejects an unexpected permission value", () => {
+    expect(hasExactReadPermissions({ ...READ_PERMISSIONS, metadata: "admin" })).toBe(false);
   });
 });

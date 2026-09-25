@@ -1,0 +1,9 @@
+# GitHub connection alert link on AWS dev, 23 September 2026
+
+The AWS dev app serves source `e955d2bcbfb80508cfd56e23f69581ed8544e106` from draft PR [#27](https://github.com/mukta2701/ComplianceHub/pull/27). [Deployment run 35795031890](https://github.com/mukta2701/ComplianceHub/actions/runs/35795031890) completed successfully. Its optional GitHub reconciliation jobs were skipped. The hosted `/api/health/live` response reported `status=ok` with that exact source, and `/api/health` reported `status=ok`, `db=ok` and the same source.
+
+Before deployment, the linked AWS dev Supabase project matched the deploy workflow's public project URL. A dry run listed only `20260922215221_github_connection_plain_language_notices.sql`. The migration applied successfully, and a fresh migration-history read showed the same version locally and remotely. This release did not request any GitHub App access, repository selection or permission change.
+
+The local full suite passed with 3,412 tests and 3 skipped. After the final outbound-body assertion was added, the affected 49 alert tests, type checking and lint passed. [Branch CI](https://github.com/mukta2701/ComplianceHub/actions/runs/35793876434) and [PR CI](https://github.com/mukta2701/ComplianceHub/actions/runs/35793873502) both passed the full final source, including application, database, container, secret and browser checks. An independent code review found no blocking issue. The focused tests inspect the exact outbound Slack JSON body and confirm the fixed `Open ComplianceHub` link for a GitHub connection alert, while ordinary monitoring findings retain their existing format.
+
+No new real GitHub incident occurred after deployment, so no post-release Slack alert was observed. The live Slack rendering of the link remains unverified. This release does not complete the Admin/Member rehearsal, default-branch schedule, PR merge, production rollout or Milestone 1 human acceptance.

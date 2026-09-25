@@ -25,7 +25,7 @@ export function validateSlackIncomingWebhookUrl(value: string): URL {
 export async function postSlackIncomingWebhook(
   webhookUrl: string,
   payload: unknown,
-  options: { fetcher?: typeof fetch; timeoutMs?: number } = {},
+  options: { fetcher?: typeof fetch; timeoutMs?: number; signal?: AbortSignal } = {},
 ): Promise<SlackIncomingWebhookResult> {
   const url = validateSlackIncomingWebhookUrl(webhookUrl);
   const body = JSON.stringify(payload);
@@ -33,12 +33,14 @@ export async function postSlackIncomingWebhook(
     throw new Error("Invalid Slack incoming-webhook payload");
   }
   try {
+    const timeoutSignal = AbortSignal.timeout(options.timeoutMs ?? 8_000);
+    const signal = options.signal ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal;
     const response = await (options.fetcher ?? fetch)(url, {
       method: "POST",
       redirect: "error",
       headers: { "content-type": "application/json" },
       body,
-      signal: AbortSignal.timeout(options.timeoutMs ?? 8_000),
+      signal,
     });
     return { kind: "response", status: response.status };
   } catch {

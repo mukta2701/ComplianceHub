@@ -65,7 +65,7 @@ export async function recheckGitHubInstallationAction(
     if (!workspaceAccess(membership.role).section("monitoring").canManageOperation("recheck-github-installation")) return failure;
     const parsed = installationSchema.parse(Object.fromEntries(formData));
     const { data: installation, error } = await supabase.from("github_installations")
-      .select("id,status,permissions_ok,repository_selection")
+      .select("id,status,permissions_ok,repository_selection,health")
       .eq("id", parsed.installationId)
       .eq("organisation_id", organisation.id)
       .maybeSingle();
@@ -74,7 +74,8 @@ export async function recheckGitHubInstallationAction(
       || installation.id !== parsed.installationId
       || installation.status !== "active"
       || installation.permissions_ok !== true
-      || installation.repository_selection !== "selected") {
+      || installation.repository_selection !== "selected"
+      || installation.health !== "healthy") {
       return failure;
     }
 

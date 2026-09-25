@@ -30,7 +30,8 @@ const hoisted = vi.hoisted(() => ({
     }],
     github_installations: [{
       id: "10000000-0000-4000-8000-000000000010", account_login: "Adtecher", status: "active",
-      repository_selection: "selected", permissions_ok: true,
+      repository_selection: "selected", permissions_ok: true, health: "healthy",
+      health_diagnostic_code: null, last_successful_reconciliation_at: "2026-08-25T12:00:00.000Z",
     }],
     github_repositories: [{
       id: "10000000-0000-4000-8000-000000000011",
@@ -146,7 +147,7 @@ describe("Settings Connections page", () => {
     const expectedColumns: Record<string, string> = {
       integration_connections: "id,provider,label,config,connection_mode,enabled,created_at,revoked_at",
       alert_channels: "id,type,label,min_severity,enabled,daily_digest_enabled,created_at,revoked_at",
-      github_installations: "id,account_login,status,repository_selection,permissions_ok",
+      github_installations: "id,account_login,status,repository_selection,permissions_ok,health,health_diagnostic_code,last_successful_reconciliation_at",
       github_repositories: "id,installation_id,full_name,html_url,visibility,default_branch,archived,selected,available",
     };
     expect(hoisted.selectCalls).toHaveLength(4);

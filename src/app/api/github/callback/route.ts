@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { createAppJwt } from "@/features/github/application/github-app-auth";
-import { resolveGitHubAccountType } from "@/features/github/application/github-account-policy";
+import { getGitHubConnectionConfig } from "@/features/github/application/github-runtime-config";
 import {
   collectUserInstallationRepositories,
   exchangeGitHubUserCode,
@@ -136,23 +136,13 @@ export async function GET(request: Request): Promise<NextResponse> {
     return errorRedirect("rate_limited");
   }
 
-  const clientId = process.env.GITHUB_APP_CLIENT_ID;
-  const appId = process.env.GITHUB_APP_ID;
-  const privateKey = process.env.GITHUB_APP_PRIVATE_KEY;
-  const allowedAccountId = Number(process.env.GITHUB_ALLOWED_ACCOUNT_ID);
-  if (!clientId || !appId || !privateKey || !Number.isSafeInteger(allowedAccountId) || allowedAccountId <= 0) {
-    return configurationErrorRedirect();
-  }
-  let allowedAccountType;
+  let connection: Awaited<ReturnType<typeof getGitHubConnectionConfig>>;
   try {
-    allowedAccountType = resolveGitHubAccountType({
-      configuredType: process.env.GITHUB_ALLOWED_ACCOUNT_TYPE,
-      nodeEnv: process.env.NODE_ENV,
-      siteUrl: process.env.NEXT_PUBLIC_SITE_URL,
-    });
+    connection = getGitHubConnectionConfig();
   } catch {
     return configurationErrorRedirect();
   }
+  const { clientId, appId, privateKey, allowedAccountId, allowedAccountType } = connection;
 
   try {
     const stateHash = createHash("sha256").update(callback.state, "utf8").digest("hex");
@@ -188,7 +178,7 @@ export async function GET(request: Request): Promise<NextResponse> {
         appInstallation,
         repositories,
       },
-      { allowedAccountType },
+      { allowedAccountId, allowedAccountType },
     );
     return redirectTo(canonicalSiteUrl("/app/integrations?github=connected"));
   } catch {

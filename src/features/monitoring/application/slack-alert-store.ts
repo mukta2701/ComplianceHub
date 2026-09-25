@@ -5,7 +5,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { decryptSecret } from "@/lib/security/secrets";
 import { approveSlackDestination, approveStoredSlackDestination } from "@/features/mcp/application/slack-destination-policy";
 import { postSlackIncomingWebhook } from "@/lib/integrations/slack-incoming-webhook";
-import { drainSlackAlertDeliveries, type ClaimedSlackAlertDelivery, type QueueSlackDeliveryInput, type SlackAlertDeliveryStore, type SlackDeliveryLeaseIdentity } from "./slack-alert-queue";
+import { siteUrl } from "@/lib/site-url";
+import { drainSlackAlertDeliveries, type ClaimedSlackAlertDelivery, type QueueSlackDeliveryInput, type SafeSlackDeliveryPayload, type SlackAlertDeliveryStore, type SlackDeliveryLeaseIdentity } from "./slack-alert-queue";
 
 const slackLeaseIdentitySchema = z.object({
   delivery_id: z.uuid(),
@@ -28,11 +29,25 @@ const claimedSlackDeliverySchema = slackLeaseIdentitySchema.extend({
   safe_payload: safeSlackPayloadSchema,
 }).strip();
 
+const claimedGitHubConnectionSlackDeliverySchema = slackLeaseIdentitySchema.extend({
+  organisation_id: z.uuid(),
+  channel_id: z.uuid(),
+  attempt_count: z.number().int().min(1).max(5),
+  safe_payload: safeSlackPayloadSchema.extend({ type: z.literal("connection_health") }),
+}).strip();
+
 function oneRpcRow(value: unknown, message: string): Record<string, unknown> | null {
   if (!Array.isArray(value) || value.length > 1) throw new Error(message);
   if (value.length === 0) return null;
   if (!value[0] || typeof value[0] !== "object") throw new Error(message);
   return value[0] as Record<string, unknown>;
+}
+
+function applyAbortSignal<T>(query: T, signal?: AbortSignal): T {
+  if (!signal || !query || (typeof query !== "object" && typeof query !== "function")) return query;
+  const abortSignal = (query as { abortSignal?: unknown }).abortSignal;
+  if (typeof abortSignal !== "function") return query;
+  return (abortSignal as (activeSignal: AbortSignal) => T).call(query, signal);
 }
 
 export function createSupabaseSlackAlertDeliveryStore(
@@ -55,8 +70,11 @@ export function createSupabaseSlackAlertDeliveryStore(
         lockToken: parsed.data!.lock_token,
       };
     },
-    async claim(workerId): Promise<ClaimedSlackAlertDelivery | null> {
-      const { data, error } = await database.rpc("claim_alert_delivery", { worker_id: workerId });
+    async claim(workerId, signal): Promise<ClaimedSlackAlertDelivery | null> {
+      const { data, error } = await applyAbortSignal(
+        database.rpc("claim_alert_delivery", { worker_id: workerId }),
+        signal,
+      );
       const row = oneRpcRow(data, "Alert delivery claim failed");
       const parsed = claimedSlackDeliverySchema.safeParse(row);
       if (error || (row !== null && !parsed.success)) throw new Error("Alert delivery claim failed");
@@ -69,21 +87,142 @@ export function createSupabaseSlackAlertDeliveryStore(
         payload: parsed.data!.safe_payload,
       };
     },
-    async complete(deliveryId, lockToken) {
-      const { data, error } = await database.rpc("complete_alert_delivery", {
-        target_delivery_id: deliveryId,
-        claimed_lock_token: lockToken,
-      });
+    async complete(deliveryId, lockToken, signal) {
+      const { data, error } = await applyAbortSignal(
+        database.rpc("complete_alert_delivery", {
+          target_delivery_id: deliveryId,
+          claimed_lock_token: lockToken,
+        }),
+        signal,
+      );
       if (error || typeof data !== "boolean") throw new Error("Alert delivery completion failed");
       return data;
     },
-    async fail(deliveryId, lockToken) {
-      const { data, error } = await database.rpc("fail_alert_delivery", {
-        target_delivery_id: deliveryId,
-        claimed_lock_token: lockToken,
-      });
+    async fail(deliveryId, lockToken, signal) {
+      const { data, error } = await applyAbortSignal(
+        database.rpc("fail_alert_delivery", {
+          target_delivery_id: deliveryId,
+          claimed_lock_token: lockToken,
+        }),
+        signal,
+      );
       if (error || typeof data !== "boolean") throw new Error("Alert delivery failure recording failed");
       return data;
+    },
+  };
+}
+
+export function createSupabaseGitHubConnectionSlackAlertDeliveryStore(
+  database: Pick<SupabaseClient, "rpc">,
+): SlackAlertDeliveryStore {
+  return {
+    async enqueueAndClaim(): Promise<SlackDeliveryLeaseIdentity | null> {
+      throw new Error("Connection alert delivery enqueue is unavailable");
+    },
+    async claim(workerId, signal): Promise<ClaimedSlackAlertDelivery | null> {
+      const { data, error } = await applyAbortSignal(
+        database.rpc("claim_github_connection_alert_delivery", {
+          worker_id: workerId,
+        }),
+        signal,
+      );
+      const row = oneRpcRow(data, "Connection alert delivery claim failed");
+      const parsed = claimedGitHubConnectionSlackDeliverySchema.safeParse(row);
+      if (error || (row !== null && !parsed.success)) throw new Error("Connection alert delivery claim failed");
+      return row === null ? null : {
+        deliveryId: parsed.data!.delivery_id,
+        organisationId: parsed.data!.organisation_id,
+        channelId: parsed.data!.channel_id,
+        lockToken: parsed.data!.lock_token,
+        attemptCount: parsed.data!.attempt_count,
+        payload: parsed.data!.safe_payload,
+      };
+    },
+    async complete(deliveryId, lockToken, signal) {
+      const { data, error } = await applyAbortSignal(
+        database.rpc("complete_alert_delivery", {
+          target_delivery_id: deliveryId,
+          claimed_lock_token: lockToken,
+        }),
+        signal,
+      );
+      if (error || typeof data !== "boolean") throw new Error("Alert delivery completion failed");
+      return data;
+    },
+    async fail(deliveryId, lockToken, signal) {
+      const { data, error } = await applyAbortSignal(
+        database.rpc("fail_alert_delivery", {
+          target_delivery_id: deliveryId,
+          claimed_lock_token: lockToken,
+        }),
+        signal,
+      );
+      if (error || typeof data !== "boolean") throw new Error("Alert delivery failure recording failed");
+      return data;
+    },
+  };
+}
+
+export type EnqueueGitHubConnectionAlertInput = {
+  organisationId: string;
+  channelId: string;
+  installationId: string;
+  kind: "incident" | "recovery";
+  diagnostic: string | null;
+  payload: SafeSlackDeliveryPayload;
+};
+
+export async function enqueueGitHubConnectionAlertDelivery(
+  database: Pick<SupabaseClient, "rpc">,
+  input: EnqueueGitHubConnectionAlertInput,
+): Promise<boolean> {
+  const { data, error } = await database.rpc("queue_github_connection_alert_delivery", {
+    target_organisation_id: input.organisationId,
+    target_channel_id: input.channelId,
+    target_installation_id: input.installationId,
+    target_kind: input.kind,
+    target_diagnostic_code: input.diagnostic,
+    safe_payload: {
+      type: "connection_health",
+      severity: input.payload.severity,
+      title: input.payload.title,
+      controlRef: input.payload.controlRef,
+      subjectId: input.payload.subjectId,
+      detail: input.payload.detail,
+    },
+  });
+  if (error || typeof data !== "boolean") throw new Error("Connection alert delivery queue failed");
+  return data;
+}
+
+function createSupabaseSlackDrainCallbacks(supabase: SupabaseClient): Pick<
+  Parameters<typeof drainSlackAlertDeliveries>[0],
+  "resolveWebhookUrl" | "postSlack"
+> {
+  return {
+    resolveWebhookUrl: async (organisationId, channelId, activeSignal) => {
+      activeSignal?.throwIfAborted();
+      const channelQuery = supabase.from("alert_channels")
+        .select("config")
+        .eq("id", channelId).eq("organisation_id", organisationId)
+        .eq("type", "slack").eq("enabled", true).is("revoked_at", null);
+      const { data, error } = await applyAbortSignal(channelQuery, activeSignal).maybeSingle();
+      activeSignal?.throwIfAborted();
+      const stored = error ? { status: "not_approved" as const } : approveStoredSlackDestination(data?.config);
+      if (stored.status !== "approved") throw new Error("Slack alert channel is unavailable");
+      const decrypted = decryptSecret(stored.encryptedWebhook);
+      const approved = decrypted ? approveSlackDestination(decrypted) : { status: "not_approved" as const };
+      if (approved.status !== "approved") throw new Error("Slack alert channel is unavailable");
+      return approved.canonicalUrl;
+    },
+    postSlack: async (webhookUrl, payload, activeSignal) => {
+      activeSignal?.throwIfAborted();
+      const approved = approveSlackDestination(webhookUrl);
+      if (approved.status !== "approved") throw new Error("Slack alert channel is unavailable");
+      const result = await postSlackIncomingWebhook(approved.canonicalUrl, payload, { signal: activeSignal });
+      if (result.kind !== "response" || result.status < 200 || result.status >= 300) {
+        throw new Error("Slack alert delivery failed");
+      }
     },
   };
 }
@@ -98,28 +237,21 @@ export async function drainSupabaseSlackAlertDeliveries(
     workerId: `monitor-alerts:${randomUUID()}`,
     batchSize,
     signal,
-    resolveWebhookUrl: async (organisationId, channelId, activeSignal) => {
-      activeSignal?.throwIfAborted();
-      const { data, error } = await supabase.from("alert_channels")
-        .select("config")
-        .eq("id", channelId).eq("organisation_id", organisationId)
-        .eq("type", "slack").eq("enabled", true).is("revoked_at", null).maybeSingle();
-      activeSignal?.throwIfAborted();
-      const stored = error ? { status: "not_approved" as const } : approveStoredSlackDestination(data?.config);
-      if (stored.status !== "approved") throw new Error("Slack alert channel is unavailable");
-      const decrypted = decryptSecret(stored.encryptedWebhook);
-      const approved = decrypted ? approveSlackDestination(decrypted) : { status: "not_approved" as const };
-      if (approved.status !== "approved") throw new Error("Slack alert channel is unavailable");
-      return approved.canonicalUrl;
-    },
-    postSlack: async (webhookUrl, payload, activeSignal) => {
-      activeSignal?.throwIfAborted();
-      const approved = approveSlackDestination(webhookUrl);
-      if (approved.status !== "approved") throw new Error("Slack alert channel is unavailable");
-      const result = await postSlackIncomingWebhook(approved.canonicalUrl, payload);
-      if (result.kind !== "response" || result.status < 200 || result.status >= 300) {
-        throw new Error("Slack alert delivery failed");
-      }
-    },
+    ...createSupabaseSlackDrainCallbacks(supabase),
+  });
+}
+
+export async function drainSupabaseGitHubConnectionSlackAlertDeliveries(
+  supabase: SupabaseClient,
+  batchSize: number,
+  signal: AbortSignal,
+): Promise<{ claimed: number; delivered: number; failed: number }> {
+  return drainSlackAlertDeliveries({
+    store: createSupabaseGitHubConnectionSlackAlertDeliveryStore(supabase),
+    workerId: `github-connection-alerts:${randomUUID()}`,
+    batchSize,
+    siteOrigin: siteUrl(),
+    signal,
+    ...createSupabaseSlackDrainCallbacks(supabase),
   });
 }

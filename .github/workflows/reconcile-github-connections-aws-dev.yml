@@ -1,0 +1,62 @@
+name: Reconcile GitHub connections (AWS dev)
+
+on:
+  schedule:
+    - cron: "23 * * * *"
+  workflow_dispatch:
+    inputs:
+      expected_release_sha:
+        description: Optional release SHA to verify through the live health endpoint before running
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compliancehub-github-reconcile-aws-dev
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: eu-west-2
+  ECR_REPOSITORY: compliancehub-dev
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-24.04
+    environment: aws-dev
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Run bounded connection reconciliation
+        uses: ./.github/actions/reconcile-github-connections-aws-dev
+        env:
+          AWS_DEV_DEPLOY_ROLE_ARN: ${{ secrets.AWS_DEV_DEPLOY_ROLE_ARN }}
+          AWS_DEV_SERVICE_ARN: ${{ vars.AWS_DEV_SERVICE_ARN }}
+          AWS_DEV_ECR_REGISTRY: ${{ vars.AWS_DEV_ECR_REGISTRY }}
+          AWS_DEV_SITE_URL: ${{ vars.AWS_DEV_SITE_URL }}
+          NEXT_PUBLIC_SITE_URL: ${{ vars.AWS_DEV_SITE_URL }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          APP_ENCRYPTION_KEY: ${{ secrets.APP_ENCRYPTION_KEY }}
+          SLACK_ALLOWED_WEBHOOK_SHA256: ${{ secrets.SLACK_ALLOWED_WEBHOOK_SHA256 }}
+          GITHUB_APP_ID: ${{ secrets.AWS_DEV_GITHUB_APP_ID }}
+          GITHUB_APP_SLUG: ${{ secrets.AWS_DEV_GITHUB_APP_SLUG }}
+          GITHUB_APP_CLIENT_ID: ${{ secrets.AWS_DEV_GITHUB_APP_CLIENT_ID }}
+          GITHUB_APP_CLIENT_SECRET: ${{ secrets.AWS_DEV_GITHUB_APP_CLIENT_SECRET }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.AWS_DEV_GITHUB_APP_PRIVATE_KEY }}
+          GITHUB_WEBHOOK_SECRET: ${{ secrets.AWS_DEV_GITHUB_WEBHOOK_SECRET }}
+          GITHUB_ALLOWED_ACCOUNT_ID: ${{ secrets.AWS_DEV_GITHUB_ALLOWED_ACCOUNT_ID }}
+          GITHUB_ALLOWED_ACCOUNT_TYPE: Organization
+          GITHUB_CONNECTION_MAX_WEBHOOK_DELIVERIES: "20"
+          GITHUB_CONNECTION_MAX_INSTALLATIONS: "10"
+          GITHUB_CONNECTION_MAX_SLACK_DELIVERIES: "10"
+          GITHUB_CONNECTION_TIME_BUDGET_MS: "240000"
+        with:
+          expected-release-sha: ${{ inputs.expected_release_sha }}
+          expected-image-digest: ""
+          require-image-binding: "false"

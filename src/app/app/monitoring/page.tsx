@@ -37,6 +37,8 @@ import {
   type GitHubRepositoryMonitoringSummary,
 } from "@/features/github/components/github-collection-health-panel";
 import { getGitHubRuntimeReadiness, type GitHubRuntimeReadiness } from "@/features/github/application/github-runtime-config";
+import { formatMonitoringTime } from "@/features/github/components/format-monitoring-time";
+import { classifyGitHubRepositoryCompliance } from "@/features/github/domain/compliance-control-room-state";
 
 const SEVERITY_TONE: Record<CheckSeverity, StatusTone> = { critical: "risk", high: "risk", medium: "attention", low: "neutral" };
 const SEVERITY_PILL: Record<CheckSeverity, string> = { critical: "red", high: "red", medium: "amber", low: "blue" };
@@ -85,7 +87,11 @@ function unhealthyGitHubRepositoryIds(
     .filter((repository) => {
       const summary = repositories.find((candidate) => candidate.repository_id === repository.id);
       const installation = installations.find((candidate) => candidate.id === summary?.installation_id);
-      return !repository.available || !installation || installation.status !== "active" || installation.permissions_ok !== true;
+      return !repository.available
+        || !installation
+        || installation.status !== "active"
+        || installation.permissions_ok !== true
+        || installation.health !== "healthy";
     })
     .map((repository) => repository.id);
 }
@@ -96,6 +102,7 @@ function GitHubMonitoringSection({
   repositories,
   nowIso,
   room,
+  review,
   runtimeReadiness,
 }: {
   role: "owner" | "admin" | "member";
@@ -103,13 +110,60 @@ function GitHubMonitoringSection({
   repositories: GitHubRepositoryMonitoringSummary[];
   nowIso: string;
   room: GitHubComplianceControlRoom;
+  review: GitHubMappingReview;
   runtimeReadiness: GitHubRuntimeReadiness;
 }) {
-  const officialResults = room.repositories.flatMap((repository) => repository.officialResults);
-  const passed = officialResults.filter((result) => result.outcome === "pass").length;
-  const needAction = officialResults.filter((result) => result.outcome === "fail").length;
+  const exactReviewedApprovalActive = room.approval != null
+    && room.approval.mappingPackId === review.pack.id
+    && room.approval.version === review.pack.version
+    && room.approval.checksum === review.pack.checksum;
+  const isOutOfDate = (freshUntil: string) => !Number.isFinite(Date.parse(freshUntil))
+    || !Number.isFinite(Date.parse(room.asOf))
+    || Date.parse(room.asOf) >= Date.parse(freshUntil);
+  const resultsByRepository = room.repositories.map((repository) => {
+    const summary = repositories.find((candidate) => candidate.repository_id === repository.id);
+    const installation = installations.find((candidate) => candidate.id === summary?.installation_id);
+    const installationHealthy = repository.available
+      && summary?.available === true
+      && installation?.status === "active"
+      && installation.permissions_ok === true
+      && installation.health === "healthy";
+    const collection = repository.latestCollection;
+    const job = repository.latestMaterialisationJob;
+    const current = exactReviewedApprovalActive
+      && collection?.status === "succeeded"
+      && job?.status === "completed"
+      && job.collectionRunId === collection.id
+      && classifyGitHubRepositoryCompliance({
+        asOf: room.asOf,
+        installationHealthy,
+        approval: room.approval,
+        latestCollection: collection,
+        latestMaterialisationJob: job,
+        officialResults: repository.officialResults,
+      }) === "official_current";
+    return { results: repository.officialResults, current };
+  });
+  const officialResults = resultsByRepository.flatMap((repository) => repository.results);
+  const countResults = (outcome: "pass" | "fail", state: "current" | "previous" | "review") =>
+    resultsByRepository.reduce((count, repository) => count + repository.results.filter((result) =>
+      result.outcome === outcome && (isOutOfDate(result.freshUntil)
+        ? state === "previous"
+        : repository.current ? state === "current" : state === "review"),
+    ).length, 0);
+  const currentPasses = countResults("pass", "current");
+  const previousPasses = countResults("pass", "previous");
+  const reviewPasses = countResults("pass", "review");
+  const currentIssues = countResults("fail", "current");
+  const previousIssues = countResults("fail", "previous");
+  const reviewIssues = countResults("fail", "review");
   const unknown = officialResults.filter((result) => result.outcome === "unknown").length;
   const notApplicable = officialResults.filter((result) => result.outcome === "not_applicable").length;
+  const outOfDate = officialResults.filter((result) => isOutOfDate(result.freshUntil)).length;
+  const mostRecentObservation = officialResults
+    .map((result) => result.observedAt)
+    .filter((date) => Number.isFinite(Date.parse(date)))
+    .sort((left, right) => Date.parse(right) - Date.parse(left))[0];
   return <section className="monitor-github-section" aria-label="GitHub repository monitoring">
     <GitHubCollectionHealthPanel
       installations={installations}
@@ -122,10 +176,23 @@ function GitHubMonitoringSection({
       className="github-check-summary"
       role="note"
       aria-label="GitHub check summary"
-      style={{ marginTop: "12px", padding: "14px 18px", fontSize: "13px", fontWeight: 700 }}
     >
-      {officialResults.length} {officialResults.length === 1 ? "check" : "checks"} · {passed} passed · <Link href="#active-findings">{needAction} {needAction === 1 ? "needs" : "need"} action</Link> · {unknown} could not be verified
-      {notApplicable > 0 && <> · {notApplicable} not applicable</>}
+      <strong>{reviewPasses + reviewIssues > 0 ? "Saved GitHub results need review"
+        : outOfDate > 0 ? "Saved GitHub results need a new check" : "GitHub results from the last check"}</strong>
+      <p>{officialResults.length} saved {officialResults.length === 1 ? "check" : "checks"} on this page
+        {mostRecentObservation && <> · Most recent observation <time dateTime={mostRecentObservation}>{formatMonitoringTime(mostRecentObservation)}</time></>}
+        {outOfDate > 0 && <> · {outOfDate} {outOfDate === 1 ? "result is" : "results are"} out of date</>}
+      </p>
+      <div className="github-check-summary-counts">
+        {currentPasses > 0 && <span>{currentPasses} passed at last check</span>}
+        {previousPasses > 0 && <span>{previousPasses} previously passed</span>}
+        {reviewPasses > 0 && <span>{reviewPasses} saved {reviewPasses === 1 ? "pass needs" : "passes need"} review</span>}
+        {currentIssues > 0 && <Link href="#active-findings">{currentIssues} {currentIssues === 1 ? "issue" : "issues"} found</Link>}
+        {previousIssues > 0 && <Link href="#active-findings">{previousIssues} previous {previousIssues === 1 ? "issue" : "issues"} still open</Link>}
+        {reviewIssues > 0 && <Link href="#active-findings">{reviewIssues} saved {reviewIssues === 1 ? "issue needs" : "issues need"} review</Link>}
+        {unknown > 0 && <span>{unknown} could not be verified</span>}
+        {notApplicable > 0 && <span>{notApplicable} not applicable</span>}
+      </div>
     </Card>}
   </section>;
 }
@@ -170,7 +237,7 @@ export default async function MonitoringPage({
     const [data, installationResult, repositorySummaryResult, controlRoom, mappingReview] = await Promise.all([
       loadMemberMonitoring(supabase, organisation.id),
       supabase.from("github_installations")
-        .select("id,account_login,status,repository_selection,permissions_ok")
+        .select("id,account_login,status,repository_selection,permissions_ok,health,health_diagnostic_code,last_successful_reconciliation_at")
         .eq("organisation_id", organisation.id)
         .order("updated_at", { ascending: false }),
       supabase.from("github_repository_monitoring_summaries")
@@ -199,6 +266,7 @@ export default async function MonitoringPage({
         repositories={repositories}
         nowIso={new Date().toISOString()}
         room={controlRoom}
+        review={mappingReview}
         runtimeReadiness={runtimeReadiness}
       />}
       githubTechnicalReview={<GitHubTechnicalReview
@@ -227,7 +295,7 @@ export default async function MonitoringPage({
       .order("created_at", { ascending: false })
       .limit(100),
     supabase.from("github_installations")
-      .select("id,account_login,status,repository_selection,permissions_ok")
+      .select("id,account_login,status,repository_selection,permissions_ok,health,health_diagnostic_code,last_successful_reconciliation_at")
       .eq("organisation_id", organisation.id)
       .order("updated_at", { ascending: false }),
     supabase.from("github_repository_monitoring_summaries")
@@ -294,11 +362,12 @@ export default async function MonitoringPage({
       repositories={repositories}
       nowIso={new Date().toISOString()}
       room={controlRoom}
+      review={mappingReview}
       runtimeReadiness={runtimeReadiness}
     />
 
     <Card className="monitor-findings-card" id="active-findings">
-      <div className="card-head"><div><h3>Active findings</h3><p>Current violations and drift, newest first</p></div></div>
+      <div className="card-head"><div><h3>Findings to review</h3><p>Recorded issues that remain open. Check the observation date before treating a GitHub result as current.</p></div></div>
       {findings.length > 0 ? <ul className="finding-list">
         {findings.map((finding) => {
           const official = officialByFinding.get(finding.id);

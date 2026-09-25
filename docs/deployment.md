@@ -1,6 +1,149 @@
 # Deployment / Go-live runbook
 
-## GitHub shadow collection maintenance
+## Milestone 1 Task 8: one image, two commands
+
+The production image contains both the standalone web application and the
+finite GitHub connection-reconciliation runner. Its default command remains:
+
+```text
+node server.js
+```
+
+A scheduler can override that command with exactly:
+
+```text
+node dist/github-connection-reconcile.mjs
+```
+
+The override runs one bounded cycle and exits; it does not contain a timer or
+remain resident. Supply the GitHub App and Supabase credentials only as runtime
+environment variables. Do not pass them as Docker build arguments or include
+them in the bundle, image history, image environment, or captured logs.
+
+The local and CI container checks use fictional configuration. They prove that
+the same non-root image serves its web health endpoint, runs the exact finite
+command within an external timeout, and keeps the fictional secret markers out
+of the inspected bundle, image history, image environment, and logs. That
+evidence does not prove a live GitHub App or provider cycle, Slack delivery,
+production Supabase behavior, the historical company AWS ECS/EventBridge
+staging path, a hosted release, or human acceptance. Those remain separate
+gates.
+
+## Milestone 1 AWS dev acceptance (current operating instructions)
+
+The 20 September 2026 AWS dev acceptance design and plan replace the unfinished
+company ECS/EventBridge staging delivery for Milestone 1. Do not create or use a
+separate staging environment for this pilot. The existing AWS dev App Runner
+service is the web runtime, and its current immutable ECR image digest is the
+only image source for connection reconciliation.
+
+### Web service and finite runner
+
+App Runner keeps the production image's default command:
+
+```text
+node server.js
+```
+
+The reconciliation workflow overrides that same image with exactly:
+
+```text
+node dist/github-connection-reconcile.mjs
+```
+
+The override performs one bounded connection-reconciliation cycle, drains only
+connection-health Slack work, and exits. It does not start a timer, run
+`/api/cron/monitor`, claim Monitoring findings, or create compliance outcomes.
+The workflow first reads App Runner's current image identifier and rejects a
+tag, another registry, another repository, or a malformed digest before Docker
+runs.
+
+### Reconciliation workflow and schedule
+
+`.github/workflows/reconcile-github-connections-aws-dev.yml` runs on a
+GitHub-hosted worker. It uses the existing `aws-dev` environment and an AWS
+OIDC role with no long-lived AWS access key. Its normal job calls the local
+`.github/actions/reconcile-github-connections-aws-dev` composite action for
+manual `workflow_dispatch` (including an optional expected release SHA) and
+the hourly schedule at minute 23 UTC (`23 * * * *`). The concurrency lock
+prevents overlapping cycles, and the workflow supplies an outer timeout around
+the runner's own bounded deadline. The action validates App Runner's current
+immutable digest, checks an optional release SHA, pulls that same image and
+exits after the exact finite command.
+
+Before this workflow is installed on the default branch, a manual dispatch of
+`Deploy AWS dev` can set
+`run_github_reconciliation_acceptance=true`. The deploy job then exposes only
+the validated `sha256:<64 lowercase hex>` digest and runs two ordinary,
+sequential `ubuntu-24.04` jobs. Each checks out `github.sha`, uses the same
+composite action and passes the digest plus release SHA with strict binding
+enabled. The input defaults to `false`, so ordinary pushes and manual deploys
+remain web-only. The acceptance jobs receive the existing `aws-dev`
+environment's named variables and secrets on the action step; secret values
+are never action inputs or cross-job outputs. The environment currently has no
+reviewer-protection rule; this is an execution path and not a claim of human
+approval enforcement.
+
+GitHub schedules run from the repository's default branch only. A feature branch
+can prove the workflow contract and the opt-in deployment acceptance calls; it
+cannot prove scheduled execution. Scheduled runs
+may start late or be skipped during GitHub service disruption, so a missing
+scheduled run is not evidence that the connection is healthy.
+
+### Configuration names and secret boundary
+
+Configure only the `aws-dev` inputs below; never copy their values
+into this repository, Docker build arguments, workflow arguments or evidence.
+The four environment variable names used by the reconciliation workflow are:
+
+- `AWS_DEV_ECR_REGISTRY`;
+- `AWS_DEV_SERVICE_ARN`;
+- `AWS_DEV_SITE_URL`;
+- `NEXT_PUBLIC_SUPABASE_URL`.
+
+The protected secret names are:
+
+- `AWS_DEV_DEPLOY_ROLE_ARN`;
+- `SUPABASE_SERVICE_ROLE_KEY`, `APP_ENCRYPTION_KEY`, and
+  `SLACK_ALLOWED_WEBHOOK_SHA256`;
+- `AWS_DEV_GITHUB_APP_ID`, `AWS_DEV_GITHUB_APP_SLUG`,
+  `AWS_DEV_GITHUB_APP_CLIENT_ID`, `AWS_DEV_GITHUB_APP_CLIENT_SECRET`,
+  `AWS_DEV_GITHUB_APP_PRIVATE_KEY`, `AWS_DEV_GITHUB_WEBHOOK_SECRET`, and
+  `AWS_DEV_GITHUB_ALLOWED_ACCOUNT_ID`.
+
+The workflow derives the runtime `NEXT_PUBLIC_SITE_URL` from
+`AWS_DEV_SITE_URL`; do not configure a separate protected value for that
+runtime name. It fixes `GITHUB_ALLOWED_ACCOUNT_TYPE` to `Organization` and the
+following reconciliation bounds in reviewed workflow source, so they are not
+protected-environment inputs:
+
+- `GITHUB_CONNECTION_MAX_WEBHOOK_DELIVERIES=20`;
+- `GITHUB_CONNECTION_MAX_INSTALLATIONS=10`;
+- `GITHUB_CONNECTION_MAX_SLACK_DELIVERIES=10`;
+- `GITHUB_CONNECTION_TIME_BUDGET_MS=240000`.
+
+The deploy workflow maps the `AWS_DEV_GITHUB_*` aliases to the exact runtime
+`GITHUB_*` names. The finite runner does not receive `CRON_SECRET`, browser
+keys, a GitHub personal access token, or a Slack webhook URL. Secret values are
+masked before Docker starts and are removed with the runner's temporary
+container and log.
+
+### Connection-only notifications and evidence limits
+
+The runner may claim and deliver only `github_connection_health` Slack rows. It
+uses the same approved destination-digest and encrypted-configuration checks as
+the application, and failed delivery remains durable for a later bounded retry.
+The general `POST /api/cron/monitor` route continues to own Monitoring
+evaluation and Monitoring alert delivery; this finite command never invokes it
+and never claims its rows.
+
+Local fictional-data tests, image scans, workflow contract checks and a manual
+feature-branch run prove source and packaging behavior only. They do not prove
+the hosted App Runner digest, live Supabase/GitHub/Slack behavior, default-branch
+scheduled execution, production readiness, or human acceptance. Record each
+environment and release separately when those later gates are authorized.
+
+## Existing GitHub shadow collection maintenance (separate from the finite runner)
 
 The AWS dev environment runs the read-only GitHub shadow collector
 at `05:29 UTC`, before the existing daily and monitoring maintenance jobs. The
@@ -18,11 +161,11 @@ change readiness/MCP answers, or deliver Slack messages.
 lease. Callers must treat that response as in-progress work, not as terminal
 success; the deterministic retry key will resolve the same run later.
 
-Personal staging requires `CRON_SECRET` and all eight `GITHUB_*` values listed
-below. They are runtime-only deployment secrets, rotated together through one
-inactive a/b slot. Keep the private key and all GitHub tokens out of application
-tables, logs, build output, client-visible environment variables, and local
-developer environment files.
+The older personal-staging shadow-collection instructions below are retained as
+historical reference for that separate route. They are not a prerequisite for
+the current AWS dev connection-runner acceptance. Keep any runtime credentials
+out of application tables, logs, build output, client-visible environment
+variables, and local developer environment files.
 
 This is the concrete checklist to take ComplianceHub from the local build to a live
 site. Steps marked **(you)** need account creation or secret entry that only the
@@ -42,15 +185,21 @@ account owner can do; everything else is already prepared in the repo.
   override only when all local data can be permanently discarded.
 - The full Playwright e2e suite passes against a **production build** (`npm run build` followed by `scripts/playwright-production-server.sh`), confirming the deployed artifact serves the whole app end-to-end. (Locally run e2e with `--workers=1` or `--workers=2` — full parallelism overwhelms the single local Supabase with concurrent sign-ups.)
 
-## 1. Hosted Supabase **(you)**
+## 1. Hosted Supabase **(you — separate deployment runbook)**
+
+This section documents the broader hosted application deployment. It is not the
+current Milestone 1 AWS dev runner gate. The AWS dev acceptance path uses the
+existing dev project and the one reviewed migration named in the 20 September
+plan; do not apply the historical personal-staging migration list below as a
+substitute.
 
 1. Create a managed Supabase project (a UK/EU region where available).
 2. Apply the committed migrations to it (link the project, then `supabase db push`, or run the SQL in order). Do **not** run `db reset` against production.
 3. From the project's API settings, copy: the **Project URL**, the **anon key**, and the **service-role key** (server-only).
 
-### GitHub foundation migration checkpoint
+### Historical GitHub foundation migration checkpoint (not the current AWS dev gate)
 
-The personal staging project for this rollout is project ref
+The historical personal-staging project for that earlier rollout was project ref
 `ytenjiyjdcrjkgwmciqw`. Confirm that exact ref in both the Supabase dashboard and
 CLI before linking or applying anything, then take and verify a recoverable
 backup. From the last deployed schema, both `supabase migration list` and
@@ -247,8 +396,8 @@ Application environment variables (names must match `.env.example`):
 
 An Adtecher GitHub organisation owner or App manager must create or update this
 as a **private, Adtecher-owned** GitHub App before the branch is merged or the
-personal staging deployment is triggered. Do not use a user-owned App or a
-personal repository as a substitute.
+AWS dev deployment is triggered. Do not use a user-owned App or a personal
+repository as a substitute.
 
 Use the exact origin in `NEXT_PUBLIC_SITE_URL` for every URL below, with no
 preview origin, path prefix, credentials, query, fragment, or trailing slash on
@@ -283,7 +432,11 @@ variables, Docker build arguments, application tables, workflow output, forks,
 or any other hosting environment. The local seeded Playwright proof
 does not require these values and makes no GitHub request.
 
-## 3. Cron automation (scheduled calls to AWS dev)
+## 3. Existing cron automation (scheduled calls to AWS dev)
+
+These HTTP cron routes are separate from the current finite GitHub connection
+workflow above. In particular, the finite runner does not call
+`/api/cron/monitor` and does not deliver Monitoring work.
 
 The four cron routes below run on the AWS dev origin with `CRON_SECRET`.
 Scheduled invocation is re-established on the AWS side; until then invoke them

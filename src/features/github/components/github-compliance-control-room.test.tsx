@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -108,13 +108,17 @@ describe("GitHubComplianceControlRoomPanel", () => {
   it("explains the four phases and shows exact mapping identity, all 15 checks, ISO references, treatments, limitations, and identity-free history", () => {
     render(<GitHubComplianceControlRoomPanel room={room()} review={review()} role="member" unhealthyRepositoryIds={[]} />);
 
-    const workflow = screen.getByRole("list", { name: "How GitHub compliance becomes official" });
-    expect(within(workflow).getAllByRole("listitem")).toHaveLength(4);
-    expect(screen.getByText("Review all 15 mapped checks").closest("details")).not.toHaveAttribute("open");
-    expect(screen.getByText(STANDARD_GITHUB_ISO_MAPPING_PACK.version)).toBeVisible();
-    expect(screen.getByText(STANDARD_GITHUB_ISO_MAPPING_PACK.checksum)).toBeVisible();
+    const workflowDetails = screen.getByText("How results become records").closest("details") as HTMLElement;
+    expect(workflowDetails).not.toHaveAttribute("open");
+    expect(within(workflowDetails).getByText("1. Connect")).not.toBeVisible();
+    expect(screen.getByText("Check definitions (15)").closest("details")).not.toHaveAttribute("open");
+    const mappingIdentity = screen.getByText("Internal mapping details").closest("details") as HTMLElement;
+    expect(mappingIdentity).not.toHaveAttribute("open");
+    expect(within(mappingIdentity).getByText(STANDARD_GITHUB_ISO_MAPPING_PACK.checksum)).not.toBeVisible();
+    fireEvent.click(within(mappingIdentity).getByText("Internal mapping details"));
+    expect(within(mappingIdentity).getByText(STANDARD_GITHUB_ISO_MAPPING_PACK.checksum)).toBeVisible();
     expect(screen.getAllByRole("article", { name: /mapping check$/ })).toHaveLength(15);
-    const mapping = screen.getByText("Review all 15 mapped checks").closest("details") as HTMLElement;
+    const mapping = screen.getByText("Check definitions (15)").closest("details") as HTMLElement;
     for (const group of ["Repository basics", "Branch protection", "Dependency and code alerts", "Secret protection", "Workflows and access"]) {
       expect(within(mapping).getByRole("heading", { name: group })).toBeInTheDocument();
     }
@@ -127,13 +131,74 @@ describe("GitHubComplianceControlRoomPanel", () => {
     expect(screen.queryByText(/approved_by|actor|email/i)).not.toBeInTheDocument();
   });
 
+  it("leads catalogue rows with plain titles and nests raw rule details", async () => {
+    const user = userEvent.setup();
+    render(<GitHubComplianceControlRoomPanel room={room()} review={review()} role="member" unhealthyRepositoryIds={[]} />);
+
+    const catalogue = screen.getByText("Check definitions (15)").closest("details") as HTMLElement;
+    expect(screen.queryByText("Review all 15 mapped checks")).not.toBeInTheDocument();
+    expect(catalogue).not.toHaveAttribute("open");
+    await user.click(within(catalogue).getByText("Check definitions (15)"));
+    expect(screen.getAllByRole("article", { name: /mapping check$/ })).toHaveLength(15);
+    const firstCheck = within(catalogue).getAllByRole("article", { name: /mapping check$/ })[0] as HTMLElement;
+    expect(within(firstCheck).getByText(/if failed/)).toBeVisible();
+    expect(within(firstCheck).getByText(/ISO references:/)).toBeVisible();
+    expect(within(firstCheck).getByText(/Suggested remediation:/)).toBeVisible();
+
+    const ruleDetails = within(firstCheck).getByText("Rule details").closest("details") as HTMLElement;
+    expect(ruleDetails).not.toHaveAttribute("open");
+    expect(within(ruleDetails).getByText(/Verified technical pass → evidence/)).not.toBeVisible();
+    expect(within(ruleDetails).getAllByText(/github\./)[0]).not.toBeVisible();
+    await user.click(within(ruleDetails).getByText("Rule details"));
+    expect(within(ruleDetails).getAllByText(/github\./)[0]).toBeVisible();
+    expect(within(ruleDetails).getByText(/Verified technical pass → evidence/)).toBeVisible();
+    expect(within(ruleDetails).getByText(/Verified issue → finding/)).toBeVisible();
+    expect(within(ruleDetails).getByText(/Could not verify:/)).toBeVisible();
+    expect(within(ruleDetails).getByText(/Not applicable:/)).toBeVisible();
+  });
+
+  it.each([
+    ["the connection is unhealthy", (value: GitHubComplianceControlRoom) => value, [REPOSITORY]],
+    ["approval is missing", (value: GitHubComplianceControlRoom) => ({ ...value, approval: null }), []],
+    ["the result set is incomplete", (value: GitHubComplianceControlRoom) => ({ ...value, repositories: [{ ...value.repositories[0]!, officialResults: value.repositories[0]!.officialResults.slice(0, 1) }] }), []],
+    ["the mapping differs", (value: GitHubComplianceControlRoom) => ({ ...value, approval: { ...value.approval!, checksum: "b".repeat(64) } }), []],
+    ["the collection is partial", (value: GitHubComplianceControlRoom) => ({ ...value, repositories: [{ ...value.repositories[0]!, latestCollection: { ...value.repositories[0]!.latestCollection!, status: "partial" as const } }] }), []],
+    ["processing belongs to an older run", (value: GitHubComplianceControlRoom) => ({ ...value, repositories: [{ ...value.repositories[0]!, latestMaterialisationJob: { ...value.repositories[0]!.latestMaterialisationJob!, collectionRunId: "a1000000-0000-4000-8000-000000000099" } }] }), []],
+  ] as const)("does not show a green pass when %s", (_reason, change, unhealthyRepositoryIds) => {
+    render(<GitHubComplianceControlRoomPanel room={change(room())} review={review()} role="member" unhealthyRepositoryIds={[...unhealthyRepositoryIds]} />);
+    const repository = screen.getByRole("article", { name: "Mukta2701/ComplianceHub official compliance" });
+    expect(within(repository).queryByText("Passed at last check")).not.toBeInTheDocument();
+    expect(within(repository).getAllByText("Past pass — needs review").length).toBeGreaterThan(0);
+    expect(within(repository).getAllByText("Past pass — needs review")[0].closest("span")).not.toHaveClass("green");
+  });
+
+  it("labels an unverified saved issue without presenting it as a current finding", () => {
+    render(<GitHubComplianceControlRoomPanel room={room({ approval: null })} review={review()} role="member" unhealthyRepositoryIds={[]} />);
+    const repository = screen.getByRole("article", { name: "Mukta2701/ComplianceHub official compliance" });
+    expect(within(repository).queryAllByText("Issue found")).toHaveLength(0);
+    expect(within(repository).getAllByText("Saved issue; needs review").length).toBeGreaterThan(0);
+    expect(within(repository).getAllByRole("link", { name: /^View finding for / }).length).toBeGreaterThan(0);
+  });
+
+  it("uses readable names for check articles and record links", () => {
+    render(<GitHubComplianceControlRoomPanel room={room()} review={review()} role="member" unhealthyRepositoryIds={[]} />);
+    const catalogue = screen.getByText("Check definitions (15)").closest("details") as HTMLElement;
+    for (const article of within(catalogue).getAllByRole("article", { name: /mapping check$/ })) {
+      expect(article.getAttribute("aria-label")).not.toContain("github.");
+    }
+    const repository = screen.getByRole("article", { name: "Mukta2701/ComplianceHub official compliance" });
+    for (const link of within(repository).getAllByRole("link", { name: /^View (evidence|finding) for / })) {
+      expect(link.getAttribute("aria-label")).not.toContain("github.");
+    }
+  });
+
   it("uses exact current-state and outcome wording with only canonical repository/evidence/finding links", () => {
     render(<GitHubComplianceControlRoomPanel room={room()} review={review()} role="member" unhealthyRepositoryIds={[]} />);
     const repository = screen.getByRole("article", { name: "Mukta2701/ComplianceHub official compliance" });
     expect(within(repository).getByText("Official records current")).toBeVisible();
-    expect(within(repository).getByText("4 verified technical pass")).toBeVisible();
-    expect(within(repository).getByText("4 verified issue")).toBeVisible();
-    expect(within(repository).getByText("4 could not verify")).toBeVisible();
+    expect(within(repository).getByText("4 passed")).toBeVisible();
+    expect(within(repository).getByText("4 found")).toBeVisible();
+    expect(within(repository).getByText("4 unverified")).toBeVisible();
     expect(within(repository).getByText("3 not applicable")).toBeVisible();
     expect(within(repository).getByRole("link", { name: "Open Mukta2701/ComplianceHub on GitHub" })).toHaveAttribute(
       "href", "https://github.com/Mukta2701/ComplianceHub",
@@ -146,10 +211,43 @@ describe("GitHubComplianceControlRoomPanel", () => {
       "href",
       "/app/monitoring?finding=a4000000-0000-4000-8000-000000000002#finding-a4000000-0000-4000-8000-000000000002",
     );
+    expect(within(repository).getAllByText("Audit identifiers")[0].closest("details")).not.toHaveAttribute("open");
     expect(repository).toHaveTextContent("Rule github-repository-v1 · Mapping github-iso-27001-v1");
     expect(within(repository).getByRole("heading", { name: "Branch protection" })).toBeInTheDocument();
     expect(within(repository).getByText("Force-push protection")).toBeInTheDocument();
     expect(repository).not.toHaveTextContent(/compliant|certified|secure|readiness improved/i);
+  });
+
+  it("calls expired saved results previous observations rather than current passes or issues", () => {
+    render(<GitHubComplianceControlRoomPanel
+      room={room({ asOf: "2026-08-28T12:00:00.000Z" })}
+      review={review()}
+      role="member"
+      unhealthyRepositoryIds={[]}
+    />);
+
+    const repository = screen.getByRole("article", { name: "Mukta2701/ComplianceHub official compliance" });
+    expect(within(repository).getAllByText("Previously passed; needs recheck").length).toBeGreaterThan(0);
+    expect(within(repository).getAllByText("Previous issue; needs recheck").length).toBeGreaterThan(0);
+    expect(repository).not.toHaveTextContent("Verified technical pass");
+    expect(within(repository).getAllByRole("link", { name: /^View evidence for / })[0]).toHaveAttribute(
+      "href", "/app/evidence?evidence=a3000000-0000-4000-8000-000000000001#evidence-a3000000-0000-4000-8000-000000000001",
+    );
+  });
+
+  it("marks official records for review when the GitHub connection is unhealthy", () => {
+    render(<GitHubComplianceControlRoomPanel
+      room={room()}
+      review={review()}
+      role="member"
+      unhealthyRepositoryIds={[REPOSITORY]}
+    />);
+
+    const repository = screen.getByRole("article", { name: "Mukta2701/ComplianceHub official compliance" });
+    expect(within(repository).getByText("Needs attention")).toBeVisible();
+    expect(within(repository).queryByText("Official records current")).not.toBeInTheDocument();
+    expect(within(repository).getByText("GitHub access or collection processing needs attention. Review the statuses and recovery options below."))
+      .toBeVisible();
   });
 
   it("never labels an official-mode collection without materialised results as shadow", () => {

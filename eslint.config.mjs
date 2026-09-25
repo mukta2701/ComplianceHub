@@ -14,6 +14,7 @@ const eslintConfig = defineConfig([
     "artifacts/**",
     "out/**",
     "build/**",
+    "dist/**",
     "test-results/**",
     "playwright-report/**",
     "supabase/.temp/**",

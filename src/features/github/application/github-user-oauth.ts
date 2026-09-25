@@ -3,6 +3,8 @@ import "server-only";
 import { createHash, createHmac, randomBytes as nodeRandomBytes, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 
+import { GitHubRateLimitError, throwIfGitHubRateLimited } from "./github-collection-error";
+
 type FetchLike = typeof fetch;
 
 const API_ORIGIN = "https://api.github.com";
@@ -12,6 +14,11 @@ const FLOW_TTL_MS = 10 * 60_000;
 const MAX_COOKIE_BYTES = 4_096;
 const MAX_PAGES = 100;
 const USER_AGENT = "ComplianceHub-GitHub-App";
+const API_VERSION = "2026-03-10";
+
+export const GITHUB_API_ORIGIN = API_ORIGIN;
+export const GITHUB_API_VERSION = API_VERSION;
+export const GITHUB_USER_AGENT = USER_AGENT;
 
 const positiveId = z.number().int().positive().safe();
 const flowSchema = z.object({
@@ -35,7 +42,7 @@ const installationListSchema = z.object({
   installations: z.array(z.object({ id: positiveId }).passthrough()).max(100),
 }).passthrough();
 
-const appInstallationSchema = z.object({
+export const appInstallationSchema = z.object({
   id: positiveId,
   account: z.object({
     id: positiveId,
@@ -177,8 +184,10 @@ export function buildGitHubAuthorizeUrl(input: {
   return url;
 }
 
-function safeFetchInit(token: string): RequestInit {
+function safeFetchInit(token: string, signal?: AbortSignal): RequestInit {
   if (!token || token.length > 2_000) throw verificationError();
+  signal?.throwIfAborted();
+  const timeoutSignal = AbortSignal.timeout(15_000);
   return {
     method: "GET",
     headers: {
@@ -189,19 +198,28 @@ function safeFetchInit(token: string): RequestInit {
     },
     cache: "no-store",
     redirect: "error",
-    signal: AbortSignal.timeout(15_000),
+    signal: signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal,
   };
 }
 
 // This boundary accepts only the allowlisted GitHub API origin checked below;
 // the ephemeral authorization value is never returned, logged, or persisted.
-async function fetchVerifiedGitHubApi(url: URL, authorizationValue: string, fetchImpl: FetchLike): Promise<Response> {
+async function fetchVerifiedGitHubApi(
+  url: URL,
+  authorizationValue: string,
+  fetchImpl: FetchLike,
+  signal?: AbortSignal,
+): Promise<Response> {
   if (url.origin !== API_ORIGIN || url.username || url.password || url.hash) throw verificationError();
   try {
-    const response = await fetchImpl(url.toString(), safeFetchInit(authorizationValue));
+    signal?.throwIfAborted();
+    const response = await fetchImpl(url.toString(), safeFetchInit(authorizationValue, signal));
+    signal?.throwIfAborted();
+    throwIfGitHubRateLimited(response);
     if (!response.ok) throw verificationError();
     return response;
-  } catch {
+  } catch (error) {
+    if (error instanceof GitHubRateLimitError) throw error;
     throw verificationError();
   }
 }
@@ -265,7 +283,13 @@ export async function listUserInstallationIds(input: { userToken: string; fetchI
   const ids: number[] = [];
   let expectedCount: number | null = null;
   for (let page = 0; page < MAX_PAGES; page += 1) {
-    const response = await fetchVerifiedGitHubApi(url, authorizationValue, fetchImpl);
+    let response: Response;
+    try {
+      response = await fetchVerifiedGitHubApi(url, authorizationValue, fetchImpl);
+    } catch (error) {
+      if (error instanceof GitHubRateLimitError) throw verificationError();
+      throw error;
+    }
     let parsed: z.infer<typeof installationListSchema>;
     try { parsed = installationListSchema.parse(await response.json()); } catch { throw verificationError(); }
     expectedCount ??= parsed.total_count;
@@ -286,7 +310,13 @@ export async function listUserInstallationIds(input: { userToken: string; fetchI
 export async function getAppInstallation(input: { appJwt: string; installationId: number; fetchImpl?: FetchLike }): Promise<VerifiedAppInstallation> {
   if (!Number.isSafeInteger(input.installationId) || input.installationId <= 0) throw verificationError();
   const url = new URL(`/app/installations/${input.installationId}`, API_ORIGIN);
-  const response = await fetchVerifiedGitHubApi(url, input.appJwt, input.fetchImpl ?? fetch);
+  let response: Response;
+  try {
+    response = await fetchVerifiedGitHubApi(url, input.appJwt, input.fetchImpl ?? fetch);
+  } catch (error) {
+    if (error instanceof GitHubRateLimitError) throw verificationError();
+    throw error;
+  }
   try {
     const parsed = appInstallationSchema.parse(await response.json());
     return {
@@ -301,24 +331,74 @@ export async function getAppInstallation(input: { appJwt: string; installationId
   }
 }
 
+export const MAX_GITHUB_DISCOVERY_PAGES = 100;
+export const MAX_DISCOVERED_REPOSITORIES = 10_000;
+
+export async function collectPaginatedInstallationRepositories(input: {
+  startUrl: string;
+  token: string;
+  fetchImpl?: FetchLike;
+  signal?: AbortSignal;
+}): Promise<UserInstallationRepository[]> {
+  let url: URL;
+  try {
+    url = new URL(input.startUrl);
+  } catch {
+    throw verificationError();
+  }
+  if (!input.token || input.token.length > 2_000) throw verificationError();
+  const fetchImpl = input.fetchImpl ?? fetch;
+  const collected: UserInstallationRepository[] = [];
+  let expectedCount: number | null = null;
+  for (let page = 0; page < MAX_GITHUB_DISCOVERY_PAGES; page += 1) {
+    input.signal?.throwIfAborted();
+    const response = await fetchVerifiedGitHubApi(url, input.token, fetchImpl, input.signal);
+    let parsed: z.infer<typeof repositoryListSchema>;
+    try {
+      input.signal?.throwIfAborted();
+      const body = await response.json();
+      input.signal?.throwIfAborted();
+      parsed = repositoryListSchema.parse(body);
+    } catch {
+      throw verificationError();
+    }
+    if (parsed.total_count > MAX_DISCOVERED_REPOSITORIES) throw verificationError();
+    expectedCount ??= parsed.total_count;
+    if (parsed.total_count !== expectedCount) throw verificationError();
+    collected.push(...parsed.repositories.map((repository) => ({
+      id: repository.id,
+      owner: repository.owner.login,
+      name: repository.name,
+      fullName: repository.full_name,
+      htmlUrl: repository.html_url,
+      visibility: repository.visibility,
+      archived: repository.archived,
+      defaultBranch: repository.default_branch,
+    })));
+    if (collected.length > MAX_DISCOVERED_REPOSITORIES) throw verificationError();
+    const ids = collected.map((repository) => repository.id);
+    if (new Set(ids).size !== ids.length) throw verificationError();
+    const next = nextUrl(response);
+    if (!next) {
+      if (collected.length !== expectedCount) throw verificationError();
+      return collected;
+    }
+    if (page === MAX_GITHUB_DISCOVERY_PAGES - 1) throw verificationError();
+    url = next;
+  }
+  throw verificationError();
+}
+
 export async function collectUserInstallationRepositories(input: { userToken: string; installationId: number; fetchImpl?: FetchLike }): Promise<UserInstallationRepository[]> {
   if (!Number.isSafeInteger(input.installationId) || input.installationId <= 0) throw verificationError();
-  const url = new URL(`/user/installations/${input.installationId}/repositories?per_page=100`, API_ORIGIN);
-  const authorizationValue = input.userToken;
-  const response = await fetchVerifiedGitHubApi(url, authorizationValue, input.fetchImpl ?? fetch);
-  let parsed: z.infer<typeof repositoryListSchema>;
-  try { parsed = repositoryListSchema.parse(await response.json()); } catch { throw verificationError(); }
-  if (parsed.total_count > 100 || nextUrl(response)) throw verificationError();
-  const ids = new Set(parsed.repositories.map((repository) => repository.id));
-  if (ids.size !== parsed.repositories.length || parsed.total_count !== parsed.repositories.length) throw verificationError();
-  return parsed.repositories.map((repository) => ({
-    id: repository.id,
-    owner: repository.owner.login,
-    name: repository.name,
-    fullName: repository.full_name,
-    htmlUrl: repository.html_url,
-    visibility: repository.visibility,
-    archived: repository.archived,
-    defaultBranch: repository.default_branch,
-  }));
+  try {
+    return await collectPaginatedInstallationRepositories({
+      startUrl: new URL(`/user/installations/${input.installationId}/repositories?per_page=100`, API_ORIGIN).toString(),
+      token: input.userToken,
+      fetchImpl: input.fetchImpl,
+    });
+  } catch (error) {
+    if (error instanceof GitHubRateLimitError) throw verificationError();
+    throw error;
+  }
 }

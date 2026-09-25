@@ -26,22 +26,22 @@ export type ClaimedSlackAlertDelivery = SlackDeliveryLeaseIdentity & {
 export type QueueSlackDeliveryInput = {
   organisationId: string;
   channelId: string;
-  kind: "monitoring_finding";
-  subjectType: "monitoring_finding";
+  kind: "monitoring_finding" | "github_connection_health";
+  subjectType: "monitoring_finding" | "github_installation";
   subjectId: string;
   payload: SafeSlackDeliveryPayload;
 };
 
 export type SlackAlertDeliveryStore = {
   enqueueAndClaim(input: QueueSlackDeliveryInput, workerId: string): Promise<SlackDeliveryLeaseIdentity | null>;
-  claim(workerId: string): Promise<ClaimedSlackAlertDelivery | null>;
-  complete(deliveryId: string, lockToken: string): Promise<boolean>;
-  fail(deliveryId: string, lockToken: string): Promise<boolean>;
+  claim(workerId: string, signal?: AbortSignal): Promise<ClaimedSlackAlertDelivery | null>;
+  complete(deliveryId: string, lockToken: string, signal?: AbortSignal): Promise<boolean>;
+  fail(deliveryId: string, lockToken: string, signal?: AbortSignal): Promise<boolean>;
 };
 
 const SEVERITY_EMOJI: Record<CheckSeverity, string> = { low: "🔵", medium: "🟡", high: "🟠", critical: "🔴" };
 
-function safeSlackText(value: string, maximum: number): string {
+export function safeSlackText(value: string, maximum: number): string {
   const normalized = value.replace(/[\u0000-\u001F\u007F\s]+/g, " ").trim();
   return (normalized || "Compliance monitoring update").slice(0, maximum);
 }
@@ -57,25 +57,50 @@ export function toSafeSlackDeliveryPayload(finding: AlertFinding): SafeSlackDeli
   };
 }
 
-export function buildQueuedSlackPayload(payload: SafeSlackDeliveryPayload): {
+function githubConnectionsLink(siteOrigin: string): string {
+  try {
+    const parsed = new URL(siteOrigin);
+    const localHttp = process.env.NODE_ENV !== "production"
+      && parsed.protocol === "http:"
+      && (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1");
+    if ((!localHttp && parsed.protocol !== "https:")
+      || parsed.username || parsed.password || parsed.origin !== siteOrigin) {
+      throw new Error("Invalid origin");
+    }
+    return `${parsed.origin}/app/integrations`;
+  } catch {
+    throw new Error("ComplianceHub site origin is invalid");
+  }
+}
+
+export function buildQueuedSlackPayload(payload: SafeSlackDeliveryPayload, siteOrigin?: string): {
   text: string;
   blocks: unknown[];
 } {
   const heading = `${SEVERITY_EMOJI[payload.severity]} ComplianceHub alert — ${payload.severity.toUpperCase()}`;
+  const blocks: unknown[] = [
+    { type: "section", text: { type: "plain_text", text: `${heading}\n${payload.title}` } },
+  ];
+  if (payload.type === "monitoring_finding") {
+    blocks.push({
+      type: "section",
+      fields: [
+        { type: "plain_text", text: `Control: ${payload.controlRef}` },
+        { type: "plain_text", text: `Subject: ${payload.subjectId}` },
+      ],
+    });
+  }
+  blocks.push({ type: "section", text: { type: "plain_text", text: payload.detail } });
+  if (payload.type === "connection_health" && payload.controlRef === "GitHub connection" && siteOrigin) {
+    blocks.push({
+      type: "section",
+      text: { type: "mrkdwn", text: `<${githubConnectionsLink(siteOrigin)}|Open ComplianceHub>` },
+    });
+  }
+  blocks.push({ type: "context", elements: [{ type: "plain_text", text: "Detected by ComplianceHub continuous monitoring" }] });
   return {
     text: heading,
-    blocks: [
-      { type: "section", text: { type: "plain_text", text: `${heading}\n${payload.title}` } },
-      {
-        type: "section",
-        fields: [
-          { type: "plain_text", text: `Control: ${payload.controlRef}` },
-          { type: "plain_text", text: `Subject: ${payload.subjectId}` },
-        ],
-      },
-      { type: "section", text: { type: "plain_text", text: payload.detail } },
-      { type: "context", elements: [{ type: "plain_text", text: "Detected by ComplianceHub continuous monitoring" }] },
-    ],
+    blocks,
   };
 }
 
@@ -88,6 +113,7 @@ export async function drainSlackAlertDeliveries(input: {
   store: SlackAlertDeliveryStore;
   workerId: string;
   batchSize?: number;
+  siteOrigin?: string;
   resolveWebhookUrl: (organisationId: string, channelId: string, signal?: AbortSignal) => Promise<string>;
   postSlack: (webhookUrl: string, payload: unknown, signal?: AbortSignal) => Promise<void>;
   signal?: AbortSignal;
@@ -101,7 +127,7 @@ export async function drainSlackAlertDeliveries(input: {
   const signal = input.signal ?? new AbortController().signal;
   for (let index = 0; index < batchSize; index += 1) {
     requireActive(signal);
-    const delivery = await input.store.claim(input.workerId);
+    const delivery = await input.store.claim(input.workerId, signal);
     requireActive(signal);
     if (!delivery) break;
     summary.claimed += 1;
@@ -114,17 +140,20 @@ export async function drainSlackAlertDeliveries(input: {
       requireActive(signal);
       const approved = approveSlackDestination(webhookUrl);
       if (approved.status !== "approved") throw new Error("Slack destination is not approved");
-      await input.postSlack(approved.canonicalUrl, buildQueuedSlackPayload(delivery.payload), signal);
+      await input.postSlack(approved.canonicalUrl, buildQueuedSlackPayload(delivery.payload, input.siteOrigin), signal);
       requireActive(signal);
-      if (await input.store.complete(delivery.deliveryId, delivery.lockToken)) {
+      if (await input.store.complete(delivery.deliveryId, delivery.lockToken, signal)) {
         summary.delivered += 1;
       }
+      requireActive(signal);
     } catch {
       requireActive(signal);
-      if (await input.store.fail(delivery.deliveryId, delivery.lockToken)) {
+      if (await input.store.fail(delivery.deliveryId, delivery.lockToken, signal)) {
         summary.failed += 1;
       }
+      requireActive(signal);
     }
   }
+  requireActive(signal);
   return summary;
 }

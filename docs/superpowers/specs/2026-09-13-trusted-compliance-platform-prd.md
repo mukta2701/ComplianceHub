@@ -141,6 +141,7 @@ The product will:
 - keep independent jobs isolated so one failure does not block unrelated work;
 - place business outcomes in Monitoring, Evidence, Findings, Tasks, Policies or Connections;
 - create the authorised in-app notification first and optionally deliver a sanitised Slack notice;
+- send employee-facing compliance notices only to the approved private team channel, with a link to the relevant ComplianceHub record; do not send employee direct messages or accept work updates through Slack;
 - keep compliance alerts separate from restricted engineering/operations alerts;
 - provide an audited emergency suspension for authorised company administrators.
 

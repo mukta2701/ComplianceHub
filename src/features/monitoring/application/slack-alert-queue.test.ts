@@ -9,6 +9,7 @@ import {
 
 const webhookUrl = "https://hooks.slack.com/services/T_TEST/B_TEST/S_TEST";
 const webhookHash = "36b243d5b0e2304cbdf6f5bf362061b4f0e5cdc842c7f407af9253d0207cce52";
+const leaseToken = crypto.randomUUID();
 
 const finding: AlertFinding = {
   organisationId: "org1",
@@ -29,7 +30,7 @@ function claimed(overrides: Partial<ClaimedSlackAlertDelivery> = {}): ClaimedSla
     deliveryId: "10000000-0000-4000-8000-000000000001",
     organisationId: "org1",
     channelId: "10000000-0000-4000-8000-000000000003",
-    lockToken: "10000000-0000-4000-8000-000000000002",
+    lockToken: leaseToken,
     attemptCount: 1,
     payload: toSafeSlackDeliveryPayload(finding),
     ...overrides,
@@ -46,6 +47,77 @@ function store(delivery: ClaimedSlackAlertDelivery | null = claimed()): SlackAle
 }
 
 describe("Slack alert payload safety", () => {
+  it("does not display an internal installation ID in a GitHub connection alert", () => {
+    const payload = buildQueuedSlackPayload({
+      type: "connection_health",
+      severity: "high",
+      title: "GitHub monitoring paused for Adtecher",
+      controlRef: "GitHub connection",
+      subjectId: "22222222-2222-4222-8222-222222222222",
+      detail: "A workspace Owner must reactivate the App in GitHub.",
+    });
+
+    expect(JSON.stringify(payload.blocks)).not.toContain("22222222-2222-4222-8222-222222222222");
+    expect(JSON.stringify(payload.blocks)).not.toContain("Subject:");
+    expect(JSON.stringify(payload.blocks)).toContain("A workspace Owner must reactivate the App in GitHub.");
+  });
+
+  it.each(["paused", "restored"])("links a GitHub monitoring %s alert to Connections", (state) => {
+    const payload = buildQueuedSlackPayload({
+      type: "connection_health",
+      severity: "high",
+      title: `GitHub monitoring ${state} for Adtecher`,
+      controlRef: "GitHub connection",
+      subjectId: "22222222-2222-4222-8222-222222222222",
+      detail: "Open Settings > Connections.",
+    }, "https://compliancehub.example");
+
+    expect(payload.blocks).toContainEqual({
+      type: "section",
+      text: { type: "mrkdwn", text: "<https://compliancehub.example/app/integrations|Open ComplianceHub>" },
+    });
+    expect(JSON.stringify(payload.blocks)).not.toContain("22222222-2222-4222-8222-222222222222");
+    expect(payload.blocks).not.toContainEqual(expect.objectContaining({ type: "actions" }));
+  });
+
+  it("keeps provider copy literal and does not link ordinary findings", () => {
+    const hostileTitle = "<@channel> *urgent*";
+    const connection = buildQueuedSlackPayload({
+      type: "connection_health",
+      severity: "high",
+      title: hostileTitle,
+      controlRef: "GitHub connection",
+      subjectId: "internal-id",
+      detail: "`@everyone` needs review",
+    }, "https://compliancehub.example");
+    const findingPayload = buildQueuedSlackPayload(toSafeSlackDeliveryPayload(finding), "https://compliancehub.example");
+
+    expect(connection.blocks).toContainEqual({
+      type: "section", text: { type: "plain_text", text: expect.stringContaining(hostileTitle) },
+    });
+    expect(connection.blocks).toContainEqual({
+      type: "section", text: { type: "plain_text", text: "`@everyone` needs review" },
+    });
+    expect(JSON.stringify(findingPayload.blocks)).not.toContain("Open ComplianceHub");
+    expect(JSON.stringify(findingPayload.blocks)).not.toContain("mrkdwn");
+  });
+
+  it.each([
+    "javascript:alert(1)",
+    "https://user:password@compliancehub.example",
+    "https://compliancehub.example/other-path",
+    "https://compliancehub.example?redirect=evil",
+  ])("rejects an invalid configured site origin: %s", (origin) => {
+    expect(() => buildQueuedSlackPayload({
+      type: "connection_health",
+      severity: "high",
+      title: "GitHub monitoring paused",
+      controlRef: "GitHub connection",
+      subjectId: "internal-id",
+      detail: "Review the connection.",
+    }, origin)).toThrow("ComplianceHub site origin is invalid");
+  });
+
   it("bounds and removes control characters from persisted finding fields", () => {
     const safe = toSafeSlackDeliveryPayload({
       ...finding,
@@ -82,6 +154,32 @@ describe("drainSlackAlertDeliveries", () => {
   beforeEach(() => vi.stubEnv("SLACK_ALLOWED_WEBHOOK_SHA256", webhookHash));
   afterEach(() => vi.unstubAllEnvs());
 
+  it("posts a GitHub connection alert with the fixed ComplianceHub link", async () => {
+    const postSlack = vi.fn().mockResolvedValue(undefined);
+    const delivery = claimed({ payload: {
+      type: "connection_health",
+      severity: "high",
+      title: "GitHub monitoring paused for Adtecher",
+      controlRef: "GitHub connection",
+      subjectId: "22222222-2222-4222-8222-222222222222",
+      detail: "A workspace Owner must reactivate the App in GitHub.",
+    } });
+
+    await expect(drainSlackAlertDeliveries({
+      store: store(delivery),
+      workerId: "github-connection-worker",
+      siteOrigin: "https://compliancehub.example",
+      resolveWebhookUrl: vi.fn().mockResolvedValue(webhookUrl),
+      postSlack,
+    })).resolves.toEqual({ claimed: 1, delivered: 1, failed: 0 });
+
+    const postedPayload = postSlack.mock.calls[0]?.[1];
+    expect(postedPayload.blocks).toContainEqual({
+      type: "section",
+      text: { type: "mrkdwn", text: "<https://compliancehub.example/app/integrations|Open ComplianceHub>" },
+    });
+  });
+
   it("approves the resolved destination immediately before outbound delivery", async () => {
     const deliveryStore = store();
     const resolveWebhookUrl = vi.fn().mockResolvedValue(webhookUrl);
@@ -98,7 +196,8 @@ describe("drainSlackAlertDeliveries", () => {
     expect(postSlack).toHaveBeenCalledWith(webhookUrl, expect.any(Object), expect.any(AbortSignal));
     expect(deliveryStore.complete).toHaveBeenCalledWith(
       "10000000-0000-4000-8000-000000000001",
-      "10000000-0000-4000-8000-000000000002",
+      leaseToken,
+      expect.any(AbortSignal),
     );
   });
 
@@ -116,8 +215,27 @@ describe("drainSlackAlertDeliveries", () => {
     expect(postSlack).not.toHaveBeenCalled();
     expect(deliveryStore.fail).toHaveBeenCalledWith(
       "10000000-0000-4000-8000-000000000001",
-      "10000000-0000-4000-8000-000000000002",
+      leaseToken,
+      expect.any(AbortSignal),
     );
+  });
+
+  it("rejects when the shared signal expires after lease finalisation", async () => {
+    const controller = new AbortController();
+    const deliveryStore = store();
+    vi.mocked(deliveryStore.complete).mockImplementation(async () => {
+      controller.abort(new Error("expired after finalisation"));
+      return true;
+    });
+
+    await expect(drainSlackAlertDeliveries({
+      store: deliveryStore,
+      workerId: "integration-worker",
+      batchSize: 1,
+      signal: controller.signal,
+      resolveWebhookUrl: vi.fn().mockResolvedValue(webhookUrl),
+      postSlack: vi.fn().mockResolvedValue(undefined),
+    })).rejects.toThrow("expired after finalisation");
   });
 
   it("checks the abort signal before claiming work", async () => {
@@ -161,7 +279,8 @@ describe("drainSlackAlertDeliveries", () => {
     expect(deliveryStore.complete).not.toHaveBeenCalled();
     expect(deliveryStore.fail).toHaveBeenCalledWith(
       "10000000-0000-4000-8000-000000000001",
-      "10000000-0000-4000-8000-000000000002",
+      leaseToken,
+      expect.any(AbortSignal),
     );
   });
 

@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      run_github_reconciliation_acceptance:
+        description: Run two bounded GitHub reconciliation checks against the deployed immutable image
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -19,6 +25,8 @@ env:
 
 jobs:
   deploy:
+    outputs:
+      image_digest: ${{ steps.image_reference.outputs.image_digest }}
     runs-on: ubuntu-latest
     environment: aws-dev
     timeout-minutes: 30
@@ -72,12 +80,20 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Set image reference
+        id: image_reference
         run: |
           if [ -n "${{ steps.image.outputs.digest }}" ]; then
-            echo "IMAGE_URI=${{ vars.AWS_DEV_ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}@${{ steps.image.outputs.digest }}" >> "$GITHUB_ENV"
+            image_digest="${{ steps.image.outputs.digest }}"
           else
-            echo "IMAGE_URI=${{ vars.AWS_DEV_ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}@${{ steps.build.outputs.digest }}" >> "$GITHUB_ENV"
+            image_digest="${{ steps.build.outputs.digest }}"
           fi
+          if [[ ! "$image_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "resolved image digest is not immutable" >&2
+            exit 1
+          fi
+          image_uri="${{ vars.AWS_DEV_ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}@$image_digest"
+          echo "IMAGE_URI=$image_uri" >> "$GITHUB_ENV"
+          echo "image_digest=$image_digest" >> "$GITHUB_OUTPUT"
 
       - name: Update App Runner service
         env:
@@ -91,6 +107,7 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           APP_ENCRYPTION_KEY: ${{ secrets.APP_ENCRYPTION_KEY }}
+          SLACK_ALLOWED_WEBHOOK_SHA256: ${{ secrets.SLACK_ALLOWED_WEBHOOK_SHA256 }}
           GITHUB_APP_ID: ${{ secrets.AWS_DEV_GITHUB_APP_ID }}
           GITHUB_APP_CLIENT_ID: ${{ secrets.AWS_DEV_GITHUB_APP_CLIENT_ID }}
           GITHUB_APP_CLIENT_SECRET: ${{ secrets.AWS_DEV_GITHUB_APP_CLIENT_SECRET }}
@@ -101,27 +118,50 @@ jobs:
           GITHUB_APPROVED_SECURITY_WORKFLOW_IDS: ${{ secrets.AWS_DEV_GITHUB_APPROVED_SECURITY_WORKFLOW_IDS }}
         run: |
           set -euo pipefail
-          source_config="$(jq -n \
-            --arg image "$IMAGE" \
-            --arg accessRole "$ACCESS_ROLE_ARN" \
-            --arg supabaseUrl "$NEXT_PUBLIC_SUPABASE_URL" \
-            --arg anonKey "$NEXT_PUBLIC_SUPABASE_ANON_KEY" \
-            --arg publishableKey "$NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY" \
-            --arg siteUrl "$NEXT_PUBLIC_SITE_URL" \
-            --arg serviceRole "$SUPABASE_SERVICE_ROLE_KEY" \
-            --arg cron "$CRON_SECRET" \
-            --arg encryption "$APP_ENCRYPTION_KEY" \
-            --arg release "$DEPLOY_SHA" \
-            --arg githubAppId "$GITHUB_APP_ID" \
-            --arg githubClientId "$GITHUB_APP_CLIENT_ID" \
-            --arg githubClientSecret "$GITHUB_APP_CLIENT_SECRET" \
-            --arg githubPrivateKey "$GITHUB_APP_PRIVATE_KEY" \
-            --arg githubWebhookSecret "$GITHUB_WEBHOOK_SECRET" \
-            --arg githubSlug "$GITHUB_APP_SLUG" \
-            --arg githubAccountId "$GITHUB_ALLOWED_ACCOUNT_ID" \
-            --arg githubWorkflowIds "$GITHUB_APPROVED_SECURITY_WORKFLOW_IDS" \
-            '{ImageRepository: {ImageIdentifier: $image, ImageRepositoryType: "ECR", ImageConfiguration: {Port: "3100", RuntimeEnvironmentVariables: {HOSTNAME: "::", NEXT_PUBLIC_SUPABASE_URL: $supabaseUrl, NEXT_PUBLIC_SUPABASE_ANON_KEY: $anonKey, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: $publishableKey, NEXT_PUBLIC_SITE_URL: $siteUrl, SUPABASE_SERVICE_ROLE_KEY: $serviceRole, CRON_SECRET: $cron, APP_ENCRYPTION_KEY: $encryption, COMPLIANCEHUB_RELEASE_SHA: $release, GITHUB_APP_ID: $githubAppId, GITHUB_APP_CLIENT_ID: $githubClientId, GITHUB_APP_CLIENT_SECRET: $githubClientSecret, GITHUB_APP_PRIVATE_KEY: $githubPrivateKey, GITHUB_WEBHOOK_SECRET: $githubWebhookSecret, GITHUB_APP_SLUG: $githubSlug, GITHUB_ALLOWED_ACCOUNT_ID: $githubAccountId, GITHUB_ALLOWED_ACCOUNT_TYPE: "Organization", GITHUB_APPROVED_SECURITY_WORKFLOW_IDS: $githubWorkflowIds}}}, AuthenticationConfiguration: {AccessRoleArn: $accessRole}, AutoDeploymentsEnabled: false}')"
-          aws apprunner update-service --region "$AWS_REGION" --service-arn "$SERVICE_ARN" --source-configuration "$source_config" --query Service.Status --output text
+          umask 077
+          request_file="$(mktemp)"
+          trap 'rm -f "$request_file"' EXIT
+          chmod 600 "$request_file"
+          jq -n '
+            {
+              ServiceArn: env.SERVICE_ARN,
+              SourceConfiguration: {
+                ImageRepository: {
+                  ImageIdentifier: env.IMAGE,
+                  ImageRepositoryType: "ECR",
+                  ImageConfiguration: {
+                    Port: "3100",
+                    RuntimeEnvironmentVariables: {
+                      HOSTNAME: "::",
+                      NEXT_PUBLIC_SUPABASE_URL: env.NEXT_PUBLIC_SUPABASE_URL,
+                      NEXT_PUBLIC_SUPABASE_ANON_KEY: env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+                      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+                      NEXT_PUBLIC_SITE_URL: env.NEXT_PUBLIC_SITE_URL,
+                      SUPABASE_SERVICE_ROLE_KEY: env.SUPABASE_SERVICE_ROLE_KEY,
+                      CRON_SECRET: env.CRON_SECRET,
+                      APP_ENCRYPTION_KEY: env.APP_ENCRYPTION_KEY,
+                      SLACK_ALLOWED_WEBHOOK_SHA256: env.SLACK_ALLOWED_WEBHOOK_SHA256,
+                      COMPLIANCEHUB_RELEASE_SHA: env.DEPLOY_SHA,
+                      GITHUB_APP_ID: env.GITHUB_APP_ID,
+                      GITHUB_APP_CLIENT_ID: env.GITHUB_APP_CLIENT_ID,
+                      GITHUB_APP_CLIENT_SECRET: env.GITHUB_APP_CLIENT_SECRET,
+                      GITHUB_APP_PRIVATE_KEY: env.GITHUB_APP_PRIVATE_KEY,
+                      GITHUB_WEBHOOK_SECRET: env.GITHUB_WEBHOOK_SECRET,
+                      GITHUB_APP_SLUG: env.GITHUB_APP_SLUG,
+                      GITHUB_ALLOWED_ACCOUNT_ID: env.GITHUB_ALLOWED_ACCOUNT_ID,
+                      GITHUB_ALLOWED_ACCOUNT_TYPE: "Organization",
+                      GITHUB_APPROVED_SECURITY_WORKFLOW_IDS: env.GITHUB_APPROVED_SECURITY_WORKFLOW_IDS
+                    }
+                  }
+                },
+                AuthenticationConfiguration: {
+                  AccessRoleArn: env.ACCESS_ROLE_ARN
+                },
+                AutoDeploymentsEnabled: false
+              }
+            }
+          ' > "$request_file"
+          aws apprunner update-service --region "$AWS_REGION" --cli-input-json "file://$request_file" --query 'Service.Status' --output text >/dev/null
           for _ in $(seq 1 80); do
             status="$(aws apprunner describe-service --region "$AWS_REGION" --service-arn "$SERVICE_ARN" --query Service.Status --output text)"
             test "$status" = RUNNING && break
@@ -137,3 +177,97 @@ jobs:
           live="$(curl --fail-with-body --retry 5 --retry-all-errors --retry-delay 5 --retry-max-time 120 --connect-timeout 10 --max-time 120 "$SITE_URL/api/health/live")"
           jq --exit-status --arg release "$DEPLOY_SHA" '.status == "ok" and .releaseSha == $release' <<< "$live" >/dev/null
           curl --fail-with-body --retry 5 --retry-all-errors --retry-delay 5 --retry-max-time 120 --connect-timeout 10 --max-time 120 "$SITE_URL/api/health"
+
+  reconcile_acceptance_first:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_github_reconciliation_acceptance == true
+    needs: deploy
+    runs-on: ubuntu-24.04
+    environment: aws-dev
+    timeout-minutes: 10
+    concurrency:
+      group: compliancehub-github-reconcile-aws-dev
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Run bounded connection reconciliation
+        uses: ./.github/actions/reconcile-github-connections-aws-dev
+        env:
+          AWS_DEV_DEPLOY_ROLE_ARN: ${{ secrets.AWS_DEV_DEPLOY_ROLE_ARN }}
+          AWS_DEV_SERVICE_ARN: ${{ vars.AWS_DEV_SERVICE_ARN }}
+          AWS_DEV_ECR_REGISTRY: ${{ vars.AWS_DEV_ECR_REGISTRY }}
+          AWS_DEV_SITE_URL: ${{ vars.AWS_DEV_SITE_URL }}
+          NEXT_PUBLIC_SITE_URL: ${{ vars.AWS_DEV_SITE_URL }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          APP_ENCRYPTION_KEY: ${{ secrets.APP_ENCRYPTION_KEY }}
+          SLACK_ALLOWED_WEBHOOK_SHA256: ${{ secrets.SLACK_ALLOWED_WEBHOOK_SHA256 }}
+          GITHUB_APP_ID: ${{ secrets.AWS_DEV_GITHUB_APP_ID }}
+          GITHUB_APP_SLUG: ${{ secrets.AWS_DEV_GITHUB_APP_SLUG }}
+          GITHUB_APP_CLIENT_ID: ${{ secrets.AWS_DEV_GITHUB_APP_CLIENT_ID }}
+          GITHUB_APP_CLIENT_SECRET: ${{ secrets.AWS_DEV_GITHUB_APP_CLIENT_SECRET }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.AWS_DEV_GITHUB_APP_PRIVATE_KEY }}
+          GITHUB_WEBHOOK_SECRET: ${{ secrets.AWS_DEV_GITHUB_WEBHOOK_SECRET }}
+          GITHUB_ALLOWED_ACCOUNT_ID: ${{ secrets.AWS_DEV_GITHUB_ALLOWED_ACCOUNT_ID }}
+          GITHUB_ALLOWED_ACCOUNT_TYPE: Organization
+          GITHUB_CONNECTION_MAX_WEBHOOK_DELIVERIES: "20"
+          GITHUB_CONNECTION_MAX_INSTALLATIONS: "10"
+          GITHUB_CONNECTION_MAX_SLACK_DELIVERIES: "10"
+          GITHUB_CONNECTION_TIME_BUDGET_MS: "240000"
+        with:
+          expected-release-sha: ${{ github.sha }}
+          expected-image-digest: ${{ needs.deploy.outputs.image_digest }}
+          require-image-binding: "true"
+
+  reconcile_acceptance_second:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_github_reconciliation_acceptance == true
+    needs:
+      - deploy
+      - reconcile_acceptance_first
+    runs-on: ubuntu-24.04
+    environment: aws-dev
+    timeout-minutes: 10
+    concurrency:
+      group: compliancehub-github-reconcile-aws-dev
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Run bounded connection reconciliation
+        uses: ./.github/actions/reconcile-github-connections-aws-dev
+        env:
+          AWS_DEV_DEPLOY_ROLE_ARN: ${{ secrets.AWS_DEV_DEPLOY_ROLE_ARN }}
+          AWS_DEV_SERVICE_ARN: ${{ vars.AWS_DEV_SERVICE_ARN }}
+          AWS_DEV_ECR_REGISTRY: ${{ vars.AWS_DEV_ECR_REGISTRY }}
+          AWS_DEV_SITE_URL: ${{ vars.AWS_DEV_SITE_URL }}
+          NEXT_PUBLIC_SITE_URL: ${{ vars.AWS_DEV_SITE_URL }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          APP_ENCRYPTION_KEY: ${{ secrets.APP_ENCRYPTION_KEY }}
+          SLACK_ALLOWED_WEBHOOK_SHA256: ${{ secrets.SLACK_ALLOWED_WEBHOOK_SHA256 }}
+          GITHUB_APP_ID: ${{ secrets.AWS_DEV_GITHUB_APP_ID }}
+          GITHUB_APP_SLUG: ${{ secrets.AWS_DEV_GITHUB_APP_SLUG }}
+          GITHUB_APP_CLIENT_ID: ${{ secrets.AWS_DEV_GITHUB_APP_CLIENT_ID }}
+          GITHUB_APP_CLIENT_SECRET: ${{ secrets.AWS_DEV_GITHUB_APP_CLIENT_SECRET }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.AWS_DEV_GITHUB_APP_PRIVATE_KEY }}
+          GITHUB_WEBHOOK_SECRET: ${{ secrets.AWS_DEV_GITHUB_WEBHOOK_SECRET }}
+          GITHUB_ALLOWED_ACCOUNT_ID: ${{ secrets.AWS_DEV_GITHUB_ALLOWED_ACCOUNT_ID }}
+          GITHUB_ALLOWED_ACCOUNT_TYPE: Organization
+          GITHUB_CONNECTION_MAX_WEBHOOK_DELIVERIES: "20"
+          GITHUB_CONNECTION_MAX_INSTALLATIONS: "10"
+          GITHUB_CONNECTION_MAX_SLACK_DELIVERIES: "10"
+          GITHUB_CONNECTION_TIME_BUDGET_MS: "240000"
+        with:
+          expected-release-sha: ${{ github.sha }}
+          expected-image-digest: ${{ needs.deploy.outputs.image_digest }}
+          require-image-binding: "true"

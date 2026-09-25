@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "PORT=3100 next dev",
     "build": "next build",
+    "build:runtimes": "node --import=tsx scripts/build-runtime-bundles.ts",
     "start": "PORT=3100 next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
@@ -19,6 +20,7 @@
     "test:db:upgrade": "bash scripts/test-db-upgrade.sh",
     "test:e2e": "playwright test",
     "github:shadow-proof": "node --conditions=react-server --import=tsx scripts/github-shadow-proof.ts",
+    "github:reconcile-connections": "node --conditions=react-server --import=tsx scripts/github-connection-reconcile.ts",
     "demo:ceo-fixture": "node --import=tsx scripts/local-ceo-demo-fixture.ts",
     "verify": "npm run lint && npm run typecheck && npm test && npm run build",
     "demo:build": "node --import=tsx scripts/demo-local.ts build",
@@ -61,6 +63,7 @@
     "@types/yauzl": "3.4.0",
     "@vitejs/plugin-react": "^6.0.3",
     "axe-core": "^4.12.1",
+    "esbuild": "0.28.2",
     "eslint": "^9",
     "eslint-config-next": "16.3.5",
     "jsdom": "^29.1.1",

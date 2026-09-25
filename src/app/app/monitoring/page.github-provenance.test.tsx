@@ -1,9 +1,13 @@
 import { render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { EXPECTED_GITHUB_CHECK_IDS } from "@/features/github/domain/rules";
 
 const OFFICIAL = "40000000-0000-4000-8000-000000000001";
 const LEGACY = "40000000-0000-4000-8000-000000000002";
-const hoisted = vi.hoisted(() => ({ loadOfficial: vi.fn(), loadControlRoom: vi.fn(), loadMappingReview: vi.fn() }));
+const hoisted = vi.hoisted(() => ({
+  loadOfficial: vi.fn(), loadControlRoom: vi.fn(), loadMappingReview: vi.fn(),
+  installations: [] as unknown[], repositories: [] as unknown[],
+}));
 
 const findings = [{
   id: OFFICIAL, control_ref: "A.8.25", subject_id: "provider-subject-must-stay-hidden", severity: "high",
@@ -24,7 +28,9 @@ function query(data: unknown[]) {
 
 vi.mock("@/lib/app-context", () => ({
   requireAppContext: () => Promise.resolve({
-    supabase: { from: (table: string) => query(table === "monitoring_findings" ? findings : []) },
+    supabase: { from: (table: string) => query(table === "monitoring_findings" ? findings
+      : table === "github_installations" ? hoisted.installations
+        : table === "github_repository_monitoring_summaries" ? hoisted.repositories : []) },
     organisation: { id: "20000000-0000-4000-8000-000000000001" },
     membership: { role: "owner" },
   }),
@@ -60,12 +66,40 @@ const provenance = {
   allowedTransitions: ["acknowledged", "in_progress", "exception_requested", "risk_accepted"] as const,
 };
 
+const repositoryId = "50000000-0000-4000-8000-000000000001";
+const installationId = "60000000-0000-4000-8000-000000000001";
+const collectionId = "70000000-0000-4000-8000-000000000001";
+const mappingPackId = "80000000-0000-4000-8000-000000000001";
+const mappingChecksum = "c".repeat(64);
+
+function currentRoom() {
+  return {
+    asOf: "2026-09-24T12:00:00.000Z",
+    approval: { mappingPackId, version: "github-iso-27001-v1", checksum: mappingChecksum } as {
+      mappingPackId: string; version: string; checksum: string;
+    } | null,
+    repositories: [{
+      id: repositoryId, available: true,
+      latestCollection: { id: collectionId, status: "succeeded" },
+      latestMaterialisationJob: { collectionRunId: collectionId, status: "completed" },
+      officialResults: EXPECTED_GITHUB_CHECK_IDS.map((checkId) => ({
+        checkId, outcome: "pass", observedAt: "2026-09-24T10:00:00.000Z",
+        freshUntil: "2026-09-25T10:00:00.000Z",
+        mappingPackId, mappingVersion: "github-iso-27001-v1", mappingChecksum,
+      })),
+    }],
+    pagination: { offset: 0, limit: 20, total: 1, truncated: false },
+  };
+}
+
 describe("MonitoringPage official GitHub findings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    hoisted.installations = [{ id: installationId, status: "active", permissions_ok: true, health: "healthy" }];
+    hoisted.repositories = [{ repository_id: repositoryId, installation_id: installationId, available: true }];
     hoisted.loadOfficial.mockResolvedValue([provenance]);
     hoisted.loadControlRoom.mockResolvedValue({ repositories: [], pagination: { offset: 0, limit: 20, total: 0, truncated: false } });
-    hoisted.loadMappingReview.mockResolvedValue({ pack: {}, entries: [], approvalHistory: [], limitations: [] });
+    hoisted.loadMappingReview.mockResolvedValue({ pack: { id: mappingPackId, version: "github-iso-27001-v1", checksum: mappingChecksum }, entries: [], approvalHistory: [], limitations: [] });
   });
 
   it("selects exact official finding, renders safe Owner lifecycle, and preserves legacy controls", async () => {
@@ -81,7 +115,7 @@ describe("MonitoringPage official GitHub findings", () => {
     expect(screen.getByRole("region", { name: "GitHub monitoring" })).toHaveTextContent("Owner check");
     expect(within(official).getByText("Force pushes are allowed")).toBeVisible();
     expect(within(official).getByText("Block force pushes on the default branch.")).toBeVisible();
-    expect(within(official).getByText("Technical evidence").closest("details")).not.toHaveAttribute("open");
+    expect(within(official).getByText("Audit details").closest("details")).not.toHaveAttribute("open");
     expect(within(official).getByText("github.branch.force_pushes")).not.toBeVisible();
     expect(within(official).getByText("b".repeat(64))).not.toBeVisible();
 
@@ -101,5 +135,81 @@ describe("MonitoringPage official GitHub findings", () => {
     hoisted.loadOfficial.mockResolvedValue([]);
     await expect(MonitoringPage({ searchParams: Promise.resolve({}) }))
       .rejects.toThrow("Could not load monitoring");
+  });
+
+  it("labels expired GitHub results as saved history rather than current passes", async () => {
+    hoisted.loadControlRoom.mockResolvedValue({
+      asOf: "2026-09-24T12:00:00.000Z",
+      repositories: [{ officialResults: [{
+        outcome: "pass", freshUntil: "2026-09-22T12:00:00.000Z", observedAt: "2026-09-21T12:00:00.000Z",
+      }] }],
+      pagination: { offset: 0, limit: 20, total: 1, truncated: false },
+    });
+
+    render(await MonitoringPage({ searchParams: Promise.resolve({}) }));
+
+    expect(screen.getByText("Saved GitHub results need a new check")).toBeVisible();
+    expect(screen.getByText(/1 previously passed/)).toBeVisible();
+    expect(screen.queryByText(/1 passed ·/)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["approval is absent", (room: ReturnType<typeof currentRoom>) => { room.approval = null; }],
+    ["mapping identity differs", (room: ReturnType<typeof currentRoom>) => { room.repositories[0].officialResults[0].mappingChecksum = "d".repeat(64); }],
+    ["collection is partial", (room: ReturnType<typeof currentRoom>) => { room.repositories[0].latestCollection.status = "partial"; }],
+    ["processing is pending", (room: ReturnType<typeof currentRoom>) => { room.repositories[0].latestMaterialisationJob.status = "pending"; }],
+    ["processing belongs to an older run", (room: ReturnType<typeof currentRoom>) => { room.repositories[0].latestMaterialisationJob.collectionRunId = "70000000-0000-4000-8000-000000000002"; }],
+    ["the check set is incomplete", (room: ReturnType<typeof currentRoom>) => { room.repositories[0].officialResults.pop(); }],
+    ["the repository is unavailable", (room: ReturnType<typeof currentRoom>) => { room.repositories[0].available = false; }],
+    ["the connection is unhealthy", () => { hoisted.installations = [{ id: installationId, status: "active", permissions_ok: true, health: "retrying" }]; }],
+  ])("keeps future-dated passes as saved history when %s", async (_reason, invalidate) => {
+    const room = currentRoom();
+    invalidate(room);
+    hoisted.loadControlRoom.mockResolvedValue(room);
+
+    render(await MonitoringPage({ searchParams: Promise.resolve({}) }));
+
+    const summary = screen.getByRole("note", { name: "GitHub check summary" });
+    expect(within(summary).getByText("Saved GitHub results need review")).toBeVisible();
+    expect(within(summary).getByText(`${room.repositories[0].officialResults.length} saved passes need review`)).toBeVisible();
+    expect(within(summary).queryByText(/passed at last check/)).not.toBeInTheDocument();
+  });
+
+  it("counts a complete approved healthy collection as passed at the last check", async () => {
+    hoisted.loadControlRoom.mockResolvedValue(currentRoom());
+
+    render(await MonitoringPage({ searchParams: Promise.resolve({}) }));
+
+    const summary = screen.getByRole("note", { name: "GitHub check summary" });
+    expect(within(summary).getByText("15 passed at last check")).toBeVisible();
+    expect(within(summary).queryByText(/certif/i)).not.toBeInTheDocument();
+  });
+
+  it("does not claim a current pass when the published mapping changed", async () => {
+    hoisted.loadControlRoom.mockResolvedValue(currentRoom());
+    hoisted.loadMappingReview.mockResolvedValue({ pack: { id: mappingPackId, version: "github-iso-27001-v1", checksum: "d".repeat(64) }, entries: [], approvalHistory: [], limitations: [] });
+
+    render(await MonitoringPage({ searchParams: Promise.resolve({}) }));
+
+    const summary = screen.getByRole("note", { name: "GitHub check summary" });
+    expect(within(summary).getByText("Saved GitHub results need review")).toBeVisible();
+    expect(within(summary).getByText("15 saved passes need review")).toBeVisible();
+    expect(within(summary).queryByText(/passed at last check/)).not.toBeInTheDocument();
+  });
+
+  it("keeps counts and observation date scoped to the loaded repository page", async () => {
+    const room = currentRoom();
+    room.pagination = { offset: 20, limit: 20, total: 21, truncated: false };
+    room.repositories[0].officialResults[0].observedAt = "2026-09-24T11:00:00.000Z";
+    hoisted.loadControlRoom.mockResolvedValue(room);
+
+    render(await MonitoringPage({ searchParams: Promise.resolve({ githubPage: "2" }) }));
+
+    expect(hoisted.loadControlRoom).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ offset: 20, limit: 20 }));
+    const summary = screen.getByRole("note", { name: "GitHub check summary" });
+    expect(within(summary).getByText(/15 saved checks on this page/)).toBeVisible();
+    expect(within(summary).getByText(/Most recent observation/)).toBeVisible();
+    expect(summary.querySelector("time")).toHaveAttribute("dateTime", "2026-09-24T11:00:00.000Z");
+    expect(within(summary).queryByText(/Last checked/)).not.toBeInTheDocument();
   });
 });

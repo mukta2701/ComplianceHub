@@ -6,6 +6,8 @@
 
 **Product milestone:** 1 of 5 in the trusted compliance platform roadmap
 
+> **Delivery amendment approved 20 September 2026:** The product behavior in this design remains approved. The company ECS/EventBridge staging delivery and acceptance path in sections 11 through 13 is historical. The approved [AWS dev acceptance design](2026-09-20-github-integration-aws-dev-acceptance-design.md) replaces that path without changing the role, permission, repository-scope or connection-health contracts.
+
 ## 1. Purpose
 
 Milestone 1 establishes the trusted boundary between one ComplianceHub workspace and the approved company GitHub organisation. An Owner can install the company-owned GitHub App, prove authority over the installation, discover every repository available to it, and select the repositories that ComplianceHub may later monitor.

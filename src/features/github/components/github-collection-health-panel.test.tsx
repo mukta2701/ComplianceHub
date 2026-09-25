@@ -12,7 +12,8 @@ import type { GitHubRepositoryMonitoringSummary } from "./github-collection-heal
 
 const installation: GitHubInstallationSummary = {
   id: "10000000-0000-4000-8000-000000000010", account_login: "Adtecher", status: "active",
-  repository_selection: "selected", permissions_ok: true,
+  repository_selection: "selected", permissions_ok: true, health: "healthy",
+  health_diagnostic_code: null, last_successful_reconciliation_at: "2026-09-01T08:00:00.000Z",
 };
 const repository: GitHubRepositoryMonitoringSummary = {
   repository_id: "10000000-0000-4000-8000-000000000011", installation_id: installation.id,
@@ -67,7 +68,20 @@ describe("GitHubCollectionHealthPanel", () => {
     expect(screen.queryByRole("link", { name: "Connect GitHub" })).not.toBeInTheDocument();
   });
 
+  it("never implies an Admin can manage the GitHub App", () => {
+    render(<GitHubCollectionHealthPanel installations={[]} repositories={[]} nowIso="2026-09-01T10:00:00Z" role="admin" runtimeReadiness={{ available: true, status: "ready" }} />);
+    expect(screen.getByText("GitHub is not connected. Ask a workspace Owner to manage the connection.")).toBeVisible();
+    expect(screen.queryByRole("link", { name: "Connect GitHub" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /manage|set up|connect/i })).not.toBeInTheDocument();
+  });
+
   it("shows connected-without-selection guidance and keeps non-Owners read-only", () => {
+    renderPanel({ repositories: [], role: "owner" });
+    expect(screen.getByText("No repositories are selected for GitHub monitoring.")).toBeVisible();
+    expect(screen.getByRole("link", { name: "Choose repositories" })).toHaveAttribute("href", "/app/integrations");
+  });
+
+  it("hides repository scope links from Admins", () => {
     renderPanel({ repositories: [], role: "admin" });
     expect(screen.getByText("No repositories are selected for GitHub monitoring.")).toBeVisible();
     expect(screen.queryByRole("link", { name: "Choose repositories" })).not.toBeInTheDocument();
@@ -101,7 +115,8 @@ describe("GitHubCollectionHealthPanel", () => {
     />);
     expect(screen.getByRole("button", { name: "Check GitHub now" })).toBeDisabled();
     expect(screen.getByText("Saved GitHub results remain visible, but fresh GitHub verification is unavailable in this app runtime.")).toBeVisible();
-    expect(screen.getByText("Up to date")).toBeVisible();
+    expect(screen.getByText("Last check completed")).toBeVisible();
+    expect(screen.queryByText("Up to date")).not.toBeInTheDocument();
   });
 
   it("fails closed when readiness is omitted", () => {
@@ -124,7 +139,8 @@ describe("GitHubCollectionHealthPanel", () => {
     renderPanel({ repositories: variants });
     expect(within(repoArticle("Adtecher/compliancehub")).getByText("Ready for first check")).toBeVisible();
     expect(within(repoArticle("Adtecher/running")).getByText("Checking now")).toBeVisible();
-    expect(within(repoArticle("Adtecher/current")).getByText("Up to date")).toBeVisible();
+    expect(within(repoArticle("Adtecher/current")).getByText("Last check completed")).toBeVisible();
+    expect(within(repoArticle("Adtecher/current")).queryByText("Up to date")).not.toBeInTheDocument();
     expect(repoArticle("Adtecher/current")).toHaveTextContent(/Last checked 01 Sep 2026, 09:00/);
     expect(within(repoArticle("Adtecher/issue")).getByText("1 check needs attention")).toBeVisible();
     expect(within(repoArticle("Adtecher/partial")).getByText("Some checks could not be completed")).toBeVisible();
@@ -133,6 +149,25 @@ describe("GitHubCollectionHealthPanel", () => {
     expect(within(repoArticle("Adtecher/rate-limited")).getByText("GitHub rate limit reached")).toBeVisible();
     expect(within(repoArticle("Adtecher/stale")).getByText("Needs a new check")).toBeVisible();
     expect(repoArticle("Adtecher/stale")).toHaveTextContent(/Last checked 30 Aug 2026/);
+  });
+
+  it("describes a successful recent collection without claiming it is up to date", () => {
+    renderPanel({ repositories: [{ ...repository, latest_failed_count: 0 }] });
+    const article = repoArticle("Adtecher/compliancehub");
+    expect(within(article).queryByText("Up to date")).not.toBeInTheDocument();
+    const badge = within(article).getByText("Last check completed");
+    expect(badge).toBeVisible();
+    expect(badge).toHaveClass("neutral");
+    expect(badge).not.toHaveClass("green");
+    expect(article).toHaveTextContent(/Last checked 01 Sep 2026/);
+  });
+
+  it("still asks for a new check when the last successful collection is stale", () => {
+    renderPanel({ repositories: [{ ...repository, latest_failed_count: 0, last_completed_collection_at: "2026-08-30T22:00:00Z" }] });
+    const article = repoArticle("Adtecher/compliancehub");
+    expect(within(article).getByText("Needs a new check")).toBeVisible();
+    expect(within(article).queryByText("Up to date")).not.toBeInTheDocument();
+    expect(within(article).queryByText("Last check completed")).not.toBeInTheDocument();
   });
 
   it("shows installation access attention and disables unsafe Owner checks", () => {
@@ -155,8 +190,24 @@ describe("GitHubCollectionHealthPanel", () => {
 
     expect(within(repoArticle("Adtecher/compliancehub")).getByText("GitHub connection needs attention")).toBeVisible();
     expect(within(repoArticle("Adtecher/compliancehub")).queryByText("Up to date")).not.toBeInTheDocument();
+    expect(within(repoArticle("Adtecher/compliancehub")).queryByText("Last check completed")).not.toBeInTheDocument();
     expect(within(repoArticle("SecondOrg/unavailable")).getByText("Repository access needs attention")).toBeVisible();
     expect(within(repoArticle("SecondOrg/unavailable")).queryByText("Up to date")).not.toBeInTheDocument();
+    expect(within(repoArticle("SecondOrg/unavailable")).queryByText("Last check completed")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["retrying", "GitHub is retrying"],
+    ["partially_unavailable", "GitHub partly unavailable"],
+    ["owner_action_required", "Owner action required"],
+    ["disconnected", "GitHub disconnected"],
+  ] as const)("does not show current data or allow a manual check while the connection is %s", (health, label) => {
+    renderPanel({ installations: [{ ...installation, health }] });
+
+    expect(within(repoArticle("Adtecher/compliancehub")).getByText(label)).toBeVisible();
+    expect(within(repoArticle("Adtecher/compliancehub")).queryByText("Up to date")).not.toBeInTheDocument();
+    expect(within(repoArticle("Adtecher/compliancehub")).queryByText("Last check completed")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Check GitHub now" })).toBeDisabled();
   });
 
   it("uses an accessible Owner pending state and refreshes only after success", async () => {
