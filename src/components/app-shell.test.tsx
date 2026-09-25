@@ -61,6 +61,7 @@ describe("AppShell role-specific navigation", () => {
 
   it("makes the signed-in identity, role and workspace choices understandable", () => {
     renderShell("owner");
+    expect(screen.getByText("Owner", { selector: "span.pill" })).not.toHaveAttribute("aria-label");
 
     fireEvent.click(screen.getByRole("button", { name: "Account menu" }));
     expect(screen.getByText("Priya Verma")).toBeVisible();

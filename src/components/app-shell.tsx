@@ -230,7 +230,7 @@ export function AppShell({ organisationId, orgName, orgInitials, userInitials, u
           </ol>
         </nav>
         <div className="header-actions">
-          <span className="pill neutral" aria-label="Portal access">{accessCue}</span>
+          <span className="pill neutral">{accessCue}</span>
           <Link href={notificationsMetadata.href} className="notif-bell" aria-label={unreadCount > 0 ? `${notificationsMetadata.label}, ${unreadCount} unread` : notificationsMetadata.label}><Icon name={notificationsMetadata.icon} />{unreadCount > 0 && <span className="notif-count">{unreadCount}</span>}</Link>
           <details ref={accountMenu} className={styles.accountMenu}>
             <summary aria-label="Account menu" role="button"><span className="user-avatar">{userInitials}</span></summary>
