@@ -225,7 +225,7 @@ test("a new user creates an isolated workspace and starts an assessment", async 
   await expect(checklist.getByRole("heading", { name: "Build your programme" })).toBeVisible();
   await expect(checklist.getByText("1 of 7 done")).toBeVisible();
   await expect(checklist.getByText("Connect a tracker", { exact: true })).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "Reduce admin later" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Reduce admin later" })).toHaveCount(0);
   await expect(checklist.locator("li", { hasText: "Create your workspace" })).toHaveCount(0);
   const assessmentStep = checklist.locator("li", { hasText: "Run your first readiness assessment" });
   await expect(assessmentStep.getByRole("link", { name: /Start assessment/ })).toBeVisible();
