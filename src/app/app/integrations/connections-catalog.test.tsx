@@ -99,7 +99,8 @@ describe("ConnectionsCatalog", () => {
     expect(jiraCard).toHaveTextContent("Setup required");
     expect(jiraCard).toHaveTextContent("Project not selected");
     expect(within(jiraCard).getByRole("button", { name: "Continue setup Jira" })).toBeVisible();
-    expect(slackCard).toHaveTextContent("Connected");
+    expect(slackCard).toHaveTextContent("Configured");
+    expect(slackCard).not.toHaveTextContent("Connected");
     expect(slackCard).toHaveTextContent("#compliance-alerts");
     expect(within(slackCard).getByRole("button", { name: "Manage Slack" })).toBeVisible();
     expect(screen.queryByRole("heading", { name: "Monitoring sources" })).not.toBeInTheDocument();
@@ -194,7 +195,7 @@ describe("ConnectionsCatalog", () => {
     />);
 
     const slackCard = screen.getByRole("article", { name: "Slack connection" });
-    expect(within(slackCard).getByText("Connected")).toBeVisible();
+    expect(within(slackCard).getByText("Configured")).toBeVisible();
     expect(within(slackCard).getByRole("button", { name: "Manage Slack" })).toHaveClass("secondary");
 
     const githubCard = screen.getByRole("article", { name: "GitHub Issues connection" });

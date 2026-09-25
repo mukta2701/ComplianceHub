@@ -488,12 +488,13 @@ export function ConnectionsCatalog({
     const records = provider.id === "slack" ? liveSlackChannels : [...providerConnections, ...nativeConnections];
     const needsSetup = providerConnections.some(connectionNeedsSetup) || nativeConnections.some(nativeJiraNeedsSetup);
     const hasEnabledRecord = records.some((record) => record.enabled);
+    const enabledStatus = provider.id === "slack" ? "Configured" : "Connected";
     const status = records.length === 0
       ? "Not connected"
       : needsSetup
         ? "Setup required"
         : hasEnabledRecord
-          ? "Connected"
+          ? enabledStatus
           : "Paused";
     const action = records.length === 0 ? "Connect" : needsSetup ? "Continue setup" : "Manage";
     const targetSummary = providerTargetSummary(provider.id, connections, liveSlackChannels, nativeJiraConnections);
