@@ -244,6 +244,15 @@ describe("GitHubInstallationPanel connection health", () => {
     expect(totals.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it("places the disconnect action after the selected repository list", () => {
+    renderPanel();
+
+    const article = screen.getByRole("article", { name: "Adtecher GitHub installation" });
+    const repository = within(article).getByRole("article", { name: "Adtecher/compliancehub repository scope" });
+    const disconnect = within(article).getByRole("button", { name: "Disconnect" });
+    expect(repository.compareDocumentPosition(disconnect) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("labels repository scope without claiming the checkbox grants app access", () => {
     renderPanel({}, true);
 

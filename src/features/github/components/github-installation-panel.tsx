@@ -246,30 +246,27 @@ export function GitHubInstallationPanel({
         const selectedCount = installationRepositories.filter((repository) => repository.selected).length;
         const availableCount = installationRepositories.filter((repository) => repository.available).length;
         return <article className="github-installation" aria-label={`${installation.account_login} GitHub installation`} key={installation.id}>
-          <div className="github-installation-head">
-            <div>
-              <h3>{installation.account_login}</h3>
-              <p>{installation.repository_selection === "selected" ? "Selected repositories" : "All repositories"}</p>
+          <div className="github-installation-overview">
+            <div className="github-installation-head">
+              <div>
+                <h3>{installation.account_login}</h3>
+                <p>{installation.repository_selection === "selected" ? "Selected repositories" : "All repositories"}</p>
+              </div>
+              <dl className="github-health-facts">
+                <div><dt>Connection status</dt><dd><Pill tone={PRESENTATION_TONE[presentation.tone]}>{presentation.label}</Pill></dd></div>
+              </dl>
             </div>
-            <dl className="github-health-facts">
-              <div><dt>Connection status</dt><dd><Pill tone={PRESENTATION_TONE[presentation.tone]}>{presentation.label}</Pill></dd></div>
-            </dl>
+            <p className="github-connection-summary">{presentation.summary}</p>
+            {presentation.nextAction && <p className="github-connection-action"><strong>Next step:</strong> {presentation.nextAction}</p>}
+            <p className="github-scope-totals">
+              {installationRepositories.length} {installationRepositories.length === 1 ? "repository" : "repositories"}
+              {` · ${selectedCount} selected · ${availableCount} available`}
+            </p>
           </div>
-          <p className="github-connection-summary">{presentation.summary}</p>
-          {presentation.nextAction && <p className="github-connection-action"><strong>Next step:</strong> {presentation.nextAction}</p>}
-
-          <p className="github-scope-totals">
-            {installationRepositories.length} {installationRepositories.length === 1 ? "repository" : "repositories"}
-            {` · ${selectedCount} selected · ${availableCount} available`}
-          </p>
           {installation.permissions_ok ? <details className="github-access-details">
             <summary>Read-only access details</summary>
             <p><strong>Approved read-only access:</strong> {APPROVED_READ_PERMISSIONS.join(" · ")}</p>
           </details> : null}
-          {canManageInstallation && installation.health !== "disconnected" && <DisconnectInstallationButton
-            installationId={installation.id}
-            onMessage={setMessage}
-          />}
           {installation.repository_selection === "all" && <p className="github-configuration-note" role="note">
             This GitHub App installation has access to all repositories. Review the installation if you want GitHub to limit access to selected repositories.
           </p>}
@@ -312,6 +309,9 @@ export function GitHubInstallationPanel({
                 </div>
               </article>;
             })}
+          </div>}
+          {canManageInstallation && installation.health !== "disconnected" && <div className="github-installation-footer">
+            <DisconnectInstallationButton installationId={installation.id} onMessage={setMessage} />
           </div>}
         </article>;
       })}
