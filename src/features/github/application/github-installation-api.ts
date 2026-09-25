@@ -170,8 +170,11 @@ export async function readInstallationSnapshot(input: {
       fetchImpl,
       signal: input.signal,
     });
-  } catch {
+  } catch (error) {
     if (input.signal?.aborted) throw new GitHubInstallationApiError("network");
+    if (error instanceof GitHubRateLimitError) {
+      throw new GitHubInstallationApiError("rate_limited", retryAtIso(Date.now(), error));
+    }
     invalid();
   }
 

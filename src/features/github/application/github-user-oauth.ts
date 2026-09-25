@@ -3,6 +3,8 @@ import "server-only";
 import { createHash, createHmac, randomBytes as nodeRandomBytes, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 
+import { GitHubRateLimitError, throwIfGitHubRateLimited } from "./github-collection-error";
+
 type FetchLike = typeof fetch;
 
 const API_ORIGIN = "https://api.github.com";
@@ -213,9 +215,11 @@ async function fetchVerifiedGitHubApi(
     signal?.throwIfAborted();
     const response = await fetchImpl(url.toString(), safeFetchInit(authorizationValue, signal));
     signal?.throwIfAborted();
+    throwIfGitHubRateLimited(response);
     if (!response.ok) throw verificationError();
     return response;
-  } catch {
+  } catch (error) {
+    if (error instanceof GitHubRateLimitError) throw error;
     throw verificationError();
   }
 }
@@ -279,7 +283,13 @@ export async function listUserInstallationIds(input: { userToken: string; fetchI
   const ids: number[] = [];
   let expectedCount: number | null = null;
   for (let page = 0; page < MAX_PAGES; page += 1) {
-    const response = await fetchVerifiedGitHubApi(url, authorizationValue, fetchImpl);
+    let response: Response;
+    try {
+      response = await fetchVerifiedGitHubApi(url, authorizationValue, fetchImpl);
+    } catch (error) {
+      if (error instanceof GitHubRateLimitError) throw verificationError();
+      throw error;
+    }
     let parsed: z.infer<typeof installationListSchema>;
     try { parsed = installationListSchema.parse(await response.json()); } catch { throw verificationError(); }
     expectedCount ??= parsed.total_count;
@@ -300,7 +310,13 @@ export async function listUserInstallationIds(input: { userToken: string; fetchI
 export async function getAppInstallation(input: { appJwt: string; installationId: number; fetchImpl?: FetchLike }): Promise<VerifiedAppInstallation> {
   if (!Number.isSafeInteger(input.installationId) || input.installationId <= 0) throw verificationError();
   const url = new URL(`/app/installations/${input.installationId}`, API_ORIGIN);
-  const response = await fetchVerifiedGitHubApi(url, input.appJwt, input.fetchImpl ?? fetch);
+  let response: Response;
+  try {
+    response = await fetchVerifiedGitHubApi(url, input.appJwt, input.fetchImpl ?? fetch);
+  } catch (error) {
+    if (error instanceof GitHubRateLimitError) throw verificationError();
+    throw error;
+  }
   try {
     const parsed = appInstallationSchema.parse(await response.json());
     return {
@@ -375,9 +391,14 @@ export async function collectPaginatedInstallationRepositories(input: {
 
 export async function collectUserInstallationRepositories(input: { userToken: string; installationId: number; fetchImpl?: FetchLike }): Promise<UserInstallationRepository[]> {
   if (!Number.isSafeInteger(input.installationId) || input.installationId <= 0) throw verificationError();
-  return collectPaginatedInstallationRepositories({
-    startUrl: new URL(`/user/installations/${input.installationId}/repositories?per_page=100`, API_ORIGIN).toString(),
-    token: input.userToken,
-    fetchImpl: input.fetchImpl,
-  });
+  try {
+    return await collectPaginatedInstallationRepositories({
+      startUrl: new URL(`/user/installations/${input.installationId}/repositories?per_page=100`, API_ORIGIN).toString(),
+      token: input.userToken,
+      fetchImpl: input.fetchImpl,
+    });
+  } catch (error) {
+    if (error instanceof GitHubRateLimitError) throw verificationError();
+    throw error;
+  }
 }

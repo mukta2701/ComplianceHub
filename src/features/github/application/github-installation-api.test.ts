@@ -214,4 +214,36 @@ describe("readInstallationSnapshot", () => {
     })).rejects.toMatchObject({ kind: "invalid" });
     expect(fetchImpl).not.toHaveBeenCalled();
   });
+
+  it("surfaces repository pagination rate limits with retry timing", async () => {
+    const beforeFirstPageMs = Date.now();
+    const firstPageLimited = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(installationBody()))
+      .mockResolvedValueOnce(new Response("limited", { status: 429, headers: { "retry-after": "120" } }));
+    const firstError = await readInstallationSnapshot({ ...SNAPSHOT_INPUT, fetchImpl: firstPageLimited }).catch((caught: unknown) => caught);
+    const afterFirstPageMs = Date.now();
+    expect(firstError).toMatchObject({ kind: "rate_limited" });
+    const firstRetryAt = (firstError as { retryAt?: unknown }).retryAt;
+    expect(typeof firstRetryAt).toBe("string");
+    const firstRetryMs = Date.parse(firstRetryAt as string);
+    expect(Number.isNaN(firstRetryMs)).toBe(false);
+    expect(firstRetryMs).toBeGreaterThanOrEqual(beforeFirstPageMs + 120_000 - 5_000);
+    expect(firstRetryMs).toBeLessThanOrEqual(afterFirstPageMs + 120_000 + 5_000);
+
+    const laterPageLimited = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(installationBody()))
+      .mockResolvedValueOnce(jsonResponse(
+        { total_count: 150, repositories: Array.from({ length: 100 }, (_, index) => repositoryRow(index + 1)) },
+        { headers: { Link: '<https://api.github.com/installation/repositories?page=2>; rel="next"' } },
+      ))
+      .mockResolvedValueOnce(new Response("limited", {
+        status: 403,
+        headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1789000000" },
+      }));
+    const laterError = await readInstallationSnapshot({ ...SNAPSHOT_INPUT, fetchImpl: laterPageLimited }).catch((caught: unknown) => caught);
+    expect(laterError).toMatchObject({
+      kind: "rate_limited",
+      retryAt: new Date(1789000000 * 1_000).toISOString(),
+    });
+  });
 });

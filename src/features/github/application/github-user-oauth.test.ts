@@ -234,4 +234,15 @@ describe("complete repository discovery", () => {
     expect(repositories).toHaveLength(10_000);
     expect(fetchImpl).toHaveBeenCalledTimes(100);
   });
+
+  it("maps discovery rate limits to the generic verification error without leaking details", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response("limited", { status: 429, headers: { "retry-after": "120" } }));
+    const error = await collectUserInstallationRepositories({ userToken: "x", installationId: 77, fetchImpl }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe("GitHub verification failed");
+    expect(String(error)).not.toContain("limited");
+    expect(String(error)).not.toContain("120");
+    expect(String(error).toLowerCase()).not.toContain("retry");
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
 });
