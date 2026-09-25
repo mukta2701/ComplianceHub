@@ -6,11 +6,33 @@ import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { workspaceAccess } from "@/features/organisations/domain/workspace-access";
 import {
   createPolicyFeedbackSchema,
+  feedbackDecisionSchema,
   feedbackStatusSchema,
   replyPolicyFeedbackSchema,
 } from "@/features/policies/application/feedback";
 
 const RATE_LIMIT = { limit: 20, windowMs: 60_000 } as const;
+
+export async function decidePolicyFeedbackAction(formData: FormData) {
+  const { supabase, user, organisation, membership } = await requireAppContext();
+  if (!workspaceAccess(membership.role).section("policies").canManage) {
+    throw new Error("Only workspace operators can decide feedback");
+  }
+  await enforceRateLimit(`policy-feedback:${user.id}`, RATE_LIMIT);
+  const input = feedbackDecisionSchema.parse(Object.fromEntries(formData));
+  const { data: thread, error: threadError } = await supabase
+    .from("policy_feedback_threads").select("policy_id")
+    .eq("id", input.threadId).eq("organisation_id", organisation.id).maybeSingle();
+  if (threadError || !thread) throw new Error("Feedback thread not found in the active workspace");
+  const { error } = await supabase.rpc("decide_policy_feedback", {
+    target_thread_id: input.threadId,
+    feedback_decision: input.decision,
+    feedback_rationale: input.rationale,
+  });
+  if (error) throw new Error("Could not save policy feedback decision");
+  revalidatePath(`/app/policies/${thread.policy_id}`);
+  revalidatePath("/app/policies");
+}
 
 export async function createPolicyFeedbackAction(formData: FormData) {
   const { supabase, user, organisation } = await requireAppContext();
@@ -27,6 +49,7 @@ export async function createPolicyFeedbackAction(formData: FormData) {
   });
   if (error) throw new Error("Could not create policy feedback");
   revalidatePath(`/app/policies/${input.policyId}`);
+  revalidatePath("/app/policies");
 }
 
 export async function replyPolicyFeedbackAction(formData: FormData) {
@@ -62,4 +85,5 @@ export async function setPolicyFeedbackStatusAction(formData: FormData) {
   });
   if (error) throw new Error("Could not update policy feedback status");
   revalidatePath(`/app/policies/${thread.policy_id}`);
+  revalidatePath("/app/policies");
 }

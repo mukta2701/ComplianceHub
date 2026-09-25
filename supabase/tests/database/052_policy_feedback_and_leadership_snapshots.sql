@@ -1,5 +1,5 @@
 begin;
-select plan(79);
+select plan(80);
 
 select has_table('public', 'policy_feedback_threads', 'policy feedback threads exist');
 select has_table('public', 'policy_feedback_comments', 'policy feedback comments exist');
@@ -86,7 +86,8 @@ select throws_ok($$ select public.set_policy_feedback_status(current_setting('ap
 
 select set_config('request.jwt.claims','{"sub":"7a000000-0000-4000-8000-000000000002","email":"feedback-admin@example.test","role":"authenticated"}',true);
 select lives_ok($$ select public.reply_policy_feedback(current_setting('app.feedback_thread')::uuid,'We will clarify the scope.') $$,'Admin can reply to open feedback');
-select lives_ok($$ select public.set_policy_feedback_status(current_setting('app.feedback_thread')::uuid,true) $$,'Admin can resolve feedback');
+select throws_ok($$ select public.set_policy_feedback_status(current_setting('app.feedback_thread')::uuid,true) $$,'22023','close feedback with an explicit decision','Admin cannot close new feedback without a decision');
+select lives_ok($$ select public.decide_policy_feedback(current_setting('app.feedback_thread')::uuid,'accepted','Clarify the scope in the next policy review.') $$,'Admin can decide feedback with a reason');
 select throws_ok($$ select public.reply_policy_feedback(current_setting('app.feedback_thread')::uuid,'Late reply') $$,'22023','feedback thread is closed','closed feedback cannot receive replies');
 select lives_ok($$ select public.set_policy_feedback_status(current_setting('app.feedback_thread')::uuid,false) $$,'Admin can reopen feedback');
 select lives_ok($$ select public.reply_policy_feedback(current_setting('app.feedback_thread')::uuid,'Reply after reopening') $$,'Admin can reply after reopening feedback');

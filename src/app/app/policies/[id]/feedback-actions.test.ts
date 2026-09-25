@@ -14,7 +14,7 @@ vi.mock("@/lib/app-context", () => ({ requireAppContext: () => Promise.resolve(h
 vi.mock("@/lib/security/rate-limit", () => ({ enforceRateLimit: hoisted.enforceRateLimit }));
 vi.mock("next/cache", () => ({ revalidatePath: hoisted.revalidatePath }));
 
-import { createPolicyFeedbackAction, replyPolicyFeedbackAction, setPolicyFeedbackStatusAction } from "./feedback-actions";
+import { createPolicyFeedbackAction, decidePolicyFeedbackAction, replyPolicyFeedbackAction, setPolicyFeedbackStatusAction } from "./feedback-actions";
 
 function scopedRow(data: unknown) {
   const chain = { select: vi.fn(), eq: vi.fn(), maybeSingle: vi.fn().mockResolvedValue({ data, error: null }) };
@@ -43,6 +43,7 @@ describe("policy feedback actions", () => {
       target_policy_id: POLICY_ID, feedback_subject: "Clarify scope", feedback_body: "Does this cover contractors?",
     });
     expect(hoisted.revalidatePath).toHaveBeenCalledWith(`/app/policies/${POLICY_ID}`);
+    expect(hoisted.revalidatePath).toHaveBeenCalledWith("/app/policies");
   });
 
   it("rejects invalid feedback before any table or RPC access", async () => {
@@ -95,5 +96,44 @@ describe("policy feedback actions", () => {
     expect(thread.eq).toHaveBeenCalledWith("organisation_id", ORGANISATION_ID);
     expect(rpc).toHaveBeenCalledWith("set_policy_feedback_status", { target_thread_id: THREAD_ID, resolved: false });
     expect(hoisted.revalidatePath).toHaveBeenCalledWith(`/app/policies/${POLICY_ID}`);
+    expect(hoisted.revalidatePath).toHaveBeenCalledWith("/app/policies");
+
+    form.set("resolved", "true");
+    await expect(setPolicyFeedbackStatusAction(form)).rejects.toThrow();
+    expect(rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets an Admin decide an in-workspace thread with a required reason", async () => {
+    const thread = scopedRow({ policy_id: POLICY_ID });
+    const rpc = vi.fn().mockResolvedValue({ data: THREAD_ID, error: null });
+    hoisted.ctx = {
+      supabase: { from: vi.fn(() => thread), rpc }, user: { id: "admin-1" },
+      organisation: { id: ORGANISATION_ID }, membership: { role: "admin" },
+    };
+    const form = new FormData();
+    form.set("threadId", THREAD_ID); form.set("decision", "accepted"); form.set("rationale", "  Add scope wording at the next review.  ");
+
+    await decidePolicyFeedbackAction(form);
+
+    expect(thread.eq).toHaveBeenCalledWith("organisation_id", ORGANISATION_ID);
+    expect(rpc).toHaveBeenCalledWith("decide_policy_feedback", {
+      target_thread_id: THREAD_ID, feedback_decision: "accepted", feedback_rationale: "Add scope wording at the next review.",
+    });
+    expect(hoisted.revalidatePath).toHaveBeenCalledWith(`/app/policies/${POLICY_ID}`);
+    expect(hoisted.revalidatePath).toHaveBeenCalledWith("/app/policies");
+  });
+
+  it("rejects Member decisions and empty reasons before RPC access", async () => {
+    const rpc = vi.fn(); const from = vi.fn(() => scopedRow({ policy_id: POLICY_ID }));
+    hoisted.ctx = { supabase: { from, rpc }, user: { id: "member-1" }, organisation: { id: ORGANISATION_ID }, membership: { role: "member" } };
+    const form = new FormData();
+    form.set("threadId", THREAD_ID); form.set("decision", "declined"); form.set("rationale", "Because");
+    await expect(decidePolicyFeedbackAction(form)).rejects.toThrow("Only workspace operators can decide feedback");
+    expect(from).not.toHaveBeenCalled(); expect(rpc).not.toHaveBeenCalled();
+
+    hoisted.ctx = { supabase: { from, rpc }, user: { id: "admin-1" }, organisation: { id: ORGANISATION_ID }, membership: { role: "admin" } };
+    form.set("rationale", "   ");
+    await expect(decidePolicyFeedbackAction(form)).rejects.toThrow();
+    expect(from).not.toHaveBeenCalled(); expect(rpc).not.toHaveBeenCalled();
   });
 });

@@ -12,12 +12,15 @@ import { Icon } from "@/components/icons";
 export default async function PoliciesPage() {
   const { supabase, user, membership, organisation } = await requireAppContext();
   const access = workspaceAccess(membership.role).section("policies");
-  const [policyResult, acceptanceResult, memberResult] = await Promise.all([
+  const [policyResult, acceptanceResult, memberResult, feedbackResult] = await Promise.all([
     loadPolicyRows((from, to) => supabase.from("policies").select("id,reference,title,status,version,review_due,owner_id").eq("organisation_id", organisation.id).order("id").range(from, to)),
     loadPolicyRows((from, to) => supabase.from("policy_acceptances").select("policy_id,user_id,accepted_version").eq("organisation_id", organisation.id).order("id").range(from, to)),
     access.canManage
       ? loadPolicyRows((from, to) => supabase.from("memberships").select("user_id,profiles(display_name)").eq("organisation_id", organisation.id).order("user_id").range(from, to))
       : Promise.resolve({ count: 0, data: [], error: null }),
+    access.canManage
+      ? loadPolicyRows((from, to) => supabase.from("policy_feedback_threads").select("id,policy_id").eq("organisation_id", organisation.id).eq("status", "open").order("id").range(from, to))
+      : Promise.resolve({ data: [], error: null }),
   ]);
   const { data: policies } = policyResult;
   const { data: acceptances } = acceptanceResult;
@@ -28,6 +31,12 @@ export default async function PoliciesPage() {
   const approved = rows.filter((p) => p.status === "approved").length;
   const byPolicy = new Map<string, { user_id: string; accepted_version: number }[]>();
   for (const a of acceptances ?? []) byPolicy.set(a.policy_id, [...(byPolicy.get(a.policy_id) ?? []), { user_id: a.user_id, accepted_version: a.accepted_version }]);
+  const openFeedbackByPolicy = new Map<string, number>();
+  for (const item of feedbackResult.data ?? []) openFeedbackByPolicy.set(item.policy_id, (openFeedbackByPolicy.get(item.policy_id) ?? 0) + 1);
+  const feedbackCue = (policyId: string) => {
+    const count = openFeedbackByPolicy.get(policyId) ?? 0;
+    return count > 0 ? <small>{count} feedback {count === 1 ? "suggestion" : "suggestions"} awaiting decision</small> : null;
+  };
   const personallyAccepted = rows.filter((policy) => {
     const presentation = policyAcceptancePresentation(membership.role, user.id, policy.version, byPolicy.get(policy.id) ?? [], members);
     return presentation.mode === "personal" && presentation.acceptedCurrent;
@@ -47,6 +56,7 @@ export default async function PoliciesPage() {
   return <div className={styles.workspace}>
     <PageIntro eyebrow="POLICIES" title="Policy library" body={access.canManage ? "Keep policies owned, reviewed and understood. Approval and employee acceptance are separate steps." : "Read your organisation's approved policies and record your own acceptance."} action={access.canManage ? <Link className="button primary" href="/app/policies/new"><Icon name="plus" />New policy</Link> : undefined} />
     {policyResult.error ? <Card className={styles.panel}><h2>Policy library unavailable</h2><p role="alert">We could not load your policies. Refresh to try again; this does not mean the library is empty.</p></Card> : <>
+      {access.canManage && feedbackResult.error && <Card className={styles.panel}><p role="alert">Feedback decisions are unavailable right now. Open a policy or refresh before treating this list as complete.</p></Card>}
       <div className={styles.summaryGrid}>
         <div className={styles.summary}><span>Total policies</span><strong>{rows.length}</strong></div>
         <div className={styles.summary}><span>Approved</span><strong>{approved}</strong></div>
@@ -58,10 +68,10 @@ export default async function PoliciesPage() {
         {!rows.length ? <p className={styles.empty}>{emptyMessage}</p> : <>
           <div className={styles.desktopTable}><table className={styles.table} aria-label="Policy library table">
             <thead><tr><th>Policy</th><th>Status / version</th><th>Owner</th><th>Next review</th><th>{access.canManage ? "Organisation acceptance" : "My acceptance"}</th></tr></thead>
-            <tbody>{rows.map((p) => <tr key={p.id}><td><Link href={`/app/policies/${p.id}`}>{p.title}</Link><small>{p.reference}</small></td><td><Pill tone={POLICY_STATUS_TONE[p.status as PolicyStatus]}>{POLICY_STATUS_LABEL[p.status as PolicyStatus]}</Pill><small>Version {p.version}</small></td><td>{ownerName(p.owner_id)}</td><td>{p.review_due || "Not scheduled"}{p.status !== "archived" && p.review_due && p.review_due < today && <small>Overdue</small>}</td><td>{acceptanceText(p)}</td></tr>)}</tbody>
+            <tbody>{rows.map((p) => <tr key={p.id}><td><Link href={`/app/policies/${p.id}`}>{p.title}</Link><small>{p.reference}</small>{access.canManage && feedbackCue(p.id)}</td><td><Pill tone={POLICY_STATUS_TONE[p.status as PolicyStatus]}>{POLICY_STATUS_LABEL[p.status as PolicyStatus]}</Pill><small>Version {p.version}</small></td><td>{ownerName(p.owner_id)}</td><td>{p.review_due || "Not scheduled"}{p.status !== "archived" && p.review_due && p.review_due < today && <small>Overdue</small>}</td><td>{acceptanceText(p)}</td></tr>)}</tbody>
           </table></div>
           <ul className={styles.mobileList} aria-label="Policy cards">{rows.map((p) => <li className={styles.mobileItem} key={p.id}>
-            <div className={styles.mobileTop}><Link href={`/app/policies/${p.id}`}><small>{p.reference} · v{p.version}</small><strong>{p.title}</strong></Link><Pill tone={POLICY_STATUS_TONE[p.status as PolicyStatus]}>{POLICY_STATUS_LABEL[p.status as PolicyStatus]}</Pill></div>
+            <div className={styles.mobileTop}><Link href={`/app/policies/${p.id}`}><small>{p.reference} · v{p.version}</small><strong>{p.title}</strong>{access.canManage && feedbackCue(p.id)}</Link><Pill tone={POLICY_STATUS_TONE[p.status as PolicyStatus]}>{POLICY_STATUS_LABEL[p.status as PolicyStatus]}</Pill></div>
             <dl className={styles.facts}><div><dt>Policy owner</dt><dd>{ownerName(p.owner_id)}</dd></div><div><dt>Next review</dt><dd>{p.review_due || "Not scheduled"}{p.status !== "archived" && p.review_due && p.review_due < today && " · Overdue"}</dd></div><div><dt>{access.canManage ? "Organisation acceptance" : "My acceptance"}</dt><dd>{acceptanceText(p)}</dd></div></dl>
           </li>)}</ul>
         </>}

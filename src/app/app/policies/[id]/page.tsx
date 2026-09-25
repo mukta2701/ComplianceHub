@@ -21,7 +21,7 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
   const { data: policy, error: policyError } = await supabase.from("policies").select("id,reference,title,body,version,status,review_due,owner_id,edit_revision").eq("id", id).eq("organisation_id", organisation.id).maybeSingle();
   if (policyError) return <Card><h2>Policy unavailable</h2><p>We could not load this policy. Your records have not changed.</p><Link href="/app/policies">Back to policies</Link></Card>;
   if (!policy) notFound();
-  const [acceptanceResult, memberResult, linkResult, optionResult, feedbackResult, commentResult, reviewTaskResult] = await Promise.all([
+  const [acceptanceResult, memberResult, linkResult, optionResult, feedbackResult, commentResult, decisionResult, reviewTaskResult] = await Promise.all([
     loadPolicyRows((from, to) => supabase.from("policy_acceptances").select("user_id,accepted_version").eq("policy_id", id).eq("organisation_id", organisation.id).order("id").range(from, to)),
     access.canManage
       ? loadPolicyRows((from, to) => supabase.from("memberships").select("user_id,profiles(display_name)").eq("organisation_id", organisation.id).order("user_id").range(from, to))
@@ -31,10 +31,11 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
       ? loadPolicyRows((from, to) => supabase.from("evidence").select("id,title").eq("organisation_id", organisation.id).order("id").range(from, to))
       : Promise.resolve({ data: [], error: null }),
     loadPolicyRows((from, to) => supabase.from("policy_feedback_threads")
-      .select("id,subject,status,policy_version,created_at,resolved_at,author:profiles!policy_feedback_threads_author_id_fkey(display_name),resolver:profiles!policy_feedback_threads_resolved_by_fkey(display_name)")
+      .select("id,subject,status,decision,decision_rationale,policy_version,created_at,resolved_at,author:profiles!policy_feedback_threads_author_id_fkey(display_name),resolver:profiles!policy_feedback_threads_resolved_by_fkey(display_name)")
       .eq("policy_id", id).eq("organisation_id", organisation.id)
       .order("id").range(from, to)),
     loadPolicyRows((from, to) => supabase.from("policy_feedback_comments").select("id,thread_id,body,created_at,author:profiles!policy_feedback_comments_author_id_fkey(display_name),thread:policy_feedback_threads!inner(policy_id)").eq("organisation_id", organisation.id).eq("thread.policy_id", id).order("id").range(from, to)),
+    loadPolicyRows((from, to) => supabase.from("policy_feedback_decisions").select("id,thread_id,decision,rationale,decided_at,decider:profiles!policy_feedback_decisions_decided_by_fkey(display_name),thread:policy_feedback_threads!inner(policy_id)").eq("organisation_id", organisation.id).eq("thread.policy_id", id).order("id").range(from, to)),
     access.canManage
       ? loadPolicyRows((from, to) => supabase.from("tasks").select("id,title,status,due_on,owner_id,policy_review_due_on").eq("organisation_id", organisation.id).eq("policy_id", id).eq("source", "policy_review").order("id").range(from, to))
       : Promise.resolve({ data: [], error: null }),
@@ -57,10 +58,21 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
       const time = String(left.created_at).localeCompare(String(right.created_at));
       return time || String(left.id).localeCompare(String(right.id));
     });
+    const decisions = [...((decisionResult.data ?? []).filter((decision) => decision.thread_id === thread.id) as Array<Record<string, unknown>>)].sort((left, right) => {
+      const time = String(left.decided_at).localeCompare(String(right.decided_at));
+      return time || String(left.id).localeCompare(String(right.id));
+    });
     return {
       id: String(thread.id), subject: String(thread.subject), status: thread.status === "resolved" ? "resolved" : "open",
+      decision: thread.decision === "accepted" || thread.decision === "declined" ? thread.decision : null,
+      decisionRationale: thread.decision_rationale ? String(thread.decision_rationale) : null,
       policyVersion: Number(thread.policy_version), createdAt: String(thread.created_at), resolvedAt: thread.resolved_at ? String(thread.resolved_at) : null,
       authorName: author?.display_name?.trim() || "Workspace member", resolverName: resolver?.display_name?.trim() || null,
+      decisionHistory: decisions.map((decision) => {
+        const decider = one(decision.decider as { display_name: string | null } | Array<{ display_name: string | null }> | null);
+        return { id: String(decision.id), decision: decision.decision === "accepted" ? "accepted" as const : "declined" as const,
+          rationale: String(decision.rationale), decidedAt: String(decision.decided_at), deciderName: decider?.display_name?.trim() || "Workspace operator" };
+      }),
       comments: comments.map((comment) => {
         const commentAuthor = one(comment.author as { display_name: string | null } | Array<{ display_name: string | null }> | null);
         return { id: String(comment.id), body: String(comment.body), createdAt: String(comment.created_at), authorName: commentAuthor?.display_name?.trim() || "Workspace member" };
@@ -149,6 +161,6 @@ export default async function PolicyDetailPage({ params }: { params: Promise<{ i
         </ul>}
       </Card>}
     </div>
-    <PolicyFeedback policyId={id} threads={feedbackThreads} canManage={access.canManage} canCollaborate={status === "approved"} loadError={Boolean(feedbackResult.error || commentResult.error)} />
+    <PolicyFeedback policyId={id} threads={feedbackThreads} canManage={access.canManage} canCollaborate={status === "approved"} loadError={Boolean(feedbackResult.error || commentResult.error || decisionResult.error)} />
   </div>;
 }

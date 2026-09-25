@@ -1,6 +1,7 @@
 import { Card, Pill } from "@/components/ui";
 import {
   createPolicyFeedbackAction,
+  decidePolicyFeedbackAction,
   replyPolicyFeedbackAction,
   setPolicyFeedbackStatusAction,
 } from "@/app/app/policies/[id]/feedback-actions";
@@ -9,11 +10,14 @@ export type PolicyFeedbackThread = {
   id: string;
   subject: string;
   status: "open" | "resolved";
+  decision: "accepted" | "declined" | null;
+  decisionRationale: string | null;
   policyVersion: number;
   createdAt: string;
   resolvedAt: string | null;
   authorName: string;
   resolverName: string | null;
+  decisionHistory: Array<{ id: string; decision: "accepted" | "declined"; rationale: string; decidedAt: string; deciderName: string }>;
   comments: Array<{ id: string; body: string; createdAt: string; authorName: string }>;
 };
 
@@ -49,7 +53,9 @@ export function PolicyFeedback({
                 <h3 style={{ fontSize: "14px", margin: 0 }}>{thread.subject}</h3>
                 <p style={{ color: "#737d8c", fontSize: "12px", margin: "4px 0 0" }}>Feedback on version {thread.policyVersion} · started by {thread.authorName} · {formatDate(thread.createdAt)}</p>
               </div>
-              <Pill tone={thread.status === "open" ? "blue" : "green"}>{thread.status === "open" ? "Open" : "Resolved"}</Pill>
+              <Pill tone={thread.status === "open" ? "blue" : thread.decision === "accepted" ? "green" : "neutral"}>
+                {thread.status === "open" ? "Awaiting decision" : thread.decision === "accepted" ? "Accepted for review" : thread.decision === "declined" ? "Declined" : "Closed previously"}
+              </Pill>
             </div>
             <ol style={{ listStyle: "none", margin: "14px 0", padding: 0, display: "grid", gap: "8px" }}>
               {thread.comments.map((comment) => <li key={comment.id} style={{ background: "#f7f9fb", borderRadius: "8px", padding: "10px" }}>
@@ -62,14 +68,28 @@ export function PolicyFeedback({
               <label>Reply<textarea name="body" rows={3} required minLength={1} maxLength={4000} /></label>
               <button className="button secondary">Reply</button>
             </form>}
-            {canManage && <form action={setPolicyFeedbackStatusAction} style={{ marginTop: "10px" }}>
+            {thread.status === "open" && canManage && <form action={decidePolicyFeedbackAction} className="app-form" style={{ marginTop: "10px" }}>
               <input type="hidden" name="threadId" value={thread.id} />
-              <input type="hidden" name="resolved" value={thread.status === "open" ? "true" : "false"} />
-              <button className="button secondary">{thread.status === "open" ? "Resolve" : "Reopen"}</button>
+              <label>Decision<select name="decision" required defaultValue=""><option value="" disabled>Choose a decision</option><option value="accepted">Accept for policy review</option><option value="declined">Decline suggestion</option></select></label>
+              <label>Reason<textarea name="rationale" rows={3} required minLength={1} maxLength={4000} placeholder="Explain the decision to the person who suggested it" /></label>
+              <button className="button primary">Save decision</button>
+              <p style={{ color: "#596273", fontSize: "12px", margin: 0 }}>Accepting feedback does not change or approve the policy. Make any document change through the normal policy review.</p>
+            </form>}
+            {canManage && thread.status === "resolved" && <form action={setPolicyFeedbackStatusAction} style={{ marginTop: "10px" }}>
+              <input type="hidden" name="threadId" value={thread.id} />
+              <input type="hidden" name="resolved" value="false" />
+              <button className="button secondary">Reopen feedback</button>
             </form>}
             {thread.status === "resolved" && <p style={{ color: "#596273", fontSize: "12px", margin: "10px 0 0" }}>
-              Resolved{thread.resolverName ? ` by ${thread.resolverName}` : ""}{thread.resolvedAt ? ` · ${formatDate(thread.resolvedAt)}` : ""}
+              {thread.decision === "accepted" ? "Accepted for review" : thread.decision === "declined" ? "Declined" : "Closed"}{thread.resolverName ? ` by ${thread.resolverName}` : ""}{thread.resolvedAt ? ` · ${formatDate(thread.resolvedAt)}` : ""}
             </p>}
+            {thread.decisionRationale && <p style={{ whiteSpace: "pre-wrap", margin: "8px 0 0", fontSize: "13px" }}><strong>Reason:</strong> {thread.decisionRationale}</p>}
+            {thread.decisionHistory.length > 1 || (thread.status === "open" && thread.decisionHistory.length > 0) ? <details style={{ marginTop: "10px" }}>
+              <summary style={{ cursor: "pointer", fontSize: "12px", color: "#596273" }}>Earlier decisions ({thread.decisionHistory.length})</summary>
+              <ol style={{ margin: "8px 0 0", paddingLeft: "20px", fontSize: "12px" }}>{thread.decisionHistory.map((entry) => <li key={entry.id} style={{ marginBottom: "8px" }}>
+                {entry.decision === "accepted" ? "Accepted for review" : "Declined"} by {entry.deciderName} · {formatDate(entry.decidedAt)}<br />{entry.rationale}
+              </li>)}</ol>
+            </details> : null}
           </section>)}
         </div>}
 

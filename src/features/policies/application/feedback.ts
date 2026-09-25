@@ -13,5 +13,11 @@ export const replyPolicyFeedbackSchema = z.object({
 
 export const feedbackStatusSchema = z.object({
   threadId: z.uuid(),
-  resolved: z.enum(["true", "false"]).transform((value) => value === "true"),
+  resolved: z.literal("false").transform(() => false),
+});
+
+export const feedbackDecisionSchema = z.object({
+  threadId: z.uuid(),
+  decision: z.enum(["accepted", "declined"]),
+  rationale: z.string().trim().min(1).max(4000),
 });

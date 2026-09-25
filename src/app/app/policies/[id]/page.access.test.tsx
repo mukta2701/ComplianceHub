@@ -50,11 +50,13 @@ function contextFor(role: "owner" | "admin" | "member", policyStatus: "draft" | 
     }),
     evidence: query({ data: [{ id: "evidence-1", title: "SOC 2 report" }, { id: "evidence-2", title: "Access review" }], error: null }),
     policy_feedback_comments: query({ data: [{ id: "comment-1", thread_id: "feedback-1", body: "Does this include contractors?", created_at: "2026-07-14T08:00:00Z", author: { display_name: "Alex Member" } }], error: null }),
+    policy_feedback_decisions: query({ data: [] as Array<Record<string, unknown>>, error: null }),
     policy_feedback_threads: query({
       data: [{
-        id: "feedback-1", subject: "Clarify contractors", status: "open", policy_version: 3,
-        created_at: "2026-07-14T08:00:00Z", resolved_at: null,
-        author: { display_name: "Alex Member" }, resolver: null,
+        id: "feedback-1", subject: "Clarify contractors", status: "open", decision: null as string | null,
+        decision_rationale: null as string | null, decided_at: null as string | null, policy_version: 3,
+        created_at: "2026-07-14T08:00:00Z", resolved_at: null as string | null,
+        author: { display_name: "Alex Member" }, resolver: null as { display_name: string } | null,
         comments: [{ id: "comment-1", body: "Does this include contractors?", created_at: "2026-07-14T08:00:00Z", author: { display_name: "Alex Member" } }],
       }],
       error: null,
@@ -106,6 +108,37 @@ describe("policy detail role presentation", () => {
     expect(screen.queryByRole("button", { name: "I accept this policy" })).not.toBeInTheDocument();
   });
 
+  it("shows a Member the operator's decision and reason without a decision control", async () => {
+    const { results } = contextFor("member");
+    results.policy_feedback_threads.range.mockResolvedValueOnce({ data: [{
+      id: "feedback-1", subject: "Clarify contractors", status: "resolved", decision: "accepted",
+      decision_rationale: "Add this to the next policy review.", decided_at: "2026-07-15T08:00:00Z",
+      policy_version: 3, created_at: "2026-07-14T08:00:00Z", resolved_at: "2026-07-15T08:00:00Z",
+      author: { display_name: "Alex Member" }, resolver: { display_name: "Admin User" },
+      comments: [],
+    }], error: null });
+
+    render(await PolicyDetailPage({ params: Promise.resolve({ id: POLICY_ID }) }));
+
+    expect(screen.getAllByText(/Accepted for review/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Add this to the next policy review/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save decision" })).not.toBeInTheDocument();
+  });
+
+  it("retains an earlier decision for a Member after the thread is reopened", async () => {
+    const { results } = contextFor("member");
+    results.policy_feedback_decisions.range.mockResolvedValueOnce({ data: [{
+      id: "decision-1", thread_id: "feedback-1", decision: "declined", rationale: "Out of scope for this version.",
+      decided_at: "2026-07-15T08:00:00Z", decider: { display_name: "Admin User" },
+    }], error: null });
+
+    render(await PolicyDetailPage({ params: Promise.resolve({ id: POLICY_ID }) }));
+
+    expect(screen.getByText(/Earlier decisions \(1\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Out of scope for this version/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save decision" })).not.toBeInTheDocument();
+  });
+
   it("shows the current policy owner and an explicit unassigned option in the edit form", async () => {
     const { results } = contextFor("admin");
     results.policies.maybeSingle.mockResolvedValueOnce({ data: {
@@ -150,7 +183,7 @@ describe("policy detail role presentation", () => {
     expect(screen.getByText("Acceptance roster")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Remove evidence link" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Link" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Resolve" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save decision" })).toBeInTheDocument();
   });
 
   it("keeps historical feedback management visible but disables collaboration on a non-approved policy", async () => {
@@ -160,7 +193,7 @@ describe("policy detail role presentation", () => {
 
     expect(screen.getByRole("heading", { name: "Policy feedback" })).toBeInTheDocument();
     expect(screen.getByText("Does this include contractors?")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Resolve" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save decision" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Start feedback" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Reply" })).not.toBeInTheDocument();
     expect(screen.getByText(/Feedback opens after this policy is approved/i)).toBeInTheDocument();
