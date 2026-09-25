@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { signInSchema, signUpSchema, requestPasswordResetSchema, updatePasswordSchema } from "@/features/auth/application/auth";
@@ -39,6 +40,8 @@ export async function signInAction(formData: FormData) {
     const failure = authFailureMessage(error.message, "sign-in");
     redirect(message(failure.path, failure.message, next));
   }
+  // A client-side Server Action redirect must not reuse the signed-out invite page.
+  if (next === "/invite") revalidatePath("/invite");
   redirect(next);
 }
 
@@ -57,7 +60,10 @@ export async function signUpAction(formData: FormData) {
     const failure = authFailureMessage(error.message, "sign-up");
     redirect(message(failure.path, failure.message, next));
   }
-  if (data.session) redirect(next);
+  if (data.session) {
+    if (next === "/invite") revalidatePath("/invite");
+    redirect(next);
+  }
   redirect(message("/sign-in", "Check your email to confirm your account.", next));
 }
 

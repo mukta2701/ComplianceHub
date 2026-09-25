@@ -13,7 +13,9 @@ vi.mock("next/navigation", () => ({
     throw Object.assign(new Error(`REDIRECT:${url}`), { digest: "NEXT_REDIRECT" });
   },
 }));
+vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
+import { revalidatePath } from "next/cache";
 import { signInAction, signInWithOAuthAction, signUpAction } from "./actions";
 
 function authClient(options: {
@@ -75,6 +77,26 @@ describe("post-auth continuation", () => {
     expect(auth.signInWithPassword).toHaveBeenCalledWith({ email: "member@example.test", password: TEST_PASSWORD });
   });
 
+  it("revalidates the invitation page on successful password sign-in continuing to it", async () => {
+    const auth = authClient();
+    hoisted.serverClient = auth.value;
+    vi.mocked(revalidatePath).mockClear();
+
+    await expect(signInAction(signInForm("/invite"))).rejects.toThrow("REDIRECT:/invite");
+
+    expect(revalidatePath).toHaveBeenCalledWith("/invite");
+  });
+
+  it("leaves cached pages alone for non-invitation sign-in destinations", async () => {
+    const auth = authClient();
+    hoisted.serverClient = auth.value;
+    vi.mocked(revalidatePath).mockClear();
+
+    await expect(signInAction(signInForm("/app"))).rejects.toThrow("REDIRECT:/app");
+
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
   it("preserves the exact validated OAuth consent request across sign-in and sign-up", async () => {
     const next = "/oauth/consent?authorization_id=11111111-1111-4111-8111-111111111111";
     const auth = authClient(); hoisted.serverClient = auth.value;
@@ -124,6 +146,16 @@ describe("post-auth continuation", () => {
     hoisted.serverClient = auth.value;
 
     await expect(signUpAction(signUpForm("/app"))).rejects.toThrow("REDIRECT:/app");
+  });
+
+  it("revalidates the invitation page when sign-up returns an immediate session continuing to it", async () => {
+    const auth = authClient({ signupSession: {} });
+    hoisted.serverClient = auth.value;
+    vi.mocked(revalidatePath).mockClear();
+
+    await expect(signUpAction(signUpForm("/invite"))).rejects.toThrow("REDIRECT:/invite");
+
+    expect(revalidatePath).toHaveBeenCalledWith("/invite");
   });
 
   it("strips invite query/hash data from password and confirmation continuations", async () => {
