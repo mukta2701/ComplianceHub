@@ -128,7 +128,7 @@ describe("Settings Connections page", () => {
     expect(screen.getByRole("heading", { name: "MCP & connected assistants" })).toBeInTheDocument();
     expect(screen.getByRole("article", { name: "GitHub Issues connection" })).toHaveTextContent("Connected");
     expect(screen.getByRole("article", { name: "Jira connection" })).toHaveTextContent("Not connected");
-    expect(screen.getByRole("article", { name: "Slack connection" })).toHaveTextContent("Connected");
+    expect(screen.getByRole("article", { name: "Slack connection" })).toHaveTextContent("Configured");
     expect(screen.queryByRole("heading", { name: "Monitoring sources" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Evidence sources" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Alert channels" })).not.toBeInTheDocument();
