@@ -98,6 +98,9 @@ select results_eq(
 select is((select count(*) from public.policy_feedback_decisions), 2::bigint, 'legacy resolution does not erase history');
 
 set local role postgres;
+select throws_ok($$ delete from public.policy_feedback_threads where id = current_setting('app.feedback_decision_thread')::uuid $$, '23503', null, 'a decided feedback thread cannot be silently deleted');
+select throws_ok($$ delete from public.policies where id = '7c000000-0000-4000-8000-000000000101'::uuid $$, '23503', null, 'a decided policy cannot cascade away its feedback history');
+select is((select count(*) from public.policy_feedback_decisions), 2::bigint, 'decision history survives rejected parent deletes');
 select throws_ok($$ update public.policy_feedback_decisions set rationale = 'Tampered' $$, 'P0001', 'policy feedback decisions are immutable', 'privileged update cannot change history');
 select throws_ok($$ delete from public.policy_feedback_decisions $$, 'P0001', 'policy feedback decisions are immutable', 'privileged delete cannot erase history');
 

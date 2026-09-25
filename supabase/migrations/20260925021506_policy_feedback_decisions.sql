@@ -16,18 +16,20 @@ alter table public.policy_feedback_threads
     )
   );
 
--- Keep every explicit decision, including decisions later reopened. Portal
--- callers may read visible history but cannot insert, change, or erase it.
+-- Keep every explicit decision, including decisions later reopened. Retain a
+-- decided policy and workspace through their normal archival lifecycle; a
+-- delete must not silently cascade away the decision record. Portal callers
+-- may read visible history but cannot insert, change, or erase it.
 create table public.policy_feedback_decisions (
   id uuid primary key default extensions.gen_random_uuid(),
-  organisation_id uuid not null references public.organisations(id) on delete cascade,
+  organisation_id uuid not null references public.organisations(id) on delete restrict,
   thread_id uuid not null,
   decision text not null check (decision in ('accepted', 'declined')),
   rationale text not null check (pg_catalog.char_length(rationale) between 1 and 4000 and rationale = pg_catalog.btrim(rationale)),
   decided_at timestamptz not null,
   decided_by uuid not null references public.profiles(id),
   constraint policy_feedback_decisions_thread_tenant_fk foreign key (thread_id, organisation_id)
-    references public.policy_feedback_threads(id, organisation_id) on delete cascade
+    references public.policy_feedback_threads(id, organisation_id) on delete restrict
 );
 create index policy_feedback_decisions_thread_idx
   on public.policy_feedback_decisions(thread_id, decided_at desc);
